@@ -1,5 +1,11 @@
 # TenantPulse
 
+[![PSGallery Version](https://img.shields.io/powershellgallery/v/TenantPulse)](https://www.powershellgallery.com/packages/TenantPulse)
+[![PSGallery Downloads](https://img.shields.io/powershellgallery/dt/TenantPulse)](https://www.powershellgallery.com/packages/TenantPulse)
+[![PowerShell 7.4+](https://img.shields.io/badge/PowerShell-7.4%2B-blue)](https://github.com/PowerShell/PowerShell)
+
+> Read-only tenant health assessment for Microsoft Intune and Entra — a versioned check catalog, deterministic scoring, and pseudonymized findings reports, built on [GraphKit](https://github.com/AdamGell/GraphKit).
+
 TenantPulse is a read-only PowerShell module that assesses a Microsoft Intune/Entra
 tenant's health against a versioned set of checks, and produces a deterministic,
 pseudonymized, scored findings report. It never writes to a tenant: every Graph read goes
