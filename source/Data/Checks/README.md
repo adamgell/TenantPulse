@@ -36,31 +36,55 @@ file directly under `-Path` (default: this directory) with `Import-PowerShellDat
 (safe - no code execution) and returns a sorted-by-`Id` array of validated descriptor
 objects with `PSTypeName 'TenantPulse.CheckDescriptor'`.
 
-An empty or missing catalog directory returns an empty array - it is not an error.
+An empty or missing catalog directory returns an empty array - it is not an error. A file
+literally named `DatasetMap.psd1` inside this directory is excluded from descriptor
+scanning (it is the shared dataset map, not a check - see below), not treated as an
+invalid descriptor.
+
+Ordering is ordinal, not culture-aware: `Id`s are sorted with `[string]::CompareOrdinal`
+(the same index-sort approach `ConvertTo-PulseCanonicalJson` uses for JSON object keys),
+so catalog order is identical regardless of the host's locale.
 
 A catalog with one or more invalid descriptors throws a single aggregated error: one line
-per problem, across every descriptor in the directory (not just the first bad file), each
-naming the offending descriptor's `Id` (or its filename, when `Id` itself is
-missing/malformed) and the offending property. Validation failures include:
+per problem, across every descriptor in the directory (not just the first bad file, and
+not stopping at the first problem within a descriptor either). Every line is prefixed
+with the **source filename** - the one unambiguous identifier, since two files can share
+the same (possibly malformed) `Id` - followed by the descriptor's `Id`-or-filename label
+and the offending property: `<filename>: <Id-or-filename>: <property>: <problem>`.
+Validation failures include:
 
 - duplicate `Id` across the catalog
+- a field holding the wrong *type* - every field is explicitly type-checked before any
+  pattern/enum/emptiness rule runs on it, so e.g. `Id = @('TP.ENT.0001')` (an array where
+  a scalar string is required) is reported as `must be a string, got Object[].` rather
+  than silently coercing through a pattern match and landing array-typed in the loaded
+  descriptor. Scalar `[string]` is required for `Id`, `Title`, `Category`, `Severity`,
+  `Effort`, `Impact`, `Rule.Type`, `Rule.Function`, `Rule.Expression`, and
+  `References.Research`. A required, non-empty `[string[]]` (no blank elements) is
+  required for `Data.Datasets`, `References.Authorities`, `Consulting.Remediation`, and
+  `Consulting.PortalLinks`. `Data.Gates` must also be a `[string[]]`, but may be empty.
 - `Id`, `Severity`, `Effort`, or `Impact` not matching their allowed pattern/values
 - `Rule.Type` not `Function` or `Expression`
 - `Rule.Function` naming a command that does not resolve (via `Get-Command`) at import
   time - this is treated as a module-authoring bug and hard-fails catalog import; a
   runtime throw from a *resolvable* function is a different, later concern (the
   evaluator's per-check `Error` status, Task 1.6)
-- empty `Data.Datasets`
+- empty `Data.Datasets` or `References.Authorities`
 - a dataset name in `Data.Datasets` not present in the shared dataset map (see below)
-- missing/empty `References.Research`, or empty `References.Authorities`
+- missing/empty `References.Research`
 - any missing `Consulting` field (`WhatItMeans`, `WhyItMatters`, `Remediation`,
   `PortalLinks`)
+- the descriptor file itself failing to parse as a PowerShell data file
 
 ### Dataset map cross-check (Task 1.5 handshake)
 
 `-DatasetMapPath` defaults to `source/Data/DatasetMap.psd1`, the shared map of dataset
-names TenantPulse knows how to collect, added by Task 1.5. Until that file exists, the
-`Data.Datasets` membership cross-check above is skipped (with a `Write-Verbose` note) -
-descriptors are not rejected for referencing datasets the map does not know about yet.
-Once Task 1.5 lands `DatasetMap.psd1`, every dataset name referenced by a descriptor's
-`Data.Datasets` must be a top-level key in that map, or catalog import fails.
+names TenantPulse knows how to collect, added by Task 1.5. That file is parsed **exactly
+once per catalog load** (not once per descriptor) and validated to be a hashtable. Until
+the file exists, the `Data.Datasets` membership cross-check above is skipped (with a
+`Write-Verbose` note) - descriptors are not rejected for referencing datasets the map
+does not know about yet. Once Task 1.5 lands `DatasetMap.psd1`, every dataset name
+referenced by a descriptor's `Data.Datasets` must be a top-level key in that map, or
+catalog import fails. A present-but-malformed map file (parse failure, or a root value
+that isn't a hashtable) is reported through the same aggregated-errors mechanism as any
+other catalog problem, not as a raw, unrelated error.

@@ -110,20 +110,39 @@ jobs:
           # corrupt-key-file error; 5 for Get-PulsePseudonym covering a pinned
           # known-answer vector, format, stability, and divergence across keys/values)
           # = 43. Task 1.4 added the check descriptor schema + loader
-          # (Import-PulseCheckCatalog, Test-PulseCheckDescriptor): 17
-          # CheckCatalog.Tests.ps1 tests covering valid-catalog loading with Id-sorted
-          # output independent of on-disk filename order, an empty/missing catalog
-          # directory returning zero descriptors without throwing (including the
-          # module's own still-empty default source/Data/Checks path), aggregated
-          # (not fail-fast) errors naming the offending Id/filename and property for
-          # duplicate Id, bad Severity, missing References.Research, empty
-          # Data.Datasets, unknown Rule.Type, a Rule.Function that does not resolve at
-          # import time, a malformed Id, and a missing Consulting field; plus the
+          # (Import-PulseCheckCatalog, Test-PulseCheckDescriptor), then hardened it
+          # after a two-reviewer pass found coercion holes (array-typed Id/Severity
+          # silently passing pattern/enum checks via PowerShell's loose typing,
+          # duplicate-Id detection bypassable the same way, no filename on aggregated
+          # error lines, the dataset map re-parsed per descriptor with unhandled
+          # malformed-map errors and no exclusion of a DatasetMap.psd1 living inside
+          # the catalog dir, and a culture-aware Sort-Object instead of ordinal):
+          # 32 CheckCatalog.Tests.ps1 tests covering valid-catalog loading with
+          # ordinal Id-sorted output independent of on-disk filename order, an
+          # empty/missing catalog directory returning zero descriptors without
+          # throwing (including the module's own still-empty default
+          # source/Data/Checks path), aggregated (not fail-fast) errors - each line
+          # prefixed with its source filename - naming the offending Id/filename and
+          # property for duplicate Id, bad Severity/Effort/Impact, missing
+          # References.Research, empty Data.Datasets/References.Authorities, unknown
+          # Rule.Type, a Rule.Function that does not resolve at import time, a
+          # malformed Id, a missing Consulting field, and a missing Rule.Expression;
+          # explicit type-mismatch coverage for array-typed Id (both the
+          # pattern-escaping case and the would-have-bypassed-duplicate-detection
+          # case), array-typed Severity, a numeric Title, a scalar Data.Datasets, a
+          # scalar References.Authorities, and a descriptor parse failure aggregated
+          # alongside other problems in the same catalog; the
           # Data.Datasets-vs-shared-dataset-map cross-check (skipped with
           # Write-Verbose until Task 1.5 lands DatasetMap.psd1, enforced via a
-          # temp-file-backed -DatasetMapPath once present) and direct
-          # Test-PulseCheckDescriptor unit coverage = 60. This minimum must keep
-          # ratcheting up as check/function test suites are added in later tasks - see
+          # temp-file-backed -DatasetMapPath once present, a malformed map file
+          # surfaced through the aggregated-errors path instead of a raw error, a
+          # DatasetMap.psd1 living inside the catalog dir excluded from descriptor
+          # scanning, and the map file proven to be parsed exactly once per catalog
+          # load via a shadowed-cmdlet call-count check); plus direct
+          # Test-PulseCheckDescriptor unit coverage with an exact-error-count pin (not
+          # just >1) and exact "must be a <type>, got <actual type>" text assertions
+          # for every H1-listed coercion hole = 75. This minimum must keep ratcheting
+          # up as check/function test suites are added in later tasks - see
           # docs/superpowers/sdd for the phase plan.
           #
           # -AllowNotRun 6 still covers the "Quality for module" (2 It) and "Help for
@@ -131,4 +150,4 @@ jobs:
           # 1.4's functions are private too), so Get-Command -Module still returns
           # nothing to drive their -ForEach. This must drop to 0 the moment the first
           # function is exported and those blocks start actually running.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 60 -AllowedSkips 0 -AllowNotRun 6
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 75 -AllowedSkips 0 -AllowNotRun 6

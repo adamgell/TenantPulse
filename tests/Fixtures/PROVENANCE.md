@@ -16,3 +16,16 @@ or a third-party source without attribution. One line per fixture file.
 - `tests/Fixtures/Checks/invalid/bad-id/bad.psd1` — synthetic
 - `tests/Fixtures/Checks/invalid/missing-consulting/bad.psd1` — synthetic
 - `tests/Fixtures/Checks/invalid/unknown-dataset-name/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/array-id/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/array-id-duplicate/one.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/array-id-duplicate/two.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/array-severity/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/numeric-title/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/scalar-datasets/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/scalar-authorities/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/empty-authorities/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/missing-expression/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/bad-effort/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/bad-impact/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/parse-failure/broken.psd1` — synthetic
+- `tests/Fixtures/DatasetMap/malformed-syntax.psd1` — synthetic

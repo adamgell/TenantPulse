@@ -19,18 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   raw tenant IDs never need to appear in snapshots or reports.
 - Check descriptor schema + loader: `Import-PulseCheckCatalog` reads and validates every
   `.psd1` check descriptor under a directory (default `source/Data/Checks`) with
-  `Import-PowerShellDataFile`, returning a sorted-by-`Id` array of
+  `Import-PowerShellDataFile`, returning an ordinally-sorted-by-`Id` array of
   `TenantPulse.CheckDescriptor` objects; an empty/missing catalog returns an empty array
   rather than throwing. `Test-PulseCheckDescriptor` validates one descriptor's schema
-  (Id/Severity/Effort/Impact patterns, non-empty Data.Datasets, Rule.Type/Rule.Function
+  with explicit per-field type enforcement (scalar `[string]` vs. required/allowed-empty
+  `[string[]]`, reported as `must be a <type>, got <actual type>` rather than silently
+  coercing), Id/Severity/Effort/Impact/Rule.Type patterns and enums, Rule.Function
   resolving via `Get-Command` at import time, required Consulting fields,
-  References.Research/Authorities) and, once Task 1.5 lands `DatasetMap.psd1`,
-  cross-checks Data.Datasets membership against it. All validation errors across a
-  catalog are aggregated into a single thrown error naming each offending descriptor and
-  property, rather than failing on the first bad file. Schema documented verbatim in
-  `source/Data/Checks/README.md`.
+  References.Research/Authorities and, once Task 1.5 lands `DatasetMap.psd1`,
+  cross-checks Data.Datasets membership against a map parsed exactly once per catalog
+  load. All validation errors across a catalog are aggregated into a single thrown
+  error, each line prefixed with its source filename and naming the offending
+  descriptor and property, rather than failing on the first bad file. Schema documented
+  verbatim in `source/Data/Checks/README.md`.
 
 ### Changed
+
+- Check descriptor loader hardening (post-review): closed PowerShell-coercion type holes
+  that let array-typed `Id`/`Severity`/`Rule.Type`/etc. silently pass their
+  pattern/enum checks and land wrong-typed in the loaded descriptor (also closing the
+  matching duplicate-Id-detection bypass); prefixed every aggregated error line with its
+  source filename so two files sharing a bad Id are distinguishable; hoisted
+  `DatasetMap.psd1` parsing to once per catalog load with its own aggregated-error
+  handling for a malformed map instead of a raw exception, and excluded a
+  `DatasetMap.psd1` living inside the catalog directory from descriptor scanning;
+  switched catalog ordering from culture-aware `Sort-Object` to an ordinal
+  `[string]::CompareOrdinal` index-sort, matching `ConvertTo-PulseCanonicalJson`'s
+  established pattern for deterministic ordering.
 
 - For changes in existing functionality.
 
