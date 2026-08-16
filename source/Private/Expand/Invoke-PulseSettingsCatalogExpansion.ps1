@@ -545,109 +545,22 @@ function Invoke-PulseSettingsCatalogExpansion {
     }
     [System.Array]::Sort($sortedGaps, $gapComparison)
 
-    $unresolvedNameCount = @($sortedRows | Where-Object { -not $_.nameResolved }).Count
-    $redactedSecretCount = @($sortedRows | Where-Object { $_.redacted }).Count
-
-    # ALL-POLICIES-FAILED -> NotExpanded, not "Partial with an empty artifact" (task-review
-    # omp-Medium fix): a Partial status with a jsonl file that has ZERO rows in it is a
-    # contradiction of what Partial is supposed to mean - "some usable rows, minus known
-    # gaps" - when in fact nothing usable came out of this run at all. Gated on BOTH
-    # conditions: -gt 0 gaps rules out the legitimate, benign "every policy walked cleanly
-    # and none of them happened to carry any settings" case (that stays Expanded with a
-    # valid, empty-but-hash-verified artifact, same as the -Policies @() case above); zero
-    # rows rules out any run that produced at least SOMETHING despite some gaps (that stays
-    # Partial, an artifact worth publishing). No staging/publication happens on this path -
-    # matching Set-PulseExpansionEntry's own NotExpanded contract (no -Path/-Sha256/etc.
-    # required) rather than writing a file nothing will ever usefully read.
-    if ($policyList.Count -gt 0 -and $sortedRows.Count -eq 0 -and $sortedGaps.Count -gt 0) {
-        $reason = Protect-PulseReason -Message "all $($policyList.Count) policy(ies) failed: $($sortedGaps.Count) gap(s), zero usable rows" `
-            -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
-        Set-PulseExpansionEntry -Store $Store -Name $Name -Status 'NotExpanded' -Reason $reason -Gaps $sortedGaps `
-            -PolicyCount $policyList.Count -RowCount 0 -UnresolvedNameCount 0 -RedactedSecretCount 0
-        return [pscustomobject]@{
-            Status              = 'NotExpanded'
-            PolicyCount         = $policyList.Count
-            RowCount            = 0
-            UnresolvedNameCount = 0
-            RedactedSecretCount = 0
-            Gaps                = $sortedGaps
-        }
-    }
-
-    # STAGING (P1-10): one try/finally around the whole staging-through-publication
-    # sequence. $tempOwnershipTransferred is set true ONLY once the generation-named file
-    # rename below succeeds - the temp file is deleted in the finally block unless that
-    # happened, so a serialization/hash/publish failure at any point never leaves an
-    # orphaned .tmp file under expanded/.
-    $tempFileName = "$Name.$([guid]::NewGuid().ToString('N')).tmp"
-    $tempPath = Join-Path $Store.ExpandedPath $tempFileName
-    $tempOwnershipTransferred = $false
-    $incrementalHash = $null
-    $generationPath = $null
-
-    try {
-        $incrementalHash = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
-        $fileStream = [System.IO.File]::Open($tempPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
-        try {
-            foreach ($row in $sortedRows) {
-                $line = ConvertTo-PulseCanonicalJsonLine -InputObject $row
-                $bytes = [System.Text.Encoding]::UTF8.GetBytes($line)
-                $fileStream.Write($bytes, 0, $bytes.Length)
-                $incrementalHash.AppendData($bytes)
-            }
-            $fileStream.Flush()
-        } finally {
-            $fileStream.Dispose()
-        }
-        $hashBytes = $incrementalHash.GetHashAndReset()
-        $sha256 = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
-
-        # CRASH-CONSISTENT PUBLICATION (P0-6): rename to an IMMUTABLE, content-addressed
-        # generation name BEFORE the manifest is ever touched - see this file's own
-        # docstring for why this ordering (durable file first, manifest switch last, as
-        # the ONLY mutex-guarded step) closes the old-manifest/new-bytes split-brain
-        # window a fault-injection test reproduced against the old
-        # rename-then-separately-write-manifest shape.
-        $generationFileName = "$Name.$sha256.jsonl"
-        $generationPath = Join-Path $Store.ExpandedPath $generationFileName
-        [System.IO.File]::Move($tempPath, $generationPath, $true)
-        $tempOwnershipTransferred = $true
-
-        $status = if ($sortedGaps.Count -eq 0) { 'Expanded' } else { 'Partial' }
-
-        $setParams = @{
-            Store               = $Store
-            Name                = $Name
-            Status              = $status
-            Path                = "expanded/$generationFileName"
-            SchemaVersion       = '1'
-            Sha256              = $sha256
-            PolicyCount         = $policyList.Count
-            RowCount            = $sortedRows.Count
-            UnresolvedNameCount = $unresolvedNameCount
-            RedactedSecretCount = $redactedSecretCount
-            # P1-12: the assignments-deferred note is persisted on every successful
-            # (Expanded/Partial) write, not only asserted by a test title.
-            Reason              = $assignmentsDeferredReason
-        }
-        if ($sortedGaps.Count -gt 0) {
-            $setParams.Gaps = $sortedGaps
-        }
-
-        Set-PulseExpansionEntry @setParams
-    } finally {
-        if ($null -ne $incrementalHash) { $incrementalHash.Dispose() }
-        if (-not $tempOwnershipTransferred -and (Test-Path -LiteralPath $tempPath -PathType Leaf)) {
-            Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
-        }
-    }
-
-    return [pscustomobject]@{
-        Status              = $status
-        PolicyCount         = $policyList.Count
-        RowCount            = $sortedRows.Count
-        UnresolvedNameCount = $unresolvedNameCount
-        RedactedSecretCount = $redactedSecretCount
-        Gaps                = $sortedGaps
-    }
+    # UNIFIED PUBLICATION (post-T2.3-review retrofit): staging/hash/crash-consistent-publish
+    # is now owned by the ONE shared Publish-PulseExpansionRows implementation (see that
+    # file's own docstring for the full crash-safety accounting - P0-6's generation-named-
+    # file-before-manifest-mutex ordering and P1-10's temp/hash cleanup both live there now,
+    # not duplicated here). This function's OWN inline copy of that logic - written for
+    # T2.2, before Publish-PulseExpansionRows existed - was an intentional, but UNDISCLOSED,
+    # fork: T2.3 (Invoke-PulseTypedPolicyExpansion.ps1) extracted the shared helper rather
+    # than copying this function's block, and that fork was never called out as project debt
+    # at the time. It is closed here: this call site and Invoke-PulseTypedPolicyExpansion's
+    # own now both go through the identical staging/hash/publish code path. The
+    # 'assignments-deferred' reason is still passed through and persisted on every
+    # successful (Expanded/Partial) write exactly as before (P1-12) - Publish-
+    # PulseExpansionRows's own -Reason parameter carries it; the ALL-POLICIES-FAILED ->
+    # NotExpanded rule (task-review omp-Medium fix) is also unchanged, just owned by the
+    # shared helper now instead of being re-implemented here.
+    return Publish-PulseExpansionRows -Store $Store -Name $Name -Rows $sortedRows -Gaps $sortedGaps `
+        -PolicyCount $policyList.Count -Reason $assignmentsDeferredReason `
+        -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
 }
