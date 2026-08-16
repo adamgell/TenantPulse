@@ -174,7 +174,13 @@
 # alongside scripts/Publish-TenantPulsePackage.ps1 and
 # tests/QA/PublishTenantPulsePackage.tests.ps1's fabricated-fixture total: FOUR tracking
 # locations total, not two, whenever this value moves).
-$script:tenantPulseGateMinimumTests = 1193
+# 1193 -> 1195 (Task 4.3 wave 2, TP.ENT.0013 - EIDSCA CP03/CP04 UNVERIFIED-flag
+# resolution): net +3 It cases in tests/Unit/Checks/TP.ENT.0013.Tests.ps1 (2 new Fail
+# cases, 1 new Pass-shape assertion folded into the existing two Pass tests rather than
+# duplicated) plus per-file SecretScan.tests.ps1 growth for this commit's changed files.
+# 1195 is the real, measured ./build.ps1 -Tasks test total; all four tracking locations
+# bumped together in this commit per the standing RATCHET rule.
+$script:tenantPulseGateMinimumTests = 1195
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

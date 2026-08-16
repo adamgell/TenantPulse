@@ -59,8 +59,16 @@ Describe 'TP.ENT.0013 - Group/team owner consent restriction (EIDSCA.CP01)' {
         ($catalog | Where-Object { $_.Id -eq 'TP.ENT.0013' }) | Should -Not -BeNullOrEmpty
     }
 
-    It 'Pass: EnableGroupSpecificConsent explicitly set to False (hashtable shape)' {
-        $rows = @(@{ id = 's1'; templateId = 'tmpl-consent'; values = @(@{ name = 'EnableGroupSpecificConsent'; value = 'False' }) })
+    It 'Pass: EnableGroupSpecificConsent explicitly set to False, CP03/CP04 explicit too (hashtable shape)' {
+        $rows = @(@{
+                id     = 's1'
+                templateId = 'tmpl-consent'
+                values = @(
+                    @{ name = 'EnableGroupSpecificConsent'; value = 'False' }
+                    @{ name = 'BlockUserConsentForRiskyApps'; value = 'true' }
+                    @{ name = 'EnableAdminConsentRequests'; value = 'true' }
+                )
+            })
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0013' -Datasets @(
             @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
         )
@@ -70,7 +78,14 @@ Describe 'TP.ENT.0013 - Group/team owner consent restriction (EIDSCA.CP01)' {
     }
 
     It 'Pass (PSObject shape)' {
-        $rows = @(@{ id = 's1'; values = @(@{ name = 'EnableGroupSpecificConsent'; value = 'False' }) })
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'EnableGroupSpecificConsent'; value = 'False' }
+                    @{ name = 'BlockUserConsentForRiskyApps'; value = 'true' }
+                    @{ name = 'EnableAdminConsentRequests'; value = 'true' }
+                )
+            })
         $pso = @(ConvertTo-PSObjectShape -Value $rows[0])
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0013' -Datasets @(
             @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $pso }
@@ -106,5 +121,41 @@ Describe 'TP.ENT.0013 - Group/team owner consent restriction (EIDSCA.CP01)' {
 
         $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Be 'descriptor-pending: awaiting GraphKit release'
+    }
+
+    It 'Fail: CP03 explicitly disabled - risky-app user consent not blocked' {
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'EnableGroupSpecificConsent'; value = 'False' }
+                    @{ name = 'BlockUserConsentForRiskyApps'; value = 'false' }
+                    @{ name = 'EnableAdminConsentRequests'; value = 'true' }
+                )
+            })
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0013' -Datasets @(
+            @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'EIDSCA.CP03'
+        ($finding.evidence | Where-Object identity -eq 'EIDSCA.CP03').detail.ok | Should -Be $false
+    }
+
+    It 'Fail: CP04 never customized - defaults to the non-permissive EIDSCA default (false), no admin-consent-request path' {
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'EnableGroupSpecificConsent'; value = 'False' }
+                    @{ name = 'BlockUserConsentForRiskyApps'; value = 'true' }
+                )
+            })
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0013' -Datasets @(
+            @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'EIDSCA.CP04'
+        ($finding.evidence | Where-Object identity -eq 'EIDSCA.CP04').detail.explicitlyConfigured | Should -Be $false
+        ($finding.evidence | Where-Object identity -eq 'EIDSCA.CP04').detail.value | Should -Be 'false'
     }
 }
