@@ -7,6 +7,13 @@
     and manifest.json tracks the status, provenance and hash of every dataset written into
     the store. This is the FINAL snapshot-manifest schema - later tasks consume it and must
     not extend it; scoringModelVersion belongs to the findings document, not the snapshot.
+
+    -Tenant (Task 1.5 handshake): the manifest's `tenant` field previously had no writer.
+    The collector (Get-PulseTenantSnapshot) is the sole caller expected to pass this - it
+    is always the PSEUDONYM of the tenant id (Get-PulsePseudonym's 'tp-...' output), never
+    the raw id; see the module-wide pseudonymization rule. Defaults to $null so every
+    existing caller (including every test that does not care about the tenant field) is
+    unaffected.
 #>
 
 function New-PulseSnapshotStore {
@@ -14,7 +21,10 @@ function New-PulseSnapshotStore {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory, Position = 0)]
-        [string] $Path
+        [string] $Path,
+
+        [Parameter()]
+        [string] $Tenant = $null
     )
 
     $root = New-Item -Path $Path -ItemType Directory -Force
@@ -31,7 +41,7 @@ function New-PulseSnapshotStore {
     $manifest = [ordered]@{
         schemaVersion     = '1.0.0'
         createdUtc        = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [System.Globalization.CultureInfo]::InvariantCulture)
-        tenant            = $null
+        tenant            = $Tenant
         producer          = [ordered]@{
             tenantPulse = $moduleVersion
             graphKit    = $null

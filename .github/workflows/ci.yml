@@ -141,13 +141,45 @@ jobs:
           # load via a shadowed-cmdlet call-count check); plus direct
           # Test-PulseCheckDescriptor unit coverage with an exact-error-count pin (not
           # just >1) and exact "must be a <type>, got <actual type>" text assertions
-          # for every H1-listed coercion hole = 75. This minimum must keep ratcheting
-          # up as check/function test suites are added in later tasks - see
-          # docs/superpowers/sdd for the phase plan.
+          # for every H1-listed coercion hole = 75. Task 1.5 added the collector - the
+          # module's only Graph-touching layer, and its first PUBLIC function,
+          # Get-PulseTenantSnapshot (source/Public). It added
+          # Get-PulseCollectionManifest (dedup/union datasets across checks through the
+          # new shared source/Data/DatasetMap.psd1, ordinal-sorted, unknown-dataset
+          # throws naming the check id), Assert-PulseReadOnlyDescriptor (the
+          # ThrottleClass='Read' -and ReplayPolicy='Safe' predicate, shared verbatim
+          # with Task 1.10's future static gate), Get-PulseFailureClass (attempt-and-
+          # classify 403-vs-everything-else, isolated so it is unit-testable against a
+          # synthetic ErrorRecord without any live GraphKit shape), and
+          # Invoke-PulseCollection (the per-dataset attempt/write loop, including the
+          # Pending-flagged-dataset short-circuit for the two datasets - mdmAuthority,
+          # entraDevices - whose GraphKit descriptors do not exist yet). All four
+          # GraphKit commands TenantPulse calls (Get-GraphContext, Get-GraphObject,
+          # Invoke-GraphOperation, Get-GraphOperation) are stubbed directly inside the
+          # TenantPulse module scope in BeforeAll with a default throwing mock
+          # registered first, so these tests never depend on a real GraphKit install:
+          # 18 Get-PulseTenantSnapshot.Tests.ps1 tests covering manifest
+          # dedup/union/unknown-dataset/ordinal-sort/Pending-passthrough (6),
+          # Assert-PulseReadOnlyDescriptor throwing for Write/NeverReplay and passing
+          # for Read+Safe (3), Get-PulseFailureClass classifying a structured
+          # StatusCode 403/500 and a message-text-only 403 fallback (4),
+          # Invoke-PulseCollection collecting/skipping-with-permission-reason/failing
+          # three datasets independently plus the Pending short-circuit making zero
+          # Get-GraphObject calls (2), and the public Get-PulseTenantSnapshot
+          # end-to-end wiring: tenant field is always the pseudonym never the raw
+          # profile id, a total context-acquisition failure still writes the snapshot
+          # with every dataset Failed and collectionFailure set, and -IncludeCategory
+          # narrows the collected dataset set (3). Plus the "Quality for module" and
+          # "Help for module" Describe blocks now actually running against the first
+          # exported function (8 more, via module.tests.ps1's -ForEach) = 99. This
+          # minimum must keep ratcheting up as check/function test suites are added in
+          # later tasks - see docs/superpowers/sdd for the phase plan.
           #
-          # -AllowNotRun 6 still covers the "Quality for module" (2 It) and "Help for
-          # module" (4 It) Describe blocks: FunctionsToExport is still empty (Task
-          # 1.4's functions are private too), so Get-Command -Module still returns
-          # nothing to drive their -ForEach. This must drop to 0 the moment the first
-          # function is exported and those blocks start actually running.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 75 -AllowedSkips 0 -AllowNotRun 6
+          # -AllowNotRun 0: the "Quality for module" (2 It) and "Help for module" (4
+          # It) Describe blocks now have exactly one function (Get-PulseTenantSnapshot)
+          # to drive their -ForEach - FunctionsToExport is no longer empty now that
+          # Task 1.5 landed the module's first Public function. Every NotRun block from
+          # Task 1.4's placeholder allowance is gone; any NotRun block reappearing here
+          # means test-case generation silently broke again and must be investigated,
+          # not re-allowed.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 99 -AllowedSkips 0 -AllowNotRun 0
