@@ -21,7 +21,15 @@
     green `test` run could still hide a discovery regression until CI caught it.
 #>
 
-$script:tenantPulseGateMinimumTests = 814
+# 814 -> 905 (Task 2.2 review-fix round): +91 tests - shape-neutrality coverage
+# (PSObject/IDictionary parity across all 15 golden fixtures), the fan-out driver's
+# prevalidation/worker-drain/depth-alignment/all-failed-NotExpanded regressions, the
+# -FromSnapshot re-derivation wiring (Resolve-PulseSettingsCatalogSnapshotExpansion), and
+# the shared value-classification helper's own dedicated suite - see task-2.2-report.md's
+# review-fix addendum for the full accounting. Matches .github/workflows/ci.yml's own
+# -MinimumTests, which must be bumped together with this value - see this file's own
+# docstring for why the same ratchet exists in both places.
+$script:tenantPulseGateMinimumTests = 905
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

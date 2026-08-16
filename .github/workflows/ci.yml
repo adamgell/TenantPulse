@@ -558,7 +558,14 @@ jobs:
           # split-brain test (finding #1), and Save-PulseSettingDefinitionCorpus's
           # Should-Invoke/-Context-forwarding and planted-raw-id Protect-PulseReason
           # redaction tests (findings #6, #8).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 814 -AllowedSkips 0 -AllowNotRun 1
+          # 814 -> 905 (Task 2.2 + its review-fix round): +91 tests - shape-neutrality
+          # coverage (PSObject/IDictionary parity across all 15 golden fixtures), the fan-out
+          # driver's prevalidation/worker-drain/depth-alignment/all-failed-NotExpanded
+          # regressions, the -FromSnapshot re-derivation wiring
+          # (Resolve-PulseSettingsCatalogSnapshotExpansion), and the shared value-
+          # classification helper's own dedicated suite - matches .build/AssertGateResult.tasks.ps1's
+          # own -MinimumTests, which must be bumped together with this value.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 905 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
