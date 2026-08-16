@@ -63,14 +63,20 @@ function Export-PulseReport {
         throw "Export-PulseReport: findings file not found at '$FindingsPath'."
     }
 
-    # -DateKind String (post-review fix, spec determinism): ConvertFrom-Json's default
-    # behavior parses any ISO-8601-looking string into [datetime], which the canonical
-    # serializer then reformats at millisecond precision - silently dropping the extra
-    # digits of a 7-digit-fraction Graph timestamp and making a re-rendered report diverge,
-    # byte-for-byte, from the file it was read from. -DateKind String keeps every JSON
-    # string a [string], exactly as read, so a timestamp round-trips byte-identical. See
-    # Export-PulseJsonReport's own -RedactionMap clone path, which needs the same fix.
-    $document = Get-Content -LiteralPath $FindingsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop -Depth 64 -DateKind String
+    # ConvertFrom-PulseJsonPreservingStrings (CI BLOCKER fix - module floor is PS 7.4,
+    # where ConvertFrom-Json's -DateKind parameter does not exist at all): behaves exactly
+    # like `ConvertFrom-Json -DateKind String` - every JSON string round-trips as a
+    # [string], never inferred into a [datetime] - on every supported PowerShell version,
+    # including 7.4, where it uses a JsonDocument-based fallback instead. Plain
+    # ConvertFrom-Json (no -DateKind) is FORBIDDEN here: its default behavior parses any
+    # ISO-8601-looking string into [datetime], which the canonical serializer then
+    # reformats at millisecond precision - silently dropping the extra digits of a
+    # 7-digit-fraction Graph timestamp and making a re-rendered report diverge, byte-for-
+    # byte, from the file it was read from. See that function's own docstring for the full
+    # 7.4/7.5+ accounting, and Export-PulseJsonReport's own -RedactionMap clone path, which
+    # needs the identical fix.
+    $rawFindingsJson = Get-Content -LiteralPath $FindingsPath -Raw -ErrorAction Stop
+    $document = ConvertFrom-PulseJsonPreservingStrings -Json $rawFindingsJson -Depth 64
 
     # Dispatches on -Format even though ValidateSet allows only 'Json' today - kept
     # explicit (rather than always calling the Json renderer unconditionally) so a future

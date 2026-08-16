@@ -80,4 +80,98 @@ Describe 'Export-PulseReport' {
         $renderedRaw | Should -Match '2026-08-15T00:00:00\.1234567Z'
         $renderedRaw | Should -Be $sourceDocument
     }
+
+    # CI BLOCKER fix: ConvertFrom-Json's -DateKind parameter does not exist at all on the
+    # module's PS 7.4 floor (it shipped in 7.5), so every -DateKind call site is routed
+    # through ConvertFrom-PulseJsonPreservingStrings, which feature-detects once and falls
+    # back to a JsonDocument-based reader on < 7.5. These tests force BOTH branches to run
+    # - regardless of which PowerShell version is actually executing them - by stubbing the
+    # feature-detect function's own cache variable directly, and assert the two branches
+    # produce BYTE-IDENTICAL canonical-JSON output for the same findings JSON: a 7-digit-
+    # fraction timestamp, a unicode string, numbers written as both '1.0' and '1', and
+    # empty arrays/objects.
+    Context 'ConvertFrom-PulseJsonPreservingStrings: native -DateKind branch vs. JsonDocument fallback branch' {
+        BeforeAll {
+            $script:findingsJsonForBranchParity = InModuleScope TenantPulse {
+                ConvertTo-PulseCanonicalJson -InputObject ([pscustomobject]@{
+                    schemaVersion = '1.0'
+                    generatedUtc  = '2026-08-15T00:00:00.1234567Z'
+                    unicodeText   = 'café ☃ 日本語'
+                    numberAsWhole = 1
+                    numberAsFloat = 1.0
+                    emptyArray    = @()
+                    emptyObject   = [pscustomobject]@{}
+                    findings      = @(
+                        [pscustomobject]@{
+                            id       = 'F1'
+                            evidence = @(
+                                [pscustomobject]@{ identity = 'user@contoso.example'; sortKey = 'user@contoso.example'; detail = [pscustomobject]@{ observedUtc = '2026-08-15T00:00:00.7654321Z' } }
+                            )
+                        }
+                    )
+                })
+            }
+        }
+
+        AfterEach {
+            # Reset the feature-detect cache so stubbing one test's branch never leaks into
+            # another It block or another test file that imports the same module instance.
+            InModuleScope TenantPulse {
+                $script:PulseConvertFromJsonSupportsDateKind = $null
+            }
+        }
+
+        It 'the native -DateKind branch (forced) parses without throwing and preserves the 7-digit timestamp' {
+            $rendered = InModuleScope TenantPulse -ArgumentList $script:findingsJsonForBranchParity {
+                param($json)
+                $script:PulseConvertFromJsonSupportsDateKind = $true
+                $document = ConvertFrom-PulseJsonPreservingStrings -Json $json -Depth 64
+                ConvertTo-PulseCanonicalJson -InputObject $document
+            }
+
+            $rendered | Should -Match '2026-08-15T00:00:00\.1234567Z'
+            $rendered | Should -Match '2026-08-15T00:00:00\.7654321Z'
+        }
+
+        It 'the JsonDocument fallback branch (forced, regardless of the local PowerShell version) parses without throwing and preserves the 7-digit timestamp' {
+            $rendered = InModuleScope TenantPulse -ArgumentList $script:findingsJsonForBranchParity {
+                param($json)
+                $script:PulseConvertFromJsonSupportsDateKind = $false
+                $document = ConvertFrom-PulseJsonPreservingStrings -Json $json -Depth 64
+                ConvertTo-PulseCanonicalJson -InputObject $document
+            }
+
+            $rendered | Should -Match '2026-08-15T00:00:00\.1234567Z'
+            $rendered | Should -Match '2026-08-15T00:00:00\.7654321Z'
+        }
+
+        It 'both branches produce byte-identical canonical JSON for the same input (timestamps, unicode, 1 vs 1.0, empty arrays/objects)' {
+            $renderedFromNativeBranch = InModuleScope TenantPulse -ArgumentList $script:findingsJsonForBranchParity {
+                param($json)
+                $script:PulseConvertFromJsonSupportsDateKind = $true
+                $document = ConvertFrom-PulseJsonPreservingStrings -Json $json -Depth 64
+                ConvertTo-PulseCanonicalJson -InputObject $document
+            }
+            InModuleScope TenantPulse { $script:PulseConvertFromJsonSupportsDateKind = $null }
+            $renderedFromFallbackBranch = InModuleScope TenantPulse -ArgumentList $script:findingsJsonForBranchParity {
+                param($json)
+                $script:PulseConvertFromJsonSupportsDateKind = $false
+                $document = ConvertFrom-PulseJsonPreservingStrings -Json $json -Depth 64
+                ConvertTo-PulseCanonicalJson -InputObject $document
+            }
+
+            $renderedFromFallbackBranch | Should -Be $renderedFromNativeBranch
+        }
+
+        It 'Export-PulseReport itself round-trips byte-identical through the FORCED fallback branch, exactly like the native branch' {
+            $findingsPath = Join-Path $script:outputRoot 'branch-parity-findings.json'
+            Set-Content -LiteralPath $findingsPath -Value $script:findingsJsonForBranchParity -NoNewline
+
+            InModuleScope TenantPulse { $script:PulseConvertFromJsonSupportsDateKind = $false }
+            $result = Export-PulseReport -FindingsPath $findingsPath -Format Json -OutputPath $script:outputRoot
+            $renderedRaw = Get-Content -LiteralPath $result.ReportPaths.Json -Raw
+
+            $renderedRaw | Should -Be $script:findingsJsonForBranchParity
+        }
+    }
 }

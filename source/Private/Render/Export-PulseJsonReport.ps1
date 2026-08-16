@@ -78,14 +78,18 @@ function Export-PulseJsonReport {
     if ($null -ne $RedactionMap -and $RedactionMap.Count -gt 0) {
         # Deep clone before mutating - see NON-MUTATION note above. Reuses the same
         # canonical-JSON round-trip clone pattern the rest of this codebase already uses.
-        # -DateKind String (post-review fix, spec determinism): without it, ConvertFrom-Json
-        # parses an ISO-8601-looking timestamp string into [datetime], and re-serializing it
-        # below reformats it at millisecond precision - silently dropping a 7-digit-fraction
-        # Graph timestamp's extra digits and making a -Redact report's untouched timestamp
-        # fields diverge, byte-for-byte, from the same field in an unredacted report of the
-        # same run. See Export-PulseReport's own read path for the matching fix.
+        # ConvertFrom-PulseJsonPreservingStrings (CI BLOCKER fix - see that function's own
+        # docstring): behaves exactly like `ConvertFrom-Json -DateKind String` on every
+        # supported PowerShell version, including the 7.4 module floor where -DateKind
+        # does not exist as a parameter at all. Without the -DateKind String behavior,
+        # ConvertFrom-Json parses an ISO-8601-looking timestamp string into [datetime], and
+        # re-serializing it below reformats it at millisecond precision - silently
+        # dropping a 7-digit-fraction Graph timestamp's extra digits and making a -Redact
+        # report's untouched timestamp fields diverge, byte-for-byte, from the same field
+        # in an unredacted report of the same run. See Export-PulseReport's own read path
+        # for the matching fix.
         $json = ConvertTo-PulseCanonicalJson -InputObject $Document
-        $documentToWrite = ConvertFrom-Json -InputObject $json -Depth 64 -DateKind String
+        $documentToWrite = ConvertFrom-PulseJsonPreservingStrings -Json $json -Depth 64
 
         foreach ($finding in @($documentToWrite.findings)) {
             foreach ($evidence in @($finding.evidence)) {
