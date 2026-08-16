@@ -573,7 +573,12 @@ jobs:
           # mirroring P1-9's instance-type fix) plus its own regression suite. Set to the
           # REAL total, not a headroom-padded number - the gate IS the count. Matches
           # .build/AssertGateResult.tasks.ps1's own -MinimumTests.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 947 -AllowedSkips 0 -AllowNotRun 1
+          # 916 -> 959 (Task 2.3): compliance/legacy typed-policy walk, per-family fan-out
+          # driver, two-family pipeline, and -FromCapturedPayloads/raw-assignment-
+          # persistence coverage - see .build/AssertGateResult.tasks.ps1's own accounting.
+          # 959 -> 963 (Task 2.5): isBaseline now reflects the 'baseline' template family
+          # specifically, not "any template-bearing policy" - see that file's own note.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 963 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

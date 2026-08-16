@@ -43,7 +43,24 @@
 # wording, exact-match dispatch, assignment-fetch-failure whole-policy gap, planted-secret-
 # never-leaks, empty-policy-list Expanded), and the two-family pipeline (both datasets
 # unavailable, one family independent of the other).
-$script:tenantPulseGateMinimumTests = 947
+# 947 -> 949 (Task 2.3 follow-up): +2 - Invoke-PulseTypedPolicyExpansion.ps1's own
+# -FromCapturedPayloads/raw-assignment-persistence addition (see that file's own docstring)
+# picked up by the QA suites that enumerate shipped source files structurally (module.tests.ps1/
+# SecretScan.tests.ps1), not a new Describe block.
+# 949 -> 959 (Task 2.3 follow-up): +10 - own regression coverage for
+# -FromCapturedPayloads/raw-assignment-persistence (3 new It cases, which also caught and
+# fixed a real ARRAY-RETURN UNROLLING TRAP bug: Read-PulseDataset's result was being
+# double-wrapped by a redundant caller-side @(), corrupting every re-expanded assignment's
+# shape - see that file's own docstring) plus discovery picking up the remainder via the
+# structural QA suites. Set to the REAL total.
+# 959 -> 963 (Task 2.5): +4 - isBaseline now reflects the 'baseline' template family
+# specifically (case-insensitive prefix match), not "any template-bearing policy" - the
+# prior predicate marked every endpoint security policy (antivirus, disk encryption,
+# firewall, ...) isBaseline:true right alongside real Security Baselines. New dedicated
+# Describe block: a real baseline family, a non-baseline-but-template-bearing endpoint
+# security family, an ordinary non-template policy, and a future 'baseline*' variant
+# family (prefix match, not exact).
+$script:tenantPulseGateMinimumTests = 963
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
