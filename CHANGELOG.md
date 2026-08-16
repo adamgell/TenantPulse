@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call and refuses to create or read one inside a snapshot root; `Get-PulsePseudonym`
   turns any value into a stable `tp-`-prefixed HMAC-SHA256 pseudonym under that key, so
   raw tenant IDs never need to appear in snapshots or reports.
+- Check descriptor schema + loader: `Import-PulseCheckCatalog` reads and validates every
+  `.psd1` check descriptor under a directory (default `source/Data/Checks`) with
+  `Import-PowerShellDataFile`, returning a sorted-by-`Id` array of
+  `TenantPulse.CheckDescriptor` objects; an empty/missing catalog returns an empty array
+  rather than throwing. `Test-PulseCheckDescriptor` validates one descriptor's schema
+  (Id/Severity/Effort/Impact patterns, non-empty Data.Datasets, Rule.Type/Rule.Function
+  resolving via `Get-Command` at import time, required Consulting fields,
+  References.Research/Authorities) and, once Task 1.5 lands `DatasetMap.psd1`,
+  cross-checks Data.Datasets membership against it. All validation errors across a
+  catalog are aggregated into a single thrown error naming each offending descriptor and
+  property, rather than failing on the first bad file. Schema documented verbatim in
+  `source/Data/Checks/README.md`.
 
 ### Changed
 
