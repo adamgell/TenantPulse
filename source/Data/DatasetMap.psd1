@@ -73,18 +73,39 @@
     domains                       = @{ Type = 'Domain'; Operation = 'List'; ApiVersion = 'beta' }
 
     # Read live against a real tenant this week; not marked Pending.
-    deviceManagementSettings = @{ Type = 'DeviceManagementSettings'; Operation = 'Get'; ApiVersion = 'beta' }
+    #
+    # CORRECTED (Task 1.10, static read-only gate): the GraphKit catalog's operation Type
+    # for this descriptor is 'ManagedDeviceSetting' (OperationKind Singleton, PathTemplate
+    # /deviceManagement/settings), NOT 'DeviceManagementSettings' - the latter never
+    # resolved via Get-GraphOperation (it doesn't exist in the catalog at all), which is
+    # exactly the class of drift the static gate exists to catch before it reaches a live
+    # tenant. ThrottleClass=Read, ReplayPolicy=Safe, ApiVersion=beta - confirmed against
+    # the real installed GraphKit 0.1.0 catalog.
+    deviceManagementSettings = @{ Type = 'ManagedDeviceSetting'; Operation = 'Get'; ApiVersion = 'beta' }
 
     # Pending - GraphKit descriptor exists committed-but-unreleased; goes live at 0.1.1.
     # See the LIVE-TENANT VERIFICATION NOTE above.
-    securityDefaultsPolicy    = @{ Type = 'SecurityDefaultsPolicy'; Operation = 'Get'; ApiVersion = 'v1.0'; Pending = $true }
-    directoryRoleAssignments  = @{ Type = 'DirectoryRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
-    directoryRoleDefinitions  = @{ Type = 'DirectoryRoleDefinition'; Operation = 'ListBeta'; ApiVersion = 'beta'; Pending = $true }
-    organization               = @{ Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
+    #
+    # ExpectedThrottleClass / ExpectedReplayPolicy (Task 1.10): these Pending entries have
+    # no live GraphKit descriptor to query yet, so the static read-only gate cannot resolve
+    # them via Get-GraphOperation the way it does every non-Pending entry above. Instead
+    # each Pending entry DECLARES the read-only shape its future descriptor is expected to
+    # have - based on this week's live-tenant verification note - and the gate asserts
+    # against that declaration (ThrottleClass 'Read', ReplayPolicy 'Safe') with a clearly
+    # reported "descriptor-pending" reason instead of a live lookup. This still catches a
+    # real authoring mistake (someone flipping Pending on a write-shaped or unsafe-replay
+    # operation) even though it cannot verify the eventual GraphKit release matches; that
+    # re-verification happens automatically the moment the Pending flag drops, because the
+    # gate then falls through to the same live Get-GraphOperation path every other entry
+    # uses.
+    securityDefaultsPolicy    = @{ Type = 'SecurityDefaultsPolicy'; Operation = 'Get'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    directoryRoleAssignments  = @{ Type = 'DirectoryRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    directoryRoleDefinitions  = @{ Type = 'DirectoryRoleDefinition'; Operation = 'ListBeta'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    organization               = @{ Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
     # GetMdmAuthority is a $select-in-path property read on the organization entity
     # (/organization/{id}?$select=mobileDeviceManagementAuthority), NOT the removed
     # getMdmAuthority action - see the CLARIFICATION note above. Live-verified 200 'intune'
     # on both v1.0 and beta this week.
-    organizationMdmAuthority  = @{ Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $true; IdFromDataset = 'organization' }
-    entraDevices               = @{ Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
+    organizationMdmAuthority  = @{ Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $true; IdFromDataset = 'organization'; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    entraDevices               = @{ Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }
