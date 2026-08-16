@@ -444,10 +444,18 @@ jobs:
           # new -SupplementalStatusCode signal and the new Get-PulseGraphFailureStatusCode
           # helper (recovering the real GraphKit failure shape confirmed live against the
           # Ivy24 lab tenant - Get-GraphObject's own throw carries no structured status or
-          # '403'/'forbidden' text) plus +1 collector regression test pinning that real
-          # shape end-to-end; +7 for scripts/Publish-TenantPulsePackage.ps1's pack-first-
-          # then-verify digest-comparison tests (tests/QA/PublishTenantPulsePackage.tests.ps1).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 657 -AllowedSkips 0 -AllowNotRun 0
+          # '403'/'forbidden' text: 10 explicit Pester cases plus 2 auto-generated
+          # SecretScan.tests.ps1 cases for the new source file - verified against git by
+          # building commit 818c5af in isolation, see task-11-report.md's addendum) plus
+          # +7 for scripts/Publish-TenantPulsePackage.ps1's pack-first-then-verify
+          # digest-comparison tests (tests/QA/PublishTenantPulsePackage.tests.ps1).
+          # 657 -> 667 (Task 1.11 review follow-up): strip GraphKit's per-row provenance
+          # stamps (_Tenant/_RetrievedUtc/_GraphPath/_ApiVersion) before dataset
+          # serialization - +8 explicit Pester cases (Remove-PulseGraphRowProvenance's own
+          # 5, 2 in Snapshot.Tests.ps1 pinning Write-PulseDataset's strip, 1 end-to-end
+          # raw-ProfileId-grep in Get-PulseTenantSnapshot.Tests.ps1) plus +2 auto-generated
+          # SecretScan.tests.ps1 cases for the new source file.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 667 -AllowedSkips 0 -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

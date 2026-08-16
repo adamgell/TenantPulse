@@ -468,6 +468,15 @@ Describe 'Get-PulseFailureClass' {
 }
 
 Describe 'Get-PulseGraphFailureStatusCode' {
+    # Mock-seam audit (Task 1.11 review round 2): a mock that never fires is invisible -
+    # the code under test can take an entirely different, unmocked path and a test can
+    # still report green if its assertion happens to hold anyway (this is exactly the
+    # shape of a real GraphKit incident: a staged-403 test whose mock's ParameterFilter
+    # never matched, so the call fell through and hit the live lab tenant instead - and
+    # the assertion passed regardless, because the live call also happened to 403).
+    # Every It below now pairs its Mock with an explicit Should-Invoke -Times -Exactly
+    # (with the SAME -ParameterFilter, where the Mock has one) proving the specific
+    # staged mock - not some other path - is what the assertion actually exercised.
     It 'returns the last Telemetry attempt''s StatusCode from a supplemental Invoke-GraphOperation call' {
         Mock Invoke-GraphOperation -ModuleName TenantPulse {
             [pscustomobject]@{
@@ -488,6 +497,7 @@ Describe 'Get-PulseGraphFailureStatusCode' {
         }
 
         $code | Should -Be 403
+        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly
     }
 
     It 'passes -Parameters through to Invoke-GraphOperation so a Get-scoped classification probe matches the failed read' {
@@ -502,6 +512,9 @@ Describe 'Get-PulseGraphFailureStatusCode' {
         }
 
         $code | Should -Be 403
+        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Parameters.id -eq 'abc'
+        }
     }
 
     It 'returns $null (never throws) when the supplemental Invoke-GraphOperation call itself fails' {
@@ -522,6 +535,10 @@ Describe 'Get-PulseGraphFailureStatusCode' {
         }
 
         $code | Should -BeNullOrEmpty
+        # Two calls to Get-PulseGraphFailureStatusCode above (the -Should -Not -Throw
+        # probe and the value-capturing call) - both must have reached the mocked
+        # Invoke-GraphOperation for this test to mean anything.
+        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 2 -Exactly
     }
 
     It 'returns $null when the result carries no Telemetry' {
@@ -534,6 +551,7 @@ Describe 'Get-PulseGraphFailureStatusCode' {
         }
 
         $code | Should -BeNullOrEmpty
+        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly
     }
 
     It 'returns $null when Telemetry is an empty array' {
@@ -546,6 +564,7 @@ Describe 'Get-PulseGraphFailureStatusCode' {
         }
 
         $code | Should -BeNullOrEmpty
+        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly
     }
 }
 
@@ -630,6 +649,15 @@ Describe 'Invoke-PulseCollection' {
         $result.datasets.conditionalAccessPolicies.status | Should -Be 'Skipped'
         $result.datasets.conditionalAccessPolicies.reason | Should -Match '^permission-denied:'
         $result.datasets.conditionalAccessPolicies.reason | Should -Match 'Policy.Read.All'
+
+        # Mock-seam proof (Task 1.11 review round 2): the assertions above pass whether or
+        # not the supplemental Invoke-GraphOperation probe actually fired - permission-
+        # denied is also reachable if Get-PulseFailureClass's message-text fallback had
+        # matched. These Should-Invoke calls are what actually proves THIS test exercised
+        # the fix (the supplemental call recovering 403 from Telemetry) and not some other
+        # path that happened to land on the same reason string.
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' }
+        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' }
     }
 
     It 'writes Collected for a clean read, Skipped with a permission reason for a 403, and Failed for a 500 - each dataset attempted independently' {
@@ -663,6 +691,14 @@ Describe 'Invoke-PulseCollection' {
 
         $result.datasets.deviceConfigurations.status | Should -Be 'Failed'
         $result.datasets.deviceConfigurations.reason | Should -Match '500 Internal Server Error'
+
+        # Mock-seam proof (Task 1.11 review round 2): three independently-filtered
+        # Get-GraphObject mocks are staged above (one per Type) - prove each one actually
+        # fired exactly once, rather than trusting the manifest's final reason strings to
+        # imply it.
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' }
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' }
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceConfiguration' }
     }
 
     It 'writes Skipped with a descriptor-pending reason and never calls Get-GraphObject for a Pending dataset' {
@@ -711,6 +747,12 @@ Describe 'Invoke-PulseCollection' {
         # The read-only predicate violation stays fatal, but a version drift must not
         # abort collection of the remaining, unrelated dataset.
         $result.datasets.deviceCompliancePolicies.status | Should -Be 'Collected'
+
+        # Mock-seam proof (Task 1.11 review round 2): the version-drift dataset must never
+        # reach Get-GraphObject at all (Assert-PulseReadOnlyDescriptor throws first), while
+        # the unrelated dataset must reach it exactly once.
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' }
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' }
     }
 
     It 'on an AuthFailure at the first dataset: sets collectionFailure, fails every remaining dataset with no further Graph calls, and returns' {
@@ -768,6 +810,11 @@ Describe 'Invoke-PulseCollection' {
 
         $result = $raw | ConvertFrom-Json
         $result.datasets.conditionalAccessPolicies.reason | Should -Match 'tp-abc123'
+
+        # Mock-seam proof (Task 1.11 review round 2): unfiltered mocks can't have a
+        # ParameterFilter mismatch, but confirming the call count still proves this test
+        # actually reached Get-GraphObject rather than short-circuiting somewhere earlier.
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 
     It 'IdFromDataset: resolves the dependency''s first row id and passes it as -Parameters @{ id = ... }' {
@@ -789,6 +836,11 @@ Describe 'Invoke-PulseCollection' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
             $Operation -eq 'GetMdmAuthority' -and $Parameters.id -eq 'org-1'
         }
+        # Mock-seam proof (Task 1.11 review round 2): the dependency call itself must also
+        # be confirmed - without this, a broken dependency-id lookup that happened to fall
+        # through to some other mocked value could still coincidentally satisfy the
+        # assertion above.
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Operation -eq 'List' }
 
         $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $result.datasets.organization.status | Should -Be 'Collected'
@@ -892,6 +944,54 @@ Describe 'Get-PulseTenantSnapshot' {
         $manifest.datasets.conditionalAccessPolicies.status | Should -Be 'Collected'
         $manifest.datasets.deviceCompliancePolicies.status | Should -Be 'Skipped'
         $manifest.datasets.deviceCompliancePolicies.reason | Should -Match '^permission-denied:'
+    }
+
+    # Task 1.11 review follow-up: GraphKit's Get-GraphObject stamps every row with
+    # _Tenant (the ProfileId - an operator-chosen label, not the raw tenant GUID, but
+    # still an identifier with no place in a pseudonymized artifact), _RetrievedUtc,
+    # _GraphPath and _ApiVersion. Write-PulseDataset now strips all four before
+    # serialization (see Remove-PulseGraphRowProvenance). This test reproduces the live
+    # gate's own verification method - grep the whole output tree for the raw ProfileId -
+    # against a snapshot built from rows carrying every stamp, so a future regression in
+    # the strip would fail here before it ever reaches a live tenant again.
+    It 'strips GraphKit''s per-row provenance stamps before writing dataset files - a grep for the raw ProfileId across the whole output tree finds nothing' {
+        $checkOne = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies')
+
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne) }
+        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            # Reproduces exactly what Get-GraphObject stamps onto a real returned row.
+            [pscustomobject]@{
+                id            = 'p1'
+                _Tenant       = 'contoso-tenant-id'
+                _RetrievedUtc = [datetime]::UtcNow
+                _GraphPath    = '/deviceManagement/deviceCompliancePolicies'
+                _ApiVersion   = 'v1.0'
+            }
+        }
+
+        $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot {
+            param($snapshotRoot)
+            Get-PulseTenantSnapshot -ProfileId 'contoso-tenant-id' -Path $snapshotRoot
+        }
+
+        $datasetFile = Join-Path $store.DatasetsPath 'deviceCompliancePolicies.json'
+        Test-Path -LiteralPath $datasetFile -PathType Leaf | Should -BeTrue
+
+        $writtenRows = Get-Content -LiteralPath $datasetFile -Raw | ConvertFrom-Json
+        $writtenRows[0].id | Should -Be 'p1'
+        $writtenRows[0].PSObject.Properties.Name | Should -Not -Contain '_Tenant'
+        $writtenRows[0].PSObject.Properties.Name | Should -Not -Contain '_RetrievedUtc'
+        $writtenRows[0].PSObject.Properties.Name | Should -Not -Contain '_GraphPath'
+        $writtenRows[0].PSObject.Properties.Name | Should -Not -Contain '_ApiVersion'
+
+        # The whole-tree grep the live gate itself used: the raw ProfileId must not
+        # survive anywhere under the snapshot root - not the manifest (already covered
+        # above), and now not any dataset file either.
+        $rawOutputTree = Get-ChildItem -LiteralPath $script:snapshotRoot -Recurse -File |
+            ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }
+        $rawOutputTree -join "`n" | Should -Not -Match 'contoso-tenant-id'
     }
 
     It 'still writes the snapshot with every dataset Failed and collectionFailure set when acquiring a GraphKit context fails outright' {

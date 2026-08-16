@@ -95,6 +95,63 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
         $result[1].value | Should -Be 2
     }
 
+    # Task 1.11 review follow-up: GraphKit's Get-GraphObject stamps every row with
+    # _Tenant/_RetrievedUtc/_GraphPath/_ApiVersion (see Remove-PulseGraphRowProvenance's
+    # docstring). Write-PulseDataset now strips all four before serialization - this
+    # pins that behavior directly against Write-PulseDataset, independent of the
+    # Get-PulseTenantSnapshot end-to-end test that exercises the same thing via a real
+    # collection run.
+    It 'strips GraphKit''s per-row provenance stamps (_Tenant, _RetrievedUtc, _GraphPath, _ApiVersion) before serializing a dataset' {
+        $data = @(
+            [pscustomobject]@{
+                id            = 'a'
+                value         = 1
+                _Tenant       = 'ivy24'
+                _RetrievedUtc = [datetime]::UtcNow
+                _GraphPath    = '/deviceManagement/managedDevices'
+                _ApiVersion   = 'v1.0'
+            }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data {
+            param($store, $data)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'Sample.json'
+        $writtenJson = Get-Content -LiteralPath $datasetFile -Raw
+
+        $writtenJson | Should -Not -Match '_Tenant'
+        $writtenJson | Should -Not -Match '_RetrievedUtc'
+        $writtenJson | Should -Not -Match '_GraphPath'
+        $writtenJson | Should -Not -Match '_ApiVersion'
+        $writtenJson | Should -Not -Match 'ivy24'
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'Sample'
+        }
+        $result[0].id | Should -Be 'a'
+        $result[0].value | Should -Be 1
+        $result[0].PSObject.Properties.Name | Should -Not -Contain '_Tenant'
+    }
+
+    It 'leaves a row with none of the four stamp properties unchanged (no-op when there is nothing to strip)' {
+        $data = @([pscustomobject]@{ id = 'a'; value = 1 })
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data {
+            param($store, $data)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'Sample'
+        }
+        $result[0].id | Should -Be 'a'
+        $result[0].value | Should -Be 1
+    }
+
     It 'records status, apiVersion, sha256 and itemCount in the manifest entry for a Collected dataset' {
         $data = @(
             [pscustomobject]@{ id = 'a' }
@@ -166,6 +223,77 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $manifest.datasets.NotNeeded.status | Should -Be 'Skipped'
         $manifest.datasets.NotNeeded.reason | Should -Be 'feature disabled'
+    }
+}
+
+Describe 'Remove-PulseGraphRowProvenance' {
+    It 'removes all four GraphKit stamp properties and leaves every other property untouched' {
+        $row = [pscustomobject]@{
+            id            = 'a'
+            value         = 42
+            _Tenant       = 'ivy24'
+            _RetrievedUtc = [datetime]::UtcNow
+            _GraphPath    = '/some/path'
+            _ApiVersion   = 'v1.0'
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList (, @($row)) {
+            param($data)
+            Remove-PulseGraphRowProvenance -Data $data
+        }
+
+        $result.Count | Should -Be 1
+        $result[0].id | Should -Be 'a'
+        $result[0].value | Should -Be 42
+        $result[0].PSObject.Properties.Name | Should -Not -Contain '_Tenant'
+        $result[0].PSObject.Properties.Name | Should -Not -Contain '_RetrievedUtc'
+        $result[0].PSObject.Properties.Name | Should -Not -Contain '_GraphPath'
+        $result[0].PSObject.Properties.Name | Should -Not -Contain '_ApiVersion'
+    }
+
+    It 'is a no-op for a row that carries none of the four stamp names' {
+        $row = [pscustomobject]@{ id = 'a'; value = 1 }
+
+        $result = InModuleScope TenantPulse -ArgumentList (, @($row)) {
+            param($data)
+            Remove-PulseGraphRowProvenance -Data $data
+        }
+
+        $result[0].id | Should -Be 'a'
+        $result[0].value | Should -Be 1
+    }
+
+    It 'handles an empty array without throwing' {
+        {
+            InModuleScope TenantPulse -ArgumentList (, [object[]] @()) {
+                param($data)
+                Remove-PulseGraphRowProvenance -Data $data
+            }
+        } | Should -Not -Throw
+    }
+
+    It 'skips a $null row rather than throwing' {
+        $rows = [object[]] @($null, [pscustomobject]@{ id = 'a'; _Tenant = 'ivy24' })
+
+        $result = InModuleScope TenantPulse -ArgumentList (, $rows) {
+            param($data)
+            Remove-PulseGraphRowProvenance -Data $data
+        }
+
+        $result.Count | Should -Be 2
+        $result[0] | Should -BeNullOrEmpty
+        $result[1].PSObject.Properties.Name | Should -Not -Contain '_Tenant'
+    }
+
+    It 'leaves a non-PSObject row (e.g. a hashtable) untouched rather than throwing' {
+        $rows = [object[]] @(@{ id = 'a'; _Tenant = 'ivy24' })
+
+        {
+            InModuleScope TenantPulse -ArgumentList (, $rows) {
+                param($data)
+                Remove-PulseGraphRowProvenance -Data $data
+            }
+        } | Should -Not -Throw
     }
 }
 
