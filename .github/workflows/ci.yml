@@ -93,14 +93,14 @@ jobs:
           if ($resultFiles.Count -gt 1) {
               throw "Multiple NUnit result files produced: $($resultFiles.Name -join ', ')"
           }
-          # TenantPulse is a fresh scaffold (Task 1.1): the only tests present are the QA
-          # module tests, which have no functions yet to generate ForEach test cases. This
-          # minimum reflects the current fixed-count QA describe blocks (module control +
-          # changelog) and must be raised as check/function test suites are added in later
-          # tasks - see docs/superpowers/sdd for the phase plan.
+          # Task 1.2 added the snapshot store: 4 fixed-count QA tests (module control +
+          # changelog) plus 14 Snapshot.Tests.ps1 tests for the six Private/Snapshot
+          # functions = 18. This minimum must keep ratcheting up as check/function test
+          # suites are added in later tasks - see docs/superpowers/sdd for the phase plan.
           #
-          # -AllowNotRun 6 covers the "Quality for module" (2 It) and "Help for module"
-          # (4 It) Describe blocks, which have zero leaf tests with no functions yet to
-          # drive their -ForEach. This must drop to 0 the moment the first function lands
+          # -AllowNotRun 6 still covers the "Quality for module" (2 It) and "Help for
+          # module" (4 It) Describe blocks: FunctionsToExport is still empty (Task 1.2's
+          # functions are private), so Get-Command -Module still returns nothing to drive
+          # their -ForEach. This must drop to 0 the moment the first function is exported
           # and those blocks start actually running.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 4 -AllowedSkips 0 -AllowNotRun 6
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 18 -AllowedSkips 0 -AllowNotRun 6

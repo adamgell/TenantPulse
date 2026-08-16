@@ -1,0 +1,326 @@
+BeforeAll {
+    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).ProviderPath
+
+    # Import the BUILT module (never dot-source source files: they would redefine module
+    # classes and Add-Type types in test scope). Pester discovers tests per file, so each
+    # file imports it.
+    $built = Get-ChildItem (Join-Path $repoRoot 'output/module/TenantPulse') -Directory |
+        Sort-Object Name -Descending | Select-Object -First 1
+    if (-not $built) {
+        throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
+    }
+    Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+}
+
+Describe 'New-PulseSnapshotStore' {
+    BeforeEach {
+        $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'creates datasets, reference and expanded directories plus a manifest skeleton' {
+        $store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+
+        $store.Root | Should -Be $script:storeRoot
+        Test-Path -LiteralPath $store.DatasetsPath -PathType Container | Should -BeTrue
+        Test-Path -LiteralPath $store.ReferencePath -PathType Container | Should -BeTrue
+        Test-Path -LiteralPath $store.ExpandedPath -PathType Container | Should -BeTrue
+        Test-Path -LiteralPath $store.ManifestPath -PathType Leaf | Should -BeTrue
+
+        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+
+        $manifest.schemaVersion | Should -Not -BeNullOrEmpty
+        $manifest.createdUtc | Should -Not -BeNullOrEmpty
+        $manifest.PSObject.Properties.Name | Should -Contain 'tenant'
+        $manifest.producer.PSObject.Properties.Name | Should -Contain 'tenantPulse'
+        $manifest.producer.tenantPulse | Should -Not -BeNullOrEmpty
+        $manifest.producer.PSObject.Properties.Name | Should -Contain 'graphKit'
+        $manifest.producer.graphKit | Should -BeNullOrEmpty
+        $manifest.collectionFailure | Should -BeNullOrEmpty
+        $manifest.datasets.PSObject.Properties.Name.Count | Should -Be 0
+    }
+
+    It 'records the module''s own version as the tenantPulse producer version' {
+        $store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+
+        $moduleVersion = (Get-Module TenantPulse).Version.ToString()
+        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.producer.tenantPulse | Should -Be $moduleVersion
+    }
+}
+
+Describe 'Write-PulseDataset and Read-PulseDataset' {
+    BeforeEach {
+        $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'round-trips written objects through Read-PulseDataset' {
+        $data = @(
+            [pscustomobject]@{ id = 'a'; value = 1 }
+            [pscustomobject]@{ id = 'b'; value = 2 }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data {
+            param($store, $data)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'Sample'
+        }
+
+        $result.Count | Should -Be 2
+        $result[0].id | Should -Be 'a'
+        $result[0].value | Should -Be 1
+        $result[1].id | Should -Be 'b'
+        $result[1].value | Should -Be 2
+    }
+
+    It 'records status, apiVersion, sha256 and itemCount in the manifest entry for a Collected dataset' {
+        $data = @(
+            [pscustomobject]@{ id = 'a' }
+            [pscustomobject]@{ id = 'b' }
+            [pscustomobject]@{ id = 'c' }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data {
+            param($store, $data)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'beta' -Status 'Collected'
+        }
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $entry = $manifest.datasets.Sample
+
+        $entry.status | Should -Be 'Collected'
+        $entry.apiVersion | Should -Be 'beta'
+        $entry.sha256 | Should -Match '^[0-9a-f]{64}$'
+        $entry.itemCount | Should -Be 3
+        $entry.collectedUtc | Should -Not -BeNullOrEmpty
+    }
+
+    It 'throws naming the file when the on-disk dataset hash no longer matches the manifest' {
+        $data = @([pscustomobject]@{ id = 'a' })
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data {
+            param($store, $data)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'Sample.json'
+        Add-Content -LiteralPath $datasetFile -Value 'tampered'
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Read-PulseDataset -Store $store -Name 'Sample'
+            }
+        } | Should -Throw -ExpectedMessage '*Sample.json*'
+    }
+
+    It 'writes only a manifest entry, no dataset file, for a Failed status' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Write-PulseDataset -Store $store -Name 'Broken' -ApiVersion 'v1.0' -Status 'Failed' -Reason 'throttled'
+        }
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'Broken.json'
+        Test-Path -LiteralPath $datasetFile | Should -BeFalse
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $entry = $manifest.datasets.Broken
+
+        $entry.status | Should -Be 'Failed'
+        $entry.reason | Should -Be 'throttled'
+        $entry.sha256 | Should -BeNullOrEmpty
+        $entry.itemCount | Should -BeNullOrEmpty
+    }
+
+    It 'writes only a manifest entry, no dataset file, for a Skipped status' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Write-PulseDataset -Store $store -Name 'NotNeeded' -ApiVersion 'v1.0' -Status 'Skipped' -Reason 'feature disabled'
+        }
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'NotNeeded.json'
+        Test-Path -LiteralPath $datasetFile | Should -BeFalse
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.datasets.NotNeeded.status | Should -Be 'Skipped'
+        $manifest.datasets.NotNeeded.reason | Should -Be 'feature disabled'
+    }
+}
+
+Describe 'Get-PulseSnapshotManifest' {
+    BeforeEach {
+        $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'returns the parsed manifest with dataset statuses and reasons after writes' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Write-PulseDataset -Store $store -Name 'Ok' -Data @([pscustomobject]@{ id = 1 }) -ApiVersion 'v1.0' -Status 'Collected'
+            Write-PulseDataset -Store $store -Name 'Bad' -ApiVersion 'v1.0' -Status 'Failed' -Reason 'timeout'
+        }
+
+        $manifest = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Get-PulseSnapshotManifest -Store $store
+        }
+
+        $manifest.datasets.Ok.status | Should -Be 'Collected'
+        $manifest.datasets.Bad.status | Should -Be 'Failed'
+        $manifest.datasets.Bad.reason | Should -Be 'timeout'
+    }
+}
+
+Describe 'Set-PulseManifestEntry' {
+    BeforeEach {
+        $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'updates a dataset entry without writing a dataset file' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Set-PulseManifestEntry -Store $store -Name 'Deferred' -Status 'Skipped' -Reason 'not licensed'
+        }
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'Deferred.json'
+        Test-Path -LiteralPath $datasetFile | Should -BeFalse
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.datasets.Deferred.status | Should -Be 'Skipped'
+        $manifest.datasets.Deferred.reason | Should -Be 'not licensed'
+    }
+
+    It 'sets the top-level collectionFailure field' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Set-PulseManifestEntry -Store $store -CollectionFailure 'auth token expired mid-run'
+        }
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.collectionFailure | Should -Be 'auth token expired mid-run'
+    }
+}
+
+Describe 'ConvertTo-PulseCanonicalJson' {
+    It 'serializes the same object identically regardless of property insertion order' {
+        $first = [ordered]@{
+            zeta  = 1
+            alpha = @{ b = 2; a = 1 }
+            mid   = @('x', 'y', 'z')
+        }
+
+        $second = [ordered]@{
+            alpha = @{ a = 1; b = 2 }
+            mid   = @('x', 'y', 'z')
+            zeta  = 1
+        }
+
+        $firstJson = InModuleScope TenantPulse -ArgumentList $first {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+
+        $secondJson = InModuleScope TenantPulse -ArgumentList $second {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+
+        $firstJson | Should -Be $secondJson
+    }
+
+    It 'produces output with no trailing whitespace on any line and LF line endings' {
+        $obj = [ordered]@{ b = 'two'; a = @('one', 'three') }
+
+        $json = InModuleScope TenantPulse -ArgumentList $obj {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+
+        $json | Should -Not -Match "`r"
+        foreach ($line in ($json -split "`n")) {
+            $line | Should -Not -Match '[ \t]$'
+        }
+    }
+
+    It 'sorts object keys alphabetically' {
+        $obj = [ordered]@{ zeta = 1; alpha = 2; mid = 3 }
+
+        $json = InModuleScope TenantPulse -ArgumentList $obj {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+
+        $alphaIndex = $json.IndexOf('"alpha"')
+        $midIndex = $json.IndexOf('"mid"')
+        $zetaIndex = $json.IndexOf('"zeta"')
+
+        $alphaIndex | Should -BeLessThan $midIndex
+        $midIndex | Should -BeLessThan $zetaIndex
+    }
+
+    It 'serializing twice after shuffling property order remains byte-identical' {
+        $obj = [ordered]@{
+            one   = 1
+            two   = 'two'
+            three = @{ nested = $true; other = $null }
+            four  = @(3, 1, 2)
+        }
+
+        $shuffled = [ordered]@{
+            four  = @(3, 1, 2)
+            three = @{ other = $null; nested = $true }
+            two   = 'two'
+            one   = 1
+        }
+
+        $jsonA = InModuleScope TenantPulse -ArgumentList $obj {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+        $jsonB = InModuleScope TenantPulse -ArgumentList $shuffled {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+
+        $bytesA = [System.Text.Encoding]::UTF8.GetBytes($jsonA)
+        $bytesB = [System.Text.Encoding]::UTF8.GetBytes($jsonB)
+
+        $bytesA | Should -Be $bytesB
+    }
+}

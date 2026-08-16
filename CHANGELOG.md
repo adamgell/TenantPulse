@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Repository scaffold: Sampler build pipeline, module manifest, QA gates, and CI workflow.
+- Snapshot store: `New-PulseSnapshotStore`, `Write-PulseDataset`, `Read-PulseDataset`,
+  `Get-PulseSnapshotManifest`, `Set-PulseManifestEntry`, and the canonical serialization
+  primitive `ConvertTo-PulseCanonicalJson`, with a hashed, reason-carrying manifest that
+  every later collector/evaluator/renderer component builds on.
 
 ### Changed
 
