@@ -1,0 +1,99 @@
+<#
+    Private: render a scored findings document to canonical JSON on disk (Task 1.8's JSON
+    renderer - the only renderer Phase 1 ships).
+
+    Always writes <OutputPath>/tenantpulse-findings.json via ConvertTo-PulseCanonicalJson,
+    the same determinism primitive every other TenantPulse artifact serializes through.
+
+    REDACTION-MAP HANDLING (T1.6 DEFERRED CONTRACT - READ BEFORE CHANGING): Invoke-
+    PulseEvaluation returns [pscustomobject]@{ Document; RedactionMap } specifically so a
+    generic serializer is never handed the wrapper directly - under ANY generic serializer
+    (including ConvertTo-PulseCanonicalJson itself) BOTH members would serialize, meaning
+    the redaction map (raw evidence identity -> pseudonym) would leak into a report file if
+    the wrapper were ever passed straight through. This function is one of the only two
+    callers in the codebase allowed to see a RedactionMap at all (the other being its own
+    caller, Invoke-PulseAssessment) - it accepts -Document and -RedactionMap as SEPARATE
+    parameters for exactly this reason, and only ever calls ConvertTo-PulseCanonicalJson on
+    a plain findings document, never on anything RedactionMap-shaped.
+
+    -RedactionMap substitutes each finding's evidence[].identity value with its mapped
+    'tp-...' pseudonym (never .detail, never any other field), on a DEEP CLONE of -Document
+    (the same ConvertTo-PulseCanonicalJson -> ConvertFrom-Json round-trip clone pattern
+    Add-PulseScores/ConvertTo-PulseClonedDatasets already establish elsewhere in this
+    codebase) - -Document itself is never mutated in place, so a caller holding the
+    original scored document (e.g. to report .scores/.coverage back to its own caller)
+    never sees it change out from under it. An identity absent from the map (should not
+    happen for a map built from the SAME evaluation run this document came from, but this
+    function is defensive rather than assuming that invariant) is left unredacted rather
+    than thrown on - this function cannot tell an intentional absence from a real gap, and
+
+    evidence[].sortKey is redacted through the SAME map lookup, using the sortKey value
+    itself as the key: New-PulseFinding defaults an evidence entry's sortKey to its raw
+    Identity whenever no explicit SortKey is supplied (see that function's own docstring),
+    so an untouched default sortKey is exactly as much of a raw-identity leak as the
+    identity field would be. A sortKey that is genuinely a custom, non-identity value is
+    never a key in -RedactionMap (the map is built only from evidence Identity values) and
+    is therefore left untouched, correctly.
+    "no silent gaps" is about dataset/check degradation reasons, not a mandate to invent a
+    placeholder pseudonym here.
+
+    Returns the full path to the file written.
+#>
+
+function Export-PulseJsonReport {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject] $Document,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $OutputPath,
+
+        [Parameter()]
+        [AllowNull()]
+        [hashtable] $RedactionMap
+    )
+
+    if (-not (Test-Path -LiteralPath $OutputPath -PathType Container)) {
+        New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
+    }
+
+    $documentToWrite = $Document
+
+    if ($null -ne $RedactionMap -and $RedactionMap.Count -gt 0) {
+        # Deep clone before mutating - see NON-MUTATION note above. Reuses the same
+        # canonical-JSON round-trip clone pattern the rest of this codebase already uses.
+        $json = ConvertTo-PulseCanonicalJson -InputObject $Document
+        $documentToWrite = ConvertFrom-Json -InputObject $json -Depth 64
+
+        foreach ($finding in @($documentToWrite.findings)) {
+            foreach ($evidence in @($finding.evidence)) {
+                $identity = [string] $evidence.identity
+                if ($RedactionMap.ContainsKey($identity)) {
+                    $evidence.identity = $RedactionMap[$identity]
+                }
+
+                # New-PulseFinding defaults an evidence entry's sortKey to its raw Identity
+                # when no explicit SortKey is given (see that function's own docstring) -
+                # a sortKey that happens to equal a raw identity is therefore just as much
+                # a leak as the identity field itself, and is redacted through the SAME
+                # map lookup. A sortKey that is NOT a raw identity (a custom, non-identity
+                # sort key) is never present as a RedactionMap key and is correctly left
+                # untouched.
+                $sortKey = [string] $evidence.sortKey
+                if ($RedactionMap.ContainsKey($sortKey)) {
+                    $evidence.sortKey = $RedactionMap[$sortKey]
+                }
+            }
+        }
+    }
+
+    $resolvedOutputPath = (Resolve-Path -LiteralPath $OutputPath).ProviderPath
+    $reportPath = Join-Path $resolvedOutputPath 'tenantpulse-findings.json'
+    $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $documentToWrite
+    Set-Content -LiteralPath $reportPath -Value $canonicalJson -NoNewline -Encoding utf8NoBOM
+
+    return $reportPath
+}

@@ -286,4 +286,47 @@ jobs:
           # three Invoke-PulseSandboxedExpression unit tests (all nine probed cmdlets
           # unreachable, all five allowlisted cmdlets still resolve, raw .NET escape
           # still blocked under ConstrainedLanguage).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 183 -AllowedSkips 0 -AllowNotRun 0
+          #
+          # Task 1.8 added the public surface + JSON renderer: Invoke-PulseAssessment
+          # (collect-or-reuse -> evaluate -> score -> render, the module's main pipeline
+          # command), Export-PulseReport (render-only re-render, deliberately with no
+          # -Redact parameter - the redaction map only ever exists in-memory during a
+          # single Invoke-PulseEvaluation call), Get-PulseCheckCatalog (a read-only
+          # {id;title;category;severity;authorities} catalog view), Invoke-PulseCheck (a
+          # thin -Id/-Category-scoped wrapper that splats straight into
+          # Invoke-PulseAssessment), the private Export-PulseJsonReport renderer (writes
+          # <OutputPath>/tenantpulse-findings.json through ConvertTo-PulseCanonicalJson,
+          # applies -RedactionMap to both evidence.identity AND evidence.sortKey - a
+          # sortKey defaults to its raw Identity per New-PulseFinding, so leaving it alone
+          # would have been a redaction leak), the private Select-PulseCheck filter (the
+          # single Include/Exclude/IncludeCategory/ExcludeCategory/IncludeCheck/
+          # ExcludeCheck selector now shared by both Get-PulseTenantSnapshot and
+          # Invoke-PulseAssessment - IncludeCategory/ExcludeCategory now dotted-prefix-match
+          # instead of exact-match, exclude always wins over include), and the private
+          # Get-PulseSnapshotStore helper (opens an existing snapshot directory by path for
+          # -FromSnapshot, validating a real manifest.json/schemaVersion is present, never
+          # writing anything). Invoke-PulseEvaluation and Invoke-PulseSandboxedExpression
+          # both gained an optional -Context hashtable, threaded to a check rule as
+          # $Context - always for Expression rules (a fresh, isolated runspace per call),
+          # opt-in for Function rules (only when the target function itself declares a
+          # -Context parameter, so every pre-Task-1.8 rule function keeps working
+          # unchanged). Get-PulseTenantSnapshot's own selection logic was refactored to
+          # call Select-PulseCheck instead of its old inline Where-Object chain - its
+          # -AssessmentProfile file shape changed from IncludeCategory/ExcludeCategory/
+          # IncludeCheck/ExcludeCheck keys to Include/Exclude (unifying with
+          # Invoke-PulseAssessment's profile schema; a documented, deliberate breaking
+          # change to that one parameter's file format, not its four CLI parameter names,
+          # which are unchanged). 71 new tests (183 -> 254): Select-PulseCheck axis/
+          # precedence coverage (Selection.Tests.ps1), Get-PulseSnapshotStore open/
+          # validation coverage (Snapshot.Tests.ps1), Invoke-PulseEvaluation/
+          # Invoke-PulseSandboxedExpression -Context threading and opt-in-gating
+          # regression coverage (Evaluator.Tests.ps1), and the four new public commands'
+          # own test files plus PublicSurface.Tests.ps1's cross-cutting coverage:
+          # -FromSnapshot makes zero GraphKit calls, -Redact is deterministic and
+          # substitutes every evidence identity (and sortKey), the RedactionMap wrapper
+          # never leaks into the rendered JSON, no tp- pseudonym leaks in when -Redact was
+          # not passed, Export-PulseReport's re-render is byte-identical to the original
+          # and carries no -Redact parameter at all. This minimum must keep ratcheting up
+          # as check/function test suites are added in later tasks - see docs/superpowers/sdd
+          # for the phase plan.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 254 -AllowedSkips 0 -AllowNotRun 0
