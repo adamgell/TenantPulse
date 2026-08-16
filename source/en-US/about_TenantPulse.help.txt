@@ -1,0 +1,29 @@
+TOPIC
+    about_TenantPulse
+
+SHORT DESCRIPTION
+    Read-only tenant health engine that evaluates Microsoft Intune and Entra
+    configuration against a versioned set of checks, producing a deterministic,
+    pseudonymized, scored snapshot.
+
+LONG DESCRIPTION
+    TenantPulse reads a tenant exclusively through GraphKit's read-class
+    descriptors, evaluates the resulting snapshot against a versioned set of
+    checks, and scores the result deterministically. It never calls
+    Connect-MgGraph, never constructs Graph URIs of its own, and never
+    performs a write operation against a tenant.
+
+EXAMPLES
+    PS C:\> {{ add examples here }}
+
+NOTE:
+    Thank you to all those who contributed to this module, by writing code, sharing opinions, and provided feedback.
+
+TROUBLESHOOTING NOTE:
+    Look out on the Github repository for issues and new releases.
+
+SEE ALSO
+    - https://github.com/AdamGell/TenantPulse
+
+KEYWORDS
+    Intune, Entra, TenantHealth, Graph
