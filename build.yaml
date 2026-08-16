@@ -101,10 +101,15 @@ Pester:
       # tests folder or source folder (if present). Test script paths can be defined to
       # only run tests in certain folders, or run specific test files, or can be use to
       # specify the order tests are run.
+      # Task 2.7: explicit, not the commented-out default - tests/Perf/ (the dedicated,
+      # serial performance/scale/memory container - see .build/PerfTest.tasks.ps1's own
+      # docstring) must NEVER be picked up by the default `./build.ps1`/`test` workflow.
+      # Leaving Path empty/commented (Pester's own default) scans the WHOLE tests/ tree
+      # recursively, which would silently pull tests/Perf into every ordinary CI/local run
+      # the moment that directory existed - this explicit list is what keeps it out.
       Path:
-        #- tests/QA/module.tests.ps1
-        #- tests/QA
-        #- tests/Unit
+        - tests/QA
+        - tests/Unit
         #- tests/Integration
     Output:
       Verbosity: Detailed
