@@ -74,7 +74,22 @@ function Write-PulseCanonicalJsonValue {
     }
 
     if ($Value -is [datetime]) {
-        $iso = $Value.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [System.Globalization.CultureInfo]::InvariantCulture)
+        # Kind=Unspecified (post-review fix): .ToUniversalTime() on an Unspecified-kind
+        # DateTime silently ASSUMES the value is local time and converts it as such - wrong
+        # for this codebase, where every DateTime that reaches here is either already UTC
+        # or was parsed with no timezone information at all (and this module's own
+        # convention, see Test-PulseStaleDevices's ConvertTo-PulseNullableUtcDateTime, is
+        # to treat an unspecified-offset timestamp as UTC, never local). SpecifyKind marks
+        # the value UTC WITHOUT converting it - the correct operation for a value that is
+        # already UTC but was not tagged as such - whereas ToUniversalTime would still be
+        # correct (a no-op) for a value already tagged Utc, so only Unspecified needs the
+        # different call.
+        $utcValue = if ($Value.Kind -eq [System.DateTimeKind]::Unspecified) {
+            [datetime]::SpecifyKind($Value, [System.DateTimeKind]::Utc)
+        } else {
+            $Value.ToUniversalTime()
+        }
+        $iso = $utcValue.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [System.Globalization.CultureInfo]::InvariantCulture)
         [void] $Builder.Append((ConvertTo-PulseCanonicalJsonString -Value $iso))
         return
     }

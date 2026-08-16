@@ -99,20 +99,11 @@ function Set-PulseManifestEntry {
 
         $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $manifest
 
-        # Write-then-rename: the temp file lives beside the manifest so the rename is
-        # same-volume (required for it to be atomic), and it is always gone again by the
-        # time this function returns - either renamed into place, or removed in the
-        # `finally` below if the write/move itself throws.
-        $tempPath = "$($Store.ManifestPath).tmp"
-        try {
-            Set-Content -LiteralPath $tempPath -Value $canonicalJson -NoNewline -Encoding utf8NoBOM
-            [System.IO.File]::Move($tempPath, $Store.ManifestPath, $true)
-        }
-        finally {
-            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
-                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
-            }
-        }
+        # Write-then-rename via the shared helper (post-review fix: extracted out of this
+        # function so Write-PulseDataset and New-PulseSnapshotStore's initial manifest
+        # write reuse the exact same atomic pattern instead of duplicating it) - see
+        # Set-PulseAtomicFileContent's own docstring.
+        Set-PulseAtomicFileContent -Path $Store.ManifestPath -Value $canonicalJson
     }
     finally {
         if ($acquired) {

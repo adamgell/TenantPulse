@@ -59,7 +59,10 @@ function Write-PulseDataset {
     $items = Remove-PulseGraphRowProvenance -Data $items
     $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $items
     $datasetPath = Join-Path $Store.DatasetsPath "$Name.json"
-    Set-Content -LiteralPath $datasetPath -Value $canonicalJson -NoNewline -Encoding utf8NoBOM
+    # Atomic write via the shared helper (post-review fix - see its own docstring): a crash
+    # or interruption mid-write must never leave a truncated dataset file on disk with a
+    # manifest entry that claims it was Collected.
+    Set-PulseAtomicFileContent -Path $datasetPath -Value $canonicalJson
 
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($canonicalJson)
     $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)

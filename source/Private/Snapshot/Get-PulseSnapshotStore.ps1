@@ -87,6 +87,39 @@ function Get-PulseSnapshotStore {
         throw "Get-PulseSnapshotStore: '$manifestPath' has a null or empty createdUtc - '$resolvedRoot' is not a valid snapshot root."
     }
 
+    # TYPE VALIDATION (post-review fix, three reproduced holes): the presence/non-empty
+    # checks above are not enough - a manifest can carry a member that EXISTS and is
+    # non-empty-as-a-string but is the WRONG SHAPE, and every one of these silently
+    # corrupted a later stage instead of failing here, at open time, with a specific field
+    # name (this module's own "no silent gaps" rule):
+    #   - "datasets":null - PSObject.Properties still reports 'datasets' present, and
+    #     [string] $null is "" which IS empty (caught above)... except a NULL JSON value
+    #     round-trips through ConvertFrom-Json as $null while STILL satisfying the
+    #     'contains' member-presence check, so it reached here in the pre-fix code, and
+    #     downstream evaluation over a null datasets object previously produced a confident
+    #     all-NotApplicable report with no error at all.
+    #   - "datasets":"x" - a bare string is not $null (the check above never even runs a
+    #     type check) and previously reached Invoke-PulseEvaluation, which expects an
+    #     object with named members - it crashed later, mid-run, far from this function.
+    #   - "createdUtc":"banana" - a non-empty string that is not a parseable timestamp
+    #     previously passed the null/empty check above and was later fed straight into
+    #     generatedUtc, garbage in, garbage out, with nothing catching it here.
+    if ($null -eq $manifestContent.datasets -or $manifestContent.datasets -isnot [System.Management.Automation.PSObject]) {
+        $actualDescription = if ($null -eq $manifestContent.datasets) { 'null' } else { $manifestContent.datasets.GetType().Name }
+        throw "Get-PulseSnapshotStore: '$manifestPath' has a 'datasets' member that is not a non-null object (got: $actualDescription) - '$resolvedRoot' is not a valid snapshot root."
+    }
+
+    $createdUtcText = [string] $manifestContent.createdUtc
+    $parsedCreatedUtc = [datetime]::MinValue
+    if (-not [datetime]::TryParse($createdUtcText, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref] $parsedCreatedUtc)) {
+        throw "Get-PulseSnapshotStore: '$manifestPath' has a 'createdUtc' value ('$createdUtcText') that cannot be parsed as a timestamp - '$resolvedRoot' is not a valid snapshot root."
+    }
+
+    if ($null -eq $manifestContent.producer -or $manifestContent.producer -isnot [System.Management.Automation.PSObject]) {
+        $actualDescription = if ($null -eq $manifestContent.producer) { 'null' } else { $manifestContent.producer.GetType().Name }
+        throw "Get-PulseSnapshotStore: '$manifestPath' has a 'producer' member that is not a non-null object (got: $actualDescription) - '$resolvedRoot' is not a valid snapshot root."
+    }
+
     return [pscustomobject]@{
         Root          = $resolvedRoot
         DatasetsPath  = Join-Path $resolvedRoot 'datasets'

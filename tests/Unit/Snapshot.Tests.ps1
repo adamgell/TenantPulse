@@ -57,6 +57,37 @@ Describe 'New-PulseSnapshotStore' {
         $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
         $manifest.producer.tenantPulse | Should -Be $moduleVersion
     }
+
+    # Item 26 (final fix wave): producer.graphKit was always null with no writer.
+    It 'records -GraphKitVersion as the producer.graphKit field when supplied' {
+        $store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot -GraphKitVersion '0.1.0'
+        }
+
+        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.producer.graphKit | Should -Be '0.1.0'
+    }
+
+    # Item 3 (final fix wave): store reuse must not leak a prior/foreign row.
+    It 'clears a foreign file out of datasets/ when reusing an existing store path' {
+        $firstStore = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+
+        $foreignFile = Join-Path $firstStore.DatasetsPath 'managedDevices.json'
+        Set-Content -LiteralPath $foreignFile -Value '[{"id":"leaked-from-a-prior-run"}]' -NoNewline -Encoding utf8
+        Test-Path -LiteralPath $foreignFile -PathType Leaf | Should -BeTrue
+
+        $secondStore = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+
+        Test-Path -LiteralPath (Join-Path $secondStore.DatasetsPath 'managedDevices.json') -PathType Leaf | Should -BeFalse
+        Test-Path -LiteralPath $secondStore.DatasetsPath -PathType Container | Should -BeTrue
+    }
 }
 
 Describe 'Write-PulseDataset and Read-PulseDataset' {
@@ -587,6 +618,31 @@ Describe 'ConvertTo-PulseCanonicalJson' {
         $json | Should -Be '"2026-08-15T21:30:41.1234567-04:00"'
     }
 
+    # Item 9 (final fix wave): a Kind=Unspecified DateTime must be treated as already-UTC
+    # (SpecifyKind), never passed through .ToUniversalTime() - which silently assumes the
+    # value is LOCAL time and would shift it by the host's UTC offset.
+    It 'treats a Kind=Unspecified DateTime as already-UTC, not local time (final fix wave, item 9)' {
+        $unspecified = [datetime]::new(2026, 8, 15, 21, 30, 41, [System.DateTimeKind]::Unspecified)
+
+        $json = InModuleScope TenantPulse -ArgumentList $unspecified {
+            param($value)
+            ConvertTo-PulseCanonicalJson -InputObject $value
+        }
+
+        $json | Should -Be '"2026-08-15T21:30:41.000Z"'
+    }
+
+    It 'leaves an already-Utc-kind DateTime unchanged (no shift applied)' {
+        $utc = [datetime]::new(2026, 8, 15, 21, 30, 41, [System.DateTimeKind]::Utc)
+
+        $json = InModuleScope TenantPulse -ArgumentList $utc {
+            param($value)
+            ConvertTo-PulseCanonicalJson -InputObject $value
+        }
+
+        $json | Should -Be '"2026-08-15T21:30:41.000Z"'
+    }
+
     It 'throws on non-finite double values instead of emitting invalid JSON tokens (M2)' {
         {
             InModuleScope TenantPulse -ArgumentList ([double]::NaN) {
@@ -859,5 +915,57 @@ Describe 'Get-PulseSnapshotStore' {
         }
 
         $opened.Root | Should -Not -BeNullOrEmpty
+    }
+
+    # Item 4 (final fix wave) - three reproduced holes: presence/non-empty checks alone let
+    # a wrong-SHAPE value through, previously producing a confident-but-wrong evaluation or
+    # a mid-run crash far from this function.
+
+    It 'throws for a manifest.json with "datasets":null (reproduced: previously produced a confident all-NA report)' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":null}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*datasets*'
+    }
+
+    It 'throws for a manifest.json with "datasets":"x" - a bare string (reproduced: previously caused a mid-run crash)' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":"x"}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*datasets*'
+    }
+
+    It 'throws for a manifest.json with "createdUtc":"banana" (reproduced: previously produced garbage generatedUtc downstream)' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"banana","tenant":"tp-abc123","producer":{},"datasets":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*createdUtc*banana*'
+    }
+
+    It 'throws for a manifest.json with "producer":"x" - a bare string, not a non-null object' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":"x","datasets":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*producer*'
     }
 }
