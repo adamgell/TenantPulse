@@ -77,6 +77,25 @@
            across ENABLED policies, folded into ExcludedIdentifiers same as every other
            source.
 
+           ENFORCED VS. REPORT-ONLY GROUP EXCLUSIONS ARE KEPT SEPARATE (post-review, High):
+           ResolvedGroupExclusions above is deliberately ENABLED-POLICIES-ONLY - a
+           report-only policy's own excludeGroups list is real operator INTENT, but a
+           report-only policy locks nobody out (nothing is actually enforced), so an
+           account named only in a report-only policy's exclusion is not "protected from
+           CA lockout" in the sense TP.ENT.0003 asks about. Silently folding a
+           report-only-derived exclusion into ResolvedGroupExclusions/ExcludedIdentifiers
+           would OVERSTATE protection - a caller could read "excluded" and conclude the
+           account is safe from a policy that, being report-only, was never going to lock
+           it out in the first place, while ALSO wrongly suppressing a genuine gap on a
+           now-or-later-enforced policy that does not carry the same exclusion. This
+           function instead surfaces report-only-derived group exclusions in their OWN
+           field, ReportOnlyExclusions, below - real operator intent, visible to a caller
+           that wants it (e.g. a future check auditing "will this break-glass account be
+           silently exposed the moment this report-only policy is switched on"), but never
+           merged into the enforced-only ExcludedIdentifiers union. Same
+           GroupExclusionsResolved/-Datasets.groupMembers gating as ResolvedGroupExclusions
+           - both are always empty today for the identical descriptor-pending reason.
+
     Returns a single flat pscustomobject:
         BreakGlassAccounts        - [string[]] as declared in -Context, unmodified (same
                                      as the Task 1.9 stub - includes malformed entries, a
@@ -92,10 +111,20 @@
         GroupExclusionsResolved   - [bool] $true only when -Datasets.groupMembers was
                                      present and non-null; $false (always, today) when it
                                      was not - see point 4 above.
-        ResolvedGroupExclusions   - [string[]] member ids resolved through excludeGroups
-                                     when GroupExclusionsResolved is $true; always empty
-                                     today (see point 4 above) - never $null, so a caller
-                                     can @() -wrap unconditionally.
+        ResolvedGroupExclusions   - [string[]] member ids resolved through excludeGroups on
+                                     ENABLED (enforced) policies only, when
+                                     GroupExclusionsResolved is $true; always empty today
+                                     (see point 4 above) - never $null, so a caller can
+                                     @() -wrap unconditionally. Folded into
+                                     ExcludedIdentifiers below.
+        ReportOnlyExclusions      - [string[]] member ids resolved through excludeGroups on
+                                     'enabledForReportingButNotEnforced' policies only, when
+                                     GroupExclusionsResolved is $true; always empty today,
+                                     same reason. NEVER folded into ExcludedIdentifiers -
+                                     see ENFORCED VS. REPORT-ONLY GROUP EXCLUSIONS ARE KEPT
+                                     SEPARATE above for why merging it would overstate
+                                     protection. A caller specifically interested in
+                                     report-only exclusion intent reads this field by name.
         GroupExclusionNote        - [string] a fixed, non-null explanation of the group-
                                      exclusion gap when GroupExclusionsResolved is $false;
                                      $null when it is $true. Exists so "group exclusions
@@ -197,18 +226,24 @@ function Get-PulseCaExclusionContext {
     # $false. It stays real, exercised code (not a stub the whole way down) so the moment a
     # group-membership dataset ships, wiring it into -Datasets.groupMembers is the only
     # change needed here.
-    $groupExclusionsResolved = $false
-    $resolvedGroupExclusions = @()
-    $groupExclusionNote = 'Group-based exclusion (excludeGroups membership) cannot be resolved: no group-membership dataset is collected yet (descriptor-pending). Only excludeUsers-based exclusion is verifiable today.'
-
-    if ($Datasets -and $Datasets.ContainsKey('groupMembers') -and $null -ne $Datasets.groupMembers) {
-        $groupExclusionsResolved = $true
-        $groupExclusionNote = $null
+    # Resolves the flat, de-duplicated, ordinally-sorted union of group-member ids reachable
+    # through every policy's excludeGroups list whose own `state` equals -PolicyState -
+    # shared by both the enforced ($resolvedGroupExclusions, -PolicyState 'enabled') and
+    # report-only ($reportOnlyExclusions, -PolicyState 'enabledForReportingButNotEnforced')
+    # resolutions below so the two can never independently drift on how a group is matched
+    # to its members. Kept as two SEPARATE call sites/output fields rather than one merged
+    # set - see this file's own ENFORCED VS. REPORT-ONLY GROUP EXCLUSIONS ARE KEPT SEPARATE
+    # docstring section for why merging would overstate protection.
+    function Resolve-GroupExclusionUnion {
+        param(
+            [hashtable] $Datasets,
+            [string] $PolicyState
+        )
 
         $excludedGroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         if ($Datasets.ContainsKey('conditionalAccessPolicies') -and $null -ne $Datasets.conditionalAccessPolicies) {
             foreach ($policy in @($Datasets.conditionalAccessPolicies)) {
-                if ($policy.state -ne 'enabled') { continue }
+                if ($policy.state -ne $PolicyState) { continue }
                 foreach ($groupId in @($policy.conditions.users.excludeGroups)) {
                     if ($groupId) { $excludedGroupIds.Add([string] $groupId) | Out-Null }
                 }
@@ -225,8 +260,25 @@ function Get-PulseCaExclusionContext {
             }
         }
 
-        $resolvedGroupExclusions = [string[]] @($memberUnion)
-        [System.Array]::Sort($resolvedGroupExclusions, [System.StringComparer]::Ordinal)
+        $result = [string[]] @($memberUnion)
+        [System.Array]::Sort($result, [System.StringComparer]::Ordinal)
+        # Comma-protects the array return - see ConvertTo-PulseCaPolicyView's own
+        # ARRAY-RETURN UNROLLING TRAP docstring for why an unprotected `return $arr` would
+        # silently collapse a zero- or one-element result.
+        return , $result
+    }
+
+    $groupExclusionsResolved = $false
+    $resolvedGroupExclusions = @()
+    $reportOnlyExclusions = @()
+    $groupExclusionNote = 'Group-based exclusion (excludeGroups membership) cannot be resolved: no group-membership dataset is collected yet (descriptor-pending). Only excludeUsers-based exclusion is verifiable today.'
+
+    if ($Datasets -and $Datasets.ContainsKey('groupMembers') -and $null -ne $Datasets.groupMembers) {
+        $groupExclusionsResolved = $true
+        $groupExclusionNote = $null
+
+        $resolvedGroupExclusions = Resolve-GroupExclusionUnion -Datasets $Datasets -PolicyState 'enabled'
+        $reportOnlyExclusions = Resolve-GroupExclusionUnion -Datasets $Datasets -PolicyState 'enabledForReportingButNotEnforced'
     }
 
     $union = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -245,6 +297,7 @@ function Get-PulseCaExclusionContext {
         MalformedDeclaredAccounts = $malformedDeclaredAccounts
         GroupExclusionsResolved   = $groupExclusionsResolved
         ResolvedGroupExclusions   = $resolvedGroupExclusions
+        ReportOnlyExclusions      = $reportOnlyExclusions
         GroupExclusionNote        = $groupExclusionNote
         ExcludedIdentifiers       = $excludedIdentifiers
     }

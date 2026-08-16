@@ -207,6 +207,72 @@ Describe 'Get-PulseCaExclusionContext' {
             Get-PulseCaExclusionContext -Datasets $datasets
         }
 
+        @($result.ReportOnlyExclusions).Count | Should -Be 0
+
         @($result.ResolvedGroupExclusions).Count | Should -Be 0
+    }
+
+    # ---- Task 4.1 post-review, Finding 2 (High): report-only group exclusions are kept
+    # in their own field, never merged into the enforced-only exclusion set ----
+
+    It 'resolves a report-only policy''s excludeGroups into ReportOnlyExclusions, NOT into ResolvedGroupExclusions or ExcludedIdentifiers' {
+        $datasets = @{
+            conditionalAccessPolicies = @(
+                [pscustomobject]@{
+                    state      = 'enabledForReportingButNotEnforced'
+                    conditions = [pscustomobject]@{ users = [pscustomobject]@{ excludeGroups = @('grp-report-only') } }
+                }
+            )
+            groupMembers              = @{ 'grp-report-only' = @('member-report-1') }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $datasets {
+            param($datasets)
+            Get-PulseCaExclusionContext -Datasets $datasets
+        }
+
+        $result.ReportOnlyExclusions | Should -Contain 'member-report-1'
+        $result.ResolvedGroupExclusions | Should -Not -Contain 'member-report-1'
+        $result.ExcludedIdentifiers | Should -Not -Contain 'member-report-1'
+    }
+
+    It 'resolves BOTH ResolvedGroupExclusions (enabled) and ReportOnlyExclusions (report-only) independently, with no cross-contamination' {
+        $datasets = @{
+            conditionalAccessPolicies = @(
+                [pscustomobject]@{
+                    state      = 'enabled'
+                    conditions = [pscustomobject]@{ users = [pscustomobject]@{ excludeGroups = @('grp-enforced') } }
+                }
+                [pscustomobject]@{
+                    state      = 'enabledForReportingButNotEnforced'
+                    conditions = [pscustomobject]@{ users = [pscustomobject]@{ excludeGroups = @('grp-report-only') } }
+                }
+            )
+            groupMembers              = @{
+                'grp-enforced'    = @('member-enforced-1')
+                'grp-report-only' = @('member-report-1')
+            }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $datasets {
+            param($datasets)
+            Get-PulseCaExclusionContext -Datasets $datasets
+        }
+
+        $result.ResolvedGroupExclusions | Should -Contain 'member-enforced-1'
+        $result.ResolvedGroupExclusions | Should -Not -Contain 'member-report-1'
+        $result.ReportOnlyExclusions | Should -Contain 'member-report-1'
+        $result.ReportOnlyExclusions | Should -Not -Contain 'member-enforced-1'
+        $result.ExcludedIdentifiers | Should -Contain 'member-enforced-1'
+        $result.ExcludedIdentifiers | Should -Not -Contain 'member-report-1'
+    }
+
+    It 'ReportOnlyExclusions is always an empty array (never $null) when GroupExclusionsResolved is $false' {
+        $result = InModuleScope TenantPulse {
+            Get-PulseCaExclusionContext
+        }
+
+        @($result.ReportOnlyExclusions).Count | Should -Be 0
+        $result.ReportOnlyExclusions.GetType().IsArray | Should -BeTrue
     }
 }

@@ -62,6 +62,82 @@ BeforeAll {
         $base = $script:rawPolicyHashtable
         return $base.Clone()
     }
+
+    # Same reasoning as Copy-RawPolicy above - routes the clone-and-override-state pattern
+    # through one local function/variable so no test body chains a clone call directly off
+    # the script-scoped fixture (which would trip the secret/PII scan gate's GUID-near-
+    # domain heuristic - see Copy-RawPolicy's own docstring above).
+    function script:New-CaPolicyWithState {
+        param([string] $State)
+        $copy = Copy-RawPolicy
+        $copy.state = $State
+        return $copy
+    }
+
+    # ---- Task 4.1 post-review: sparse-policy fixtures (Finding 1 / Critical) ----
+    # Each omits a whole OPTIONAL parent block entirely (not present-but-null - a real
+    # sparse Graph response drops the property, it does not send it as an explicit null).
+
+    $script:minimalPolicyHashtable = @{ id = 'policy-minimal'; displayName = 'Minimal'; state = 'enabled' }
+
+    $script:policyMissingConditionsHashtable = @{
+        id            = 'policy-no-conditions'
+        displayName   = 'No Conditions'
+        state         = 'enabled'
+        grantControls = @{ operator = 'OR'; builtInControls = @('mfa') }
+    }
+
+    $script:policyMissingGrantControlsHashtable = @{
+        id          = 'policy-no-grantcontrols'
+        displayName = 'No GrantControls'
+        state       = 'enabled'
+        conditions  = @{ users = @{ includeUsers = @('All') } }
+    }
+
+    $script:policyMissingSessionControlsHashtable = @{
+        id            = 'policy-no-sessioncontrols'
+        displayName   = 'No SessionControls'
+        state         = 'enabled'
+        conditions    = @{ users = @{ includeUsers = @('All') } }
+        grantControls = @{ operator = 'OR'; builtInControls = @('mfa') }
+    }
+
+    # ---- Task 4.1 post-review: consolidated fixture registry (Finding 3 / Important) ----
+    # Every distinct normalization path this file exercises, named once, reused by BOTH the
+    # dedicated per-scenario It blocks above/below AND the single consolidated SHAPE
+    # NEUTRALITY test - so a new scenario only ever needs adding here once.
+    $script:caShapeFixtures = [ordered]@{
+        'full-enabled-policy'              = @{ Raw = $script:rawPolicyHashtable }
+        'minimal-policy-state-only'        = @{ Raw = $script:minimalPolicyHashtable }
+        'policy-missing-conditions'        = @{ Raw = $script:policyMissingConditionsHashtable }
+        'policy-missing-grantControls'     = @{ Raw = $script:policyMissingGrantControlsHashtable }
+        'policy-missing-sessionControls'   = @{ Raw = $script:policyMissingSessionControlsHashtable }
+        'reportOnly-state'                 = @{ Raw = (New-CaPolicyWithState -State 'enabledForReportingButNotEnforced') }
+        'disabled-state'                   = @{ Raw = (New-CaPolicyWithState -State 'disabled') }
+        'absent-state-throws'              = @{ Raw = @{ id = 'policy-no-state'; displayName = 'No State' }; ExpectThrow = $true }
+        'unrecognized-state-throws'        = @{ Raw = (New-CaPolicyWithState -State 'somethingUnexpected'); ExpectThrow = $true }
+        'includeUsers-not-all'             = @{ Raw = @{ id = 'policy-scoped'; displayName = 'Scoped'; state = 'enabled'; conditions = @{ users = @{ includeUsers = @('11111111-1111-1111-1111-111111111111') } } } }
+        'no-authenticationStrength-node'   = @{ Raw = @{ id = 'policy-no-strength'; displayName = 'No Strength'; state = 'enabled'; grantControls = @{ operator = 'OR'; builtInControls = @('mfa') } } }
+        'authenticationStrength-context-fallback' = @{
+            Raw     = @{ id = 'policy-strength-fallback'; displayName = 'Strength Fallback'; state = 'enabled'; grantControls = @{ operator = 'OR'; builtInControls = @('mfa'); authenticationStrength = @{ id = 'strength-2' } } }
+            Context = @{ AuthenticationStrengthDisplayNames = @{ 'strength-2' = 'Custom Strength' } }
+        }
+    }
+
+    # Materializes a fixture's -Raw hashtable as a PSObject tree via a JSON round-trip and
+    # returns a fresh {Raw;PSObject;Context;ExpectThrow} record - kept as a function (not
+    # inlined per-fixture) so both the dedicated tests and the consolidated shape-neutrality
+    # test build the PSObject side identically.
+    function script:Get-CaShapeFixtureVariant {
+        param([string] $Name)
+        $fixture = $script:caShapeFixtures[$Name]
+        return [pscustomobject]@{
+            Raw         = $fixture.Raw
+            AsPSObject  = (ConvertTo-PSObjectShape -Value $fixture.Raw)
+            Context     = if ($fixture.ContainsKey('Context')) { $fixture.Context } else { @{} }
+            ExpectThrow = [bool] $fixture.ExpectThrow
+        }
+    }
 }
 
 Describe 'ConvertTo-PulseCaPolicyView' {
@@ -228,5 +304,123 @@ Describe 'ConvertTo-PulseCaPolicyView' {
         }
 
         $result.session.signInFrequency | Should -Not -BeNullOrEmpty
+    }
+
+    # ---- Task 4.1 post-review, Finding 1 (Critical): optional parent nodes never throw,
+    # and never silently collapse an array-typed field to $null/a bare scalar ----
+
+    It 'a minimal policy (state only, no conditions/grantControls/sessionControls at all) normalizes without throwing, in both shapes' {
+        foreach ($raw in @($script:minimalPolicyHashtable, (ConvertTo-PSObjectShape -Value $script:minimalPolicyHashtable))) {
+            $result = InModuleScope TenantPulse -ArgumentList $raw {
+                param($raw)
+                ConvertTo-PulseCaPolicyView -Policies $raw
+            }
+
+            $result.state | Should -Be 'enforced'
+            $result.conditions.users | Should -Not -BeNullOrEmpty
+            @($result.conditions.users.includeUsers).Count | Should -Be 0
+            $result.conditions.users.includeUsers.GetType().IsArray | Should -BeTrue
+            $result.grants | Should -Not -BeNullOrEmpty
+            @($result.grants.builtInControls).Count | Should -Be 0
+            $result.session | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'a policy missing conditions entirely null/empty-normalizes conditions.users fields (never throws), in both shapes' {
+        foreach ($raw in @($script:policyMissingConditionsHashtable, (ConvertTo-PSObjectShape -Value $script:policyMissingConditionsHashtable))) {
+            $result = InModuleScope TenantPulse -ArgumentList $raw {
+                param($raw)
+                ConvertTo-PulseCaPolicyView -Policies $raw
+            }
+
+            $result.conditions.users.includeAll | Should -BeFalse
+            @($result.conditions.users.includeUsers).Count | Should -Be 0
+            $result.conditions.users.includeUsers.GetType().IsArray | Should -BeTrue
+            @($result.conditions.locations.includeLocations).Count | Should -Be 0
+            # grantControls WAS present on this fixture - unaffected by the missing conditions block.
+            $result.grants.builtInControls | Should -Contain 'mfa'
+        }
+    }
+
+    It 'a policy missing grantControls entirely null/empty-normalizes grants fields (never throws), in both shapes' {
+        foreach ($raw in @($script:policyMissingGrantControlsHashtable, (ConvertTo-PSObjectShape -Value $script:policyMissingGrantControlsHashtable))) {
+            $result = InModuleScope TenantPulse -ArgumentList $raw {
+                param($raw)
+                ConvertTo-PulseCaPolicyView -Policies $raw
+            }
+
+            $result.grants | Should -Not -BeNullOrEmpty
+            $result.grants.operator | Should -BeNullOrEmpty
+            @($result.grants.builtInControls).Count | Should -Be 0
+            $result.grants.builtInControls.GetType().IsArray | Should -BeTrue
+            $result.grants.authenticationStrength | Should -BeNullOrEmpty
+            # conditions WAS present on this fixture - unaffected by the missing grantControls block.
+            $result.conditions.users.includeAll | Should -BeTrue
+        }
+    }
+
+    It 'a policy missing sessionControls entirely null-normalizes every session field (never throws), in both shapes' {
+        foreach ($raw in @($script:policyMissingSessionControlsHashtable, (ConvertTo-PSObjectShape -Value $script:policyMissingSessionControlsHashtable))) {
+            $result = InModuleScope TenantPulse -ArgumentList $raw {
+                param($raw)
+                ConvertTo-PulseCaPolicyView -Policies $raw
+            }
+
+            $result.session | Should -Not -BeNullOrEmpty
+            $result.session.signInFrequency | Should -BeNullOrEmpty
+            $result.session.persistentBrowser | Should -BeNullOrEmpty
+            $result.session.cloudAppSecurity | Should -BeNullOrEmpty
+            $result.session.disableResilienceDefaults | Should -BeNullOrEmpty
+        }
+    }
+
+    # ---- Task 4.1 post-review, Finding 3 (Important): consolidated SHAPE NEUTRALITY ----
+    # Mirrors tests/Unit/Expand/SettingsCatalogWalk.Tests.ps1:432's own consolidated
+    # per-fixture-family pattern: EVERY named fixture in $script:caShapeFixtures runs
+    # through both a hashtable and a PSObject materialization, asserting either identical
+    # throw behavior or byte-identical canonical JSON output between the two shapes.
+
+    It 'SHAPE NEUTRALITY: every fixture family normalizes identically (or throws identically) whether materialized as a hashtable or a PSObject tree' {
+        foreach ($name in $script:caShapeFixtures.Keys) {
+            $variant = Get-CaShapeFixtureVariant -Name $name
+
+            if ($variant.ExpectThrow) {
+                {
+                    InModuleScope TenantPulse -ArgumentList $variant.Raw, $variant.Context {
+                        param($raw, $ctx)
+                        ConvertTo-PulseCaPolicyView -Policies $raw -Context $ctx
+                    }
+                } | Should -Throw -Because "fixture '$name' (hashtable shape) must throw"
+
+                {
+                    InModuleScope TenantPulse -ArgumentList $variant.AsPSObject, $variant.Context {
+                        param($raw, $ctx)
+                        ConvertTo-PulseCaPolicyView -Policies $raw -Context $ctx
+                    }
+                } | Should -Throw -Because "fixture '$name' (PSObject shape) must throw"
+
+                continue
+            }
+
+            $hashtableResult = InModuleScope TenantPulse -ArgumentList $variant.Raw, $variant.Context {
+                param($raw, $ctx)
+                ConvertTo-PulseCaPolicyView -Policies $raw -Context $ctx
+            }
+            $psObjectResult = InModuleScope TenantPulse -ArgumentList $variant.AsPSObject, $variant.Context {
+                param($raw, $ctx)
+                ConvertTo-PulseCaPolicyView -Policies $raw -Context $ctx
+            }
+
+            $hashtableJson = InModuleScope TenantPulse -ArgumentList $hashtableResult {
+                param($o)
+                ConvertTo-PulseCanonicalJsonLine -InputObject $o
+            }
+            $psObjectJson = InModuleScope TenantPulse -ArgumentList $psObjectResult {
+                param($o)
+                ConvertTo-PulseCanonicalJsonLine -InputObject $o
+            }
+
+            $hashtableJson | Should -Be $psObjectJson -Because "fixture '$name' must normalize to byte-identical output between hashtable and PSObject shapes"
+        }
     }
 }

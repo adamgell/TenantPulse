@@ -119,7 +119,19 @@
 # (MalformedDeclaredAccounts GUID-contract classification, GroupExclusionsResolved/
 # ResolvedGroupExclusions/GroupExclusionNote forward-compatible group-exclusion shape - 7
 # It cases). TP.ENT.0003/0004/0005's own existing tests were left green, unmodified.
-$script:tenantPulseGateMinimumTests = 1092
+# 1092 -> 1112 (Task 4.1 post-review fixes, four findings): +20 - Finding 1/Critical
+# (ARRAY-RETURN UNROLLING TRAP fix in both views' array-building helpers, comma-protecting
+# every return; 4 new dedicated sparse-fixture It cases in ConvertTo-PulseCaPolicyView.Tests.ps1
+# plus 2 in ConvertTo-PulseAuthMethodView.Tests.ps1 pinning the fix and its self-caught
+# sibling defect), Finding 2/High (Get-PulseCaExclusionContext's new ReportOnlyExclusions
+# field, kept separate from the enforced-only ExcludedIdentifiers union - 3 new It cases),
+# Finding 3/Important (one consolidated SHAPE NEUTRALITY It per view test file, looping
+# every named fixture through both hashtable and PSObject materializations - 2 new It
+# cases, one per file), Finding 4/Low (ConvertTo-PulseAuthMethodView's -settings bag sorted
+# ordinally before insertion, independent of raw response property order - 1 new It case).
+# TP.ENT.0003 source+tests remain byte-identical (verified via `git diff` against the
+# reviewed commit) - merge-order condition still satisfied.
+$script:tenantPulseGateMinimumTests = 1112
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

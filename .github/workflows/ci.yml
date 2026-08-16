@@ -594,7 +594,11 @@ jobs:
           # tests plus Get-PulseCaExclusionContext rework additions) - 29 new tests, see
           # .build/AssertGateResult.tasks.ps1's own accounting, which must be bumped
           # together with this value.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1092 -AllowedSkips 0 -AllowNotRun 1
+          # 1092 -> 1112 (Task 4.1 post-review fixes: array-unrolling fix, ReportOnlyExclusions,
+          # consolidated shape-neutrality tests, ordinal settings sort) - 20 new tests, see
+          # .build/AssertGateResult.tasks.ps1's own accounting, which must be bumped
+          # together with this value.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1112 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

@@ -20,6 +20,13 @@
     Resolve-PulseSettingsCatalogValueClassification.ps1's own Get-PulseSettingsCatalogValueProperty
     docstring for the [PSObject]-vs-[IDictionary] trap this avoids repeating.
 
+    ARRAY-RETURN UNROLLING TRAP (post-review, Critical - see
+    ConvertTo-AuthMethodTargetArray's own inline docstring for the reproduced defect and
+    ConvertTo-PulseCaPolicyView's sibling ConvertTo-StringArray for the identical bug
+    class): includeTargets/excludeTargets both went through this exact trap before being
+    fixed - an absent target list silently became $null instead of an empty array, and a
+    single-target list silently collapsed to a bare object instead of a one-element array.
+
     ABSENT STATE THROWS (field-absence lens, matching ConvertTo-PulseCaPolicyView's own
     convention): a method configuration with no `state` property, or a `state` value that
     is neither 'enabled' nor 'disabled', is an unrecognized shape - silently guessing
@@ -36,7 +43,10 @@
     `.settings.numberMatchingRequiredState`). A consuming check reads
     `.settings.<propertyName>` directly - this function does not interpret per-method
     settings semantics, it only relocates them out of the raw node into one predictable
-    bag so every consumer reads settings the same way.
+    bag so every consumer reads settings the same way. Property names are sorted
+    ORDINALLY before insertion (post-review, Low) - the raw node's own property order is
+    an accident of Graph's serialization, not a contract, so -settings' insertion order
+    (and therefore its own canonical JSON serialization) is independent of it.
 #>
 
 function ConvertTo-PulseAuthMethodView {
@@ -58,9 +68,18 @@ function ConvertTo-PulseAuthMethodView {
         )
 
         function ConvertTo-AuthMethodTargetArray {
+            # UNARY COMMA MANDATORY on both branches (post-review, Critical - the identical
+            # defect a sibling review found in ConvertTo-PulseCaPolicyView's own
+            # ConvertTo-StringArray: see that file's ARRAY-RETURN UNROLLING TRAP docstring
+            # section). Reproduced here too before this fix: an empty -Value (no
+            # includeTargets/excludeTargets on the raw node) returned via a bare
+            # `return @()` collapsed to $null on the way into the caller's pscustomobject
+            # property, and a single-target array collapsed to its bare
+            # [pscustomobject] item instead of staying a one-element array - both silently
+            # broke this field's own documented always-an-array contract.
             param($Value)
-            if ($null -eq $Value) { return @() }
-            return @($Value | ForEach-Object {
+            if ($null -eq $Value) { return , @() }
+            return , @($Value | ForEach-Object {
                 [pscustomobject]@{
                     id                 = Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'id'
                     targetType         = Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'targetType'
@@ -93,8 +112,19 @@ function ConvertTo-PulseAuthMethodView {
                 throw "ConvertTo-PulseAuthMethodView: authentication method '$methodId' has an unrecognized state '$state' - expected 'enabled' or 'disabled'."
             }
 
+            # ORDINAL, DETERMINISTIC INSERTION ORDER (post-review, Low): a [PSObject] tree's
+            # PSObject.Properties.Name and an [IDictionary]'s .Keys both surface in
+            # whatever order Graph happened to serialize/deserialize them in - never a
+            # contract this converter should let leak into its own output. Sorting the
+            # property-name list ONCE, ordinally, before any insertion into the [ordered]
+            # bag makes -settings' own key order independent of the raw response's
+            # property order - two policies/configs that differ only in JSON property
+            # ordering now serialize identically.
+            $settingPropertyNames = [string[]] @(Get-AuthMethodPropertyNames -Node $config)
+            [System.Array]::Sort($settingPropertyNames, [System.StringComparer]::Ordinal)
+
             $settings = [ordered]@{}
-            foreach ($propertyName in (Get-AuthMethodPropertyNames -Node $config)) {
+            foreach ($propertyName in $settingPropertyNames) {
                 if ($script:wellKnownAuthMethodProperties.Contains($propertyName)) { continue }
                 $settings[$propertyName] = Get-PulseSettingsCatalogValueProperty -Node $config -PropertyName $propertyName
             }

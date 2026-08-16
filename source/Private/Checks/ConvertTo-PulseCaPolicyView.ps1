@@ -45,6 +45,34 @@
     absent. Omitting -Context entirely is always safe: authenticationStrength.displayName
     is simply $null in that case, never a throw - unlike State, a missing display NAME is
     cosmetic, not evidence of an unrecognized shape.
+
+    OPTIONAL PARENT NODES NEVER THROW (post-review, Critical): `conditions`,
+    `grantControls`, and `sessionControls` are each OPTIONAL on a sparse-but-legitimate
+    Graph response (a policy row that genuinely omits a whole optional block, as opposed to
+    an absent/unrecognized STATE - see ABSENT STATE THROWS above, which remains the ONLY
+    thing this function ever throws on). Get-PulseSettingsCatalogValueProperty already
+    returns $null for every property read off a $null node, so an absent `conditions`
+    cascades safely down through `users`/`apps`/`platforms`/`locations` to $null without
+    any extra guard needed at each level - conditions/apps/platforms/locations/grants/
+    session are ALWAYS constructed as real (never-null) pscustomobjects in the output,
+    with their OWN fields null/empty-normalized instead.
+
+    ARRAY-RETURN UNROLLING TRAP, REPRODUCED (post-review, Critical - the actual mechanism
+    behind "a sparse response crashes the view"): ConvertTo-StringArray's own return value
+    - even `[string[]] @()`, a well-typed EMPTY array - is subject to the exact same
+    pipeline-unrolling trap Get-PulseSettingsCatalogValueProperty's own docstring already
+    documents for a raw Graph node read. A bare `return $emptyArray` (zero elements) sends
+    ZERO objects down the pipeline, and a caller capturing that into a pscustomobject
+    property (`includeUsers = ConvertTo-StringArray (...)`) silently receives `$null`
+    instead of an empty array - reproduced end to end: a policy with no `conditions` at
+    all produced `$view.conditions.users.includeUsers -eq $null` (not `[string[]]@()`),
+    and a downstream caller doing `.Count` or any method call on that $null is exactly the
+    crash this finding reported. A single-element array has the identical trap in the OTHER
+    direction: it unrolls to its bare scalar item, not a one-element array, silently
+    breaking every caller that assumes an array-typed field can always be enumerated as
+    one. ConvertTo-StringArray protects BOTH of its return statements with the unary comma
+    operator (`return , [string[]] @(...)`) for exactly this reason - removing either comma
+    reintroduces this bug.
 #>
 
 function ConvertTo-PulseCaPolicyView {
@@ -73,8 +101,13 @@ function ConvertTo-PulseCaPolicyView {
         # array containing $null.
         function ConvertTo-StringArray {
             param($Value)
-            if ($null -eq $Value) { return [string[]] @() }
-            return [string[]] @($Value | ForEach-Object { [string] $_ })
+            # UNARY COMMA MANDATORY on both branches - see this file's own ARRAY-RETURN
+            # UNROLLING TRAP docstring section. Without it, an empty array collapses to
+            # $null and a one-element array collapses to its bare scalar item on the way
+            # out of this function - both silently break every caller's array-typed
+            # contract for this field.
+            if ($null -eq $Value) { return , ([string[]] @()) }
+            return , ([string[]] @($Value | ForEach-Object { [string] $_ }))
         }
     }
 
