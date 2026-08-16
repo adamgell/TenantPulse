@@ -28,10 +28,10 @@
            any context" rule instead.
 
            DIGEST, NOT REVERSAL (hygiene-rule rework, post-review): an EARLIER version of
-           this check stored the real GUID as its own character-reversal
-           ('a1b372de4293-5a2b-31b4-7dba-760d2bd8' reversed back to the real value at scan
-           time) so this tracked file never contained the value as ONE literal, greppable
-           string. That was a genuine defect, not a mitigation: character reversal is a
+           this check stored the real GUID as its own character-reversal (imagine
+           'edcba-4321' reversing back to '1234-abcde' at scan time - the real entry used
+           the actual banned GUID) so this tracked file never contained the value as ONE
+           literal, greppable string. That was a genuine defect, not a mitigation: character reversal is a
            trivially invertible transform any reader of this PUBLIC repo can undo by eye -
            the reversed string, sitting at HEAD in a tracked file, WAS the disclosure, in a
            form immune to any later history rewrite (the value is recoverable from the
