@@ -1,16 +1,60 @@
 # Third-Party Notices
 
-TenantPulse depends on third-party software. This file lists those dependencies and their
-licenses.
+TenantPulse depends on third-party software, and two of its Phase 1 checks adapt logic from
+a third-party project. This file lists both and their licenses (post-review fix: an earlier
+draft of this file claimed "no third-party content has been ported into this repository
+yet", which contradicted TP.INT.0001 and TP.INT.0003 - both of which carry a
+`Origin = @{ Project = 'Maester'; License = 'MIT' }` field in their own check descriptor
+naming exactly this).
 
-This is a stub: no third-party content has been ported into this repository yet, so there
-are no entries below. Entries land here alongside the first ported content that requires
-one (a dependency embedded in the build, or code adapted from another project).
+## Adapted code
+
+### Maester
+
+- **Project:** [Maester](https://github.com/maester365/maester)
+- **License:** MIT
+- **Adapted into:**
+  - `source/Data/Checks/TP.INT.0001.psd1` ("MDM authority is set to Intune") - adapts the
+    check logic behind Maester's `MT.1105`.
+  - `source/Data/Checks/TP.INT.0003.psd1` ("default enrollment restrictions are configured
+    to block unmanaged platforms" - see that file for its exact title) - adapts the check
+    logic behind Maester's `MT.1054`.
+
+  Each descriptor's own `Origin` field (`Project`/`Id`/`License`) records this at the point
+  of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as
+  provenance on the check itself, not only here.
+
+Maester's MIT license and copyright notice:
+
+```
+MIT License
+
+Copyright (c) Merill Fernando and Maester contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## Runtime dependencies
 
 | Component | License | Notes |
 |-----------|---------|-------|
+| [GraphKit](https://github.com/AdamGell/GraphKit) | See GraphKit's own repository | The sole Graph-access layer TenantPulse calls through; declared in `source/TenantPulse.psd1` and pinned in `RequiredModules.psd1`. Not vendored - resolved from PSGallery at install time. |
 
 ## Build/test-only dependencies
 

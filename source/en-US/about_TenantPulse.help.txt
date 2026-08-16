@@ -4,26 +4,111 @@ TOPIC
 SHORT DESCRIPTION
     Read-only tenant health engine that evaluates Microsoft Intune and Entra
     configuration against a versioned set of checks, producing a deterministic,
-    pseudonymized, scored snapshot.
+    pseudonymized, scored findings report.
 
 LONG DESCRIPTION
     TenantPulse reads a tenant exclusively through GraphKit's read-class
-    descriptors, evaluates the resulting snapshot against a versioned set of
-    checks, and scores the result deterministically. It never calls
+    descriptors (ThrottleClass 'Read', ReplayPolicy 'Safe'), evaluates the
+    resulting snapshot against a versioned set of checks, scores the result,
+    and renders a deterministic findings report. It never calls
     Connect-MgGraph, never constructs Graph URIs of its own, and never
     performs a write operation against a tenant.
 
+    PSEUDONYMIZATION CONTRACT
+
+    The tenant identifier is never written to a snapshot or findings report in
+    the clear. Every snapshot manifest's `tenant` field is the HMAC-SHA256 of
+    the tenant id, keyed by a local operator key (~/.tenantpulse/operator.key
+    by default) and rendered as 'tp-<hex>'. The same tenant, under two
+    different GraphKit profile names, always produces the same pseudonym -
+    the pseudonym is derived from the resolved tenant id itself
+    (Get-GraphContext's TenantId), not from the operator-chosen profile name,
+    so renaming a profile never changes it. -Redact (on Invoke-PulseAssessment
+    and Invoke-PulseCheck) additionally substitutes evidence identities (and
+    identity-defaulted sortKeys) with their own 'tp-...' pseudonym in the
+    rendered report. -Redact does NOT redact everything: a rule-authored
+    evidence Detail field (for example a device name a check chose to
+    surface) and free-text reason strings are left as rule authors wrote
+    them - see Invoke-PulseAssessment's own -Redact parameter help for the
+    full, honestly-stated residual.
+
+    SNAPSHOT SENSITIVITY
+
+    A snapshot store's dataset files hold raw, unredacted tenant data exactly
+    as Graph returned it. Only the manifest's tenant field and collection
+    reasons are pseudonymized. Treat a snapshot directory as sensitive at
+    rest, the same way you would treat a raw Graph API export.
+
+    HONEST DEGRADATION
+
+    Every layer of this module - collection, evaluation, scoring - is built
+    to degrade a check honestly rather than produce a confident, silently
+    wrong verdict. A permission gap writes a dataset Skipped with the exact
+    permission needed; a not-yet-released GraphKit descriptor writes Skipped
+    with a descriptor-pending reason; a check whose dataset did not collect
+    degrades to NotApplicable with that same reason quoted; a rule that
+    throws, or a malformed timestamp a check would otherwise need, degrades
+    to Error rather than a wall-clock guess. Re-evaluating the same snapshot
+    with the same catalog is always byte-identical.
+
+    CIS BENCHMARK DISCLAIMER
+
+    TenantPulse does not claim, imply, or certify CIS Benchmark compliance,
+    alignment, or coverage of any kind. No check in this module's catalog is
+    mapped to, scored against, or claims correspondence with any CIS
+    Benchmark control.
+
 EXAMPLES
-    PS C:\> {{ add examples here }}
+    PS C:\> Get-PulseCheckCatalog | Format-Table id, title, category, severity
+
+    Lists every check in the catalog, so you can see what -IncludeCategory or
+    -IncludeCheck values are available before running an assessment.
+
+    PS C:\> Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out'
+
+    Collects a fresh snapshot for the GraphKit 'contoso' profile, evaluates
+    every check, scores the result, and writes
+    './out/tenantpulse-findings.json' plus the raw snapshot under
+    './out/snapshot/'.
+
+    PS C:\> Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out' -Redact
+
+    Same as above, but every evidence identity in the rendered report is
+    substituted with its pseudonym.
+
+    PS C:\> Invoke-PulseCheck -ProfileId 'contoso' -OutputPath './out' -Id 'TP.ENT.0005'
+
+    Runs only the named check (admin MFA coverage) end to end, instead of the
+    whole catalog.
+
+    PS C:\> Get-PulseTenantSnapshot -ProfileId 'contoso' -OutputPath './snapshot' -IncludeCategory 'Entra.ConditionalAccess'
+
+    Collects only the datasets the Entra Conditional Access checks need, into
+    a standalone snapshot store you can later re-evaluate with
+    Invoke-PulseAssessment -FromSnapshot.
 
 NOTE:
-    Thank you to all those who contributed to this module, by writing code, sharing opinions, and provided feedback.
+    TenantPulse's Phase 1 catalog (ten checks, Entra Conditional Access and
+    Intune device management) was verified live against a real tenant before
+    its first release. See docs/STATUS.md in the source repository for the
+    full development history and known, documented scope limitations.
 
 TROUBLESHOOTING NOTE:
-    Look out on the Github repository for issues and new releases.
+    A dataset that stays Skipped with reason 'permission-denied: <scopes>'
+    means the GraphKit profile's app registration is missing that Graph
+    permission - grant it and re-run. A dataset Skipped with
+    'descriptor-pending: awaiting GraphKit release' means the underlying
+    GraphKit read descriptor has not shipped yet - re-run once GraphKit is
+    upgraded. Look on the GitHub repository for issues and new releases.
 
 SEE ALSO
     - https://github.com/AdamGell/TenantPulse
+    - https://github.com/AdamGell/GraphKit
+    - Get-PulseTenantSnapshot
+    - Get-PulseCheckCatalog
+    - Invoke-PulseAssessment
+    - Invoke-PulseCheck
+    - Export-PulseReport
 
 KEYWORDS
-    Intune, Entra, TenantHealth, Graph
+    Intune, Entra, ConditionalAccess, TenantHealth, Graph, Pseudonymization

@@ -61,18 +61,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   switched catalog ordering from culture-aware `Sort-Object` to an ordinal
   `[string]::CompareOrdinal` index-sort, matching `ConvertTo-PulseCanonicalJson`'s
   established pattern for deterministic ordering.
-
-- For changes in existing functionality.
+- **Final fix-wave, contract:** `Get-PulseTenantSnapshot`'s snapshot manifest `tenant`
+  pseudonym is now derived from the resolved GraphKit tenant id (`$Context.TenantId`),
+  never from `-ProfileId` - the same tenant under two differently-named profiles now
+  pseudonymizes identically, and renaming a profile no longer changes the pseudonym.
+  `Get-GraphContext` is now called before the snapshot store is created so the tenant id
+  is available before anything is written. `Get-PulseTenantSnapshot -Path` and
+  `Get-PulseCheckCatalog -Path` are renamed to `-OutputPath`/`-CatalogPath` respectively
+  (`-Path` kept as a deprecated alias for one release). `Export-PulseReport`'s return
+  object now carries `FindingsPath`, matching `Invoke-PulseAssessment`'s return shape.
+- **Final fix-wave, snapshot-store boundary:** `New-PulseSnapshotStore` now clears
+  `datasets/`, `reference/` and `expanded/` before reuse (unconditionally, not behind a
+  `-Force` flag), so a prior run's or a foreign file left in an existing store path can
+  no longer silently survive into a new run. `Get-PulseSnapshotStore` now type-validates
+  `datasets` (non-null object), `createdUtc` (a parseable timestamp) and `producer`
+  (non-null object) when opening a store, throwing a specific path+field error instead of
+  producing a confident-but-wrong evaluation or a mid-run crash. `Write-PulseDataset` and
+  `New-PulseSnapshotStore`'s manifest write now share `Set-PulseAtomicFileContent`, the
+  same tmp+rename pattern `Set-PulseManifestEntry` already used, instead of duplicating
+  it.
+- **Final fix-wave, publish tooling and local gates:** a new `Record_Tested_Module_Digest`
+  build task (`.build/AssertGateResult.tasks.ps1`) records a SHA-256 manifest of every
+  shipped file right after `./build.ps1 -Tasks test` passes; a new `Assert_Gate_Result`
+  task in the same file wires the whole-result `MinimumTests` gate
+  (`tests/QA/Assert-GateResult.ps1`) into the local `test` workflow, so a local
+  `./build.ps1 -Tasks test` run enforces the same discovery-regression protection CI
+  already had. `producer.graphKit` in the snapshot manifest is now populated from
+  `(Get-Module GraphKit).Version` at collect time (previously always `null`). The offline
+  secret/PII scan (`tests/QA/SecretScan.tests.ps1`) now also covers `scripts/`,
+  `build.ps1`, `build.yaml`, `README.md`, `CHANGELOG.md` and `.github/workflows/ci.yml`,
+  not just `source/` and `tests/`.
+- **Final fix-wave, public-facing skin:** README.md rewritten to PSGallery-landing
+  quality (quick start, the five public commands, required Graph permissions, a snapshot
+  sensitive-at-rest warning, a CIS no-compliance-claim disclaimer, operator
+  prerequisites, an honest Phase 1 scope statement); internal status/task narrative moved
+  to `docs/STATUS.md`. `THIRD-PARTY-NOTICES.md` now documents Maester's MIT license and
+  the two checks (`TP.INT.0001`, `TP.INT.0003`) that adapt its logic, resolving the
+  contradiction with those checks' own `Origin` fields. `about_TenantPulse.help.txt`
+  rewritten with real content and real examples (previously a `{{ add examples here }}`
+  placeholder). Build-tool versions in `RequiredModules.psd1` (`InvokeBuild`,
+  `PSScriptAnalyzer`, `ModuleBuilder`, `ChangelogManagement`) pinned to exact versions
+  instead of `'latest'`.
 
 ### Deprecated
 
-- For soon-to-be removed features.
-
-### Removed
-
-- For now removed features.
+- `Get-PulseTenantSnapshot -Path` and `Get-PulseCheckCatalog -Path`: renamed to
+  `-OutputPath` and `-CatalogPath` respectively. `-Path` still works as an alias for one
+  release; migrate to the new names before it is removed.
 
 ### Fixed
+
+- **Final fix-wave, determinism/redaction:** `Export-PulseReport` and
+  `Export-PulseJsonReport` now parse JSON with `-DateKind String`, so a findings
+  document's timestamp fields round-trip byte-identical through re-rendering (previously
+  a 7-digit-fraction timestamp lost precision when re-serialized at millisecond
+  granularity, causing `-Redact` and unredacted reports of the same run to diverge on
+  timestamp fields that should have matched). `Test-PulseCompliancePolicyPerPlatform` and
+  `Import-PulseCheckCatalog`'s file-listing sort now use an explicit ordinal comparer
+  instead of culture-aware `Sort-Object`, matching this codebase's established
+  deterministic-ordering pattern. `TP.INT.0005`'s stale-device-population-gap evidence no
+  longer carries a `deviceId` field in `Detail` that duplicated the already-redacted
+  `Identity`. `ConvertTo-PulseCanonicalJson` now treats a `Kind=Unspecified` `DateTime` as
+  already-UTC (`[DateTime]::SpecifyKind(...,'Utc')`) instead of calling
+  `.ToUniversalTime()` on it, which silently assumed local time.
 
 - `ConvertTo-PulseCanonicalJson` now sorts object/dictionary keys ordinally instead of via
   case-insensitive culture collation, which previously let case-distinct keys (`apple` vs
@@ -96,10 +147,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requires it to be exactly 32 bytes, throwing a clear "corrupt key file" error naming the
   actual byte count and the path to delete, instead of silently returning a truncated key
   or an opaque `$null`-related error.
+- **Final fix-wave, check logic:** `Test-PulseBreakGlassExcluded` (`TP.ENT.0003`) no
+  longer exempts a Conditional Access policy from a break-glass account's evidence just
+  because its `includeUsers` doesn't name the account - a non-empty `includeGroups` or
+  `includeRoles` can still reach the account, so the check now fails closed (treats the
+  policy as reachable) instead of exempting in that case. `Test-PulseAdminMfaEnforced`
+  (`TP.ENT.0005`) now counts an MFA-requiring policy scoped via `includeUsers: 'All'`
+  toward admin role coverage - it covers every admin role by definition and previously
+  was not counted at all. `Invoke-PulseEvaluation`'s dataset-status gate now degrades a
+  check to `NotApplicable` on any status `-ne 'Collected'` instead of enumerating
+  `Failed`/`Skipped` - a novel/unrecognized status string now fails closed instead of
+  silently reading as collected. `Test-PulseStaleDevices` (`TP.INT.0005`) now throws
+  (surfacing as `Error`) instead of silently falling back to wall-clock time when a
+  supplied cutoff-base timestamp cannot be parsed. `Invoke-PulseCollection`'s auth-abort
+  loop no longer overwrites a remaining `Pending` dataset's `descriptor-pending` reason
+  with `auth-failure: collection aborted`.
+- **Final fix-wave, publish tooling:** `Get-PulseFailureClass` and
+  `Get-PulseGraphFailureStatusCode` now handle enum-typed status code values (e.g.
+  `[System.Net.HttpStatusCode]::Forbidden`) by casting to `[int]` directly, instead of
+  stringifying (which rendered the enum's *name*, not its numeric value, and silently
+  lost the signal). A supplemental status-recovery failure in
+  `Get-PulseGraphFailureStatusCode` now `Write-Warning`s (previously `Write-Verbose`
+  only, silent by default) and `Invoke-PulseCollection` appends `(status unknown)` to the
+  affected dataset's own Failed reason, so the weaker signal is visible in the artifact
+  itself, not only an easily-missed console message.
+- `scripts/Publish-TenantPulsePackage.ps1`'s digest verification now compares every
+  shipped file (`.psm1`, `.psd1`, `Data/**`, `en-US/**`) against a manifest of hashes
+  recorded at test time (`output/testResults/tested-module-digest.txt`, written by the
+  new `Record_Tested_Module_Digest` build task), not just `TenantPulse.psm1` re-hashed
+  from whatever happens to be on disk at publish time - closing a gap where a built-module
+  file could be silently edited (not rebuilt) between a passing test run and a later
+  publish with nothing catching the drift.
 
 ### Security
 
-- In case of vulnerabilities.
+- `scripts/Publish-TenantPulsePackage.ps1`'s `-NuGetApiKey` plain-`[string]` parameter is
+  removed entirely (final fix-wave). The API key is now resolved ONLY from a
+  `-NuGetApiKeySecure [SecureString]` parameter or the `TENANTPULSE_NUGET_API_KEY`
+  environment variable, closing the plain-string-on-the-command-line exposure (shell
+  history, process listings, CI job logs).
 - `Invoke-PulseEvaluation`: Expression-type check rules now execute in
   `Invoke-PulseSandboxedExpression`'s own fresh, isolated PowerShell runspace
   (`ConstrainedLanguage`, no ambient variables, no scope chain to the caller, only a

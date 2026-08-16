@@ -24,11 +24,19 @@
     EVERY SUPPLIED FILTER NARROWS FURTHER (AND across axes, matching
     Get-PulseTenantSnapshot's original docstring promise): each bound parameter is applied
     as its own sequential Where-Object pass over whatever survived the previous pass, never
-    combined with OR across axes. Exclude-vs-include precedence falls out of this
-    ordering by construction: every Exclude pass runs strictly after every Include pass in
-    this function's body, so a check that matches both an Include and an Exclude for the
-    same or a different axis is always dropped - exclude always wins, at every axis,
-    including across the CLI and profile vocabularies.
+    combined with OR across axes. ACTUAL PASS ORDER (verified against the code, post-review
+    docstring fix - an earlier draft of this note claimed "every Exclude pass runs strictly
+    after every Include pass", which does not match the function body below): the six
+    passes run in the fixed order IncludeCategory, ExcludeCategory, IncludeCheck,
+    ExcludeCheck, Include, Exclude - ExcludeCategory (pass 2) runs BEFORE IncludeCheck
+    (pass 3), so Excludes are not literally grouped after every Include. Exclude-vs-include
+    precedence still holds - a check dropped by any exclude pass can never be re-admitted by
+    a later include pass, because every pass only ever narrows (Where-Object over whatever
+    survived so far, never a re-union) - but that guarantee comes from every pass being a
+    pure AND-narrowing step, not from Excludes being ordered strictly after Includes. The
+    FINAL result is identical regardless of the passes' relative order (AND is
+    commutative), so this ordering detail affects nothing observable - it just was not what
+    the original docstring claimed.
 
     ORDINAL MATCHING ONLY: this function never uses PowerShell's default -eq/-in/-contains
     (case-insensitive collation), matching every other "deterministic ordering/matching
