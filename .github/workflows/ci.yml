@@ -286,4 +286,4 @@ jobs:
           # three Invoke-PulseSandboxedExpression unit tests (all nine probed cmdlets
           # unreachable, all five allowlisted cmdlets still resolve, raw .NET escape
           # still blocked under ConstrainedLanguage).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 168 -AllowedSkips 0 -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 181 -AllowedSkips 0 -AllowNotRun 0

@@ -467,6 +467,28 @@ Describe 'Invoke-PulseEvaluation' {
         [System.Text.Encoding]::UTF8.GetBytes($jsonFirst) | Should -Be ([System.Text.Encoding]::UTF8.GetBytes($jsonSecond))
     }
 
+    It 'produces byte-identical SCORED documents across two independent evaluations once Add-PulseScores (T1.7) runs on each' {
+        $checkB = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureWarnRule' }
+        $checkA = New-PulseFixtureCheck -Id 'TP.ENT.0001' -Datasets @('datasetFailed') -Rule @{ Type = 'Expression'; Expression = '$true' }
+        $checkC = New-PulseFixtureCheck -Id 'TP.INT.0003' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureFailRule' }
+
+        $firstRun = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($checkB, $checkA, $checkC)
+        $secondRun = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($checkB, $checkA, $checkC)
+
+        $jsonFirst = InModuleScope TenantPulse -ArgumentList $firstRun.Document {
+            param($doc)
+            $scored = Add-PulseScores -Findings $doc
+            ConvertTo-PulseCanonicalJson -InputObject $scored
+        }
+        $jsonSecond = InModuleScope TenantPulse -ArgumentList $secondRun.Document {
+            param($doc)
+            $scored = Add-PulseScores -Findings $doc
+            ConvertTo-PulseCanonicalJson -InputObject $scored
+        }
+
+        [System.Text.Encoding]::UTF8.GetBytes($jsonFirst) | Should -Be ([System.Text.Encoding]::UTF8.GetBytes($jsonSecond))
+    }
+
     # ---- H2: malformed evidence must degrade only the offending check, never crash the run ----
 
     It 'degrades a check to Error (not a crash) when a duck-typed RuleResult has an evidence entry with no Identity' {
