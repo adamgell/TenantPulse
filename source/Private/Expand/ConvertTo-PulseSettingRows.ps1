@@ -4,7 +4,10 @@
     only ever reads -SettingsPayload/-DefinitionIndex and returns
     { Rows = [rowSchemaV1...]; Gaps = [string...] } - Invoke-PulseSettingsCatalogExpansion
     (the fan-out driver) owns every side effect (fetching, writing fragments, classifying
-    per-policy terminal state).
+    per-policy terminal state). THROWS on an internal instanceId collision (P1-7/P1-8
+    review fix - see COLLISION REJECTION below) - the caller (Invoke-PulseSettingsCatalogPolicy)
+    turns that into a whole-policy gap rather than trusting a row set this function itself
+    could not keep internally consistent.
 
     ROW SCHEMA V1 (FROZEN - see the plan's Task 2.2 section, verbatim, every producer
     T2.2-T2.5 emits exactly these properties, null where inapplicable):
@@ -14,97 +17,134 @@
 
     ASSIGNMENTS-DEFERRED (G-gate sequencing amendment, 2026-08-16): every row this function
     emits carries assignments:null unconditionally - ConfigurationPolicyAssignment.ListBeta
-    is unreleased GraphKit (see the plan's G-gate section). This function has no
-    -Assignments parameter at all yet, by design: Phase 2b's assignment sub-fetch slots in
-    later as an additional per-policy input this function joins against instanceId/
-    settingPath, without restructuring the walk itself.
+    is unreleased GraphKit (see the plan's G-gate section).
 
-    ONE ROW PER SETTING-INSTANCE TREE NODE. The `Settings` payload is either a single
-    object or an array of { id; settingInstance } root entries (GraphKit's
-    ConfigurationPolicySetting.ListBeta shape, matching every tests/Fixtures/SettingsCatalog
-    fixture's own `Settings` member). Each root's own `id` is used as its row's -instanceId
-    verbatim (native id). A settingInstance's `@odata.type` selects one of the five known
-    instance kinds:
-      - ChoiceSettingInstance: one row; value/valueLabel resolved from `choiceSettingValue`;
-        recurses into `choiceSettingValue.children` (each child is itself a root-shaped
-        instance, one row per child, nested under this row's settingPath/instanceId).
-      - SimpleSettingInstance: one row; value read straight off `simpleSettingValue.value`
-        UNLESS its own `@odata.type` matches the secret contract (see SECRET CONTRACT
-        below), in which case value is null and redacted/valueState take over. No children.
-      - GroupSettingCollectionInstance: NO independent value of its own (value stays null) -
-        it is a pure container. Each element of `groupSettingCollectionValue` is walked as
-        one "occurrence" (ordinal-suffixed synthetic parent id, since an occurrence carries
-        no id/definitionId of its own) and its own `children` recursed under that.
-      - ChoiceSettingCollectionInstance: one row; -value is the ARRAY of each element's
-        `.value` (frozen schema's own "array for collections" comment); -valueLabel is the
-        parallel array of resolved labels (or null entries where unresolved). Any element
-        that itself carries `children` is ALSO recursed (ordinal-suffixed synthetic parent,
-        same occurrence scheme as GroupSettingCollection) - a collection element is not
-        assumed leaf-only.
-      - SimpleSettingCollectionInstance: one row; -value is the array of each element's
-        scalar `.value`. If ANY element is secret-typed, the WHOLE row redacts (value=null,
-        redacted=true, valueState = the first secret element's valueState) - fail-closed,
-        matching this codebase's "a value this code cannot prove is safe must not ship"
-        convention (see Protect-PulseGraphRowTenantId's own FAIL CLOSED precedent).
-      - Anything else (unknown @odata.type): the node itself is SKIPPED (no row emitted for
-        it - there is no known instance shape to build one from) and a gap string is added
-        to the returned Gaps array; the walk continues into sibling/already-emitted rows
-        rather than aborting the whole policy.
+    SHAPE NEUTRALITY (Task 2.2 P0 re-review - the headline defect): every raw-payload read
+    in this file goes through the shared accessors in Resolve-PulseSettingsCatalogValueClassification.ps1
+    - Get-PulseSettingsCatalogValueProperty (property read) and Test-PulseSettingsCatalogNode
+    (container check) - never `.PSObject.Properties[...]`/`-is [PSObject]` directly. GraphKit's
+    REAL response shape is an OrderedHashtable tree (`ConvertFrom-Json -AsHashtable`), not
+    pscustomobject; this file previously walked to ZERO rows and ZERO gaps against every one
+    of T2.0's 15 golden fixtures once re-materialized through that real shape - "Expanded,
+    rowCount: 0" on populated policies, the silent-nothing failure the review reproduced.
+    Both shapes are exercised in this module's own test suite; this function must keep
+    behaving identically for either one.
 
-    SETTING PATH ('/'-joined definitionId chain root->leaf; '/' in a definitionId escaped
-    as '~s' - matches the frozen schema's own comment). Every settingDefinitionId a
-    real Settings Catalog CSP path can legally contain is escaped BEFORE joining, not after,
-    so a definitionId that itself happened to contain '/' can never be misparsed as an
-    extra path segment by anything that later splits settingPath on '/'.
+    EXACT INSTANCE-TYPE MATCH (P1-9 review fix - reproduced bypass): the five known
+    `@odata.type` values are matched as EXACT, case-insensitive, FULLY-QUALIFIED strings
+    (`#microsoft.graph.deviceManagementConfiguration<Kind>SettingInstance`), never a
+    trailing-suffix regex. A suffix match (the pre-fix shape) treats any string merely
+    ENDING WITH e.g. 'SimpleSettingInstance' as a real SimpleSettingInstance - reproduced:
+    a hypothetical future/unknown type
+    '#microsoft.graph.deviceManagementConfigurationFutureSimpleSettingInstance' silently
+    misclassified as the real, known kind instead of falling through to the unknown-type
+    gap. Exact match closes this: only the five literal strings below are ever recognized.
 
-    SYNTHETIC INSTANCE IDS ('<parentInstanceId>/<definitionId>#<ordinal>' - matches the
-    frozen schema's own comment). -ordinal counts occurrences of the SAME definitionId
-    under the SAME parent instance id, starting at 0 - so two sibling children that happen
-    to share a definitionId (legal - e.g. a repeated collection element) still get distinct
-    ids, and re-running this walk against byte-identical input always assigns the same
-    ordinals in the same order (determinism - no dictionary/hashtable iteration order is
-    ever consulted for ordinal assignment, only the input array's own order).
-    GroupSettingCollectionValue/ChoiceSettingCollectionValue ELEMENTS carry no definitionId
-    of their own - each element's synthetic "occurrence" parent id is
-    '<parentInstanceId>/<settingDefinitionId>~occ#<elementOrdinal>' (a name no real
-    definitionId can collide with, since real definitionIds never contain '~occ') so
-    children nested under element 0 and element 1 of the same collection can never share an
-    instanceId even when their own definitionIds are identical.
+    MALFORMED SHAPES GAP, NEVER SILENT SUCCESS (P1-9 review fix - reproduced holes):
+      - a root `Settings[]` entry with no (or a null) `settingInstance` now raises a
+        'malformed-root' gap instead of silently contributing zero rows and zero gaps;
+      - a non-object element encountered where an instance is expected (a scalar inside a
+        children/collection array) now raises a 'malformed-instance' gap instead of a
+        silent early return;
+      - a missing or non-object `simpleSettingValue`/`simpleSettingCollectionValue` element
+        now routes through the shared value classifier (Resolve-PulseSettingsCatalogValueClassification)
+        the same as any other value node - an invalid/absent container is an UNKNOWN SHAPE,
+        which the classifier fails closed on (redacted:true) - never the pre-fix
+        `value:null; redacted:false` (a redacted-LOOKING null that was not actually flagged
+        redacted at all).
+      - an unknown `@odata.type` gap now notes, best-effort, how many immediate child
+        nodes under it (if structurally identifiable at all) were consequently never
+        walked - "record dropped descendants in the gap reason" per the review.
 
-    NAME/LABEL RESOLUTION against -DefinitionIndex (Get-PulseSettingDefinitionIndex's
-    compact output - keyed by definitionId, holding only Name/DisplayName/RootDefinitionId/
-    OptionLabels/Applicability/IsSecretCapable, see that function's own docstring):
-    settingName = index[definitionId].DisplayName if present, else index[...].Name, else
-    null; nameResolved = $true only when a DisplayName or Name was actually found.
-    valueLabel for a Choice-shaped value looks up index[definitionId].OptionLabels[value];
-    labelResolved = $true only when that lookup actually found a non-null label. A -null or
-    empty -DefinitionIndex (the documented 'definitions corpus unavailable' case) makes
-    EVERY settingName/valueLabel null and every *Resolved flag $false - this function does
-    not throw for a missing index, since a caller may legitimately walk without one (a
-    Failed-corpus policy is expected to reach Partial via the driver's own gap, not via an
-    exception out of the walk).
+    SECRET CONTRACT (P0-2, unconditional, SHARED classifier): every `simpleSettingValue`
+    and every `simpleSettingCollectionValue` element is classified through
+    Resolve-PulseSettingsCatalogValueClassification - the exact same function
+    Protect-PulseSettingsCatalogSecretPayload (the raw-dataset redactor) uses - passing the
+    setting definition's own IsSecretCapable flag (from -DefinitionIndex) alongside the
+    instance's own value shape. A value classified secret for any reason OTHER than a
+    clean, expected secret-typed match (i.e. an unrecognized/missing discriminator - see
+    that function's own FAIL CLOSED docstring section) additionally raises an
+    'unknown-value-shape' gap, so an unrecognized shape both redacts (safe) AND is visible
+    as a Partial reason (not silently absorbed).
 
-    SECRET CONTRACT (P0, unconditional): a settingValue is secret whenever its own
-    `@odata.type` matches `...SecretSettingValueDefinition`'s instance-level counterpart -
-    `#microsoft.graph.deviceManagementConfigurationSecretSettingValue` (or any other
-    `...SecretSettingValue` subtype, matched case-insensitively by suffix, the same
-    pattern Get-PulseSettingDefinitionIndex's own IsSecretCapable check uses at the
-    DEFINITION level - see that function's docstring for why this INSTANCE-level check,
-    not the definition-level flag, is the one the contract actually depends on). A secret
-    row's -value is ALWAYS null and -redacted is ALWAYS true, regardless of what raw value
-    the payload carried - this function never reads a secret value into any variable that
-    could leak into a row, an error message, or a gap string. -valueState is read verbatim
-    off the secret value's own `valueState` property (Graph's own {notEncrypted|
-    encryptedValueToken|invalidValueState} enum-ish string), or null if absent.
+    SETTING PATH ('/'-joined definitionId chain root->leaf). ESCAPE THE ESCAPE (P1-8
+    review fix - reproduced collision): a literal '~' in a real definitionId is now escaped
+    to '~t' BEFORE '/' is escaped to '~s' - encoding the escape character itself first is
+    what makes the whole mapping injective. Pre-fix (escaping only '/') the two distinct
+    definitionId chains 'a/b' and 'a~sb' both produced the identical settingPath 'a~sb' -
+    reproduced by the review. Post-fix: 'a/b' -> 'a~sb' (unchanged, no literal tildes to
+    escape) and 'a~sb' -> 'a~tsb' (the literal tilde is escaped to '~t' first) - now
+    distinct. Real Settings Catalog CSP definitionIds can and do contain '~' (per the
+    review), so this is not a theoretical edge case.
 
-    DEPTH BUDGET (64, matching every other recursive walker in this module -
-    ConvertTo-PulseCanonicalJson's own -Depth default, Protect-PulseGraphRowTenantId's own
-    -MaxDepth default): checked before descending into any child/element, and a policy that
-    exceeds it is reported as a Gap ('depth-budget-exceeded: ...') rather than throwing -
-    matching the "unknown @odata.type -> Partial gap, walk continues" resilience the driver
-    depends on; a pathologically deep or cyclic settingInstance graph must degrade this ONE
-    policy to Partial, not abort the entire fan-out.
+    NAMESPACED, COLLISION-REJECTING INSTANCE IDS (P1-8 review fix). Three distinct id
+    namespaces, tagged so a value from one namespace can never be confused with another:
+      - native root id (the `Settings[]` entry's own `id` field, when present):
+        'n:<nativeId>'.
+      - a root with NO native id: falls through to the ordinary synthetic-child scheme
+        below with $PolicyId as its parent - '<PolicyId>/s:<definitionId>#<ordinal>' - no
+        separate root-only scheme; $PolicyId is never itself a valid non-root parent id,
+        so this can never collide with a deeper synthetic id.
+      - an ordinary synthetic child (a ChoiceSettingInstance's own recursed child, NOT a
+        collection element): '<ParentInstanceId>/s:<definitionId>#<ordinal>' - ordinal
+        counts occurrences of the SAME definitionId under the SAME parent, matching the
+        frozen schema's own '#<ordinal>' comment.
+      - a collection OCCURRENCE (one element of a GroupSettingCollectionValue/
+        ChoiceSettingCollectionValue array - carries no definitionId of its own):
+        '<ParentInstanceId>/o:<definitionId>#<elementOrdinal>' - the 'o:' tag keeps this
+        namespace distinct from an ordinary 's:' child even when both would otherwise
+        produce the same '<parent>/<definitionId>#<ordinal>' text.
+    Every tag ('n:', 's:', 'o:') is inserted by THIS function, immediately after a '/' or
+    at string start - never trusted from raw input - so a crafted native id value can
+    influence what comes AFTER a tag but can never forge the tag itself.
+
+    COLLISION REJECTION: every computed instanceId is checked against a per-call
+    HashSet[string] (ordinal comparer) before being assigned to a row or used as a further
+    parent id; a collision (which the namespacing/escaping above should make structurally
+    unreachable in practice, but is checked anyway rather than assumed away) THROWS - see
+    this file's own top-level docstring for why a collision aborts the whole policy's walk
+    rather than silently overwriting or skipping one row.
+
+    DEPTH BUDGET (64): checked before descending into any child/element; exceeding it is a
+    Gap, not a throw - matches the "unknown @odata.type -> Partial gap, walk continues"
+    resilience the driver depends on for every OTHER gap class; only an instanceId
+    collision (a data-integrity anomaly, not a shape/depth issue) throws.
 #>
+
+# SHARED DEPTH BUDGET (Task 2.2 omp-Medium re-review fix): the WALKER's own unit of depth
+# is "one settingInstance level" - Invoke-PulseWalkInstance increments -Depth by exactly 1
+# per recursive child/element call, so -MaxDepth 64 here means "64 settingInstance levels
+# deep, however many raw JSON wrapper objects/arrays sit between one instance and the
+# next." Protect-PulseSettingsCatalogSecretPayload (the raw-payload redactor, in
+# Invoke-PulseSettingsCatalogExpansion.ps1) walks the SAME payload but counts depth
+# per RAW NODE (every dictionary/object AND every array is its own level) - a
+# GroupSettingCollection/ChoiceSettingCollection occurrence costs 4 raw levels per walker
+# level (collectionValue array -> element object -> children array -> next instance
+# object), the worst case among the five instance kinds. A VALID chain that is exactly at
+# the walker's own 64-level budget could therefore need up to 64*4=256 raw levels to
+# redact - misclassified as a redaction failure (and, one layer up, a bare
+# "fetch-failed" gap) if the redactor's own depth budget were left at a smaller,
+# independently-chosen number. The redactor's own default (see that file) is derived from
+# THIS constant, not chosen independently, so the two can never silently drift back out of
+# alignment - see PulseSettingsCatalogValueRedactionMaxDepthMultiplier below.
+$script:PulseSettingsCatalogWalkerMaxDepth = 64
+
+# The five - and only five - known Settings Catalog instance kinds, matched as EXACT,
+# case-insensitive, fully-qualified strings (P1-9 - see this file's own docstring for why a
+# suffix regex is the reproduced bypass this replaces).
+$script:PulseSettingsCatalogKnownInstanceTypes = @(
+    '#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance'
+    '#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance'
+    '#microsoft.graph.deviceManagementConfigurationGroupSettingCollectionInstance'
+    '#microsoft.graph.deviceManagementConfigurationChoiceSettingCollectionInstance'
+    '#microsoft.graph.deviceManagementConfigurationSimpleSettingCollectionInstance'
+)
+
+function Test-PulseSettingsCatalogInstanceType {
+    param([string] $ODataType, [string] $KnownType)
+    if ([string]::IsNullOrEmpty($ODataType)) { return $false }
+    return [string]::Equals($ODataType, $KnownType, [System.StringComparison]::OrdinalIgnoreCase)
+}
 
 function ConvertTo-PulseSettingRows {
     [CmdletBinding()]
@@ -138,25 +178,36 @@ function ConvertTo-PulseSettingRows {
 
         [Parameter()]
         [ValidateRange(1, 1000)]
-        [int] $MaxDepth = 64
+        [int] $MaxDepth = $script:PulseSettingsCatalogWalkerMaxDepth
     )
 
     $rows = [System.Collections.Generic.List[object]]::new()
     $gaps = [System.Collections.Generic.List[string]]::new()
+    $assignedInstanceIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+
+    # SHAPE NEUTRALITY: coerce a raw node's property to [string], via the module-shared
+    # Get-PulseSettingsCatalogValueProperty (handles both [PSObject] and [IDictionary] -
+    # see this file's own top-level docstring). Absent/$null both come back $null.
+    function Get-PulseSettingsCatalogStringProperty {
+        param($Node, [string] $PropertyName)
+        $raw = Get-PulseSettingsCatalogValueProperty -Node $Node -PropertyName $PropertyName
+        if ($null -eq $raw) { return $null }
+        return [string] $raw
+    }
 
     function Protect-PulseSettingPathSegment {
         param([string] $Segment)
         if ($null -eq $Segment) { return '' }
-        return $Segment.Replace('/', '~s')
+        # ESCAPE THE ESCAPE (P1-8): '~' must be escaped BEFORE '/' - see this file's own
+        # top-level docstring for the collision this ordering fixes.
+        return $Segment.Replace('~', '~t').Replace('/', '~s')
     }
 
-    function Resolve-PulseSettingIsSecret {
-        param($SettingValue)
-        if ($null -eq $SettingValue) { return $false }
-        if ($SettingValue -isnot [System.Management.Automation.PSObject]) { return $false }
-        if (-not $SettingValue.PSObject.Properties['@odata.type']) { return $false }
-        $odataType = [string] $SettingValue.'@odata.type'
-        return ($odataType -match '(?i)SecretSettingValue$')
+    function Register-PulseInstanceId {
+        param([string] $InstanceId)
+        if (-not $assignedInstanceIds.Add($InstanceId)) {
+            throw "ConvertTo-PulseSettingRows: instanceId collision on '$InstanceId' for policy '$PolicyId' - refusing to continue this policy's walk with an ambiguous id space."
+        }
     }
 
     function Resolve-PulseDefinitionEntry {
@@ -224,6 +275,43 @@ function ConvertTo-PulseSettingRows {
         }
     }
 
+    function Resolve-PulseValueClassification {
+        param($SettingValue, $DefinitionEntry)
+        $isSecretCapable = $false
+        if ($null -ne $DefinitionEntry -and $DefinitionEntry.Contains('IsSecretCapable')) {
+            $isSecretCapable = [bool] $DefinitionEntry.IsSecretCapable
+        }
+        return Resolve-PulseSettingsCatalogValueClassification -SettingValue $SettingValue -DefinitionIsSecretCapable $isSecretCapable
+    }
+
+    # True only for a classification whose secrecy came from a shape this classifier could
+    # not confidently call safe (missing/unrecognized discriminator) - a real declared
+    # secret (IsSecretByType) is expected and does NOT get an accompanying gap.
+    function Test-PulseUnknownValueShape {
+        param($Classification)
+        return ($Classification.IsSecret -and -not $Classification.IsSecretByType -and -not $Classification.IsKnownSafeShape)
+    }
+
+    function Get-PulseInstanceDescendantHint {
+        # Best-effort, structural-only count of what an unknown-type node's children WOULD
+        # have been, for the gap message (P1-9: "record dropped descendants in the gap
+        # reason") - never inspects VALUES, only counts array lengths under the known
+        # collection-value property names so this stays a safe, no-secret-risk hint.
+        # SHAPE NEUTRAL: reads through the shared accessor, not `.PSObject.Properties[...]`.
+        param($Instance)
+        $count = 0
+        foreach ($propName in @('groupSettingCollectionValue', 'choiceSettingCollectionValue', 'simpleSettingCollectionValue')) {
+            $propValue = Get-PulseSettingsCatalogValueProperty -Node $Instance -PropertyName $propName
+            if ($null -ne $propValue) { $count += @($propValue).Count }
+        }
+        $choiceValue = Get-PulseSettingsCatalogValueProperty -Node $Instance -PropertyName 'choiceSettingValue'
+        if ($null -ne $choiceValue) {
+            $children = Get-PulseSettingsCatalogValueProperty -Node $choiceValue -PropertyName 'children'
+            if ($null -ne $children) { $count += @($children).Count }
+        }
+        return $count
+    }
+
     function Invoke-PulseWalkInstance {
         param(
             $Instance, [string] $ParentSettingPath, [string] $ParentInstanceId,
@@ -236,11 +324,13 @@ function ConvertTo-PulseSettingRows {
             return
         }
 
-        if ($null -eq $Instance -or $Instance -isnot [System.Management.Automation.PSObject]) {
+        if (-not (Test-PulseSettingsCatalogNode -Node $Instance)) {
+            $actualType = if ($null -eq $Instance) { 'null' } else { $Instance.GetType().Name }
+            $gaps.Add("malformed-instance: expected an object under parent '$ParentInstanceId', got '$actualType'") | Out-Null
             return
         }
 
-        $definitionId = if ($Instance.PSObject.Properties['settingDefinitionId']) { [string] $Instance.settingDefinitionId } else { $null }
+        $definitionId = Get-PulseSettingsCatalogStringProperty -Node $Instance -PropertyName 'settingDefinitionId'
         if ([string]::IsNullOrEmpty($definitionId)) {
             $gaps.Add("malformed-instance: missing settingDefinitionId under parent '$ParentInstanceId'") | Out-Null
             return
@@ -251,157 +341,164 @@ function ConvertTo-PulseSettingRows {
 
         $instanceId = $NativeInstanceId
         if ([string]::IsNullOrEmpty($instanceId)) {
-            $counterKey = "$ParentInstanceId|$definitionId"
+            $counterKey = "$ParentInstanceId|s|$definitionId"
             $ordinal = 0
             if ($OrdinalCounters.ContainsKey($counterKey)) {
                 $ordinal = $OrdinalCounters[$counterKey]
             }
             $OrdinalCounters[$counterKey] = $ordinal + 1
-            $instanceId = "$ParentInstanceId/$definitionId#$ordinal"
+            $instanceId = "$ParentInstanceId/s:$definitionId#$ordinal"
+        }
+        Register-PulseInstanceId -InstanceId $instanceId
+
+        $odataType = Get-PulseSettingsCatalogStringProperty -Node $Instance -PropertyName '@odata.type'
+        $entry = Resolve-PulseDefinitionEntry -DefinitionId $definitionId -Index $DefinitionIndex
+
+        if (Test-PulseSettingsCatalogInstanceType -ODataType $odataType -KnownType '#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance') {
+            $choiceValue = Get-PulseSettingsCatalogValueProperty -Node $Instance -PropertyName 'choiceSettingValue'
+            $rawValue = $null
+            $children = @()
+            if (Test-PulseSettingsCatalogNode -Node $choiceValue) {
+                $rawValue = Get-PulseSettingsCatalogStringProperty -Node $choiceValue -PropertyName 'value'
+                $childrenRaw = Get-PulseSettingsCatalogValueProperty -Node $choiceValue -PropertyName 'children'
+                if ($null -ne $childrenRaw) { $children = @($childrenRaw) }
+            }
+            $labelResult = Resolve-PulseOptionLabel -Entry $entry -Value $rawValue
+            $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
+                        -InstanceId $instanceId -Value $rawValue -ValueLabel $labelResult.Label `
+                        -LabelResolved $labelResult.Resolved -Redacted $false -ValueState $null)) | Out-Null
+
+            foreach ($child in $children) {
+                Invoke-PulseWalkInstance -Instance $child -ParentSettingPath $settingPath -ParentInstanceId $instanceId `
+                    -NativeInstanceId $null -Depth ($Depth + 1) -OrdinalCounters $OrdinalCounters
+            }
+            return
         }
 
-        $odataType = if ($Instance.PSObject.Properties['@odata.type']) { [string] $Instance.'@odata.type' } else { $null }
+        if (Test-PulseSettingsCatalogInstanceType -ODataType $odataType -KnownType '#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance') {
+            $simpleValue = Get-PulseSettingsCatalogValueProperty -Node $Instance -PropertyName 'simpleSettingValue'
+            $classification = Resolve-PulseValueClassification -SettingValue $simpleValue -DefinitionEntry $entry
 
-        switch -Regex ($odataType) {
-            'ChoiceSettingInstance$' {
-                $choiceValue = $Instance.choiceSettingValue
-                $rawValue = $null
-                $children = @()
-                if ($null -ne $choiceValue -and $choiceValue -is [System.Management.Automation.PSObject]) {
-                    if ($choiceValue.PSObject.Properties['value']) { $rawValue = [string] $choiceValue.value }
-                    if ($choiceValue.PSObject.Properties['children'] -and $null -ne $choiceValue.children) {
-                        $children = @($choiceValue.children)
-                    }
+            if ($classification.IsSecret) {
+                if (Test-PulseUnknownValueShape -Classification $classification) {
+                    $gaps.Add("unknown-value-shape: settingPath '$settingPath' odataType '$($classification.ODataType)'") | Out-Null
                 }
-                $entry = Resolve-PulseDefinitionEntry -DefinitionId $definitionId -Index $DefinitionIndex
-                $labelResult = Resolve-PulseOptionLabel -Entry $entry -Value $rawValue
-                $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
-                            -InstanceId $instanceId -Value $rawValue -ValueLabel $labelResult.Label `
-                            -LabelResolved $labelResult.Resolved -Redacted $false -ValueState $null)) | Out-Null
-
-                foreach ($child in $children) {
-                    Invoke-PulseWalkInstance -Instance $child -ParentSettingPath $settingPath -ParentInstanceId $instanceId `
-                        -NativeInstanceId $null -Depth ($Depth + 1) -OrdinalCounters $OrdinalCounters
-                }
-                return
-            }
-
-            'SimpleSettingInstance$' {
-                $simpleValue = $Instance.simpleSettingValue
-                $isSecret = Resolve-PulseSettingIsSecret -SettingValue $simpleValue
-                if ($isSecret) {
-                    $valueState = if ($simpleValue.PSObject.Properties['valueState']) { $simpleValue.valueState } else { $null }
-                    $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
-                                -InstanceId $instanceId -Value $null -ValueLabel $null -LabelResolved $false `
-                                -Redacted $true -ValueState $valueState)) | Out-Null
-                } else {
-                    $rawValue = $null
-                    if ($null -ne $simpleValue -and $simpleValue -is [System.Management.Automation.PSObject] -and $simpleValue.PSObject.Properties['value']) {
-                        $rawValue = $simpleValue.value
-                    }
-                    $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
-                                -InstanceId $instanceId -Value $rawValue -ValueLabel $null -LabelResolved $false `
-                                -Redacted $false -ValueState $null)) | Out-Null
-                }
-                return
-            }
-
-            'GroupSettingCollectionInstance$' {
                 $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
                             -InstanceId $instanceId -Value $null -ValueLabel $null -LabelResolved $false `
-                            -Redacted $false -ValueState $null)) | Out-Null
-
-                $elements = if ($Instance.PSObject.Properties['groupSettingCollectionValue'] -and $null -ne $Instance.groupSettingCollectionValue) {
-                    @($Instance.groupSettingCollectionValue)
-                } else { @() }
-
-                for ($elementOrdinal = 0; $elementOrdinal -lt $elements.Count; $elementOrdinal++) {
-                    $element = $elements[$elementOrdinal]
-                    $occurrenceParentId = "$instanceId/$definitionId~occ#$elementOrdinal"
-                    $childList = if ($null -ne $element -and $element.PSObject.Properties['children'] -and $null -ne $element.children) {
-                        @($element.children)
-                    } else { @() }
-                    foreach ($child in $childList) {
-                        Invoke-PulseWalkInstance -Instance $child -ParentSettingPath $settingPath -ParentInstanceId $occurrenceParentId `
-                            -NativeInstanceId $null -Depth ($Depth + 1) -OrdinalCounters $OrdinalCounters
-                    }
-                }
-                return
-            }
-
-            'ChoiceSettingCollectionInstance$' {
-                $elements = if ($Instance.PSObject.Properties['choiceSettingCollectionValue'] -and $null -ne $Instance.choiceSettingCollectionValue) {
-                    @($Instance.choiceSettingCollectionValue)
-                } else { @() }
-
-                $entry = Resolve-PulseDefinitionEntry -DefinitionId $definitionId -Index $DefinitionIndex
-                $values = [System.Collections.Generic.List[object]]::new()
-                $labels = [System.Collections.Generic.List[object]]::new()
-                $anyLabelResolved = $false
-                for ($elementOrdinal = 0; $elementOrdinal -lt $elements.Count; $elementOrdinal++) {
-                    $element = $elements[$elementOrdinal]
-                    $elementValue = if ($null -ne $element -and $element.PSObject.Properties['value']) { [string] $element.value } else { $null }
-                    $values.Add($elementValue) | Out-Null
-                    $labelResult = Resolve-PulseOptionLabel -Entry $entry -Value $elementValue
-                    $labels.Add($labelResult.Label) | Out-Null
-                    if ($labelResult.Resolved) { $anyLabelResolved = $true }
-                }
-
+                            -Redacted $true -ValueState $classification.ValueState)) | Out-Null
+            } else {
+                $rawValue = Get-PulseSettingsCatalogValueProperty -Node $simpleValue -PropertyName 'value'
                 $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
-                            -InstanceId $instanceId -Value $values.ToArray() -ValueLabel $labels.ToArray() `
-                            -LabelResolved $anyLabelResolved -Redacted $false -ValueState $null)) | Out-Null
-
-                for ($elementOrdinal = 0; $elementOrdinal -lt $elements.Count; $elementOrdinal++) {
-                    $element = $elements[$elementOrdinal]
-                    $occurrenceParentId = "$instanceId/$definitionId~occ#$elementOrdinal"
-                    $childList = if ($null -ne $element -and $element.PSObject.Properties['children'] -and $null -ne $element.children) {
-                        @($element.children)
-                    } else { @() }
-                    foreach ($child in $childList) {
-                        Invoke-PulseWalkInstance -Instance $child -ParentSettingPath $settingPath -ParentInstanceId $occurrenceParentId `
-                            -NativeInstanceId $null -Depth ($Depth + 1) -OrdinalCounters $OrdinalCounters
-                    }
-                }
-                return
+                            -InstanceId $instanceId -Value $rawValue -ValueLabel $null -LabelResolved $false `
+                            -Redacted $false -ValueState $null)) | Out-Null
             }
-
-            'SimpleSettingCollectionInstance$' {
-                $elements = if ($Instance.PSObject.Properties['simpleSettingCollectionValue'] -and $null -ne $Instance.simpleSettingCollectionValue) {
-                    @($Instance.simpleSettingCollectionValue)
-                } else { @() }
-
-                $anySecret = $false
-                $firstSecretValueState = $null
-                $values = [System.Collections.Generic.List[object]]::new()
-                foreach ($element in $elements) {
-                    if (Resolve-PulseSettingIsSecret -SettingValue $element) {
-                        if (-not $anySecret) {
-                            $anySecret = $true
-                            $firstSecretValueState = if ($element.PSObject.Properties['valueState']) { $element.valueState } else { $null }
-                        }
-                        continue
-                    }
-                    $elementValue = if ($null -ne $element -and $element.PSObject.Properties['value']) { $element.value } else { $null }
-                    $values.Add($elementValue) | Out-Null
-                }
-
-                if ($anySecret) {
-                    $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
-                                -InstanceId $instanceId -Value $null -ValueLabel $null -LabelResolved $false `
-                                -Redacted $true -ValueState $firstSecretValueState)) | Out-Null
-                } else {
-                    $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
-                                -InstanceId $instanceId -Value $values.ToArray() -ValueLabel $null -LabelResolved $false `
-                                -Redacted $false -ValueState $null)) | Out-Null
-                }
-                return
-            }
-
-            default {
-                $gaps.Add("unknown-instance-type: '$odataType' at settingPath '$settingPath'") | Out-Null
-                return
-            }
+            return
         }
+
+        if (Test-PulseSettingsCatalogInstanceType -ODataType $odataType -KnownType '#microsoft.graph.deviceManagementConfigurationGroupSettingCollectionInstance') {
+            $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
+                        -InstanceId $instanceId -Value $null -ValueLabel $null -LabelResolved $false `
+                        -Redacted $false -ValueState $null)) | Out-Null
+
+            $elementsRaw = Get-PulseSettingsCatalogValueProperty -Node $Instance -PropertyName 'groupSettingCollectionValue'
+            $elements = if ($null -ne $elementsRaw) { , @($elementsRaw) } else { , @() }
+
+            for ($elementOrdinal = 0; $elementOrdinal -lt $elements.Count; $elementOrdinal++) {
+                $element = $elements[$elementOrdinal]
+                $occurrenceParentId = "$instanceId/o:$definitionId#$elementOrdinal"
+                Register-PulseInstanceId -InstanceId $occurrenceParentId
+                $childList = @()
+                if (Test-PulseSettingsCatalogNode -Node $element) {
+                    $childrenRaw = Get-PulseSettingsCatalogValueProperty -Node $element -PropertyName 'children'
+                    if ($null -ne $childrenRaw) { $childList = @($childrenRaw) }
+                }
+                foreach ($child in $childList) {
+                    Invoke-PulseWalkInstance -Instance $child -ParentSettingPath $settingPath -ParentInstanceId $occurrenceParentId `
+                        -NativeInstanceId $null -Depth ($Depth + 1) -OrdinalCounters $OrdinalCounters
+                }
+            }
+            return
+        }
+
+        if (Test-PulseSettingsCatalogInstanceType -ODataType $odataType -KnownType '#microsoft.graph.deviceManagementConfigurationChoiceSettingCollectionInstance') {
+            $elementsRaw = Get-PulseSettingsCatalogValueProperty -Node $Instance -PropertyName 'choiceSettingCollectionValue'
+            $elements = if ($null -ne $elementsRaw) { , @($elementsRaw) } else { , @() }
+
+            $values = [System.Collections.Generic.List[object]]::new()
+            $labels = [System.Collections.Generic.List[object]]::new()
+            $anyLabelResolved = $false
+            for ($elementOrdinal = 0; $elementOrdinal -lt $elements.Count; $elementOrdinal++) {
+                $element = $elements[$elementOrdinal]
+                $elementValue = Get-PulseSettingsCatalogStringProperty -Node $element -PropertyName 'value'
+                $values.Add($elementValue) | Out-Null
+                $labelResult = Resolve-PulseOptionLabel -Entry $entry -Value $elementValue
+                $labels.Add($labelResult.Label) | Out-Null
+                if ($labelResult.Resolved) { $anyLabelResolved = $true }
+            }
+
+            $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
+                        -InstanceId $instanceId -Value $values.ToArray() -ValueLabel $labels.ToArray() `
+                        -LabelResolved $anyLabelResolved -Redacted $false -ValueState $null)) | Out-Null
+
+            for ($elementOrdinal = 0; $elementOrdinal -lt $elements.Count; $elementOrdinal++) {
+                $element = $elements[$elementOrdinal]
+                $occurrenceParentId = "$instanceId/o:$definitionId#$elementOrdinal"
+                Register-PulseInstanceId -InstanceId $occurrenceParentId
+                $childList = @()
+                if (Test-PulseSettingsCatalogNode -Node $element) {
+                    $childrenRaw = Get-PulseSettingsCatalogValueProperty -Node $element -PropertyName 'children'
+                    if ($null -ne $childrenRaw) { $childList = @($childrenRaw) }
+                }
+                foreach ($child in $childList) {
+                    Invoke-PulseWalkInstance -Instance $child -ParentSettingPath $settingPath -ParentInstanceId $occurrenceParentId `
+                        -NativeInstanceId $null -Depth ($Depth + 1) -OrdinalCounters $OrdinalCounters
+                }
+            }
+            return
+        }
+
+        if (Test-PulseSettingsCatalogInstanceType -ODataType $odataType -KnownType '#microsoft.graph.deviceManagementConfigurationSimpleSettingCollectionInstance') {
+            $elementsRaw = Get-PulseSettingsCatalogValueProperty -Node $Instance -PropertyName 'simpleSettingCollectionValue'
+            $elements = if ($null -ne $elementsRaw) { , @($elementsRaw) } else { , @() }
+
+            $anySecret = $false
+            $anyUnknownShape = $false
+            $firstSecretValueState = $null
+            $values = [System.Collections.Generic.List[object]]::new()
+            foreach ($element in $elements) {
+                $elementClassification = Resolve-PulseValueClassification -SettingValue $element -DefinitionEntry $entry
+                if ($elementClassification.IsSecret) {
+                    if (-not $anySecret) {
+                        $anySecret = $true
+                        $firstSecretValueState = $elementClassification.ValueState
+                    }
+                    if (Test-PulseUnknownValueShape -Classification $elementClassification) { $anyUnknownShape = $true }
+                    continue
+                }
+                $elementValue = Get-PulseSettingsCatalogValueProperty -Node $element -PropertyName 'value'
+                $values.Add($elementValue) | Out-Null
+            }
+
+            if ($anyUnknownShape) {
+                $gaps.Add("unknown-value-shape: settingPath '$settingPath' (collection element)") | Out-Null
+            }
+
+            if ($anySecret) {
+                $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
+                            -InstanceId $instanceId -Value $null -ValueLabel $null -LabelResolved $false `
+                            -Redacted $true -ValueState $firstSecretValueState)) | Out-Null
+            } else {
+                $rows.Add((New-PulseSettingRow -SettingPath $settingPath -SettingDefinitionId $definitionId `
+                            -InstanceId $instanceId -Value $values.ToArray() -ValueLabel $null -LabelResolved $false `
+                            -Redacted $false -ValueState $null)) | Out-Null
+            }
+            return
+        }
+
+        # Unknown @odata.type (P1-9): note a best-effort descendant-drop hint in the gap.
+        $descendantHint = Get-PulseInstanceDescendantHint -Instance $Instance
+        $descendantSuffix = if ($descendantHint -gt 0) { " ($descendantHint descendant node(s) not walked)" } else { '' }
+        $gaps.Add("unknown-instance-type: '$odataType' at settingPath '$settingPath'$descendantSuffix") | Out-Null
     }
 
     $roots = @()
@@ -412,13 +509,32 @@ function ConvertTo-PulseSettingRows {
     $ordinalCounters = [System.Collections.Generic.Dictionary[string, int]]::new()
 
     foreach ($root in $roots) {
-        if ($null -eq $root -or $root -isnot [System.Management.Automation.PSObject]) { continue }
-        $nativeId = if ($root.PSObject.Properties['id'] -and -not [string]::IsNullOrEmpty([string] $root.id)) { [string] $root.id } else { $null }
-        $settingInstance = if ($root.PSObject.Properties['settingInstance']) { $root.settingInstance } else { $null }
-        if ($null -eq $settingInstance) { continue }
+        if (-not (Test-PulseSettingsCatalogNode -Node $root)) {
+            $actualType = if ($null -eq $root) { 'null' } else { $root.GetType().Name }
+            $gaps.Add("malformed-root: expected an object, got '$actualType'") | Out-Null
+            continue
+        }
+
+        $nativeIdRaw = Get-PulseSettingsCatalogStringProperty -Node $root -PropertyName 'id'
+        $nativeId = if (-not [string]::IsNullOrEmpty($nativeIdRaw)) { $nativeIdRaw } else { $null }
+        $settingInstance = Get-PulseSettingsCatalogValueProperty -Node $root -PropertyName 'settingInstance'
+
+        if ($null -eq $settingInstance -or -not (Test-PulseSettingsCatalogNode -Node $settingInstance)) {
+            $rootLabel = if ($nativeId) { "id '$nativeId'" } else { 'a root entry with no id' }
+            $gaps.Add("malformed-root: missing settingInstance for $rootLabel") | Out-Null
+            continue
+        }
+
+        # NAMESPACED ROOT SEED (P1-8): 'n:<nativeId>' when a native id is present. A root
+        # with NO native id falls through to the ordinary synthetic-id machinery below
+        # (ParentInstanceId = $PolicyId, the same 's:<definitionId>#<ordinal>' scheme every
+        # other synthetic id uses) rather than a bespoke root-only scheme - simpler, and
+        # already collision-safe: $PolicyId is never itself a valid non-root parent id, so
+        # a root-level synthetic id can never be confused with a deeper one.
+        $rootSeed = if ($nativeId) { "n:$nativeId" } else { $null }
 
         Invoke-PulseWalkInstance -Instance $settingInstance -ParentSettingPath '' -ParentInstanceId $PolicyId `
-            -NativeInstanceId $nativeId -Depth 1 -OrdinalCounters $ordinalCounters
+            -NativeInstanceId $rootSeed -Depth 1 -OrdinalCounters $ordinalCounters
     }
 
     return [pscustomobject]@{

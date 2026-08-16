@@ -35,6 +35,16 @@
     line the SECRET CONTRACT actually depends on: a definition missed here degrades to "not
     flagged secret-capable at the index level," it does not defeat the instance-level
     redaction downstream.
+
+    SHAPE NEUTRALITY (Task 2.2 P0 re-review): -Data is GraphKit's raw
+    ConfigurationSettingDefinition.ListBeta response - an OrderedHashtable tree in
+    production (`ConvertFrom-Json -AsHashtable`), never pscustomobject. Every read below
+    goes through the shared Get-PulseSettingsCatalogValueProperty/Test-PulseSettingsCatalogNode
+    accessors (see ConvertTo-PulseSettingRows.ps1's own docstring for the full story of the
+    bug class this fixes) rather than `.PSObject.Properties[...]`/`-is [PSObject]` - a
+    hashtable-shaped corpus previously indexed to zero usable entries (every `id` read came
+    back $null and was skipped), which would have silently defeated name/label resolution
+    and the IsSecretCapable signal for the entire walk, not just this function's own tests.
 #>
 
 function Get-PulseSettingDefinitionIndex {
@@ -50,47 +60,46 @@ function Get-PulseSettingDefinitionIndex {
     $index = [ordered]@{}
 
     foreach ($definition in $Data) {
-        if ($null -eq $definition) { continue }
-        if ($definition -isnot [System.Management.Automation.PSObject]) { continue }
-        if (-not $definition.PSObject.Properties['id']) { continue }
+        if (-not (Test-PulseSettingsCatalogNode -Node $definition)) { continue }
 
-        $id = [string] $definition.id
+        $idRaw = Get-PulseSettingsCatalogValueProperty -Node $definition -PropertyName 'id'
+        $id = if ($null -ne $idRaw) { [string] $idRaw } else { $null }
         if ([string]::IsNullOrEmpty($id)) { continue }
 
-        $name = $null
-        if ($definition.PSObject.Properties['name']) { $name = [string] $definition.name }
+        $nameRaw = Get-PulseSettingsCatalogValueProperty -Node $definition -PropertyName 'name'
+        $name = if ($null -ne $nameRaw) { [string] $nameRaw } else { $null }
 
-        $displayName = $null
-        if ($definition.PSObject.Properties['displayName']) { $displayName = [string] $definition.displayName }
+        $displayNameRaw = Get-PulseSettingsCatalogValueProperty -Node $definition -PropertyName 'displayName'
+        $displayName = if ($null -ne $displayNameRaw) { [string] $displayNameRaw } else { $null }
 
-        $rootDefinitionId = $null
-        if ($definition.PSObject.Properties['rootDefinitionId']) { $rootDefinitionId = [string] $definition.rootDefinitionId }
+        $rootDefinitionIdRaw = Get-PulseSettingsCatalogValueProperty -Node $definition -PropertyName 'rootDefinitionId'
+        $rootDefinitionId = if ($null -ne $rootDefinitionIdRaw) { [string] $rootDefinitionIdRaw } else { $null }
 
-        $applicability = $null
-        if ($definition.PSObject.Properties['applicability']) { $applicability = $definition.applicability }
+        $applicability = Get-PulseSettingsCatalogValueProperty -Node $definition -PropertyName 'applicability'
 
         $optionLabels = [ordered]@{}
-        if ($definition.PSObject.Properties['options'] -and $null -ne $definition.options) {
-            foreach ($option in @($definition.options)) {
-                if ($null -eq $option) { continue }
-                if ($option -isnot [System.Management.Automation.PSObject]) { continue }
-                if (-not $option.PSObject.Properties['itemId']) { continue }
+        $optionsRaw = Get-PulseSettingsCatalogValueProperty -Node $definition -PropertyName 'options'
+        if ($null -ne $optionsRaw) {
+            foreach ($option in @($optionsRaw)) {
+                if (-not (Test-PulseSettingsCatalogNode -Node $option)) { continue }
 
-                $optionId = [string] $option.itemId
+                $optionIdRaw = Get-PulseSettingsCatalogValueProperty -Node $option -PropertyName 'itemId'
+                $optionId = if ($null -ne $optionIdRaw) { [string] $optionIdRaw } else { $null }
                 if ([string]::IsNullOrEmpty($optionId)) { continue }
 
-                $optionLabel = $null
-                if ($option.PSObject.Properties['displayName']) { $optionLabel = [string] $option.displayName }
+                $optionLabelRaw = Get-PulseSettingsCatalogValueProperty -Node $option -PropertyName 'displayName'
+                $optionLabel = if ($null -ne $optionLabelRaw) { [string] $optionLabelRaw } else { $null }
 
                 $optionLabels[$optionId] = $optionLabel
             }
         }
 
         $isSecretCapable = $false
-        if ($definition.PSObject.Properties['valueDefinition'] -and $null -ne $definition.valueDefinition) {
-            $valueDefinition = $definition.valueDefinition
-            if ($valueDefinition -is [System.Management.Automation.PSObject] -and $valueDefinition.PSObject.Properties['@odata.type']) {
-                $odataType = [string] $valueDefinition.'@odata.type'
+        $valueDefinition = Get-PulseSettingsCatalogValueProperty -Node $definition -PropertyName 'valueDefinition'
+        if (Test-PulseSettingsCatalogNode -Node $valueDefinition) {
+            $odataTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $valueDefinition -PropertyName '@odata.type'
+            if ($null -ne $odataTypeRaw) {
+                $odataType = [string] $odataTypeRaw
                 if ($odataType -match '(?i)SecretSettingValueDefinition$') {
                     $isSecretCapable = $true
                 }
