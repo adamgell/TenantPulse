@@ -537,7 +537,7 @@ function Assert-PulseEvidenceNoDuplicates {
 
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     foreach ($item in $Evidence) {
-        # ` ` (NUL) can never appear in a SortKey/Identity string built from normal
+        # [char]0 (NUL) can never appear in a SortKey/Identity string built from normal
         # text, so it is a safe, simple tuple separator for the uniqueness check.
         $tupleKey = "$($item.SortKey)$([char]0)$($item.Identity)"
         if (-not $seen.Add($tupleKey)) {
