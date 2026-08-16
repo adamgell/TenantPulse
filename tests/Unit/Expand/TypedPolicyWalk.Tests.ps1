@@ -225,6 +225,45 @@ Describe 'ConvertTo-PulseTypedPolicyRows' {
         $dayRow.redacted | Should -BeFalse
     }
 
+    # T2.3 rider (Task 3): the real, sanitized windowsUpdateForBusinessConfiguration
+    # fixture's own installationSchedule is null (an unpopulated shell - see the GOLDEN
+    # test above), which never exercises the full container-row + all-4-sub-property-rows
+    # path (TypedPolicyMaps.psd1's own installationSchedule.Nested.Properties: 4 entries -
+    # scheduledInstallDay, scheduledInstallTime, activeHoursStart, activeHoursEnd). This
+    # synthetic policy fills every one of those 4 with a non-null value.
+    It 'a Nested object property (windowsUpdateForBusinessConfiguration.installationSchedule) POPULATED with all 4 sub-properties walks to the container row plus exactly 4 sub-property rows' {
+        $entry = Get-PulseDeviceConfigTypeEntry -ODataType '#microsoft.graph.windowsUpdateForBusinessConfiguration'
+        $policy = [pscustomobject]@{
+            '@odata.type'        = '#microsoft.graph.windowsUpdateForBusinessConfiguration'
+            id                   = 'w2'
+            installationSchedule = [pscustomobject]@{
+                scheduledInstallDay  = 'tuesday'
+                scheduledInstallTime = '03:30:00'
+                activeHoursStart     = '08:00:00'
+                activeHoursEnd       = '17:00:00'
+            }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $policy, $entry {
+            param($policy, $entry)
+            ConvertTo-PulseTypedPolicyRows -PolicyId 'w2' -PolicyType 'deviceConfiguration' -Policy $policy -TypeEntry $entry -Assignments @()
+        }
+
+        $containerRow = $result.Rows | Where-Object { $_.settingPath -eq 'installationSchedule' }
+        $containerRow | Should -Not -BeNullOrEmpty
+        $containerRow.value | Should -BeNullOrEmpty
+        $containerRow.redacted | Should -BeFalse
+
+        $subRows = @($result.Rows | Where-Object { $_.settingPath -like 'installationSchedule/*' })
+        $subRows.Count | Should -Be 4
+
+        ($result.Rows | Where-Object { $_.settingPath -eq 'installationSchedule/scheduledInstallDay' }).value | Should -Be 'tuesday'
+        ($result.Rows | Where-Object { $_.settingPath -eq 'installationSchedule/scheduledInstallTime' }).value | Should -Be '03:30:00'
+        ($result.Rows | Where-Object { $_.settingPath -eq 'installationSchedule/activeHoursStart' }).value | Should -Be '08:00:00'
+        ($result.Rows | Where-Object { $_.settingPath -eq 'installationSchedule/activeHoursEnd' }).value | Should -Be '17:00:00'
+        $subRows | ForEach-Object { $_.redacted | Should -BeFalse }
+    }
+
     It 'a Nested property whose raw value is absent (unpopulated shell) emits only the container row, not a gap/throw' {
         $entry = Get-PulseDeviceConfigTypeEntry -ODataType '#microsoft.graph.windows10CustomConfiguration'
         $policy = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.windows10CustomConfiguration'; id = 'c2' }

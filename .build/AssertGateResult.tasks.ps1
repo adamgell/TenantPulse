@@ -108,7 +108,20 @@
 # across two independent stores, the redaction-sentinel-never-reaches-disk regression),
 # and Invoke-PulseConflictDetection/Resolve-PulseConflictSnapshotExpansion's own
 # per-family-availability-vs-corruption-gap and -FromSnapshot verify-or-rederive coverage.
-$script:tenantPulseGateMinimumTests = 1063
+# 1063 -> 1079 (Task 74 fix wave): +16 - CI BLOCKER fix's own dual-branch byte-identity
+# coverage for ConvertFrom-PulseJsonPreservingStrings (native -DateKind branch forced,
+# JsonDocument fallback branch forced regardless of local PS version, both-branches-
+# byte-identical, Export-PulseReport's own round-trip through the forced fallback: +4);
+# the windowsUpdateForBusinessConfiguration installationSchedule POPULATED-with-all-4-
+# sub-properties golden-adjacent test (+1); the new Publish-PulseExpansionRows dual-owned
+# ALL-POLICIES-FAILED unit suite, settingsCatalog + compliance + deviceConfiguration caller
+# idioms (+3); and the -FromSnapshot re-derivation rider fixes - NEVER-EXPANDED/NO-
+# CAPTURED-PAYLOADS skip-cleanly and STALE-ENTRY-FAILURE-sets-Failed, for both the
+# settingsCatalog resolver (+2) and the typed-policy compliance family resolver (+2,
+# plus +1 for the mixed-captured-state control that proves the skip does not over-fire) -
+# see task-74fix-report.md for the full accounting. Matches .github/workflows/ci.yml's own
+# -MinimumTests, reconciled separately by the peer session already owning that file.
+$script:tenantPulseGateMinimumTests = 1079
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

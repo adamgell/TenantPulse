@@ -116,18 +116,84 @@ Describe 'Resolve-PulseTypedPolicySnapshotExpansion' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
 
-    It 'a missing per-policy assignment payload gaps that policy on re-derivation rather than throwing' {
+    # Rider fix (a): when NO policy in the family has ANY captured per-policy assignment
+    # payload (a fully virgin family - expansion was never attempted, nothing was ever
+    # captured for it), re-derivation is a guaranteed-futile attempt (every policy would
+    # gap) - skipped cleanly, no manifest entry written at all, instead of the OLD
+    # behavior of attempting anyway and recording NotExpanded. See this file's own
+    # docstring rider fix (a) section.
+    It 'NEVER-EXPANDED, NO CAPTURED PAYLOADS (rider fix a): skips re-derivation cleanly when zero policies in the family have any captured payload' {
         $policy = New-TestCompliancePolicyForSnapshot -Id 'p4'
-        # Deliberately no 'complianceAssignments-p4' dataset written.
+        # Deliberately no 'complianceAssignments-p4' dataset written, and no OTHER
+        # compliance policy's assignment payload exists either - the whole family is
+        # virgin.
         InModuleScope TenantPulse -ArgumentList $script:store, $policy {
             param($store, $policy)
             Write-PulseDataset -Store $store -Name 'deviceCompliancePolicies' -Data @($policy) -ApiVersion 'v1.0' -Status 'Collected'
+        }
+        Mock Invoke-PulseTypedPolicyExpansion -ModuleName TenantPulse { throw 'Invoke-PulseTypedPolicyExpansion must never be called - this is the skip-cleanly branch (rider fix a).' }
+
+        InModuleScope TenantPulse -ArgumentList $script:store { param($store) Resolve-PulseTypedPolicySnapshotExpansion -Store $store }
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        ($manifest.expansions.PSObject.Properties.Name -contains 'compliance') | Should -BeFalse
+        Should-Invoke Invoke-PulseTypedPolicyExpansion -ModuleName TenantPulse -Times 0 -Exactly
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
+    # Distinguishes rider fix (a)'s "whole family virgin" skip from an ordinary per-policy
+    # gap: as long as AT LEAST ONE policy in the family has a captured payload, this is not
+    # a virgin family, and a re-derivation attempt IS made - a policy lacking its own
+    # payload still gaps individually, exactly like a live fetch failure would.
+    It 'a captured payload for at least one OTHER policy in the family still triggers re-derivation, gapping the one policy lacking its own payload' {
+        $policyWithPayload = New-TestCompliancePolicyForSnapshot -Id 'p5'
+        $policyWithoutPayload = New-TestCompliancePolicyForSnapshot -Id 'p6'
+        $assignments = @([pscustomobject]@{ id = 'a5'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'g5' } })
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $policyWithPayload, $policyWithoutPayload, $assignments {
+            param($store, $policyWithPayload, $policyWithoutPayload, $assignments)
+            Write-PulseDataset -Store $store -Name 'deviceCompliancePolicies' -Data @($policyWithPayload, $policyWithoutPayload) -ApiVersion 'v1.0' -Status 'Collected'
+            Write-PulseDataset -Store $store -Name 'complianceAssignments-p5' -Data $assignments -ApiVersion 'v1.0' -Status 'Collected'
+            # Deliberately no 'complianceAssignments-p6' dataset.
         }
 
         InModuleScope TenantPulse -ArgumentList $script:store { param($store) Resolve-PulseTypedPolicySnapshotExpansion -Store $store }
 
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
-        $manifest.expansions.compliance.status | Should -Be 'NotExpanded'
+        $manifest.expansions.compliance.status | Should -Be 'Partial'
+        $manifest.expansions.compliance.gaps.policyId | Should -Contain 'p6'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
+    # Rider fix (b): an existing Expanded entry for one family that fails hash
+    # verification is tracked as stale; if the re-derivation attempted to replace it then
+    # throws, the stale entry must not survive claiming 'Expanded' for a file already
+    # proven untrustworthy.
+    It 'STALE-ENTRY FAILURE (rider fix b): a hash-invalid Expanded compliance entry whose re-derivation then throws is overwritten to Failed' {
+        $policy = New-TestCompliancePolicyForSnapshot -Id 'p7'
+        $assignments = @([pscustomobject]@{ id = 'a7'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'g7' } })
+        $typeMap = InModuleScope TenantPulse { $moduleBase = (Get-Module TenantPulse).ModuleBase; (Import-PowerShellDataFile -LiteralPath (Join-Path $moduleBase 'Data/TypedPolicyMaps.psd1')).compliance }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $policy, $assignments, $typeMap {
+            param($store, $policy, $assignments, $typeMap)
+            Write-PulseDataset -Store $store -Name 'deviceCompliancePolicies' -Data @($policy) -ApiVersion 'v1.0' -Status 'Collected'
+            Write-PulseDataset -Store $store -Name 'complianceAssignments-p7' -Data $assignments -ApiVersion 'v1.0' -Status 'Collected'
+            Invoke-PulseTypedPolicyExpansion -Store $store -Policies @($policy) -PolicyType 'compliance' -TypeMap $typeMap `
+                -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance' -FromCapturedPayloads $true
+        }
+
+        $manifestBefore = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifestBefore.expansions.compliance.status | Should -Be 'Expanded'
+        $expandedFilePath = Join-Path $script:store.Root $manifestBefore.expansions.compliance.path
+        Add-Content -LiteralPath $expandedFilePath -Value 'TAMPERED' -NoNewline
+
+        Mock Invoke-PulseTypedPolicyExpansion -ModuleName TenantPulse { throw 'simulated re-derivation failure' }
+
+        { InModuleScope TenantPulse -ArgumentList $script:store { param($store) Resolve-PulseTypedPolicySnapshotExpansion -Store $store } } | Should -Not -Throw
+
+        $manifestAfter = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifestAfter.expansions.compliance.status | Should -Be 'Failed'
+        $manifestAfter.expansions.compliance.reason | Should -Match 'simulated re-derivation failure'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
 }
