@@ -20,6 +20,15 @@
     all, so there is nothing to redact there) - omitting either leaves row content exactly
     as GraphKit returned it minus the provenance stamps, matching this function's
     pre-existing behavior for every caller that has no tenant id in scope.
+
+    -Depth (Task 2.2 depth-alignment fix): forwarded straight through to
+    ConvertTo-PulseCanonicalJson's own -Depth. Defaults to 64, unchanged for every existing
+    caller. Added specifically because Invoke-PulseSettingsCatalogPolicy's raw
+    `configurationPolicySettings-<policyId>` write can legitimately need MORE than 64 raw
+    JSON node levels for a walker-valid Settings Catalog tree (raw-node depth counts every
+    object AND array, not one level per settingInstance - see ConvertTo-PulseSettingRows.ps1's
+    own $script:PulseSettingsCatalogWalkerMaxDepth docstring) - a caller that does not pass
+    -Depth explicitly gets the exact same default this function has always had.
 #>
 
 function Write-PulseDataset {
@@ -58,7 +67,11 @@ function Write-PulseDataset {
         [Parameter()]
         [AllowNull()]
         [AllowEmptyString()]
-        [string] $Pseudonym
+        [string] $Pseudonym,
+
+        [Parameter()]
+        [ValidateRange(1, 1000)]
+        [int] $Depth = 64
     )
 
     Assert-PulseDatasetName -Name $Name
@@ -81,7 +94,7 @@ function Write-PulseDataset {
     if (-not [string]::IsNullOrEmpty($TenantId) -and -not [string]::IsNullOrEmpty($Pseudonym)) {
         $items = Protect-PulseGraphRowTenantId -Data $items -TenantId $TenantId -Pseudonym $Pseudonym
     }
-    $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $items
+    $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $items -Depth $Depth
     $datasetPath = Join-Path $Store.DatasetsPath "$Name.json"
 
     # Hash-what-you-write (post-review fix, omp finding #2): compute the byte array ONCE

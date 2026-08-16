@@ -98,4 +98,22 @@
     # on both v1.0 and beta this week.
     organizationMdmAuthority  = @{ Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; IdFromDataset = 'organization' }
     entraDevices               = @{ Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0' }
+
+    # Task 2.2 (Settings Catalog expansion, -ExpandSettings): declared here so the STATIC
+    # read-only gate (tests/QA/ReadOnly.tests.ps1, which walks every key in this file) also
+    # proves these two descriptors are Read/Safe - the same "single pivot, no documented
+    # exception" this file is for every other Get-GraphObject call TenantPulse ever makes.
+    # NEITHER is consumed by the ordinary check-driven Invoke-PulseCollection loop (no
+    # T2.2-era check references either name in its own Data.Datasets, and
+    # configurationPolicySettings needs a PER-POLICY id, not the single first-row
+    # IdFromDataset semantics Invoke-PulseCollection implements) - both are instead fetched
+    # directly by the Settings Catalog expansion pipeline
+    # (Invoke-PulseSettingsCatalogExpansionPipeline for configurationPolicies,
+    # Invoke-PulseSettingsCatalogPolicy - one call per policy - for
+    # configurationPolicySettings), each of which calls Assert-PulseReadOnlyDescriptor
+    # itself against the SAME {Type;Operation} pair declared here before ever calling
+    # Get-GraphObject, exactly like Invoke-PulseCollection does for every check-driven
+    # dataset.
+    configurationPolicies       = @{ Type = 'ConfigurationPolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+    configurationPolicySettings = @{ Type = 'ConfigurationPolicySetting'; Operation = 'ListBeta'; ApiVersion = 'beta' }
 }

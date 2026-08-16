@@ -6,6 +6,16 @@
     invariant-culture number formatting. The same object graph - regardless of the order its
     properties were inserted in - always produces byte-identical output, which is what lets
     dataset hashes and canonical-JSON diffs be meaningful.
+
+    -Depth ValidateRange raised 100 -> 1000 (Task 2.2 depth-alignment fix): a raw Settings
+    Catalog payload counts depth per RAW NODE (every object AND array is its own level),
+    the SAME counting style Protect-PulseSettingsCatalogSecretPayload uses - a walker-valid
+    64-level settingInstance chain (ConvertTo-PulseSettingRows's own budget) can need up to
+    ~255 raw levels here in the worst case (see ConvertTo-PulseSettingRows.ps1's own
+    $script:PulseSettingsCatalogWalkerMaxDepth docstring for the exact accounting).
+    Write-PulseDataset's own -Depth pass-through (see its docstring) needs to be able to
+    exceed the OLD 100-cap for exactly this caller; every other existing caller keeps using
+    the unchanged default of 64, so this is a ceiling raise only, not a default change.
 #>
 
 function ConvertTo-PulseCanonicalJson {
@@ -17,7 +27,7 @@ function ConvertTo-PulseCanonicalJson {
         [object] $InputObject,
 
         [Parameter()]
-        [ValidateRange(1, 100)]
+        [ValidateRange(1, 1000)]
         [int] $Depth = 64
     )
 

@@ -129,6 +129,22 @@
 # alignment - see PulseSettingsCatalogValueRedactionMaxDepthMultiplier below.
 $script:PulseSettingsCatalogWalkerMaxDepth = 64
 
+# RAW-NODE DEPTH BUDGET, shared by every reader of the SAME raw payload that counts depth
+# per raw JSON node (object AND array each cost one level) rather than per settingInstance
+# level - Protect-PulseSettingsCatalogSecretPayload's own default -MaxDepth AND
+# Write-PulseDataset's -Depth override for the raw configurationPolicySettings write (see
+# Invoke-PulseSettingsCatalogPolicy.ps1). Both derive from THIS one constant so they can
+# never independently drift back out of alignment with each other, or with the walker's
+# own $script:PulseSettingsCatalogWalkerMaxDepth above. A worst-case
+# GroupSettingCollection/ChoiceSettingCollection occurrence costs 4 raw levels per walker
+# level; the fixed +16 headroom above that 4x multiplier is empirically tuned (reproduced
+# regression: a chain exactly AT the walker's own budget still tripped a bare 4x-multiplier
+# counter with no buffer - the per-call fixed overhead outside the repeating per-level
+# pattern, e.g. each row's own wrapper object and its `settingInstance` property lookup, is
+# real but does not scale with depth, so a multiplier alone is one off-by-a-few short at
+# the exact boundary).
+$script:PulseSettingsCatalogRawPayloadMaxDepth = ($script:PulseSettingsCatalogWalkerMaxDepth * 4) + 16
+
 # The five - and only five - known Settings Catalog instance kinds, matched as EXACT,
 # case-insensitive, fully-qualified strings (P1-9 - see this file's own docstring for why a
 # suffix regex is the reproduced bypass this replaces).
