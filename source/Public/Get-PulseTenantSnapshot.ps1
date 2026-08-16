@@ -245,6 +245,13 @@ function Get-PulseTenantSnapshot {
         # own VOID RETURN docstring section for why an uncaptured call here previously made
         # this function return TWO objects instead of one.
         $null = Invoke-PulseSettingsCatalogExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
+
+        # Task 2.3: compliance + legacy typed-policy expansion. Reads back
+        # deviceCompliancePolicies/deviceConfigurations - already collected by the ordinary
+        # check-driven Invoke-PulseCollection call above - and fans out assignments (both
+        # descriptors already released, unlike T2.2's own deferred assignments). Same void-
+        # return discipline as the call above - see this file's own docstring.
+        $null = Invoke-PulseTypedPolicyExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
     }
 
     return $store

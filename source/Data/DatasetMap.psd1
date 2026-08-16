@@ -116,4 +116,17 @@
     # dataset.
     configurationPolicies       = @{ Type = 'ConfigurationPolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
     configurationPolicySettings = @{ Type = 'ConfigurationPolicySetting'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+
+    # Task 2.3 (compliance + legacy typed-policy expansion, -ExpandSettings): declared here
+    # for the exact same reason as the two Task 2.2 entries directly above - so the STATIC
+    # read-only gate proves both are Read/Safe - and consumed the exact same way: NOT
+    # through the ordinary check-driven Invoke-PulseCollection loop (a PER-POLICY id, not
+    # IdFromDataset's single first-row semantics), but fetched directly, once per policy,
+    # by Invoke-PulseTypedPolicyExpansion, which calls Assert-PulseReadOnlyDescriptor
+    # itself against these SAME {Type;Operation} pairs before ever calling Get-GraphObject.
+    # Both descriptors are ALREADY RELEASED in GraphKit 0.1.1 (unlike T2.2's own
+    # ConfigurationPolicyAssignment, still G-gate-pending) - see the plan's own G-gate
+    # section for why T2.3's assignment fan-out is real, not deferred.
+    deviceCompliancePolicyAssignments = @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+    deviceConfigurationAssignments    = @{ Type = 'DeviceConfigurationAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
 }
