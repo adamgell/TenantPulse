@@ -30,16 +30,26 @@
            System.Net.Http.HttpRequestException (or similar) carries when GraphKit's
            transport surfaces the raw HTTP response. 403 -> PermissionDenied, 401 ->
            AuthFailure, anything else numeric -> Failed.
-        2. The rendered exception message, pattern-matched (case-insensitively) for an
+        2. -SupplementalStatusCode, an OPTIONAL out-of-band status code the caller already
+           recovered itself (see Get-PulseGraphFailureStatusCode). Confirmed against the
+           Ivy24 lab tenant (Task 1.11 live gate): Get-GraphObject's own throw carries
+           neither a structured status nor '403'/'forbidden' text - see that function's
+           docstring for the full story - so signal (1) above never fires against a real
+           Get-GraphObject failure and signal (3) below never matches either.
+           -SupplementalStatusCode is the collector's channel for handing this function the
+           status code GraphKit still knows (via a supplemental Invoke-GraphOperation call)
+           but Get-GraphObject itself discarded. Same 403/401/other-numeric mapping as
+           signal (1); only consulted when signal (1) found nothing.
+        3. The rendered exception message, pattern-matched (case-insensitively) for an
            AADSTS error code, "token acquisition" or "unauthorized" -> AuthFailure; '403',
-           'forbidden' or 'accessdenied' -> PermissionDenied - the last-resort fallback for
-           a plain `throw "<text>"` that carries no structured status at all (exactly the
-           shape Get-GraphObject's own "Outcome/Certainty" failure message has today - see
-           its docstring).
+           'forbidden' or 'accessdenied' -> PermissionDenied - a last-resort fallback for
+           a plain `throw "<text>"` that carries no structured status at all and whose
+           caller had no -SupplementalStatusCode to offer either.
 
-    TODO(Task 1.11): once GraphKit's live error shapes are confirmed against a real
-    tenant, tighten this to the authoritative property and drop (or narrow) the
-    message-text fallback.
+    Kept even though live confirmation shows Get-GraphObject's real throw never satisfies
+    signals (1) or (3): a message-text match still catches errors from anything else in
+    the call chain (e.g. Get-GraphContext's own auth failures, or a future GraphKit
+    version) that DOES render status text into its message.
 #>
 
 function Get-PulseFailureClass {
@@ -48,7 +58,16 @@ function Get-PulseFailureClass {
     param(
         [Parameter(Mandatory)]
         [AllowNull()]
-        [System.Management.Automation.ErrorRecord] $ErrorRecord
+        [System.Management.Automation.ErrorRecord] $ErrorRecord,
+
+        # Out-of-band status code the caller already recovered (see
+        # Get-PulseGraphFailureStatusCode). Optional: omitted or $null falls through to
+        # the ErrorRecord-only signals exactly as before this parameter existed. Named
+        # -SupplementalStatusCode rather than -StatusCode deliberately - see the note
+        # beside its only use below.
+        [Parameter()]
+        [AllowNull()]
+        [System.Nullable[int]] $SupplementalStatusCode
     )
 
     # Never throws: a TryParse-based, exception-swallowing conversion from an arbitrary
@@ -99,6 +118,16 @@ function Get-PulseFailureClass {
                     $statusCode = ConvertTo-PulseNullableStatusCode -Value $directStatusProperty.Value
                 }
             }
+        }
+
+        # Signal (2): the caller's out-of-band status code, only consulted when the
+        # ErrorRecord itself carried nothing structured. NOTE: the parameter is named
+        # -SupplementalStatusCode, not -StatusCode - PowerShell variable names are
+        # case-INSENSITIVE, so a same-spelled parameter (any casing) would collide with
+        # the local $statusCode computed above and silently clobber it back to $null on
+        # every call, exactly the bug this comment is here to prevent reintroducing.
+        if ($null -eq $statusCode -and $null -ne $SupplementalStatusCode) {
+            $statusCode = $SupplementalStatusCode
         }
 
         if ($statusCode -eq 403) {

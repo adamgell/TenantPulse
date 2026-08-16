@@ -168,7 +168,14 @@ function Invoke-PulseCollection {
             Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Collected'
             $collectedRows[$entry.Dataset] = $rows
         } catch {
-            $failureClass = Get-PulseFailureClass -ErrorRecord $_
+            # Get-GraphObject's own throw carries no structured status and no '403'/
+            # 'forbidden' text (confirmed live against Ivy24 - see
+            # Get-PulseGraphFailureStatusCode's docstring), so Get-PulseFailureClass's
+            # ErrorRecord-only signals cannot see a 403/401 here. Recover the status code
+            # GraphKit still knows, via one supplemental Invoke-GraphOperation read-only
+            # call against the same descriptor, and hand it in as an out-of-band signal.
+            $supplementalStatusCode = Get-PulseGraphFailureStatusCode -Context $Context -Type $entry.Type -Operation $entry.Operation -Parameters $extraParameters
+            $failureClass = Get-PulseFailureClass -ErrorRecord $_ -SupplementalStatusCode $supplementalStatusCode
 
             if ($failureClass -eq 'PermissionDenied') {
                 $requiredPermissions = $null

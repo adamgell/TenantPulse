@@ -398,6 +398,155 @@ Describe 'Get-PulseFailureClass' {
 
         $class | Should -Be 'Failed'
     }
+
+    # Task 1.11 live gate (Ivy24 lab tenant): Get-GraphObject's real throw is the fixed
+    # message "Get-GraphObject failed for '<Type>/<Operation>': Outcome '<Outcome>',
+    # Certainty '<Certainty>'." - no Response/StatusCode property, no '403'/'forbidden'
+    # text. Every signal above this point is dead against that real shape; -StatusCode is
+    # the collector's channel for the status code it recovers out-of-band (see
+    # Get-PulseGraphFailureStatusCode) and hands in here instead.
+    It 'classifies PermissionDenied from -SupplementalStatusCode 403 when the ErrorRecord carries no structured status or matching text' {
+        $errorRecord = $null
+        try {
+            throw "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known'."
+        } catch {
+            $errorRecord = $_
+        }
+
+        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
+            param($errorRecord)
+            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode 403
+        }
+
+        $class | Should -Be 'PermissionDenied'
+    }
+
+    It 'classifies AuthFailure from -SupplementalStatusCode 401 when the ErrorRecord carries no structured status or matching text' {
+        $errorRecord = $null
+        try {
+            throw "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known'."
+        } catch {
+            $errorRecord = $_
+        }
+
+        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
+            param($errorRecord)
+            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode 401
+        }
+
+        $class | Should -Be 'AuthFailure'
+    }
+
+    It 'prefers the ErrorRecord''s own structured StatusCode over a conflicting -StatusCode override' {
+        $exception = [System.Management.Automation.RuntimeException]::new('boom')
+        Add-Member -InputObject $exception -NotePropertyName 'StatusCode' -NotePropertyValue 401
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Boom', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
+
+        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
+            param($errorRecord)
+            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode 403
+        }
+
+        $class | Should -Be 'AuthFailure'
+    }
+
+    It 'ignores a $null -StatusCode exactly as if it were omitted' {
+        $errorRecord = $null
+        try {
+            throw "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known'."
+        } catch {
+            $errorRecord = $_
+        }
+
+        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
+            param($errorRecord)
+            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode $null
+        }
+
+        $class | Should -Be 'Failed'
+    }
+}
+
+Describe 'Get-PulseGraphFailureStatusCode' {
+    It 'returns the last Telemetry attempt''s StatusCode from a supplemental Invoke-GraphOperation call' {
+        Mock Invoke-GraphOperation -ModuleName TenantPulse {
+            [pscustomobject]@{
+                PSTypeName = 'GraphKit.OperationResult'
+                Outcome    = 'Failed'
+                Certainty  = 'Known'
+                Telemetry  = @(
+                    [pscustomobject]@{ Attempt = 1; StatusCode = 429 }
+                    [pscustomobject]@{ Attempt = 2; StatusCode = 403 }
+                )
+            }
+        }
+
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $code = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
+        }
+
+        $code | Should -Be 403
+    }
+
+    It 'passes -Parameters through to Invoke-GraphOperation so a Get-scoped classification probe matches the failed read' {
+        Mock Invoke-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'abc' } {
+            [pscustomobject]@{ Telemetry = @([pscustomobject]@{ StatusCode = 403 }) }
+        }
+
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $code = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseGraphFailureStatusCode -Context $context -Type 'ManagedDevice' -Operation 'Get' -Parameters @{ id = 'abc' }
+        }
+
+        $code | Should -Be 403
+    }
+
+    It 'returns $null (never throws) when the supplemental Invoke-GraphOperation call itself fails' {
+        Mock Invoke-GraphOperation -ModuleName TenantPulse { throw 'transient network error' }
+
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+
+        {
+            InModuleScope TenantPulse -ArgumentList $context {
+                param($context)
+                Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
+            }
+        } | Should -Not -Throw
+
+        $code = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
+        }
+
+        $code | Should -BeNullOrEmpty
+    }
+
+    It 'returns $null when the result carries no Telemetry' {
+        Mock Invoke-GraphOperation -ModuleName TenantPulse { [pscustomobject]@{ Outcome = 'Failed' } }
+
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $code = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
+        }
+
+        $code | Should -BeNullOrEmpty
+    }
+
+    It 'returns $null when Telemetry is an empty array' {
+        Mock Invoke-GraphOperation -ModuleName TenantPulse { [pscustomobject]@{ Telemetry = @() } }
+
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $code = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
+        }
+
+        $code | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'Protect-PulseReason' {
@@ -451,6 +600,36 @@ Describe 'Invoke-PulseCollection' {
 
     AfterEach {
         Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # Task 1.11 live gate regression (Ivy24 lab tenant, no Policy.Read.All grant): a real
+    # Get-GraphObject 403 throws ONLY "Get-GraphObject failed for '<Type>/<Operation>':
+    # Outcome 'Failed', Certainty 'Known'." - no '403 Forbidden' text, unlike every other
+    # test in this Describe block, which mocks that text into the thrown message. Without
+    # the supplemental Invoke-GraphOperation classification call this dataset landed
+    # Failed, not the Skipped/permission-denied honest-degradation contract the design
+    # promises - this test pins the fix against the real shape, not the assumed one.
+    It 'classifies a real-shaped Get-GraphObject 403 (no status text in the message) as Skipped/permission-denied via the supplemental status-code probe' {
+        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' -RequiredPermissions @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { throw "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known'." }
+        Mock Invoke-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } {
+            [pscustomobject]@{ Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = 403 }) }
+        }
+
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
+        )
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
+            param($store, $manifest, $context)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'contoso' -TenantPseudonym 'tp-abc123'
+        }
+
+        $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $result.datasets.conditionalAccessPolicies.status | Should -Be 'Skipped'
+        $result.datasets.conditionalAccessPolicies.reason | Should -Match '^permission-denied:'
+        $result.datasets.conditionalAccessPolicies.reason | Should -Match 'Policy.Read.All'
     }
 
     It 'writes Collected for a clean read, Skipped with a permission reason for a 403, and Failed for a 500 - each dataset attempted independently' {
