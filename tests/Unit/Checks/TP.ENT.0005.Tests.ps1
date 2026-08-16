@@ -102,6 +102,22 @@ Describe 'TP.ENT.0005 - MFA is required for admin roles by an enforced Condition
         $finding.status | Should -Be 'Pass'
     }
 
+    It 'Pass: a single enabled policy with includeUsers "All" covers all 9 required roles by definition' {
+        $allUsersPolicy = [pscustomobject]@{
+            id            = 'ca-all-users-mfa'
+            displayName   = 'MFA For All Users'
+            state         = 'enabled'
+            conditions    = [pscustomobject]@{ users = [pscustomobject]@{ includeUsers = @('All') } }
+            grantControls = [pscustomobject]@{ builtInControls = @('mfa') }
+        }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($allUsersPolicy) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+    }
+
     It 'Pass: coverage split across two enabled policies still satisfies the union' {
         $half1 = $script:allNineRoles[0..4]
         $half2 = $script:allNineRoles[5..8]

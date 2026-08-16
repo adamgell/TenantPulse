@@ -49,12 +49,26 @@ BeforeAll {
     }
 
     function script:New-PulseCaPolicy {
-        param([string] $DisplayName, [string] $State = 'enabled', [string[]] $ExcludeUsers = @(), [string[]] $IncludeUsers = @())
+        param(
+            [string] $DisplayName,
+            [string] $State = 'enabled',
+            [string[]] $ExcludeUsers = @(),
+            [string[]] $IncludeUsers = @(),
+            [string[]] $IncludeGroups = @(),
+            [string[]] $IncludeRoles = @()
+        )
         [pscustomobject]@{
             id          = "ca-$DisplayName"
             displayName = $DisplayName
             state       = $State
-            conditions  = [pscustomobject]@{ users = [pscustomobject]@{ excludeUsers = $ExcludeUsers; includeUsers = $IncludeUsers } }
+            conditions  = [pscustomobject]@{
+                users = [pscustomobject]@{
+                    excludeUsers  = $ExcludeUsers
+                    includeUsers  = $IncludeUsers
+                    includeGroups = $IncludeGroups
+                    includeRoles  = $IncludeRoles
+                }
+            }
         }
     }
 
@@ -176,6 +190,34 @@ Describe 'TP.ENT.0003 - Break-glass accounts exist and are excluded from Conditi
     It 'Fail: a policy scoped to includeUsers "All" CAN reach the account and is not exempted' {
         $policies = @(
             New-PulseCaPolicy -DisplayName 'All Users Policy' -IncludeUsers @('All') -ExcludeUsers @()
+        )
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0003' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = $policies }
+            @{ Name = 'directoryRoleAssignments'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
+        ) -Context @{ BreakGlassAccounts = @($script:bg1Guid) }
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    # ---- fail-closed regression: includeGroups/includeRoles must not be exempted ----
+
+    It 'Fail: a policy scoped via includeGroups (not naming the break-glass account, includeUsers scoped) is NOT exempted' {
+        $policies = @(
+            New-PulseCaPolicy -DisplayName 'Scoped Via Group' -IncludeUsers @($script:bg2Guid) -IncludeGroups @('33333333-3333-3333-3333-333333333333') -ExcludeUsers @()
+        )
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0003' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = $policies }
+            @{ Name = 'directoryRoleAssignments'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
+        ) -Context @{ BreakGlassAccounts = @($script:bg1Guid) }
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: a policy scoped via includeRoles (not naming the break-glass account, includeUsers scoped) is NOT exempted' {
+        $policies = @(
+            New-PulseCaPolicy -DisplayName 'Scoped Via Role' -IncludeUsers @($script:bg2Guid) -IncludeRoles @('62e90394-69f5-4237-9190-012177145e10') -ExcludeUsers @()
         )
 
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0003' -Datasets @(

@@ -462,11 +462,10 @@ jobs:
           # reuse), +2 ConvertTo-PulseCanonicalJson (Kind=Unspecified DateTime, Kind=Utc
           # unchanged), +4 Get-PulseSnapshotStore (datasets:null, datasets:"x",
           # createdUtc:"banana", producer:"x" type-validation holes), +1
-          # Get-PulseTenantSnapshot (-Path alias positive case), +1 TP.ENT.0003
-          # (includeGroups/includeRoles no longer exempted), +1 evaluator (novel dataset
-          # status fails closed), +1 TP.INT.0005 (malformed createdUtc -> Error), +2
-          # Get-PulseFailureClass/Get-PulseGraphFailureStatusCode (enum-typed status code
-          # handling, x2 call sites), +1 Invoke-PulseCollection (supplemental
+          # Get-PulseTenantSnapshot (-Path alias positive case), +1 evaluator (novel
+          # dataset status fails closed), +1 TP.INT.0005 (malformed createdUtc -> Error),
+          # +2 Get-PulseFailureClass/Get-PulseGraphFailureStatusCode (enum-typed status
+          # code handling, x2 call sites), +1 Invoke-PulseCollection (supplemental
           # status-recovery-failure "(status unknown)" marker), +1 Invoke-PulseCollection
           # (auth-abort loop preserves a remaining Pending dataset's own reason), +1
           # Get-PulseTenantSnapshot (same tenant pseudonymizes identically across two
@@ -475,10 +474,21 @@ jobs:
           # prior single-file re-hash test's assertions - plus SecretScan.tests.ps1's own
           # per-file auto-generated cases for every touched/new source and script file, and
           # the roots-extension gain from scanning scripts/, build.ps1, build.yaml,
-          # README.md, CHANGELOG.md and .github/workflows/ci.yml for the first time. This
-          # minimum must keep ratcheting up as check/function test suites are added in
-          # later tasks.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 702 -AllowedSkips 0 -AllowNotRun 0
+          # README.md, CHANGELOG.md and .github/workflows/ci.yml for the first time.
+          # NOTE: this same comment previously claimed "+1 TP.ENT.0003
+          # (includeGroups/includeRoles no longer exempted)" for the 667 -> 702 step - that
+          # test did not actually exist; the fail-closed check logic landed without
+          # regression coverage. Corrected below, not backdated.
+          # 702 -> 705 (wave re-review, integrity gap): +2 TP.ENT.0003 (a policy scoped via
+          # includeGroups, and separately via includeRoles - not naming the break-glass
+          # account, includeUsers scoped away from it - is NOT exempted; fails closed,
+          # matching Test-PulseBreakGlassExcluded's actual logic; both verified red against
+          # the pre-fix includeUsers-only exemption before landing), +1 TP.ENT.0005 (a
+          # single enabled policy with includeUsers='All' covers all 9 admin roles by
+          # definition -> Pass; verified red against the pre-fix includeRoles-only coverage
+          # check). This minimum must keep ratcheting up as check/function test suites are
+          # added in later tasks.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 705 -AllowedSkips 0 -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
