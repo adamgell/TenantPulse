@@ -29,7 +29,10 @@
 # review-fix addendum for the full accounting. Matches .github/workflows/ci.yml's own
 # -MinimumTests, which must be bumped together with this value - see this file's own
 # docstring for why the same ratchet exists in both places.
-$script:tenantPulseGateMinimumTests = 905
+# 905 -> 912 (Task 2.2 re-review fix): +7 - IsNullOrWhiteSpace policy-id prevalidation
+# (a whitespace-only id previously passed IsNullOrEmpty and reached Get-GraphObject) plus
+# its own WHITESPACE-ID regression test.
+$script:tenantPulseGateMinimumTests = 912
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

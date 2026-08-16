@@ -384,7 +384,11 @@ function Invoke-PulseSettingsCatalogExpansion {
     foreach ($policy in $policyList) {
         $rawIdValue = Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'id'
         $rawId = if ($null -ne $rawIdValue) { [string] $rawIdValue } else { $null }
-        if ([string]::IsNullOrEmpty($rawId)) {
+        # IsNullOrWhiteSpace, not IsNullOrEmpty (re-review fix): a whitespace-only id
+        # (e.g. '   ') is not empty as a string, so IsNullOrEmpty let it through as
+        # "valid" and it would have reached Get-GraphObject as a garbage -Parameters.id.
+        # Rejected here, before any fetch, exactly like a null/empty id.
+        if ([string]::IsNullOrWhiteSpace($rawId)) {
             $gapEntries.Add([pscustomobject]@{ policyId = ''; reason = 'category:EmptyPolicyId' }) | Out-Null
             continue
         }

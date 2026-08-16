@@ -264,6 +264,25 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 
+    It 'WHITESPACE-ID (re-review fix): a policy whose id is whitespace-only gaps immediately, prevalidation rejects it, and it is never fetched' {
+        $goodPolicy = New-TestPolicy -Id 'policy-good'
+        $whitespacePolicy = New-TestPolicy -Id '   '
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'policy-good' } { $settingsResponse }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $goodPolicy, $whitespacePolicy, $index {
+            param($store, $context, $goodPolicy, $whitespacePolicy, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($goodPolicy, $whitespacePolicy) -DefinitionIndex $index -Sequential
+        }
+
+        $summary.Status | Should -Be 'Partial'
+        ($summary.Gaps | Where-Object { $_.reason -match 'category:EmptyPolicyId' }).Count | Should -Be 1
+        # zero Graph calls for the whitespace-id policy - only the good policy is fetched
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Parameters.id -match '^\s+$' }
+    }
+
     It 'PATH-COLLISION (P1-8): two definitionId chains that would collide under a single-pass escape produce distinct settingPaths' {
         $policy = New-TestPolicy -Id 'policy-path-collision'
         $index = New-TestDefinitionIndex

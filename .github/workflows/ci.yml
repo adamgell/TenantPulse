@@ -565,7 +565,10 @@ jobs:
           # (Resolve-PulseSettingsCatalogSnapshotExpansion), and the shared value-
           # classification helper's own dedicated suite - matches .build/AssertGateResult.tasks.ps1's
           # own -MinimumTests, which must be bumped together with this value.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 905 -AllowedSkips 0 -AllowNotRun 1
+          # 905 -> 912 (Task 2.2 re-review fix): +7 - IsNullOrWhiteSpace policy-id
+          # prevalidation (a whitespace-only id previously passed IsNullOrEmpty and reached
+          # Get-GraphObject) plus its own WHITESPACE-ID regression test.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 912 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
