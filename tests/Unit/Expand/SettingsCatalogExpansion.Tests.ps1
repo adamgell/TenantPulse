@@ -630,3 +630,102 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
         $summary.Gaps | Where-Object { $_.reason -match 'category:FetchFailed' } | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / baseline instances' {
+    <#
+        Endpoint security policies live in the SAME configurationPolicies dataset T2.2
+        already fans out over - templateFamily/isBaseline are frozen row schema v1 fields
+        T2.2 already populates from -Policy's own templateReference (no new fetch here, per
+        the plan). This block pins the ONE thing T2.5 actually changes: isBaseline must be
+        true ONLY for the 'baseline' template family (Security Baselines), never for every
+        OTHER template-bearing family (ordinary endpoint security profiles - antivirus,
+        disk encryption, firewall, ... - are template-bearing too, but are not baselines).
+    #>
+    BeforeEach {
+        $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+        $script:context = [pscustomobject]@{ TenantId = 'tenant-guid'; ProfileId = 'contoso-lab' }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'a security-baseline policy (templateFamily "baseline") walks with isBaseline:true on every row' {
+        $policy = New-TestPolicy -Id 'policy-baseline' -TemplateFamily 'baseline' -TemplateId 'tpl-baseline-1'
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
+            param($store, $context, $policy, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+        }
+
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
+        $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
+        $rows.Count | Should -BeGreaterThan 0
+        $rows | ForEach-Object {
+            $_.templateFamily | Should -Be 'baseline'
+            $_.isBaseline | Should -BeTrue
+        }
+    }
+
+    It 'an endpoint security policy that is template-bearing but NOT a baseline family walks with isBaseline:false' {
+        $policy = New-TestPolicy -Id 'policy-endpointsec' -TemplateFamily 'endpointSecurityAntivirus' -TemplateId 'tpl-av-1'
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
+            param($store, $context, $policy, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+        }
+
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
+        $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
+        $rows.Count | Should -BeGreaterThan 0
+        $rows | ForEach-Object {
+            $_.templateFamily | Should -Be 'endpointSecurityAntivirus'
+            $_.isBaseline | Should -BeFalse
+        }
+    }
+
+    It 'an ordinary, non-template Settings Catalog policy (templateFamily "none", no templateId) walks with isBaseline:false' {
+        $policy = New-TestPolicy -Id 'policy-plain'
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
+            param($store, $context, $policy, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+        }
+
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
+        $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
+        $rows | ForEach-Object {
+            $_.templateFamily | Should -Be 'none'
+            $_.isBaseline | Should -BeFalse
+        }
+    }
+
+    It 'a policy whose templateFamily merely starts with "baseline" (future variant) still classifies isBaseline:true (prefix match, not exact)' {
+        $policy = New-TestPolicy -Id 'policy-baseline-variant' -TemplateFamily 'baselineWindows10MdmSecurity' -TemplateId 'tpl-baseline-2'
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
+            param($store, $context, $policy, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+        }
+
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
+        $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
+        $rows | ForEach-Object { $_.isBaseline | Should -BeTrue }
+    }
+}

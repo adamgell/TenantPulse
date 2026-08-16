@@ -130,7 +130,21 @@ function Invoke-PulseSettingsCatalogPolicy {
         $templateIdRaw = Get-PulseSettingsCatalogValueProperty -Node $templateReference -PropertyName 'templateId'
         if ($null -ne $templateIdRaw) { $templateId = [string] $templateIdRaw }
     }
-    $isBaseline = (-not [string]::IsNullOrEmpty($templateId)) -and ($templateFamily -ne 'none')
+    # Task 2.5: isBaseline reflects the SECURITY BASELINE template family specifically, not
+    # "any template-bearing policy" - Graph's own deviceManagementTemplateFamily enum has a
+    # dedicated 'baseline' value (Security Baselines - Windows 10, MDATP, etc.) alongside a
+    # whole cluster of OTHER, equally template-bearing, non-baseline families
+    # (endpointSecurityAntivirus, endpointSecurityDiskEncryption, endpointSecurityFirewall,
+    # enrollmentConfiguration, deviceCompliance, ...). The prior predicate here
+    # ((templateId non-empty) AND (templateFamily -ne 'none')) marked EVERY endpoint
+    # security policy isBaseline:true right alongside real baselines - not what the plan's
+    # own "baseline* families -> isBaseline true" instruction means. Matched as a
+    # case-insensitive PREFIX ('baseline*', via -like) rather than an exact 'baseline'
+    # string so a hypothetical future family variant Graph might add under the same
+    # 'baseline...' naming convention is still recognized without a code change - templateId
+    # is no longer consulted at all (a non-baseline family with a real templateId, e.g. an
+    # ordinary endpoint security profile, must never be misclassified isBaseline:true).
+    $isBaseline = (-not [string]::IsNullOrEmpty($templateFamily)) -and ($templateFamily -like 'baseline*')
 
     $settingsPayload = $null
     $fetchGap = $null
