@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history: the hygiene digest test recovers its plant from history at run time
 
       # Each row installs its exact PowerShell version rather than trusting the
       # runner image, then asserts the running version matches before doing work.
