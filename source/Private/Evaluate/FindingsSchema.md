@@ -164,3 +164,105 @@ inside a rule breaks that guarantee.
 Combined with `generatedUtc` being pinned to the manifest's `createdUtc` (never wall clock),
 re-evaluating the same snapshot against the same catalog produces a `Document` that
 serializes byte-identically through `ConvertTo-PulseCanonicalJson` every time.
+
+## Settings expansion artifacts (Phase 2, `-ExpandSettings`)
+
+These are **not** part of the findings `Document` above - Phase 2's checks still read
+`deviceCompliancePolicies`/`deviceConfigurations`/`configurationPolicies` the same way
+Phase 1 checks read any other dataset (`Data.Datasets` + `$Datasets`, see "Dataset and gate
+resolution order"). The expansion/conflict artifacts documented here are a **separate**,
+lower-level derived-data layer under the snapshot store's own `expanded/` directory,
+recorded in `manifest.expansions.<name>` (schema 1.1.0, Task 2.1) - they exist for tooling
+that wants the per-setting decomposition directly (a future check family, an external
+report), not for the findings document itself.
+
+### `manifest.expansions.<name>` (per-family status entry)
+
+```
+manifest.expansions.<name> = {
+  status: 'Expanded' | 'Partial' | 'NotExpanded' | 'Failed';
+  path; format: 'jsonl' | 'json'; schemaVersion; sha256;
+  policyCount;              # 'family count' for the conflicts entry (see Publish-
+                             # PulseConflictArtifact's own docstring)
+  rowCount; unresolvedNameCount; redactedSecretCount;
+  gaps: [ { policyId; reason } , ... ];  # sorted ordinally on (policyId, reason)
+  reason;                   # required for NotExpanded/Failed; also carries the
+                             # 'assignments-deferred: awaiting GraphKit release' note on
+                             # every successful settingsCatalog entry (G-gate core slice)
+}
+```
+
+`<name>` is one of `settingsCatalog`, `compliance`, `deviceConfiguration` (the three row
+producers), or `conflicts` (see below). `path` points at an IMMUTABLE, content-addressed
+generation file - `expanded/<name>.<sha256>.jsonl` for the three row producers,
+`expanded/conflicts.<sha256>.json` for the conflicts artifact - never a fixed filename;
+always resolve the real path from the manifest, never assume it.
+
+### Row schema v1 (`settingsCatalog`/`compliance`/`deviceConfiguration` - one JSON object
+per line in the family's own `.jsonl`)
+
+```jsonc
+{
+  "schemaVersion": "1",
+  "policyId": "...", "policyType": "settingsCatalog"|"compliance"|"deviceConfiguration",
+  "policyName": "..."|null, "templateFamily": "..."|null, "isBaseline": true|false,
+  "settingPath": "...",          // '/'-joined settingDefinitionId chain root->leaf, '/'
+                                   // inside an id escaped as '~s'
+  "settingDefinitionId": "...", "settingName": "..."|null, "nameResolved": true|false,
+  "instanceId": "...",           // native id, or synthetic '<parentInstanceId>/<defId>#<n>'
+  "value": <typed scalar|array>|null,   // null when redacted
+  "valueLabel": "..."|[...]|null, "labelResolved": true|false,
+  "redacted": true|false, "valueState": "..."|null,
+  "applicability": { "platform"; "technologies" }|null,
+  "assignments": null            // ALWAYS null in the core slice - see the G-gate
+                                   // sequencing amendment; a non-null shape is Phase 2b
+}
+```
+
+Rows within a family's `.jsonl` are sorted ordinally (`[string]::CompareOrdinal`) on
+`(policyId, settingPath, instanceId)` - deterministic regardless of worker completion
+order (see `Invoke-PulseSettingsCatalogExpansion`'s own docstring). Every line is one
+compact JSON object (`ConvertTo-PulseCanonicalJsonLine`), ordinal-sorted properties, no
+embedded raw newlines, exactly one trailing LF per line including the last.
+
+### `conflicts` artifact (`expanded/conflicts.<sha256>.json`, one JSON document, not jsonl)
+
+```jsonc
+{
+  "schemaVersion": "1",
+  "conflicts": [
+    {
+      "settingDefinitionId": "...",
+      "groups": [
+        { "canonicalValue": <typed value>|null, "redacted": true|false,
+          "policies": [ { "policyId": "..."; "policyName": "..."|null }, ... ] }
+        // >= 2 groups per conflict entry, by construction (see below)
+      ],
+      "assignmentOverlap": "proven" | "possible" | "none" | "unknown",
+      "assignmentOverlapReason": "..."|null   // populated at least for 'unknown' -
+                                                // 'assignments-deferred: awaiting GraphKit
+                                                // release' for every core-slice
+                                                // settingsCatalog-involving conflict
+    }
+    // sorted ordinally by settingDefinitionId; each entry's groups sorted by their own
+    // canonical-value text; each group's policies sorted by policyId
+  ]
+}
+```
+
+A `settingDefinitionId` becomes a conflict entry only when it has >= 2 distinct
+canonical-value groups collectively naming >= 2 distinct policy ids (one policy
+disagreeing only with itself is not a conflict - see `ConvertTo-PulseConflictRecords`'s own
+docstring). **Zero conflicts found is a valid, `Expanded` outcome** - it means detection ran
+over every available family and found none, not that detection did not run; do not treat an
+empty `conflicts` array as suspicious on its own. `redacted: true` on a group means every
+row that contributed to it carried a secret value - the group's `canonicalValue` is always
+`null` in that case and the true value is never present anywhere in this document (see the
+module-wide SECRET CONTRACT). `assignmentOverlap` is the plan's four-state result:
+`'proven'` (every contributing policy's real assignment targets provably overlap),
+`'possible'` (cannot rule overlap out, but not proven either - e.g. a filter or an
+All-devices/All-users target is involved), `'none'` (every pair of contributing policies'
+assignment targets is provably disjoint), or `'unknown'` (at least one contributing row
+carries `assignments: null` - the deferred-assignments state every `settingsCatalog` row
+carries in the core slice, so overlap cannot be evaluated at all for any conflict that
+includes one).

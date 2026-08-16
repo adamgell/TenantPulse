@@ -102,6 +102,107 @@ NotApplicable, 0 Error), coverage 9/10 (90%), `-FromSnapshot` reproduced a byte-
 findings JSON, and the raw tenant GUID appears nowhere in the output tree (datasets,
 manifest, or findings) - only its `tp-...` pseudonym.
 
+## Phase 2 (Settings expansion, core slice T2.1-T2.7): complete, live-gated
+
+Every Phase 2 core-slice task (T2.1 snapshot schema extension, T2.2 Settings Catalog
+fan-out/walk, T2.3 compliance/legacy typed-policy expansion, T2.5 baseline flagging, T2.6
+conflict detection, T2.7 this task) is implemented, unit-tested (1091/1091), and now
+**live-gated against Ivy24 end to end** with `-ExpandSettings`: real Settings Catalog
+(781 policies), compliance (40) and deviceConfiguration (15) typed-policy expansion, and
+conflict detection, all in one run.
+
+**Live gate results (verbatim), Ivy24, sequential Settings Catalog fan-out** (see
+"Live-gate surprises" below for why sequential, not the default `-MaxParallel 4`):
+
+- `configurationPolicies` enumerated 781; `settingsCatalog` expansion status `Partial`,
+  `policyCount` 781, `rowCount` 4302, every one of the 781 enumerated policies present in
+  the row set (781 unique `policyId`s), 64 gaps (per-instance walk gaps within otherwise-
+  successful policies, not whole-policy failures), `unresolvedNameCount` 0,
+  `redactedSecretCount` 131.
+- `deviceCompliancePolicies` enumerated 40; `compliance` expansion `Partial`, 34 policies
+  contributed rows + 6 gapped (unmapped `@odata.type`, the documented "collected, not
+  setting-expanded" outcome), `unresolvedNameCount` 0, `redactedSecretCount` 0.
+- `deviceConfigurations` enumerated 15; `deviceConfiguration` expansion `Expanded`
+  (zero gaps), 15/15 policies, `unresolvedNameCount` 0, `redactedSecretCount` 8.
+- **Unresolved-name rate: 0% across all three families** - well inside the plan's <1%
+  exit criterion.
+- **Conflicts: real conflicts surfaced, not a zero-conflicts-by-luck outcome** - 165
+  conflict entries from all 3 families; `assignmentOverlap` breakdown `none`=8,
+  `possible`=34, `unknown`=123 (the 123 all involve at least one `settingsCatalog` row,
+  whose assignments are deferred per the G-gate - the 8/34 non-`unknown` verdicts come
+  from compliance/deviceConfiguration rows, which DO carry real assignment data today).
+- `groupPolicyConfigurations` (the plan's own "9 gpConfigs" reconciliation note) is
+  correctly ABSENT from this manifest - admin templates (T2.4) are Phase 2b, deferred by
+  the G-gate; this dataset is not collected under the core-slice `-ExpandSettings` at all.
+- **`-FromSnapshot` byte-identity**: re-derived all four expansion artifacts
+  (`settingsCatalog`/`compliance`/`deviceConfiguration`/`conflicts`) from the same
+  snapshot - all four byte-identical to the original run.
+- **4-worker parallel vs sequential, real captured Ivy24 payloads**: byte-identical
+  (`-MaxParallel 4` vs `-Sequential` over the real 781-policy raw-payload corpus).
+- **TypedPolicyMaps deeper-nesting check (deferred F3)**: CONFIRMED live - 8 real
+  `windows10CustomConfiguration` policies carry an `omaSettings.value` whose raw value is
+  itself an object/dict, one level past what `TypedPolicyMaps.psd1`'s `Nested` schema
+  supports. Recorded here as an explicit gap, not silently absorbed: the secret contract
+  is NOT at risk (that exact property is flagged `Sensitive`, so the whole value redacts
+  regardless of its internal shape - confirmed by `redactedSecretCount` 8 for
+  `deviceConfiguration`, exactly matching the 8 affected policies), but the module cannot
+  currently decompose that nested object into individual settings. Flagged for Phase 3.
+
+**Live-gate surprises, fixed with regression tests (first full-expansion live run, as
+expected)**:
+
+1. **Raw tenant id in an ordinary (non-secret) Settings Catalog policy VALUE**: a real
+   Ivy24 policy's own OneDrive Known-Folder-Move opt-in setting legitimately carries the
+   tenant's own GUID as admin-entered configuration data (a standard, documented Intune
+   configuration pattern, not a bug in the tenant's config) - and that raw GUID reached
+   `expanded/settingsCatalog.<hash>.jsonl` unredacted, because `Protect-PulseGraphRowTenantId`
+   (T1.11's raw-dataset tenant-id redaction walk) was never wired into the T2.2/T2.3
+   expansion-row publish path, only into `Write-PulseDataset`'s raw writes. Fixed:
+   `Invoke-PulseSettingsCatalogExpansion.ps1` and `Invoke-PulseTypedPolicyExpansion.ps1`
+   both now redact their final row set through `Protect-PulseGraphRowTenantId`
+   immediately before publication. +2 regression tests (one per pipeline). Re-run against
+   Ivy24 after the fix: clean (848 files scanned, zero raw-tenant-id or literal-ProfileId
+   hits).
+2. **`-MaxParallel 4` (the default) is pathologically slow against a REAL tenant**: did
+   not complete even a 20-policy real slice within 9m35s (killed); the identical slice
+   completed `-Sequential` in 2.30s (0.12s/policy - even better than the T2.0 spike's own
+   300ms mean). Root cause not fully established (see
+   `docs/spike/2026-08-16-t27-perf-container.md`'s own section 4), but plausibly the
+   RunspacePool's per-worker GraphKit re-import means each worker's token cache and
+   `GraphThrottleCoordinator` state are NOT shared, so four workers independently unaware
+   of each other's throttle state hammer the tenant with no shared backoff. Fixed
+   pragmatically: `Invoke-PulseSettingsCatalogExpansionPipeline.ps1` (the one caller that
+   ever runs against a real, live tenant) now forces `-Sequential` unconditionally,
+   documented as a deliberate safe default pending the real root-cause fix.
+   `Invoke-PulseSettingsCatalogExpansion`'s own `-MaxParallel 4` default is UNCHANGED and
+   still fast/byte-identical against `-FromCapturedPayloads` data (no live Graph calls to
+   starve of shared state).
+
+**`-ExpandSettings` default-on flip, evaluated and deliberately deferred**: the parameter's
+own pre-T2.7 docstring said this would flip on by default in T2.7 once the live gate
+passed. The live gate DID pass clean. Trying the flip anyway surfaced two real,
+wider-blast-radius costs not appropriate to absorb inside this same task: `[switch] $X =
+$true` trips this repo's own PSScriptAnalyzer QA gate
+(`PSAvoidDefaultValueSwitchParameter`), and at least two existing
+`Get-PulseTenantSnapshot` unit tests assert on manifest shapes the flip changes for every
+caller, not just ones that opt in - a genuine breaking change to the function's existing
+contract. Reverted; `-ExpandSettings` stays opt-in. Flipping the default is real,
+scoped, doable follow-up work - not done here under this task's own time budget.
+
+**Performance/scale (Task 2.7)**: a dedicated, serial perf container
+(`tests/Perf/ScaleAndMemory.Tests.ps1`, run via `./build.ps1 -Tasks build,perftest`, never
+part of the default test workflow) measures and budgets ([measured] x1.5): a 5,000-policy
+synthetic Settings Catalog expansion + conflict-detection compute pass (mocked Graph,
+~202s/4300 rows), a 50,000-row `managedDevices` write+read memory ceiling, and raw
+per-policy dataset write scaling. Two genuine, documented scale gaps surfaced (not fixed
+in this task, flagged for follow-up): `Write-PulseDataset`/`Read-PulseDataset` do not
+stream (materialize the full object graph - measured ~5.6-16x the serialized file size in
+memory, not the plan's informal <=2x target), and `Set-PulseManifestEntry` re-reads and
+re-serializes the WHOLE manifest on every single dataset write (O(n) per write / O(n^2)
+total as a snapshot's own manifest grows - a real cost a live 781-policy run pays on every
+policy). See `docs/spike/2026-08-16-t27-perf-container.md` for the full recorded numbers,
+hardware, and method.
+
 ## Not yet done - one thing, an operator action, not code
 
 1. **First publish to PSGallery**, which needs a PSGallery API key. Publish tooling is

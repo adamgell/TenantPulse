@@ -154,6 +154,51 @@ policy is actually assigned to any device), a CIS Benchmark mapping (see the dis
 above), or a rendering format other than JSON. These are documented, known limitations in
 each affected check's own docstring - not silent gaps.
 
+## Settings expansion (Phase 2)
+
+`Get-PulseTenantSnapshot -ExpandSettings` (and `Invoke-PulseAssessment -ExpandSettings`,
+which passes it straight through) decomposes every policy TenantPulse can currently
+setting-expand into individual canonical setting rows, on top of the ordinary check-driven
+collection Phase 1 already does:
+
+- **Settings Catalog** (`configurationPolicies` + `ConfigurationPolicySetting.ListBeta`
+  per policy) - the modern, definitionId-driven configuration model.
+- **Compliance and legacy device configuration policies** (`deviceCompliancePolicies`,
+  `deviceConfigurations`) - the older, polymorphic `@odata.type`-typed Graph resources,
+  decomposed via a hand-maintained property map (`source/Data/TypedPolicyMaps.psd1`) rather
+  than a Graph-side settings catalog, since none exists for these types.
+- **Conflict detection** - a single pass over every row from the families above, grouping
+  by `settingDefinitionId` to surface settings where two or more policies disagree, with a
+  four-state assignment-overlap verdict (`proven`/`possible`/`none`/`unknown`).
+
+Every artifact this produces is recorded in the snapshot manifest under
+`manifest.expansions.<name>` and written to `expanded/<name>.<sha256>.jsonl` (or
+`expanded/conflicts.<sha256>.json` for the conflicts document) - immutable,
+content-addressed files, never a fixed name. See
+`source/Private/Evaluate/FindingsSchema.md`'s own "Settings expansion artifacts" section
+for the exact row/conflict-record schema.
+
+**Known gap, by design, for this phase**: `ConfigurationPolicyAssignment.ListBeta` (the
+descriptor that would resolve which devices/users a Settings Catalog policy is actually
+assigned to) is not yet a released GraphKit descriptor as of this phase - every Settings
+Catalog row carries `assignments: null`, and any conflict that involves at least one such
+row reports `assignmentOverlap: 'unknown'` with an explicit `'assignments-deferred:
+awaiting GraphKit release'` reason, rather than a silently wrong verdict. Compliance and
+legacy device configuration policies do NOT have this gap (their assignment descriptors are
+already released) - their rows carry real assignment data today. This is tracked as its own
+follow-up slice ("Phase 2b" in the implementation plan), not a silent limitation.
+
+**Scale note**: Settings Catalog expansion fans out one Graph read per policy, at the
+measured rate documented in `docs/spike/` (mean ~300ms/policy on the Ivy24 lab tenant) -
+budget your own run's wall time accordingly for a large policy count. See
+`docs/spike/2026-08-16-t27-perf-container.md` for the dedicated performance/scale/memory
+test container (`./build.ps1 -Tasks build,perftest`, not part of the default test run) and
+its own recorded numbers, including two genuine, documented scale characteristics this
+phase surfaced rather than hid: per-policy raw-dataset writes get slower as a snapshot's own
+manifest grows (an O(n)-per-write cost with no batching yet), and neither
+`Write-PulseDataset` nor `Read-PulseDataset` streams - both hold the full dataset in memory,
+which matters most for a very large `managedDevices`-shaped dataset.
+
 ## Development
 
 Dependencies and build tools are restored through the repository scripts. Run the test
