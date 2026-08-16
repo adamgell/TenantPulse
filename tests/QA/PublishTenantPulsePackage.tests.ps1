@@ -11,7 +11,7 @@
         <fixture>/output/module/TenantPulse/<version>/TenantPulse.psm1
         <fixture>/output/testResults/NUnitXml_*.xml + PesterObject_*.xml
 
-    The NUnit/PesterObject test-result fixture is fabricated (not a real 667+ test Pester
+    The NUnit/PesterObject test-result fixture is fabricated (not a real 702+ test Pester
     run) with just enough shape - root attributes, one Passed test-suite, an empty
     Containers list - to satisfy Assert-GateResult.ps1's own whole-result gate, so these
     tests stay fast and independent of the real suite while still exercising the actual
@@ -56,6 +56,18 @@ BeforeAll {
         $builtPsm1Path = Join-Path $builtModuleDir 'TenantPulse.psm1'
         Set-Content -LiteralPath $builtPsm1Path -Value $BuiltPsm1Content -NoNewline -Encoding utf8
 
+        # Digest manifest (post-review fix): the script now verifies against a manifest of
+        # hashes recorded "at test time" rather than re-hashing whatever is currently on
+        # disk - see Publish-TenantPulsePackage.ps1's own DIGEST-MANIFEST VERIFICATION
+        # docstring section. This fixture writes one recorded from $BuiltPsm1Content, the
+        # same content the built psm1 above was just given, so a test that wants to
+        # reproduce "the build directory drifted after the digest was recorded" does so by
+        # passing a DIFFERENT -BuiltPsm1Content after fixture creation (see the dedicated
+        # test below), not by this helper disagreeing with itself.
+        $digestManifestPath = Join-Path $testResultsDir 'tested-module-digest.txt'
+        $builtPsm1Hash = (Get-FileHash -LiteralPath $builtPsm1Path -Algorithm SHA256).Hash.ToLowerInvariant()
+        Set-Content -LiteralPath $digestManifestPath -Value "TenantPulse.psm1  $builtPsm1Hash" -NoNewline -Encoding utf8
+
         # A fabricated .nupkg - a plain zip with a top-level '<NuGetPackageModuleName>.psm1'
         # entry, exactly the shape the script's ZipFile-based extraction expects.
         $packagePath = Join-Path $fixtureRoot "$NuGetPackageModuleName.$Version.nupkg"
@@ -74,11 +86,11 @@ BeforeAll {
         finally { $archive.Dispose() }
 
         # A fabricated but gate-passing NUnit result + sibling PesterObject CLIXML, so
-        # Assert-GateResult.ps1's own whole-result checks pass without a real 667-test run.
+        # Assert-GateResult.ps1's own whole-result checks pass without a real 702-test run.
         $resultPath = Join-Path $testResultsDir "NUnitXml_TenantPulse_v$Version.Fixture.xml"
         $nunitXml = @"
 <?xml version="1.0" encoding="utf-8"?>
-<test-results name="TenantPulse $Version" total="667" failures="0" errors="0" skipped="0">
+<test-results name="TenantPulse $Version" total="702" failures="0" errors="0" skipped="0">
   <test-suite type="TestFixture" name="Fixture" result="Passed">
     <results>
       <test-case name="fixture test" result="Success" />
@@ -152,14 +164,30 @@ Describe 'Publish-TenantPulsePackage: pack-first-then-verify digest check' {
         $result.Output | Should -Not -Match 'DRY RUN'
     }
 
-    It 'refuses when the built module directory the tests imported no longer exists' {
+    It 'refuses when a file the digest manifest recorded is missing from the built module directory' {
         $script:fixture = New-PulsePublishFixture
         Remove-Item -LiteralPath $script:fixture.BuiltPsm1Path -Force
 
         $result = Invoke-PulsePublishScript -Fixture $script:fixture
 
+        # PowerShell wraps a thrown error's rendered message across terminal-width lines
+        # (inserting its own '|' continuation markers), so match fragments independently
+        # rather than one contiguous phrase - see the 'not TenantPulse' test above for the
+        # same pattern.
         $result.ExitCode | Should -Not -Be 0
-        $result.Output | Should -Match 'built module.*is gone'
+        $result.Output | Should -Match 'TenantPulse\.psm1'
+        $result.Output | Should -Match 'missing\s*(\||\s)*\s*from'
+    }
+
+    It 'refuses when no tested-module digest manifest is present at all' {
+        $script:fixture = New-PulsePublishFixture
+        $digestManifestPath = Join-Path $script:fixture.FixtureRoot 'output/testResults/tested-module-digest.txt'
+        Remove-Item -LiteralPath $digestManifestPath -Force
+
+        $result = Invoke-PulsePublishScript -Fixture $script:fixture
+
+        $result.ExitCode | Should -Not -Be 0
+        $result.Output | Should -Match 'No tested-module digest manifest found'
     }
 
     It 'refuses when the package name is not TenantPulse' {

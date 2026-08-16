@@ -203,7 +203,7 @@ jobs:
           # downgrade, lazy-auth abort, and reason-redaction coverage (3), and
           # Get-PulseTenantSnapshot's lazy-auth-at-first-dataset and empty-ProfileId/
           # -Path validation coverage (2). This minimum must keep ratcheting up as
-          # check/function test suites are added in later tasks - see docs/superpowers/sdd
+          # check/function test suites are added in later tasks - see the project's SDD phase-plan docs (tracked outside this repo, not at any docs/superpowers/sdd path here)
           # for the phase plan.
           #
           # -AllowNotRun 0: the "Quality for module" (2 It) and "Help for module" (4
@@ -230,7 +230,7 @@ jobs:
           # pseudonyms/PSTypeName leaking into the serialized findings JSON, and
           # byte-identical double serialization through ConvertTo-PulseCanonicalJson.
           # This minimum must keep ratcheting up as check/function test suites are added
-          # in later tasks - see docs/superpowers/sdd for the phase plan.
+          # in later tasks - see the project's SDD phase-plan docs (tracked outside this repo, not at any docs/superpowers/sdd path here) for the phase plan.
           #
           # Post-review security/robustness fixes to Task 1.6 (same task, second pass):
           # C1 (Critical) - Expression rules now run in Invoke-PulseSandboxedExpression's
@@ -327,7 +327,7 @@ jobs:
           # never leaks into the rendered JSON, no tp- pseudonym leaks in when -Redact was
           # not passed, Export-PulseReport's re-render is byte-identical to the original
           # and carries no -Redact parameter at all. This minimum must keep ratcheting up
-          # as check/function test suites are added in later tasks - see docs/superpowers/sdd
+          # as check/function test suites are added in later tasks - see the project's SDD phase-plan docs (tracked outside this repo, not at any docs/superpowers/sdd path here)
           # for the phase plan.
           #
           # Task 1.8 review-fix round (same task, second pass): six review findings closed.
@@ -377,7 +377,7 @@ jobs:
           # (Invoke-PulseCheck.Tests.ps1), and 3 Export-PulseJsonReport tests - the
           # RedactionMap choke-point guard plus the two sortKey redaction cases
           # (PublicSurface.Tests.ps1). This minimum must keep ratcheting up as check/
-          # function test suites are added in later tasks - see docs/superpowers/sdd for
+          # function test suites are added in later tasks - see the project's SDD phase-plan docs (tracked outside this repo, not at any docs/superpowers/sdd path here) for
           # the phase plan.
           # Raised to 346 by Task 1.9 (ten seed checks): infra tests (DatasetMap/
           # IdFromDataset collector extension/Get-PulseCaExclusionContext) plus 10 per-check
@@ -419,8 +419,9 @@ jobs:
           # excluding any match immediately preceded by '$' (a PowerShell variable-rooted
           # property-access chain, never a domain). Also added: SAS-token-shaped query
           # parameter detection ([?&]sig=/[?&]se=...), SQL-connection-string key-order
-          # independence (Password=...;...Server=/Data Source=... now flagged, not just the
-          # reverse order), five more scanned extensions (.json/.csv/.xml/.psc1/.pssc), the
+          # independence (the "Password" key before the "Server"/"Data Source" key is now
+          # flagged too, not just the reverse order), five more scanned extensions
+          # (.json/.csv/.xml/.psc1/.pssc), the
           # control-byte scan extended from source/-only to source/+tests/, a
           # ReadOnly.tests.ps1 discovery-time vacuum guard (throws if both the released and
           # Pending DatasetMap.psd1 case lists come back empty, mirroring SecretScan's
@@ -439,7 +440,7 @@ jobs:
           # (duplicate-path throw, case-differing-paths-are-distinct, case-differing-path
           # real-violation coverage, sanitized() empty, sanitized(   ) whitespace-only).
           # This minimum must keep ratcheting up as check/function test suites are added in
-          # later tasks - see docs/superpowers/sdd for the phase plan.
+          # later tasks - see the project's SDD phase-plan docs (tracked outside this repo, not at any docs/superpowers/sdd path here) for the phase plan.
           # 638 -> 657 (Task 1.11, live gate + publish prep): +12 for Get-PulseFailureClass's
           # new -SupplementalStatusCode signal and the new Get-PulseGraphFailureStatusCode
           # helper (recovering the real GraphKit failure shape confirmed live against the
@@ -455,7 +456,29 @@ jobs:
           # 5, 2 in Snapshot.Tests.ps1 pinning Write-PulseDataset's strip, 1 end-to-end
           # raw-ProfileId-grep in Get-PulseTenantSnapshot.Tests.ps1) plus +2 auto-generated
           # SecretScan.tests.ps1 cases for the new source file.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 667 -AllowedSkips 0 -AllowNotRun 0
+          # 667 -> 702 (final fix wave, merged two-review fix list): +1 Get-PulseCheckCatalog
+          # -Path alias, +2 Export-PulseReport (FindingsPath parity, 7-digit-fraction
+          # timestamp round-trip), +2 New-PulseSnapshotStore (-GraphKitVersion, clear-on-
+          # reuse), +2 ConvertTo-PulseCanonicalJson (Kind=Unspecified DateTime, Kind=Utc
+          # unchanged), +4 Get-PulseSnapshotStore (datasets:null, datasets:"x",
+          # createdUtc:"banana", producer:"x" type-validation holes), +1
+          # Get-PulseTenantSnapshot (-Path alias positive case), +1 TP.ENT.0003
+          # (includeGroups/includeRoles no longer exempted), +1 evaluator (novel dataset
+          # status fails closed), +1 TP.INT.0005 (malformed createdUtc -> Error), +2
+          # Get-PulseFailureClass/Get-PulseGraphFailureStatusCode (enum-typed status code
+          # handling, x2 call sites), +1 Invoke-PulseCollection (supplemental
+          # status-recovery-failure "(status unknown)" marker), +1 Invoke-PulseCollection
+          # (auth-abort loop preserves a remaining Pending dataset's own reason), +1
+          # Get-PulseTenantSnapshot (same tenant pseudonymizes identically across two
+          # differently-named profiles), +1 PublishTenantPulsePackage (missing digest
+          # manifest refuses to publish) net of the digest-manifest rework replacing the
+          # prior single-file re-hash test's assertions - plus SecretScan.tests.ps1's own
+          # per-file auto-generated cases for every touched/new source and script file, and
+          # the roots-extension gain from scanning scripts/, build.ps1, build.yaml,
+          # README.md, CHANGELOG.md and .github/workflows/ci.yml for the first time. This
+          # minimum must keep ratcheting up as check/function test suites are added in
+          # later tasks.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 702 -AllowedSkips 0 -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

@@ -12,11 +12,16 @@
     #    }
     #}
 
-    InvokeBuild                 = 'latest'
-    PSScriptAnalyzer            = 'latest'
+    # Pinned to exact versions (post-review fix - these four were floating on 'latest',
+    # meaning a fresh -ResolveDependency run could silently pull a newer build-tool
+    # version than whatever last actually built/tested this repo, with no record of which
+    # version that was). Pinned to each tool's currently-resolved version under
+    # output/RequiredModules/ at the time of this fix.
+    InvokeBuild                 = '5.14.23'
+    PSScriptAnalyzer            = '1.25.0'
     Pester                      = '6.1.0'
-    ModuleBuilder               = 'latest'
-    ChangelogManagement         = 'latest'
+    ModuleBuilder               = '3.2.18'
+    ChangelogManagement         = '3.1.0'
     Sampler                     = '0.120.1'
 
     # GraphKit is a runtime dependency (see source/TenantPulse.psd1 RequiredModules,

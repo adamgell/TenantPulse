@@ -496,29 +496,56 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
 
     BeforeDiscovery {
         $projectPath = "$($PSScriptRoot)\..\.." | Convert-Path
-        $textExtensions = @('.ps1', '.psm1', '.psd1', '.psc1', '.pssc', '.md', '.txt', '.json', '.csv', '.xml')
+        $textExtensions = @('.ps1', '.psm1', '.psd1', '.psc1', '.pssc', '.md', '.txt', '.json', '.csv', '.xml', '.yml', '.yaml')
+
+        # ROOTS (post-review fix, item 28): previously only source/ and tests/ were
+        # scanned - scripts/ (the publish script, which handles an API key end to end) and
+        # the repo-root build/CI/doc surface (build.ps1, build.yaml, README.md,
+        # CHANGELOG.md, .github/workflows/ci.yml) were never scanned at all, even though
+        # every one of them is exactly the kind of file a secret or PII value could land in
+        # by accident (a pasted example token in a doc, a hardcoded value in a workflow
+        # file). Extended to cover all of them, while still excluding output/ (build
+        # artifacts, never hand-authored) and tests/QA/ (this scanner's own code, reviewed
+        # by hand - see the exclusion note elsewhere in this file).
+        $recurseRoots = @(
+            (Join-Path $projectPath 'source')
+            (Join-Path $projectPath 'tests')
+            (Join-Path $projectPath 'scripts')
+        ) | Where-Object { Test-Path -LiteralPath $_ -PathType Container }
+
+        $explicitRootFiles = @(
+            (Join-Path $projectPath 'build.ps1')
+            (Join-Path $projectPath 'build.yaml')
+            (Join-Path $projectPath 'README.md')
+            (Join-Path $projectPath 'CHANGELOG.md')
+            (Join-Path $projectPath '.github/workflows/ci.yml')
+        ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object { Get-Item -LiteralPath $_ }
 
         $scanFiles = @(
-            Get-ChildItem -Path (Join-Path $projectPath 'source'), (Join-Path $projectPath 'tests') -Recurse -File |
+            (Get-ChildItem -Path $recurseRoots -Recurse -File |
                 Where-Object {
                     $textExtensions -contains $_.Extension -and
-                    ($_.FullName -replace '\\', '/') -notmatch '/tests/QA/'
-                }
+                    ($_.FullName -replace '\\', '/') -notmatch '/tests/QA/' -and
+                    ($_.FullName -replace '\\', '/') -notmatch '(^|/)output/'
+                }) + $explicitRootFiles
         )
 
         $secretScanCases = @($scanFiles | ForEach-Object {
             @{ FullPath = $_.FullName; RelativePath = (($_.FullName.Substring($projectPath.Length + 1)) -replace '\\', '/') }
         })
 
-        # Control-byte scan now covers tests/ too (not just source/) - excluding tests/QA/
-        # itself for the same self-inflicted-false-positive reason the secret scan above
-        # excludes it: this file's own control-byte unit test fixtures below construct
-        # literal control bytes in-memory as [byte[]] arrays, never on disk, so there is
-        # nothing to exclude there in practice, but the exclusion keeps the same "QA code
-        # is reviewed by hand, not by this scanner" rule consistent across both scans.
+        # Control-byte scan covers the exact same root set as the secret scan above -
+        # excluding tests/QA/ and output/ for the same reasons: this file's own
+        # control-byte unit test fixtures below construct literal control bytes in-memory
+        # as [byte[]] arrays, never on disk, so there is nothing to exclude there in
+        # practice, but the exclusion keeps the same "QA/build-artifact content is
+        # reviewed by hand or generated, not scanned" rule consistent across both scans.
         $controlByteFiles = @(
-            Get-ChildItem -Path (Join-Path $projectPath 'source'), (Join-Path $projectPath 'tests') -Recurse -File |
-                Where-Object { ($_.FullName -replace '\\', '/') -notmatch '/tests/QA/' }
+            (Get-ChildItem -Path $recurseRoots -Recurse -File |
+                Where-Object {
+                    ($_.FullName -replace '\\', '/') -notmatch '/tests/QA/' -and
+                    ($_.FullName -replace '\\', '/') -notmatch '(^|/)output/'
+                }) + $explicitRootFiles
         )
 
         $controlByteCases = @($controlByteFiles | ForEach-Object {

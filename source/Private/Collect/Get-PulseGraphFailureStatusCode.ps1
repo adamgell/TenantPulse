@@ -80,17 +80,32 @@ function Get-PulseGraphFailureStatusCode {
         $statusProperty = $lastAttempt.PSObject.Properties['StatusCode']
         if ($null -eq $statusProperty -or $null -eq $statusProperty.Value) { return $null }
 
+        $statusValue = $statusProperty.Value
+
+        # Enum-typed StatusCode (post-review fix, e.g. [System.Net.HttpStatusCode]::Forbidden)
+        # must be cast to [int] directly - [string] on an enum value renders its NAME
+        # ('Forbidden'), not its underlying numeric value ('403'), so the TryParse below
+        # would simply fail and this function would silently recover no signal at all.
+        if ($statusValue -is [System.Enum]) { return [int] $statusValue }
+
         $parsed = 0
-        if ([int]::TryParse([string] $statusProperty.Value, [ref] $parsed)) {
+        if ([int]::TryParse([string] $statusValue, [ref] $parsed)) {
             return $parsed
         }
 
         return $null
     } catch {
         # Total: recovering a classification signal must never itself become a second,
-        # unhandled failure. Write-Verbose only - the caller falls back to whatever
-        # Get-PulseFailureClass can still infer from the original ErrorRecord.
-        Write-Verbose "Get-PulseGraphFailureStatusCode: supplemental Invoke-GraphOperation for '$Type/$Operation' did not recover a status code: $($_.Exception.Message)"
+        # unhandled failure - the caller falls back to whatever Get-PulseFailureClass can
+        # still infer from the original ErrorRecord. Write-Warning (post-review fix, not
+        # Write-Verbose only): a supplemental recovery failure is an operationally
+        # interesting event - it means the collector's status classification for this
+        # dataset is running on a WEAKER signal than usual - and Write-Verbose is silent by
+        # default in every normal run, which buried this from an operator who never passes
+        # -Verbose. Write-Warning surfaces by default; the caller (Invoke-PulseCollection)
+        # also appends '(status unknown)' to the dataset's own Failed reason for the same
+        # reason - visible in the artifact itself, not just the console.
+        Write-Warning "Get-PulseGraphFailureStatusCode: supplemental Invoke-GraphOperation for '$Type/$Operation' did not recover a status code: $($_.Exception.Message)"
         return $null
     }
 }

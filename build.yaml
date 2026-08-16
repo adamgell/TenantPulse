@@ -69,6 +69,14 @@ BuildWorkflow:
     # pattern of Public, Private, Enum, Classes.
     #- Convert_Pester_Coverage
     - Pester_if_Code_Coverage_Under_Threshold
+    # Post-review fix (final fix wave, items 15 & 27): enforce the same whole-result
+    # MinimumTests gate locally that ci.yml already enforces, and record the shipped-file
+    # digest manifest Publish-TenantPulsePackage.ps1 verifies against - both defined in
+    # .build/AssertGateResult.tasks.ps1. Order matters: the digest is only worth recording
+    # once the suite has already passed (Pester_Tests_Stop_On_Fail throws first if not),
+    # and the gate check runs against the same result file the digest task just used.
+    - Record_Tested_Module_Digest
+    - Assert_Gate_Result
 
   # Use this task when you have multiple parallel tests, which produce multiple
   # code coverage files and needs to get merged into one file.

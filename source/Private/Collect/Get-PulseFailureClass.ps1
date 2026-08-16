@@ -80,6 +80,13 @@ function Get-PulseFailureClass {
         try {
             if ($Value -is [int]) { return $Value }
 
+            # Enum-typed values (post-review fix, e.g. [System.Net.HttpStatusCode]::Forbidden)
+            # must be cast to [int] directly, BEFORE falling through to the TryParse path
+            # below - [string] on an enum value renders its NAME ('Forbidden'), not its
+            # underlying numeric value ('403'), so [int]::TryParse against that string would
+            # simply fail and this classifier would silently lose the status code signal.
+            if ($Value -is [System.Enum]) { return [int] $Value }
+
             $parsed = 0
             if ([int]::TryParse([string] $Value, [ref] $parsed)) {
                 return $parsed
