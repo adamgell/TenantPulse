@@ -382,4 +382,9 @@ jobs:
           # Raised to 346 by Task 1.9 (ten seed checks): infra tests (DatasetMap/
           # IdFromDataset collector extension/Get-PulseCaExclusionContext) plus 10 per-check
           # Pester files under tests/Unit/Checks/.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 346 -AllowedSkips 0 -AllowNotRun 0
+          # Raised to 369 by the Task 1.9 review-fix pass: rule-returned NotApplicable +
+          # wall-clock-free evaluation context (engine), NA rework/MFA authenticationStrength/
+          # GUID contract/misc (TP.ENT.*), MDM authority citation/platform allowlist/stale-
+          # device determinism (TP.INT.*), and the dependency-pending-vs-unavailable
+          # distinction (collector).
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 369 -AllowedSkips 0 -AllowNotRun 0
