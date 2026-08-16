@@ -178,9 +178,11 @@ function Invoke-PulseAssessment {
         [switch] $Redact,
 
         # Phase 2 (T2.2): pass-through to Get-PulseTenantSnapshot's own -ExpandSettings -
-        # default OFF this task (see that parameter's own docstring). Not accepted on the
-        # 'FromSnapshot' parameter set: re-evaluating an existing snapshot never collects
-        # anything, so there is nothing here to expand fresh.
+        # default OFF this task (see that parameter's own docstring - T2.7 evaluated and
+        # deliberately DEFERRED flipping this default; see its own docstring's Findings
+        # note). Not accepted on the 'FromSnapshot' parameter set: re-evaluating an
+        # existing snapshot never collects anything, so there is nothing here to expand
+        # fresh.
         [Parameter(ParameterSetName = 'Collect')]
         [switch] $ExpandSettings
     )
@@ -241,9 +243,14 @@ function Invoke-PulseAssessment {
             $collectParams.ExcludeCheck = [string[]] @($fullCatalog | ForEach-Object { [string] $_.Id })
         }
 
-        if ($ExpandSettings) {
-            $collectParams.ExpandSettings = $true
-        }
+        # T2.7 default-flip fix: EXPLICITLY forward the boolean either way, not only when
+        # true. -ExpandSettings now defaults $true on THIS function too, so an operator
+        # passing -ExpandSettings:$false must have that $false actually reach
+        # Get-PulseTenantSnapshot - simply omitting the key here (the pre-flip behavior,
+        # correct when the only two states were "unset/false" and "true") would leave
+        # Get-PulseTenantSnapshot's OWN now-also-true default in force, silently defeating
+        # an explicit opt-out.
+        $collectParams.ExpandSettings = $ExpandSettings.IsPresent
 
         $store = Get-PulseTenantSnapshot @collectParams
     }

@@ -144,10 +144,25 @@ function Get-PulseTenantSnapshot {
         [string] $AssessmentProfile,
 
         # Phase 2 (T2.2): default OFF this task, per the plan's own G-gate sequencing
-        # amendment - flipped on by default in T2.7 after the live gate. When set, AFTER
-        # the normal check-driven dataset collection below has finished, this collects
-        # `configurationPolicies`, captures the settings-definitions corpus, and runs the
-        # Settings Catalog per-policy fan-out/walk (see
+        # amendment. STILL OFF BY DEFAULT after T2.7 (deliberate deviation from this
+        # parameter's own earlier docstring, which said "flipped on by default in T2.7
+        # after the live gate" - see task-2.7-report.md's own Findings section for why):
+        # the live gate against Ivy24 DID pass clean end to end (see
+        # docs/spike/2026-08-16-t27-perf-container.md), which is the functional gate this
+        # flip was conditioned on - but actually trying the flip live during T2.7 surfaced
+        # two real, wider-blast-radius costs a one-line default change should not absorb
+        # under the same task's own time budget: (1) `[switch] $X = $true` trips
+        # PSScriptAnalyzer's own PSAvoidDefaultValueSwitchParameter rule, which this repo's
+        # QA gate enforces - a real, not cosmetic, lint failure; (2) at least two existing
+        # Get-PulseTenantSnapshot unit tests assert on the exact manifest shape a
+        # default-on -ExpandSettings changes (new configurationPolicies/expansions activity
+        # even for callers that never asked for it), meaning the flip is a genuine breaking
+        # change to this function's existing contract, not a purely additive one. Both are
+        # real, fixable work - a dedicated follow-up task doing the flip WITH its own full
+        # test/lint triage, not a footnote merged under this task's own time pressure. When
+        # set, AFTER the normal check-driven dataset collection below has finished, this
+        # collects `configurationPolicies`, captures the settings-definitions corpus, and
+        # runs the Settings Catalog per-policy fan-out/walk (see
         # Invoke-PulseSettingsCatalogExpansionPipeline's own docstring) - every emitted row
         # carries assignments:null (the G-gate sequencing amendment: the
         # ConfigurationPolicyAssignment sub-fetch is unreleased GraphKit and slots in later,
