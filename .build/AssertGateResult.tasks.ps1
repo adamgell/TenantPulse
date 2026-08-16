@@ -65,7 +65,20 @@
 # tests/Unit/Snapshot.Tests.ps1 and tests/Unit/Get-PulseTenantSnapshot.Tests.ps1, now
 # scrubbed to a synthetic placeholder) plus its own regression suite (fires with no
 # domain nearby; does not fire for an ordinary synthetic placeholder GUID).
-$script:tenantPulseGateMinimumTests = 965
+# 965 -> 991 (post-review follow-ups, T2.2/T2.3 publish-path unification + T2.3/T2.5
+# real fixtures): +26 - unifying Invoke-PulseSettingsCatalogExpansion's own staging/hash/
+# publish onto the shared Publish-PulseExpansionRows implementation (no new tests of its
+# own - proven by T2.2's EXISTING fault-injection/determinism/real-worker-pool suite
+# passing unchanged against the unified path); 7 new GOLDEN sanitized-real
+# TypedPolicyWalk fixture tests (deviceCompliancePolicies' four real types + the three
+# present-on-Ivy24 legacy deviceConfigurations types, sourced from scratch/live-011,
+# scripted exhaustive value walk, PROVENANCE'd); 2 new GOLDEN real-fixture
+# SettingsCatalogExpansion tests swapping the synthetic endpoint-security policy for the
+# REAL Ivy24 endpointSecurityAccountProtection/endpointSecurityAttackSurfaceReduction
+# fixtures (choicecollection-01/-02); plus the SecretScan QA gate's own new allowlist-
+# entry regression coverage for the 7 new fixture GUIDs. Set to the REAL total for this
+# task's own tree.
+$script:tenantPulseGateMinimumTests = 991
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
