@@ -133,7 +133,20 @@
 # every-pair-is-disjoint, 3 cases), and the single end-to-end golden pipeline test that
 # threads a planted secret through the REAL T2.2 Settings Catalog + T2.3 typed-policy
 # expansion pipelines into a REAL Invoke-PulseConflictDetection run.
-$script:tenantPulseGateMinimumTests = 1087
+# 1087 -> 1091 (Task 2.7, live-gate tenant-id-redaction fix): +4 - the live gate against
+# Ivy24 found a real, previously-uncaught secret-contract-adjacent gap: a raw Settings
+# Catalog policy VALUE (a OneDrive Known-Folder-Move opt-in setting) legitimately carries
+# the tenant's own GUID as admin-entered configuration data, and Protect-
+# PulseGraphRowTenantId (T1.11's raw-dataset tenant-id redaction walk) was never wired
+# into the T2.2/T2.3 expansion-row publish path - only into Write-PulseDataset's raw
+# writes - so the raw tenant id reached expanded/settingsCatalog.<hash>.jsonl unredacted.
+# Fixed in Invoke-PulseSettingsCatalogExpansion.ps1 and Invoke-PulseTypedPolicyExpansion.ps1
+# (both now redact the final row set through Protect-PulseGraphRowTenantId immediately
+# before Publish-PulseExpansionRows) plus 2 new regression tests pinning the fix for each
+# pipeline (see task-2.7-report.md for the full live-gate accounting). Set to the REAL
+# total (1091), matching the module's own post-fix Pester run, not a headroom-padded
+# number - the gate IS the count.
+$script:tenantPulseGateMinimumTests = 1091
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
