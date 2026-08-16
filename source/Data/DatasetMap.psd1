@@ -11,28 +11,46 @@
 
     Shape: a plain hashtable (not an array), keyed by dataset name, each value itself a
     hashtable with:
-        Type       - the GraphKit operation Type, e.g. 'ConditionalAccessPolicy'.
-        Operation  - the GraphKit operation Operation, e.g. 'List' or 'Get'.
-        ApiVersion - 'v1.0' or 'beta', matching the resolved GraphKit descriptor's own
-                     ApiVersion (Write-PulseDataset validates against this same set).
+        Type          - the GraphKit operation Type, e.g. 'ConditionalAccessPolicy'.
+        Operation     - the GraphKit operation Operation, e.g. 'List' or 'Get'.
+        ApiVersion    - 'v1.0' or 'beta', matching the resolved GraphKit descriptor's own
+                        ApiVersion (Write-PulseDataset validates against this same set).
+        IdFromDataset - OPTIONAL. Names another dataset in THIS map that must be collected
+                        first; the collector takes @(items)[0].id from that dataset's
+                        already-collected rows and passes it as -Parameters @{ id = ... }
+                        to Get-GraphObject for THIS entry (see Get-PulseCollectionManifest
+                        and Invoke-PulseCollection's own docstrings for the ordering and
+                        failure-propagation rules this implies). Used for
+                        organizationMdmAuthority below, whose GraphKit operation
+                        (Organization.GetMdmAuthority) is a $select-in-path read that needs
+                        the org id.
 
     Pending flag: a dataset entry may also carry `Pending = $true`. This marks a dataset
-    whose GraphKit descriptor does not exist yet - the collector (Get-PulseTenantSnapshot
-    / Invoke-PulseCollection) must classify it Skipped with reason
-    'descriptor-pending: awaiting GraphKit release' and must NOT call Get-GraphOperation
-    or attempt any Graph call for it (there is nothing there to resolve or call). Once the
-    corresponding GraphKit descriptor ships, drop the Pending flag and the collector
-    starts actually collecting the dataset with no other code change required. As of this
-    writing (GraphKit 0.0.2) two datasets below are Pending: mdmAuthority
-    (needs an Organization.Get-shaped read) and entraDevices (needs an EntraDevice.List-
-    shaped read).
+    whose GraphKit descriptor does not exist yet in a RELEASED GraphKit version - the
+    collector (Get-PulseTenantSnapshot / Invoke-PulseCollection) must classify it Skipped
+    with reason 'descriptor-pending: awaiting GraphKit release' and must NOT call
+    Get-GraphOperation or attempt any Graph call for it (there is nothing there to resolve
+    or call). Once the corresponding GraphKit descriptor ships (0.1.1), drop the Pending
+    flag and the collector starts actually collecting the dataset with no other code change
+    required.
 
-    The ten entries below are exactly the datasets the ten Phase 1 seed checks (Task 1.9)
-    need. Every non-Pending entry names a real GraphKit 0.0.2 operation descriptor
-    (source/Data/Operations/<Type>.<Operation>.psd1 in the GraphKit repo) already
-    confirmed ThrottleClass 'Read' and ReplayPolicy 'Safe' - the read-only predicate this
-    module enforces everywhere (Assert-PulseReadOnlyDescriptor, and later the static
-    Task 1.10 gate).
+    LIVE-TENANT VERIFICATION NOTE (2026-08-15, Task 1.9): six datasets below are Pending as
+    of GraphKit's currently-released version - their descriptors exist in GraphKit's
+    committed-but-unreleased catalog and go live when 0.1.1 is cut:
+        securityDefaultsPolicy, directoryRoleAssignments, directoryRoleDefinitions,
+        organization, organizationMdmAuthority, entraDevices.
+    mdmAuthority (the single-dataset shape this map used before this task) does NOT work
+    against a live tenant - mobileDeviceManagementAuthority is not a property of the
+    /organization collection response at all. It only appears on the dedicated
+    Organization.GetMdmAuthority read (GET /organization/{id}?$select=...), which needs the
+    org id up front - hence the two-dataset organization + organizationMdmAuthority split
+    and the IdFromDataset mechanism above. See TP.INT.0001's check function for how an
+    ABSENT mobileDeviceManagementAuthority property on that read is treated (Error, never
+    Fail/Pass - the field-absence lens this whole task applies).
+
+    directoryRoleDefinitions is deliberately mapped to the BETA List operation: isPrivileged
+    and templateId-complete role metadata are beta-only - the v1.0 List silently omits
+    fields TP.ENT.0002's Global Administrator join depends on.
 #>
 @{
     conditionalAccessPolicies   = @{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' }
@@ -44,7 +62,15 @@
     autopilotDevices             = @{ Type = 'AutopilotDevice'; Operation = 'List'; ApiVersion = 'beta' }
     domains                       = @{ Type = 'Domain'; Operation = 'List'; ApiVersion = 'beta' }
 
-    # Pending - no GraphKit descriptor exists yet. See the Pending flag note above.
-    mdmAuthority = @{ Type = 'Organization'; Operation = 'Get'; ApiVersion = 'v1.0'; Pending = $true }
-    entraDevices = @{ Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
+    # Read live against a real tenant this week; not marked Pending.
+    deviceManagementSettings = @{ Type = 'DeviceManagementSettings'; Operation = 'Get'; ApiVersion = 'beta' }
+
+    # Pending - GraphKit descriptor exists committed-but-unreleased; goes live at 0.1.1.
+    # See the LIVE-TENANT VERIFICATION NOTE above.
+    securityDefaultsPolicy    = @{ Type = 'SecurityDefaultsPolicy'; Operation = 'Get'; ApiVersion = 'v1.0'; Pending = $true }
+    directoryRoleAssignments  = @{ Type = 'DirectoryRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
+    directoryRoleDefinitions  = @{ Type = 'DirectoryRoleDefinition'; Operation = 'ListBeta'; ApiVersion = 'beta'; Pending = $true }
+    organization               = @{ Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
+    organizationMdmAuthority  = @{ Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $true; IdFromDataset = 'organization' }
+    entraDevices               = @{ Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
 }

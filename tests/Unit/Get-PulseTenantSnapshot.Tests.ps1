@@ -151,6 +151,39 @@ Describe 'Get-PulseCollectionManifest' {
 
         @($manifest).Count | Should -Be 0
     }
+
+    It 'IdFromDataset: auto-adds the dependency dataset even though no check declared it directly, ordered before its dependent' {
+        $check = New-TestCheck -Id 'TP.INT.0001' -Datasets @('organizationMdmAuthority')
+        $map = @{
+            organization              = @{ Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0' }
+            organizationMdmAuthority  = @{ Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; IdFromDataset = 'organization' }
+        }
+
+        $manifest = InModuleScope TenantPulse -ArgumentList @($check), $map {
+            param($checks, $map)
+            Get-PulseCollectionManifest -Checks $checks -DatasetMap $map
+        }
+
+        @($manifest).Count | Should -Be 2
+        $manifest[0].Dataset | Should -Be 'organization'
+        $manifest[1].Dataset | Should -Be 'organizationMdmAuthority'
+        $manifest[1].IdFromDataset | Should -Be 'organization'
+    }
+
+    It 'IdFromDataset: throws naming the dependency chain for a dependency cycle' {
+        $check = New-TestCheck -Id 'TP.INT.0001' -Datasets @('a')
+        $map = @{
+            a = @{ Type = 'A'; Operation = 'Get'; ApiVersion = 'v1.0'; IdFromDataset = 'b' }
+            b = @{ Type = 'B'; Operation = 'Get'; ApiVersion = 'v1.0'; IdFromDataset = 'a' }
+        }
+
+        {
+            InModuleScope TenantPulse -ArgumentList @($check), $map {
+                param($checks, $map)
+                Get-PulseCollectionManifest -Checks $checks -DatasetMap $map
+            }
+        } | Should -Throw -ExpectedMessage '*cycle*'
+    }
 }
 
 Describe 'Assert-PulseReadOnlyDescriptor' {
@@ -556,6 +589,55 @@ Describe 'Invoke-PulseCollection' {
 
         $result = $raw | ConvertFrom-Json
         $result.datasets.conditionalAccessPolicies.reason | Should -Match 'tp-abc123'
+    }
+
+    It 'IdFromDataset: resolves the dependency''s first row id and passes it as -Parameters @{ id = ... }' {
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { @([pscustomobject]@{ id = 'org-1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { @([pscustomobject]@{ mobileDeviceManagementAuthority = 'intune' }) }
+
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
+            [pscustomobject]@{ Dataset = 'organizationMdmAuthority'; Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = 'organization' }
+        )
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
+            param($store, $manifest, $context)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'contoso' -TenantPseudonym 'tp-abc123'
+        }
+
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Operation -eq 'GetMdmAuthority' -and $Parameters.id -eq 'org-1'
+        }
+
+        $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $result.datasets.organization.status | Should -Be 'Collected'
+        $result.datasets.organizationMdmAuthority.status | Should -Be 'Collected'
+    }
+
+    It 'IdFromDataset: writes Failed with a dependency-unavailable reason and never calls Get-GraphObject when the dependency dataset is empty' {
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { throw 'Get-GraphObject must not be called when the dependency is unavailable.' }
+
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
+            [pscustomobject]@{ Dataset = 'organizationMdmAuthority'; Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = 'organization' }
+        )
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
+            param($store, $manifest, $context)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'contoso' -TenantPseudonym 'tp-abc123'
+        }
+
+        $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $result.datasets.organization.status | Should -Be 'Collected'
+        $result.datasets.organizationMdmAuthority.status | Should -Be 'Failed'
+        $result.datasets.organizationMdmAuthority.reason | Should -Be 'dependency-unavailable: organization'
+
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } -Times 0 -Exactly
     }
 }
 

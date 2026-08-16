@@ -38,6 +38,18 @@
     for the different, total-failure case where Get-GraphContext itself throws before this
     function is ever called - both paths converge on the same collectionFailure contract).
 
+    IdFromDataset (Task 1.9 extension): when a manifest entry carries IdFromDataset (see
+    Get-PulseCollectionManifest's own docstring - it guarantees the dependency dataset is
+    ordered earlier in -Manifest), this function reads the id straight out of what it ALREADY
+    wrote for that dependency this run (tracked in $collectedRows below - never re-read from
+    disk, since the dependency was just written moments ago in this same loop) rather than
+    calling Read-PulseDataset. If the dependency was not Collected (Pending/Failed/Skipped,
+    or Collected with zero rows, or its first row has no `id`), this entry is written Failed
+    with reason 'dependency-unavailable: <dependency dataset name>' and NO Graph call is
+    attempted for it - there is no id to call with. Otherwise @(items)[0].id is passed as
+    -Parameters @{ id = <id> } on the Get-GraphObject call below; every other classification
+    path (permission-denied, auth-failure, generic failure) is unchanged.
+
     Every reason string handed to Write-PulseDataset or Set-PulseManifestEntry -
     unconditionally, even a fixed non-exception-derived string - is routed through
     Protect-PulseReason first: a caught GraphKit exception's message can carry the raw
@@ -73,6 +85,13 @@ function Invoke-PulseCollection {
         $contextTenantId = [string] $Context.TenantId
     }
 
+    # Tracks, for every entry processed so far this run, the rows written for it (only ever
+    # consulted by a LATER entry's IdFromDataset - see this file's own docstring). Populated
+    # on every Collected outcome; left absent (never looked up as anything but "unavailable")
+    # for Pending/Failed/Skipped outcomes, which is exactly the "dependency unavailable"
+    # signal a dependent entry needs.
+    $collectedRows = @{}
+
     for ($i = 0; $i -lt $Manifest.Count; $i++) {
         $entry = $Manifest[$i]
 
@@ -80,6 +99,26 @@ function Invoke-PulseCollection {
             $reason = Protect-PulseReason -Message 'descriptor-pending: awaiting GraphKit release' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
             Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Skipped' -Reason $reason
             continue
+        }
+
+        $extraParameters = @{}
+        if ($entry.PSObject.Properties['IdFromDataset'] -and $entry.IdFromDataset) {
+            $dependencyRows = $collectedRows[$entry.IdFromDataset]
+            $dependencyId = $null
+            if ($null -ne $dependencyRows -and @($dependencyRows).Count -gt 0) {
+                $firstRow = @($dependencyRows)[0]
+                if ($firstRow.PSObject.Properties['id'] -and $firstRow.id) {
+                    $dependencyId = [string] $firstRow.id
+                }
+            }
+
+            if (-not $dependencyId) {
+                $reason = Protect-PulseReason -Message "dependency-unavailable: $($entry.IdFromDataset)" -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' -Reason $reason
+                continue
+            }
+
+            $extraParameters = @{ id = $dependencyId }
         }
 
         try {
@@ -97,8 +136,19 @@ function Invoke-PulseCollection {
         }
 
         try {
-            $rows = @(Get-GraphObject -Context $Context -Type $entry.Type -Operation $entry.Operation -ErrorAction Stop)
+            $graphObjectParams = @{
+                Context     = $Context
+                Type        = $entry.Type
+                Operation   = $entry.Operation
+                ErrorAction = 'Stop'
+            }
+            if ($extraParameters.Count -gt 0) {
+                $graphObjectParams.Parameters = $extraParameters
+            }
+
+            $rows = @(Get-GraphObject @graphObjectParams)
             Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Collected'
+            $collectedRows[$entry.Dataset] = $rows
         } catch {
             $failureClass = Get-PulseFailureClass -ErrorRecord $_
 

@@ -22,6 +22,22 @@
     "deterministic ordering everywhere" sort in this codebase (see
     ConvertTo-PulseCanonicalJson and Import-PulseCheckCatalog) - never a culture-aware
     Sort-Object, which is non-deterministic across locales/hosts.
+
+    IdFromDataset (Task 1.9 extension): a map entry may carry `IdFromDataset = '<name>'`,
+    meaning that dataset must be collected FIRST and its first row's `id` fed to THIS
+    entry's Get-GraphObject call as -Parameters @{ id = ... } (see Invoke-PulseCollection).
+    Two things this function guarantees so that extension can rely on them:
+        1. The dependency dataset is ALWAYS present in the returned manifest, even if no
+           check declared it directly (organizationMdmAuthority needs 'organization'
+           collected even though a check might reference only organizationMdmAuthority) -
+           dependencies are resolved transitively and added the same way a directly-
+           declared dataset would be, including the same "must exist in -DatasetMap or
+           throw" check.
+        2. Ordering is DEPENDENCY-FIRST: an entry with IdFromDataset is placed after its
+           dependency in the returned array. Ties (same dependency depth) still break
+           ordinally by Dataset name, so the result is deterministic. A dependency cycle
+           (Dataset A depends on B which depends on A) is a hard error - it can never be
+           satisfied at collection time.
 #>
 
 function Get-PulseCollectionManifest {
@@ -38,28 +54,53 @@ function Get-PulseCollectionManifest {
 
     $entries = [ordered]@{}
 
+    # Resolves (and, on first sight, ADDS) a dataset name into $entries, recursing to pull
+    # in its IdFromDataset dependency (if any) first - so a dependency that no check
+    # declared directly (organization, for organizationMdmAuthority) still ends up in the
+    # manifest. -Chain tracks the in-progress recursion path so a dependency cycle is
+    # reported clearly instead of overflowing the call stack.
+    function Resolve-Entry {
+        param(
+            [string] $Name,
+            [string] $RequestedBy,
+            [string[]] $Chain = @()
+        )
+
+        if ($entries.Contains($Name)) {
+            return
+        }
+
+        if (-not $DatasetMap.ContainsKey($Name)) {
+            throw "Get-PulseCollectionManifest: check '$RequestedBy' references dataset '$Name', which is not present in the shared dataset map."
+        }
+
+        if ($Chain -contains $Name) {
+            throw "Get-PulseCollectionManifest: dataset dependency cycle detected: $(($Chain + $Name) -join ' -> ')."
+        }
+
+        $mapEntry = $DatasetMap[$Name]
+        $isPending = $mapEntry.ContainsKey('Pending') -and [bool] $mapEntry.Pending
+        $idFromDataset = if ($mapEntry.ContainsKey('IdFromDataset')) { [string] $mapEntry.IdFromDataset } else { $null }
+
+        if ($idFromDataset) {
+            Resolve-Entry -Name $idFromDataset -RequestedBy $RequestedBy -Chain ($Chain + $Name)
+        }
+
+        $entries[$Name] = [pscustomobject]@{
+            Dataset       = $Name
+            Type          = $mapEntry.Type
+            Operation     = $mapEntry.Operation
+            ApiVersion    = $mapEntry.ApiVersion
+            Pending       = $isPending
+            IdFromDataset = $idFromDataset
+        }
+    }
+
     foreach ($check in $Checks) {
         $datasetNames = @($check.Data.Datasets)
 
         foreach ($name in $datasetNames) {
-            if ($entries.Contains($name)) {
-                continue
-            }
-
-            if (-not $DatasetMap.ContainsKey($name)) {
-                throw "Get-PulseCollectionManifest: check '$($check.Id)' references dataset '$name', which is not present in the shared dataset map."
-            }
-
-            $mapEntry = $DatasetMap[$name]
-            $isPending = $mapEntry.ContainsKey('Pending') -and [bool] $mapEntry.Pending
-
-            $entries[$name] = [pscustomobject]@{
-                Dataset    = $name
-                Type       = $mapEntry.Type
-                Operation  = $mapEntry.Operation
-                ApiVersion = $mapEntry.ApiVersion
-                Pending    = $isPending
-            }
+            Resolve-Entry -Name $name -RequestedBy $check.Id
         }
     }
 
@@ -67,8 +108,33 @@ function Get-PulseCollectionManifest {
         return @()
     }
 
-    $names = [string[]] @($entries.Keys)
-    [System.Array]::Sort($names, [System.StringComparer]::Ordinal)
+    # Dependency-first ordering: compute each entry's dependency depth (0 = no
+    # IdFromDataset), then sort by (depth, Dataset name ordinal) - a dependency is always
+    # depth-lower than its dependent, and ties break the same ordinal way every other sort
+    # in this codebase does.
+    $depthOf = @{}
+    function Get-Depth {
+        param([string] $Name)
+        if ($depthOf.ContainsKey($Name)) {
+            return $depthOf[$Name]
+        }
+        $entry = $entries[$Name]
+        $depth = if ($entry.IdFromDataset) { 1 + (Get-Depth -Name $entry.IdFromDataset) } else { 0 }
+        $depthOf[$Name] = $depth
+        return $depth
+    }
 
-    return @(foreach ($name in $names) { $entries[$name] })
+    $names = [string[]] @($entries.Keys)
+    foreach ($name in $names) { Get-Depth -Name $name | Out-Null }
+
+    $order = [int[]] (0 .. ($names.Count - 1))
+    $comparison = [System.Comparison[int]] {
+        param($a, $b)
+        $byDepth = $depthOf[$names[$a]].CompareTo($depthOf[$names[$b]])
+        if ($byDepth -ne 0) { return $byDepth }
+        return [string]::CompareOrdinal($names[$a], $names[$b])
+    }
+    [System.Array]::Sort($order, $comparison)
+
+    return @(foreach ($i in $order) { $entries[$names[$i]] })
 }
