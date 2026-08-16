@@ -17,6 +17,14 @@
     of them. Report-only-only coverage (no enabled policy covers a role at all) is reported
     as a gap, same distinction TP.ENT.0004 makes for legacy auth.
 
+    MFA-SATISFACTION (post-review, H1 adjudicated): a policy satisfies "requires MFA" when
+    EITHER grantControls.builtInControls contains 'mfa' OR grantControls.authenticationStrength
+    is bound (non-null) - Microsoft's own phishing-resistant admin MFA template (this check's
+    own primary cited authority) configures authenticationStrength, not builtInControls
+    'mfa'. The original builtInControls-only check meant a tenant that followed Microsoft's
+    recommended template to the letter FAILED this check. Evidence records which mechanism
+    satisfied each covering policy.
+
     HONEST LIMITATION: this checks includeRoles coverage only - conditions.users.excludeRoles
     or excludeUsers narrowing a policy back down for a specific admin is not reconciled here;
     a role "covered" by includeRoles that is then carved back out by an exclusion would still
@@ -48,11 +56,24 @@ function Test-PulseAdminMfaEnforced {
 
     $allPolicies = @($Datasets.conditionalAccessPolicies)
 
-    $isMfaForRolesShape = {
+    # Which MFA mechanism (if any) a policy satisfies - $null when neither is present.
+    $getMfaMechanism = {
         param($policy)
         $builtInControls = @($policy.grantControls.builtInControls)
+        if ($builtInControls -contains 'mfa') {
+            return 'builtInControls:mfa'
+        }
+        if ($null -ne $policy.grantControls.authenticationStrength) {
+            return 'authenticationStrength'
+        }
+        return $null
+    }
+
+    $isMfaForRolesShape = {
+        param($policy)
+        $mechanism = & $getMfaMechanism $policy
         $includeRoles = @($policy.conditions.users.includeRoles)
-        return ($builtInControls -contains 'mfa') -and ($includeRoles.Count -gt 0)
+        return ($null -ne $mechanism) -and ($includeRoles.Count -gt 0)
     }
 
     $enabledMfaPolicies = @($allPolicies | Where-Object { $_.state -eq 'enabled' -and (& $isMfaForRolesShape $_) })
@@ -67,7 +88,7 @@ function Test-PulseAdminMfaEnforced {
     $missingRoles = @($requiredAdminRoles.GetEnumerator() | Where-Object { -not $coveredRoleIds.Contains($_.Key) })
 
     if ($missingRoles.Count -eq 0) {
-        $evidence = @($enabledMfaPolicies | ForEach-Object { @{ Identity = [string] $_.id; Detail = @{ displayName = $_.displayName } } })
+        $evidence = @($enabledMfaPolicies | ForEach-Object { @{ Identity = [string] $_.id; Detail = @{ displayName = $_.displayName; mfaMechanism = (& $getMfaMechanism $_) } } })
         return New-PulseFinding -Status Pass -Reason "All 9 of Microsoft's minimum admin roles are covered by MFA-requiring, enabled Conditional Access polic$(if ($enabledMfaPolicies.Count -eq 1) { 'y' } else { 'ies' })." -Evidence $evidence
     }
 

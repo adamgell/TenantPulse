@@ -5,20 +5,28 @@
     all-or-nothing baseline identity protection - the fallback for tenants without
     Conditional Access (which needs Entra ID P1). Once even one Conditional Access policy
     is enabled, Security Defaults stops being the tenant's meaningful control (Microsoft
-    recommends turning it off once CA takes over the same ground) - this check reports Pass
-    with an explanatory Reason in that case rather than judging the isEnabled flag at all,
-    because it is no longer the control that matters. ENGINE CONSTRAINT: a Function rule can
-    only return Pass/Warn/Fail (Invoke-PulseEvaluation), not NotApplicable - "CA supersedes
-    Security Defaults" is therefore represented as Pass-with-Reason, the closest available
-    status, not a true NA. This is a deliberate, documented approximation, not an oversight.
+    recommends turning it off once CA takes over the same ground).
 
-    FIELD-ABSENCE LENS: if no Conditional Access policy is enabled, securityDefaultsPolicy
-    (SecurityDefaultsPolicy.Get, still Pending as of GraphKit's current release - see
-    DatasetMap.psd1) must actually carry an isEnabled value to judge - an absent/null value
-    throws (-> engine Error), never silently reads as Pass or Fail. A genuinely empty
-    conditionalAccessPolicies collection (no CA licensed/configured at all) is a normal,
-    expected shape, not an absence bug - it participates in enabledCaCount = 0 like any
-    other real "zero policies" tenant.
+    POST-REVIEW FIX (adjudicated): this used to report Pass-with-a-caveat-Reason when CA
+    supersedes Security Defaults, because a Function rule could not return NotApplicable at
+    all. Now that it can (see New-PulseFinding's own docstring), that case returns
+    NotApplicable instead - Pass-with-Reason silently earned this check's full scoring
+    weight for every CA tenant regardless of whether Security Defaults itself was even
+    configured sanely, which inflated the score with credit nobody actually verified.
+    NotApplicable is scored correctly by Add-PulseScores: excluded from both earned and
+    possible, not quietly counted as a pass.
+
+    FIELD-ABSENCE LENS (two places, both enforced, the second one closed by this same
+    review pass - it had been missed originally):
+      - securityDefaultsPolicy.isEnabled: an absent/null value throws (-> engine Error),
+        never silently reads as Pass or Fail.
+      - conditionalAccessPolicies[].state: an absent/null value ALSO throws now - a CA
+        policy with no recorded state is not "not enabled" (which would silently undercount
+        enabledCaPolicies and could tip a CA-protected tenant into a spurious Fail), it is
+        data this check cannot honestly reason about at all.
+    A genuinely empty conditionalAccessPolicies collection (no CA licensed/configured at
+    all) is a normal, expected shape, not an absence bug - it participates in
+    enabledCaCount = 0 like any other real "zero policies" tenant.
 #>
 
 function Test-PulseSecurityDefaultsAppropriate {
@@ -30,11 +38,18 @@ function Test-PulseSecurityDefaultsAppropriate {
     )
 
     $caPolicies = @($Datasets.conditionalAccessPolicies)
+
+    foreach ($policy in $caPolicies) {
+        if ($null -eq $policy.state -or [string]::IsNullOrEmpty([string] $policy.state)) {
+            throw "conditionalAccessPolicies entry '$($policy.id)' has no state value - an absent state must never silently read as not-enabled."
+        }
+    }
+
     $enabledCaPolicies = @($caPolicies | Where-Object { $_.state -eq 'enabled' })
 
     if ($enabledCaPolicies.Count -gt 0) {
         $noun = if ($enabledCaPolicies.Count -eq 1) { 'policy' } else { 'policies' }
-        return New-PulseFinding -Status Pass -Reason "Conditional Access is in use ($($enabledCaPolicies.Count) enabled $noun); Security Defaults is no longer the tenant's primary access-control layer and is not evaluated as a standalone control here."
+        return New-PulseFinding -Status NotApplicable -Reason "Conditional Access is in use ($($enabledCaPolicies.Count) enabled $noun); Security Defaults is no longer the tenant's primary access-control layer and is not evaluated as a standalone control here."
     }
 
     $securityDefaultsRows = @($Datasets.securityDefaultsPolicy)

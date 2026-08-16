@@ -18,7 +18,7 @@ Describe 'Get-PulseCaExclusionContext' {
 
         @($result.BreakGlassAccounts).Count | Should -Be 0
         @($result.ServiceAccounts).Count | Should -Be 0
-        @($result.PermanentGlobalAdmins).Count | Should -Be 0
+        @($result.ActiveGlobalAdmins).Count | Should -Be 0
         @($result.ExcludedIdentifiers).Count | Should -Be 0
     }
 
@@ -49,7 +49,7 @@ Describe 'Get-PulseCaExclusionContext' {
             Get-PulseCaExclusionContext -Datasets $datasets
         }
 
-        $result.PermanentGlobalAdmins | Should -Be @('ga-user-1')
+        $result.ActiveGlobalAdmins | Should -Be @('ga-user-1')
         $result.ExcludedIdentifiers | Should -Contain 'ga-user-1'
         $result.ExcludedIdentifiers | Should -Not -Contain 'not-ga-user'
     }
@@ -69,7 +69,7 @@ Describe 'Get-PulseCaExclusionContext' {
             Get-PulseCaExclusionContext -Datasets $datasets
         }
 
-        $result.PermanentGlobalAdmins | Should -Be @('ga-user-2')
+        $result.ActiveGlobalAdmins | Should -Be @('ga-user-2')
     }
 
     It 'de-duplicates a principal that is both an operator-declared break-glass account and a permanent Global Administrator' {
@@ -88,12 +88,12 @@ Describe 'Get-PulseCaExclusionContext' {
         @($result.ExcludedIdentifiers | Where-Object { $_ -eq 'ga-user-1' }).Count | Should -Be 1
     }
 
-    It 'never throws and yields zero PermanentGlobalAdmins when directoryRoleAssignments was not collected' {
+    It 'never throws and yields zero ActiveGlobalAdmins when directoryRoleAssignments was not collected' {
         $result = InModuleScope TenantPulse {
             Get-PulseCaExclusionContext -Datasets @{}
         }
 
-        @($result.PermanentGlobalAdmins).Count | Should -Be 0
+        @($result.ActiveGlobalAdmins).Count | Should -Be 0
     }
 
     It 'returns ExcludedIdentifiers ordinally sorted' {

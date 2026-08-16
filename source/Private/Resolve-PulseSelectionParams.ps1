@@ -22,7 +22,13 @@
 
     BreakGlassAccounts/ServiceAccounts, if present in the profile file, are returned as
     -Context (for Invoke-PulseEvaluation's own -Context parameter - see that function's
-    docstring for how a check rule receives it as $Context). ThresholdOverrides, if
+    docstring for how a check rule receives it as $Context). FORMAT CONTRACT (post-review,
+    M2): both arrays must be declared by ENTRA OBJECT ID (GUID) - consuming checks
+    (TP.ENT.0003/0004/0005, via Get-PulseCaExclusionContext) match them against Conditional
+    Access excludeUsers/includeUsers, which hold GUID principal ids, not UPNs or display
+    names. This function does not itself validate the format (it just reads the two keys
+    through) - a non-GUID entry surfaces at evaluation time as an unresolvable-format Warn,
+    not silently as an unverified Fail. ThresholdOverrides, if
     present, is read only to confirm the key exists in the file - RESERVED, its value is
     never inspected, never returned, and never wired into -Context or anywhere else; no
     schema/shape validation is performed on it (this function does not claim to validate

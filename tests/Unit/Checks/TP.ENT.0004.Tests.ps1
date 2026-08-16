@@ -74,6 +74,22 @@ Describe 'TP.ENT.0004 - Legacy authentication is blocked by an enforced Conditio
         $finding.evidence.Count | Should -Be 1
     }
 
+    It 'Pass (post-review, L1): clientAppTypes "all" covers legacy protocols too, not just itemized exchangeActiveSync/other' {
+        $allAppsPolicy = [pscustomobject]@{
+            id            = 'ca-all-apps-block'
+            displayName   = 'Block All Client App Types'
+            state         = 'enabled'
+            conditions    = [pscustomobject]@{ clientAppTypes = @('all') }
+            grantControls = [pscustomobject]@{ builtInControls = @('block') }
+        }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($allAppsPolicy) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+    }
+
     It 'Fail: policy exists but is report-only, not enforced' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseLegacyAuthPolicy -State 'enabledForReportingButNotEnforced') }

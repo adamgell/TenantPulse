@@ -8,9 +8,11 @@
     check distinguishes those two outcomes in its Reason so an operator sees "you have a
     policy, it just isn't turned on" rather than "you have nothing".
 
-    Legacy-auth-blocking shape: conditions.clientAppTypes includes 'exchangeActiveSync' or
-    'other' (the two client app types basic/legacy auth protocols present as), and
-    grantControls.builtInControls includes 'block'.
+    Legacy-auth-blocking shape: conditions.clientAppTypes includes 'exchangeActiveSync',
+    'other' (the two client app types basic/legacy auth protocols present as), or 'all'
+    (post-review, L1 - a policy scoped to every client app type necessarily covers legacy
+    protocols too; it should not be treated as silently missing that coverage just because
+    it was not itemized), and grantControls.builtInControls includes 'block'.
 #>
 
 function Test-PulseLegacyAuthBlocked {
@@ -27,7 +29,7 @@ function Test-PulseLegacyAuthBlocked {
         param($policy)
         $clientAppTypes = @($policy.conditions.clientAppTypes)
         $builtInControls = @($policy.grantControls.builtInControls)
-        return (($clientAppTypes -contains 'exchangeActiveSync') -or ($clientAppTypes -contains 'other')) -and ($builtInControls -contains 'block')
+        return (($clientAppTypes -contains 'exchangeActiveSync') -or ($clientAppTypes -contains 'other') -or ($clientAppTypes -contains 'all')) -and ($builtInControls -contains 'block')
     }
 
     $enforcedBlockPolicies = @($allPolicies | Where-Object { $_.state -eq 'enabled' -and (& $isLegacyAuthBlockShape $_) })

@@ -12,20 +12,22 @@
            for that source rather than throwing - a check descriptor's own evaluation must
            never fail just because the operator profile omitted an optional key.
 
-        2. Permanent Global Administrator heuristic: every DISTINCT principalId with an
-           ACTIVE Global Administrator role assignment in -Datasets.directoryRoleAssignments
-           (when that dataset was actually collected - see below). directoryRoleAssignments
-           (DirectoryRoleAssignment.List) only ever returns ACTIVE assignments; a PIM-
-           eligible-but-not-activated Global Administrator assignment does not appear here
-           at all, so every principal this heuristic finds already IS "permanently" a GA in
-           the sense that matters for CA-exclusion review (they hold the role right now,
-           with no activation step an auditor could point to as the safety net) - "PIM
-           eligible-only" is a materially different, lower-risk posture this heuristic
-           deliberately does not flag. This is a heuristic, not a certified enumeration:
-           it is only as complete as the collected dataset, and it is silently skipped
-           (contributes zero identifiers, never throws) when directoryRoleAssignments is
-           absent from -Datasets - the caller (a check's Function rule) is expected to
-           reason about a degraded exclusion context itself if that matters to its finding.
+        2. Active Global Administrator heuristic: every DISTINCT principalId with an ACTIVE
+           Global Administrator role assignment in -Datasets.directoryRoleAssignments (when
+           that dataset was actually collected - see below). NAMED "Active", NOT "Permanent"
+           (post-review, L4 - the original name overclaimed what this list actually is):
+           directoryRoleAssignments (DirectoryRoleAssignment.List) returns every ACTIVE
+           assignment, which includes BOTH a genuinely permanent/standing assignment AND a
+           PIM-ELIGIBLE assignment that has been ACTIVATED (temporarily active, will expire
+           and drop back to eligible-only) - this dataset shape cannot distinguish the two,
+           so this heuristic cannot either. It can also include a SERVICE PRINCIPAL holding
+           the role, not only a human account. A caller must not assume every entry here is
+           a standing, human, forever-Global-Admin - only that it held the role, actively,
+           at collection time. This is a heuristic, not a certified enumeration: it is only
+           as complete as the collected dataset, and it is silently skipped (contributes
+           zero identifiers, never throws) when directoryRoleAssignments is absent from
+           -Datasets - the caller (a check's Function rule) is expected to reason about a
+           degraded exclusion context itself if that matters to its finding.
 
         Global Administrator resolution prefers a join against
         -Datasets.directoryRoleDefinitions (DisplayName -eq 'Global Administrator', or
@@ -38,7 +40,7 @@
     Returns a single flat pscustomobject:
         BreakGlassAccounts    - [string[]] as declared in -Context, unmodified.
         ServiceAccounts       - [string[]] as declared in -Context, unmodified.
-        PermanentGlobalAdmins - [string[]] distinct principalIds found by the heuristic
+        ActiveGlobalAdmins    - [string[]] distinct principalIds found by the heuristic
                                 above, ordinally sorted (deterministic ordering).
         ExcludedIdentifiers   - [string[]] the de-duplicated union of all three lists
                                 above, ordinally sorted - the single list a check's
@@ -74,7 +76,7 @@ function Get-PulseCaExclusionContext {
 
     $wellKnownGlobalAdminTemplateId = '62e90394-69f5-4237-9190-012177145e10'
 
-    $permanentGlobalAdmins = @()
+    $activeGlobalAdmins = @()
     if ($Datasets -and $Datasets.ContainsKey('directoryRoleAssignments') -and $null -ne $Datasets.directoryRoleAssignments) {
         $assignments = @($Datasets.directoryRoleAssignments)
 
@@ -104,14 +106,14 @@ function Get-PulseCaExclusionContext {
             }
         }
 
-        $permanentGlobalAdmins = [string[]] @($foundPrincipals)
-        [System.Array]::Sort($permanentGlobalAdmins, [System.StringComparer]::Ordinal)
+        $activeGlobalAdmins = [string[]] @($foundPrincipals)
+        [System.Array]::Sort($activeGlobalAdmins, [System.StringComparer]::Ordinal)
     }
 
     $union = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($id in $breakGlass) { if ($id) { $union.Add([string] $id) | Out-Null } }
     foreach ($id in $serviceAccounts) { if ($id) { $union.Add([string] $id) | Out-Null } }
-    foreach ($id in $permanentGlobalAdmins) { if ($id) { $union.Add([string] $id) | Out-Null } }
+    foreach ($id in $activeGlobalAdmins) { if ($id) { $union.Add([string] $id) | Out-Null } }
 
     $excludedIdentifiers = [string[]] @($union)
     [System.Array]::Sort($excludedIdentifiers, [System.StringComparer]::Ordinal)
@@ -119,7 +121,7 @@ function Get-PulseCaExclusionContext {
     return [pscustomobject]@{
         BreakGlassAccounts    = $breakGlass
         ServiceAccounts       = $serviceAccounts
-        PermanentGlobalAdmins = $permanentGlobalAdmins
+        ActiveGlobalAdmins    = $activeGlobalAdmins
         ExcludedIdentifiers   = $excludedIdentifiers
     }
 }

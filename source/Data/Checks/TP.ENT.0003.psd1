@@ -19,7 +19,7 @@
         Remediation  = @(
             'Create at least 2 cloud-only (*.onmicrosoft.com) accounts with permanent Global Administrator assignment, strong unique credentials (or phishing-resistant hardware keys) stored offline, and no ties to an individual employee.'
             'Exclude both accounts from EVERY enabled Conditional Access policy''s user/group exclusions - not just the MFA policies, all of them.'
-            'Declare the accounts in TenantPulse''s -AssessmentProfile (BreakGlassAccounts) so this check (and TP.ENT.0002/0004/0005) can verify their exclusion automatically on every run.'
+            'Declare the accounts in TenantPulse''s -AssessmentProfile (BreakGlassAccounts) BY THEIR ENTRA OBJECT ID (GUID) - not UPN or display name. Conditional Access excludeUsers holds GUID principal ids, so this check (and TP.ENT.0002/0004/0005) can only match a declared account against a policy''s exclusions when it is GUID-shaped; a non-GUID value reads as an unresolvable format (Warn), not a verified exclusion.'
             'Monitor sign-ins to these accounts and alert on any use - a break-glass sign-in should always be a rare, deliberate, logged event.'
         )
         PortalLinks  = @('https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ConditionalAccessBlade')

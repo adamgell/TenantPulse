@@ -1,8 +1,19 @@
+<#
+    RESEARCH NOTE (post-review, adjudicated, L3): Severity raised Medium -> High. The only
+    condition this check actually Fails on is "no Conditional Access AND Security Defaults
+    disabled" - that is not a partial-credit misconfiguration, it is zero baseline identity
+    protection: no MFA enforcement anywhere in the tenant, no block on legacy
+    authentication. Impact was already scored High; Medium severity understated how bad the
+    Fail case genuinely is relative to the rest of the Phase 1 catalog. The CA-in-use case
+    is no longer scored as this check's business at all (see the rule function's own
+    NotApplicable rework), so severity now describes exactly one thing: the zero-baseline-
+    protection Fail.
+#>
 @{
     Id         = 'TP.ENT.0001'
     Title      = 'Security Defaults state is appropriate'
     Category   = 'Entra.Identity'
-    Severity   = 'Medium'
+    Severity   = 'High'
     Effort     = 'Low'
     Impact     = 'High'
     Data       = @{

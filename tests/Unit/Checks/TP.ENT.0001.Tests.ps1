@@ -65,13 +65,13 @@ Describe 'TP.ENT.0001 - Security Defaults state is appropriate' {
         $finding.status | Should -Be 'Pass'
     }
 
-    It 'Pass (superseded): Conditional Access is in use, regardless of Security Defaults state' {
+    It 'NotApplicable (superseded, post-review): Conditional Access is in use, regardless of Security Defaults state - never Pass (would inflate the score with unearned credit)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0001' -Datasets @(
             @{ Name = 'securityDefaultsPolicy'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'default'; isEnabled = $false }) }
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'p1'; state = 'enabled' }) }
         )
 
-        $finding.status | Should -Be 'Pass'
+        $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Match 'Conditional Access is in use'
     }
 
@@ -103,5 +103,20 @@ Describe 'TP.ENT.0001 - Security Defaults state is appropriate' {
 
         $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Be 'descriptor-pending: awaiting GraphKit release'
+    }
+
+    It 'Error: an absent/null state on a Conditional Access policy never silently reads as not-enabled (L2 field-absence fix)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0001' -Datasets @(
+            @{ Name = 'securityDefaultsPolicy'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'default'; isEnabled = $true }) }
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'p1' }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'state'
+    }
+
+    It 'catalog: Severity is High (post-review, L3 - a zero-baseline-protection Fail, not a partial-credit Medium)' {
+        $catalog = InModuleScope TenantPulse { @(Import-PulseCheckCatalog) }
+        ($catalog | Where-Object { $_.Id -eq 'TP.ENT.0001' }).Severity | Should -Be 'High'
     }
 }

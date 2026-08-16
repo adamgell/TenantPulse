@@ -77,6 +77,23 @@ Describe 'TP.ENT.0005 - MFA is required for admin roles by an enforced Condition
         ($catalog | Where-Object { $_.Id -eq 'TP.ENT.0005' }) | Should -Not -BeNullOrEmpty
     }
 
+    It 'Pass (post-review, H1): a policy using authenticationStrength (Microsoft''s own phishing-resistant template shape) satisfies MFA, not just builtInControls mfa' {
+        $authStrengthPolicy = [pscustomobject]@{
+            id            = 'ca-phish-resistant'
+            displayName   = 'Phishing-Resistant MFA For Admins'
+            state         = 'enabled'
+            conditions    = [pscustomobject]@{ users = [pscustomobject]@{ includeRoles = $script:allNineRoles } }
+            grantControls = [pscustomobject]@{ authenticationStrength = [pscustomobject]@{ id = 'phishingResistant'; displayName = 'Phishing-resistant MFA' } }
+        }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($authStrengthPolicy) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $finding.evidence[0].detail.mfaMechanism | Should -Be 'authenticationStrength'
+    }
+
     It 'Pass: a single enabled policy covers all 9 required roles' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseMfaPolicy -IncludeRoles $script:allNineRoles) }
