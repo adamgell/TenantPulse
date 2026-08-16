@@ -101,6 +101,22 @@ BeforeAll {
         'github.com'
     )
 
+    # Domain-shaped PREFIXES that are never a real domain no matter what follows them -
+    # the complement of $safeDomainSuffixes for cases where the fixed part is the front,
+    # not the back, of the match. 'microsoft.graph.' is the literal namespace prefix every
+    # Microsoft Graph OData type-discriminator VALUE uses (e.g.
+    # '#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance', matched here
+    # without its leading '#', which is not a domain-pattern character) - these values
+    # appear throughout tests/Fixtures/SettingsCatalog/*.json right next to real (remapped)
+    # settingInstanceTemplateId/settingValueTemplateId GUIDs, and the task that produced
+    # those fixtures requires @odata.type values to be kept VERBATIM (public schema), so
+    # they cannot be scrubbed to dodge this check. A suffix-only allowlist cannot reach
+    # this shape (the "domain" here is the whole
+    # 'microsoft.graph.<PascalCaseTypeName>' run, not something ending in a known TLD).
+    $script:safeDomainPrefixes = @(
+        'microsoft.graph.'
+    )
+
     <#
         Scans one file's text CONTENT for the four PII/secret-shaped patterns described in
         this file's own docstring (everything except the raw-control-byte check, which
@@ -120,7 +136,9 @@ BeforeAll {
 
             [string[]] $AllowedGuid = @(),
 
-            [string[]] $SafeDomainSuffix = @()
+            [string[]] $SafeDomainSuffix = @(),
+
+            [string[]] $SafeDomainPrefix = @()
         )
 
         $violations = [System.Collections.Generic.List[string]]::new()
@@ -164,6 +182,14 @@ BeforeAll {
                 # GUIDs (11111111-.../22222222-...).
                 'tp.ent'
                 'tp.int'
+                # The literal JSON property key '@odata.type' (Microsoft Graph's
+                # OData type-discriminator field) - domain-shaped ('odata' + '.' +
+                # 'type', a 2+ letter final label) but a schema property name, never a
+                # domain. Fires throughout tests/Fixtures/SettingsCatalog/*.json, where
+                # every sanitized Settings Catalog payload has real (remapped)
+                # settingInstanceTemplateId/settingValueTemplateId GUIDs sitting a few
+                # lines from a "@odata.type": "#microsoft.graph...Instance" key.
+                'odata.type'
             ),
             [System.StringComparer]::OrdinalIgnoreCase
         )
@@ -201,6 +227,14 @@ BeforeAll {
                     if ($domain -eq $suffix -or $domain.EndsWith(".$suffix")) {
                         $isSafe = $true
                         break
+                    }
+                }
+                if (-not $isSafe) {
+                    foreach ($prefix in $SafeDomainPrefix) {
+                        if ($domain.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                            $isSafe = $true
+                            break
+                        }
                     }
                 }
 
@@ -339,6 +373,54 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
                 -RelativePath 'source/Fake.ps1' `
                 -AllowedGuid @() `
                 -SafeDomainSuffix $script:safeDomainSuffixes)
+
+            $violations | Should -BeNullOrEmpty
+        }
+
+        It 'does NOT flag a GUID near a "#microsoft.graph.<Type>" @odata.type VALUE (safe-domain-prefix, not suffix-gated)' {
+            # Companion to the deny-listed '@odata.type' KEY case below: the @odata.type
+            # VALUE itself ('#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance')
+            # is also domain-shaped once its leading '#' is stripped by the domain pattern -
+            # 'microsoft.graph.devicemanagementconfigurationchoicesettinginstance' is one
+            # dotted run ending in a 2+ letter label. A suffix allowlist cannot reach this
+            # (it never ends in a known TLD), so this needs the prefix-based counterpart.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content '"@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance", "settingInstanceTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f"' `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes `
+                -SafeDomainPrefix $script:safeDomainPrefixes)
+
+            $violations | Should -BeNullOrEmpty
+        }
+
+        It 'still flags a GUID near a real-looking domain when SafeDomainPrefix is supplied but does not match' {
+            # Proves the prefix check is a genuine prefix match (StartsWith), not an
+            # accidental "contains" - a domain that merely mentions 'microsoft.graph'
+            # somewhere other than its start must still be flagged.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "tenantId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479' for evil-microsoft.graph.contoso-prod.example.com" `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes `
+                -SafeDomainPrefix $script:safeDomainPrefixes)
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'looks like a real tenant id/domain pair'
+        }
+
+        It 'does NOT flag a GUID near the literal "@odata.type" JSON property key (deny-listed, not TLD-gated)' {
+            # The Settings Catalog fixture class: every sanitized policy/settings JSON
+            # payload under tests/Fixtures/SettingsCatalog/ has a real settingInstanceTemplateId
+            # or settingValueTemplateId GUID sitting a few lines from a literal
+            # '"@odata.type": "#microsoft.graph...Instance"' key - domain-shaped
+            # ('odata.type') but a schema property name, never a domain.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content '"@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance", "settingInstanceTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f"' `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes `
+                -SafeDomainPrefix $script:safeDomainPrefixes)
 
             $violations | Should -BeNullOrEmpty
         }
@@ -568,7 +650,7 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
 
     It "'<RelativePath>' has no secret/PII-shaped content" -ForEach $secretScanCases {
         $content = Get-Content -LiteralPath $FullPath -Raw -ErrorAction Stop
-        $violations = @(Get-PulseSecretScanViolations -Content $content -RelativePath $RelativePath -AllowedGuid $script:allowedGuids -SafeDomainSuffix $script:safeDomainSuffixes)
+        $violations = @(Get-PulseSecretScanViolations -Content $content -RelativePath $RelativePath -AllowedGuid $script:allowedGuids -SafeDomainSuffix $script:safeDomainSuffixes -SafeDomainPrefix $script:safeDomainPrefixes)
 
         $violations | Should -BeNullOrEmpty -Because ($violations -join "`n")
     }
