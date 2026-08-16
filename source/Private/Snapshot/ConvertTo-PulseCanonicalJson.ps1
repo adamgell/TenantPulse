@@ -44,15 +44,28 @@ function Write-PulseCanonicalJsonValue {
         [int] $MaxDepth,
 
         [Parameter(Mandatory)]
-        [int] $CurrentDepth
+        [int] $CurrentDepth,
+
+        # Shared with ConvertTo-PulseCanonicalJsonLine (Task 2.2) - see that function's own
+        # docstring for why it exists as a -Compact SWITCH on this same writer rather than a
+        # second, forked copy of the ordering/escaping logic: the pretty and compact
+        # serializers must never be able to drift on what counts as canonical ORDER (keys
+        # sorted ordinally) or canonical ESCAPING (ConvertTo-PulseCanonicalJsonString) - only
+        # whitespace differs between the two output shapes, so only the whitespace-emitting
+        # lines below branch on this switch; every ordering/duplicate-detection/escaping call
+        # is shared, unconditional code.
+        [Parameter()]
+        [switch] $Compact
     )
 
     if ($CurrentDepth -gt $MaxDepth) {
         throw "ConvertTo-PulseCanonicalJson: input exceeds the maximum depth of $MaxDepth."
     }
 
-    $indent = '  ' * $IndentLevel
-    $childIndent = '  ' * ($IndentLevel + 1)
+    $indent = if ($Compact) { '' } else { '  ' * $IndentLevel }
+    $childIndent = if ($Compact) { '' } else { '  ' * ($IndentLevel + 1) }
+    $newline = if ($Compact) { '' } else { "`n" }
+    $colonSeparator = if ($Compact) { ':' } else { ': ' }
 
     if ($null -eq $Value) {
         [void] $Builder.Append('null')
@@ -169,18 +182,19 @@ function Write-PulseCanonicalJsonValue {
         $comparison = [System.Comparison[int]] { param($a, $b) [string]::CompareOrdinal($stringKeys[$a], $stringKeys[$b]) }
         [System.Array]::Sort($order, $comparison)
 
-        [void] $Builder.Append("{`n")
+        [void] $Builder.Append('{')
+        [void] $Builder.Append($newline)
         for ($i = 0; $i -lt $order.Count; $i++) {
             $sourceIndex = $order[$i]
             $key = $originalKeys[$sourceIndex]
             [void] $Builder.Append($childIndent)
             [void] $Builder.Append((ConvertTo-PulseCanonicalJsonString -Value $stringKeys[$sourceIndex]))
-            [void] $Builder.Append(': ')
-            Write-PulseCanonicalJsonValue -Value $Value[$key] -Builder $Builder -IndentLevel ($IndentLevel + 1) -MaxDepth $MaxDepth -CurrentDepth ($CurrentDepth + 1)
+            [void] $Builder.Append($colonSeparator)
+            Write-PulseCanonicalJsonValue -Value $Value[$key] -Builder $Builder -IndentLevel ($IndentLevel + 1) -MaxDepth $MaxDepth -CurrentDepth ($CurrentDepth + 1) -Compact:$Compact
             if ($i -lt $order.Count - 1) {
                 [void] $Builder.Append(',')
             }
-            [void] $Builder.Append("`n")
+            [void] $Builder.Append($newline)
         }
         [void] $Builder.Append($indent)
         [void] $Builder.Append('}')
@@ -196,14 +210,15 @@ function Write-PulseCanonicalJsonValue {
             return
         }
 
-        [void] $Builder.Append("[`n")
+        [void] $Builder.Append('[')
+        [void] $Builder.Append($newline)
         for ($i = 0; $i -lt $items.Count; $i++) {
             [void] $Builder.Append($childIndent)
-            Write-PulseCanonicalJsonValue -Value $items[$i] -Builder $Builder -IndentLevel ($IndentLevel + 1) -MaxDepth $MaxDepth -CurrentDepth ($CurrentDepth + 1)
+            Write-PulseCanonicalJsonValue -Value $items[$i] -Builder $Builder -IndentLevel ($IndentLevel + 1) -MaxDepth $MaxDepth -CurrentDepth ($CurrentDepth + 1) -Compact:$Compact
             if ($i -lt $items.Count - 1) {
                 [void] $Builder.Append(',')
             }
-            [void] $Builder.Append("`n")
+            [void] $Builder.Append($newline)
         }
         [void] $Builder.Append($indent)
         [void] $Builder.Append(']')
@@ -233,17 +248,18 @@ function Write-PulseCanonicalJsonValue {
 
         [System.Array]::Sort($propertyNames, [System.StringComparer]::Ordinal)
 
-        [void] $Builder.Append("{`n")
+        [void] $Builder.Append('{')
+        [void] $Builder.Append($newline)
         for ($i = 0; $i -lt $propertyNames.Count; $i++) {
             $name = $propertyNames[$i]
             [void] $Builder.Append($childIndent)
             [void] $Builder.Append((ConvertTo-PulseCanonicalJsonString -Value $name))
-            [void] $Builder.Append(': ')
-            Write-PulseCanonicalJsonValue -Value $Value.$name -Builder $Builder -IndentLevel ($IndentLevel + 1) -MaxDepth $MaxDepth -CurrentDepth ($CurrentDepth + 1)
+            [void] $Builder.Append($colonSeparator)
+            Write-PulseCanonicalJsonValue -Value $Value.$name -Builder $Builder -IndentLevel ($IndentLevel + 1) -MaxDepth $MaxDepth -CurrentDepth ($CurrentDepth + 1) -Compact:$Compact
             if ($i -lt $propertyNames.Count - 1) {
                 [void] $Builder.Append(',')
             }
-            [void] $Builder.Append("`n")
+            [void] $Builder.Append($newline)
         }
         [void] $Builder.Append($indent)
         [void] $Builder.Append('}')
