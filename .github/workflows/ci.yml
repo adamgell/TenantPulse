@@ -488,7 +488,43 @@ jobs:
           # definition -> Pass; verified red against the pre-fix includeRoles-only coverage
           # check). This minimum must keep ratcheting up as check/function test suites are
           # added in later tasks.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 705 -AllowedSkips 0 -AllowNotRun 0
+          # 705 -> 699 (Task 1.11, GraphKit 0.1.1 migration): net -6. Deleted the
+          # Get-PulseGraphFailureStatusCode workaround and its 6 unit tests (GraphKit 0.1.1's
+          # Get-GraphObject now throws a structured ErrorRecord directly - no more
+          # supplemental out-of-band status-recovery call to test). Rewrote
+          # Get-PulseFailureClass's tests against the new ErrorRecord shape (13, was 14) and
+          # added a new Test-PulseErrorRecordHasStructuredSignal Describe block (4 tests) for
+          # the small helper backing the collector's now-repurposed '(status unknown)'
+          # suffix. -AllowNotRun raised 0 -> 1: dropping Pending from all six previously-
+          # Pending DatasetMap.psd1 entries (their GraphKit 0.1.1 descriptors are live) left
+          # tests/QA/ReadOnly.tests.ps1's Pending-only Context legitimately empty - the
+          # mechanism itself stays covered by a synthetic Pending fixture in
+          # Get-PulseTenantSnapshot.Tests.ps1's Invoke-PulseCollection Describe block.
+          # 699 -> 706 (Task 1.11, live-gate surprise fixed with regression coverage): the
+          # first real run of GraphKit 0.1.1's newly-live organization/directoryRoleAssignments
+          # descriptors against Ivy24 surfaced that some Graph payloads carry the raw tenant
+          # GUID as a genuine response FIELD (Organization.id, DirectoryRoleAssignment.
+          # principalOrganizationId), not merely a GraphKit provenance stamp - unredacted in
+          # datasets/*.json. Fixed with a new Protect-PulseGraphRowTenantId helper wired into
+          # Write-PulseDataset, plus +7 tests: 5 in Snapshot.Tests.ps1 (redacts a top-level
+          # id, redacts a nested value, no-op when -TenantId/-Pseudonym are omitted, and
+          # proves the caller's original row object is never mutated) and +1 collector-level
+          # regression in Get-PulseTenantSnapshot.Tests.ps1 pinning that the IdFromDataset
+          # dependency lookup still uses the REAL (unredacted) id even though the dependency's
+          # own written file is redacted.
+          # 706 -> 707 (Task 1.11, second live-gate surprise on the SAME re-run): a real
+          # ConditionalAccessPolicy row's conditions/grantControls came back as
+          # Hashtable/OrderedHashtable, not PSCustomObject. Protect-PulseGraphRowTenantId's
+          # generic-object branch walked a Hashtable via .PSObject.Properties, which surfaces
+          # the Hashtable's own adapter members (Keys/Values/Count/SyncRoot/...) rather than
+          # its dictionary entries - and a non-synchronized Hashtable's SyncRoot IS the same
+          # hashtable, so the walk recursed into itself and blew the call depth on every
+          # policy row (reproduced live: ~4s burned per row before falling back to the
+          # unredacted original). Fixed by walking IDictionary via its own Keys/this[key]
+          # entries, checked and handled before the generic PSObject branch. +1 regression
+          # test in Snapshot.Tests.ps1 pinning a Hashtable-nested tenant GUID redacts
+          # correctly and fast (<2s), reproducing the exact ConditionalAccessPolicy shape.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 707 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

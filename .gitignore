@@ -3,3 +3,6 @@ output/
 # Local Pester/coverage artifacts
 *.coverage.xml
 testResults/
+# Ad-hoc local scratch space (live-gate snapshot dumps, manual repro output) - never
+# committed; may contain pseudonymized-but-still-tenant-shaped data from manual runs.
+scratch/

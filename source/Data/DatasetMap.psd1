@@ -83,29 +83,19 @@
     # the real installed GraphKit 0.1.0 catalog.
     deviceManagementSettings = @{ Type = 'ManagedDeviceSetting'; Operation = 'Get'; ApiVersion = 'beta' }
 
-    # Pending - GraphKit descriptor exists committed-but-unreleased; goes live at 0.1.1.
-    # See the LIVE-TENANT VERIFICATION NOTE above.
-    #
-    # ExpectedThrottleClass / ExpectedReplayPolicy (Task 1.10): these Pending entries have
-    # no live GraphKit descriptor to query yet, so the static read-only gate cannot resolve
-    # them via Get-GraphOperation the way it does every non-Pending entry above. Instead
-    # each Pending entry DECLARES the read-only shape its future descriptor is expected to
-    # have - based on this week's live-tenant verification note - and the gate asserts
-    # against that declaration (ThrottleClass 'Read', ReplayPolicy 'Safe') with a clearly
-    # reported "descriptor-pending" reason instead of a live lookup. This still catches a
-    # real authoring mistake (someone flipping Pending on a write-shaped or unsafe-replay
-    # operation) even though it cannot verify the eventual GraphKit release matches; that
-    # re-verification happens automatically the moment the Pending flag drops, because the
-    # gate then falls through to the same live Get-GraphOperation path every other entry
-    # uses.
-    securityDefaultsPolicy    = @{ Type = 'SecurityDefaultsPolicy'; Operation = 'Get'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    directoryRoleAssignments  = @{ Type = 'DirectoryRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    directoryRoleDefinitions  = @{ Type = 'DirectoryRoleDefinition'; Operation = 'ListBeta'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    organization               = @{ Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # GraphKit 0.1.1 (Task 1.11 migration): these six descriptors shipped in the release
+    # the LIVE-TENANT VERIFICATION NOTE above anticipated. Pending dropped - the static
+    # read-only gate now resolves each of these via a live Get-GraphOperation lookup
+    # against the installed GraphKit 0.1.1 catalog, exactly like every other entry above,
+    # instead of asserting against a declared ExpectedThrottleClass/ExpectedReplayPolicy.
+    securityDefaultsPolicy    = @{ Type = 'SecurityDefaultsPolicy'; Operation = 'Get'; ApiVersion = 'v1.0' }
+    directoryRoleAssignments  = @{ Type = 'DirectoryRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+    directoryRoleDefinitions  = @{ Type = 'DirectoryRoleDefinition'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+    organization               = @{ Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0' }
     # GetMdmAuthority is a $select-in-path property read on the organization entity
     # (/organization/{id}?$select=mobileDeviceManagementAuthority), NOT the removed
     # getMdmAuthority action - see the CLARIFICATION note above. Live-verified 200 'intune'
     # on both v1.0 and beta this week.
-    organizationMdmAuthority  = @{ Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $true; IdFromDataset = 'organization'; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    entraDevices               = @{ Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    organizationMdmAuthority  = @{ Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; IdFromDataset = 'organization' }
+    entraDevices               = @{ Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0' }
 }

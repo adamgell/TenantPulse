@@ -255,6 +255,138 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
         $manifest.datasets.NotNeeded.status | Should -Be 'Skipped'
         $manifest.datasets.NotNeeded.reason | Should -Be 'feature disabled'
     }
+
+    # Task 1.11 GraphKit 0.1.1 live-gate surprise (Ivy24 lab tenant): some Graph payloads
+    # carry the raw tenant id as a genuine response FIELD, not a GraphKit provenance stamp -
+    # Organization.id IS the tenant GUID, DirectoryRoleAssignment.principalOrganizationId is
+    # also the tenant GUID. See Protect-PulseGraphRowTenantId's own docstring.
+    It '-TenantId/-Pseudonym redact the raw tenant GUID out of row content, including a value equal to `id`' {
+        $tenantId = 'REDACTED-TENANT-GUID'
+        $data = @(
+            [pscustomobject]@{ id = $tenantId; displayName = 'Contoso' }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data, $tenantId {
+            param($store, $data, $tenantId)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected' -TenantId $tenantId -Pseudonym 'tp-abc123'
+        }
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'Sample.json'
+        $writtenJson = Get-Content -LiteralPath $datasetFile -Raw
+        $writtenJson | Should -Not -Match ([regex]::Escape($tenantId))
+        $writtenJson | Should -Match 'tp-abc123'
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'Sample'
+        }
+        $result[0].id | Should -Be 'tp-abc123'
+        $result[0].displayName | Should -Be 'Contoso'
+    }
+
+    It 'redacts a nested tenant GUID (e.g. a DirectoryRoleAssignment-shaped principalOrganizationId) too' {
+        $tenantId = 'REDACTED-TENANT-GUID'
+        $data = @(
+            [pscustomobject]@{
+                id                     = 'assignment-1'
+                principalOrganizationId = $tenantId
+                principal              = [pscustomobject]@{ id = 'principal-1'; organizationId = $tenantId }
+            }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data, $tenantId {
+            param($store, $data, $tenantId)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected' -TenantId $tenantId -Pseudonym 'tp-abc123'
+        }
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'Sample.json'
+        $writtenJson = Get-Content -LiteralPath $datasetFile -Raw
+        $writtenJson | Should -Not -Match ([regex]::Escape($tenantId))
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'Sample'
+        }
+        $result[0].principalOrganizationId | Should -Be 'tp-abc123'
+        $result[0].principal.organizationId | Should -Be 'tp-abc123'
+        $result[0].id | Should -Be 'assignment-1'
+    }
+
+    It 'omitting -TenantId/-Pseudonym leaves row content completely unredacted (pre-existing behavior for every other caller)' {
+        $tenantId = 'REDACTED-TENANT-GUID'
+        $data = @([pscustomobject]@{ id = $tenantId })
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data {
+            param($store, $data)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'Sample'
+        }
+        $result[0].id | Should -Be $tenantId
+    }
+
+    It 'does NOT mutate the caller''s original -Data row objects (the collector reads the real id off these for IdFromDataset)' {
+        $tenantId = 'REDACTED-TENANT-GUID'
+        $originalRow = [pscustomobject]@{ id = $tenantId }
+        $data = @($originalRow)
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data, $tenantId {
+            param($store, $data, $tenantId)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected' -TenantId $tenantId -Pseudonym 'tp-abc123'
+        }
+
+        # The original object the caller still holds a reference to must be untouched -
+        # only the CLONE written to disk is redacted.
+        $originalRow.id | Should -Be $tenantId
+    }
+
+    # Task 1.11 live-gate finding (Ivy24, real ConditionalAccessPolicy rows): GraphKit
+    # returns several nested Graph properties (conditions, grantControls, sessionControls)
+    # as [System.Collections.Hashtable] / OrderedHashtable, not PSCustomObject. A Hashtable's
+    # .PSObject.Properties surfaces its ADAPTER members (Keys, Values, Count, IsReadOnly,
+    # SyncRoot, ...) rather than its dictionary entries - and a non-synchronized Hashtable's
+    # SyncRoot property returns the SAME hashtable instance, so walking .PSObject.Properties
+    # on a Hashtable is a self-reference the recursive redactor previously followed straight
+    # into a call-depth overflow on every real policy row (reproduced live: ~4s burned per
+    # row before falling back to the unredacted original - see Protect-PulseGraphRowTenantId).
+    It 'redacts a tenant GUID nested inside a Hashtable-valued property (e.g. a real ConditionalAccessPolicy''s conditions/grantControls shape) without call-depth overflow' {
+        $tenantId = 'REDACTED-TENANT-GUID'
+        $data = @(
+            [pscustomobject]@{
+                id         = 'policy-1'
+                conditions = [ordered] @{
+                    applications = [ordered] @{ includeApplications = @('All') }
+                    users        = [ordered] @{ excludeGuestsOrExternalUsers = [ordered] @{ externalTenants = [ordered] @{ membershipKind = 'all' } } }
+                }
+                grantControls = [ordered] @{ tenantOwnerId = $tenantId; operator = 'OR' }
+            }
+        )
+
+        $writeDuration = Measure-Command {
+            InModuleScope TenantPulse -ArgumentList $script:store, $data, $tenantId {
+                param($store, $data, $tenantId)
+                Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected' -TenantId $tenantId -Pseudonym 'tp-abc123'
+            }
+        }
+
+        # A regression to the old behavior burns whole seconds per row hunting for a call
+        # depth it will never legitimately reach; a correct dictionary walk is near-instant.
+        $writeDuration.TotalSeconds | Should -BeLessThan 2
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'Sample.json'
+        $writtenJson = Get-Content -LiteralPath $datasetFile -Raw
+        $writtenJson | Should -Not -Match ([regex]::Escape($tenantId))
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'Sample'
+        }
+        $result[0].grantControls.tenantOwnerId | Should -Be 'tp-abc123'
+        $result[0].conditions.users.excludeGuestsOrExternalUsers.externalTenants.membershipKind | Should -Be 'all'
+    }
 }
 
 Describe 'Remove-PulseGraphRowProvenance' {

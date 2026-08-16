@@ -28,5 +28,5 @@
     # pinned to the same version) and is now published to PSGallery, so
     # Resolve-Dependency (PSResourceGet/PowerShellGet against PSGallery) resolves it here
     # like every other build dependency.
-    GraphKit                    = '0.1.0'
+    GraphKit                    = '0.1.1'
 }

@@ -239,10 +239,35 @@ Describe 'Assert-PulseReadOnlyDescriptor' {
 }
 
 Describe 'Get-PulseFailureClass' {
-    It 'classifies a StatusCode 403 exception property as PermissionDenied' {
-        $exception = [System.Management.Automation.RuntimeException]::new('boom')
-        Add-Member -InputObject $exception -NotePropertyName 'StatusCode' -NotePropertyValue 403
-        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Boom', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
+    BeforeAll {
+        # GraphKit 0.1.1: Get-GraphObject's failure ErrorRecord now carries structured
+        # CategoryInfo.Category (mapped by GraphKit from the HTTP status) and a
+        # TargetObject that is the whole GraphKit.OperationResult envelope, so
+        # @($_.TargetObject.Telemetry) carries the per-attempt StatusCode/GraphErrorCode
+        # history. New-TestGraphFailureRecord below builds an ErrorRecord in exactly that
+        # shape - the same shape New-GraphOperationFailureRecord builds inside GraphKit
+        # itself. Defined in BeforeAll (not directly in the Describe body) so it is
+        # available in every It block's run-phase scope, not just Discovery.
+        function script:New-TestGraphFailureRecord {
+            param(
+                [string] $Message = 'boom',
+                [System.Management.Automation.ErrorCategory] $Category = [System.Management.Automation.ErrorCategory]::NotSpecified,
+                [object[]] $Telemetry = $null,
+                [string] $ErrorId = 'GraphKit.OperationFailed.0'
+            )
+
+            $exception = [System.InvalidOperationException]::new($Message)
+            $targetObject = if ($null -ne $Telemetry) {
+                [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Failed'; Certainty = 'Known'; Telemetry = $Telemetry }
+            } else {
+                $null
+            }
+            [System.Management.Automation.ErrorRecord]::new($exception, $ErrorId, $Category, $targetObject)
+        }
+    }
+
+    It 'classifies CategoryInfo.Category PermissionDenied as PermissionDenied (signal 1, GraphKit 0.1.1)' {
+        $errorRecord = New-TestGraphFailureRecord -Message "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known', HTTP 403." -Category ([System.Management.Automation.ErrorCategory]::PermissionDenied) -Telemetry @([pscustomobject]@{ Attempt = 1; StatusCode = 403 }) -ErrorId 'GraphKit.OperationFailed.403'
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
@@ -252,10 +277,8 @@ Describe 'Get-PulseFailureClass' {
         $class | Should -Be 'PermissionDenied'
     }
 
-    It 'classifies a StatusCode 401 exception property as AuthFailure' {
-        $exception = [System.Management.Automation.RuntimeException]::new('boom')
-        Add-Member -InputObject $exception -NotePropertyName 'StatusCode' -NotePropertyValue 401
-        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Boom', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
+    It 'classifies CategoryInfo.Category AuthenticationError as AuthFailure (signal 1, GraphKit 0.1.1)' {
+        $errorRecord = New-TestGraphFailureRecord -Message "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known', HTTP 401." -Category ([System.Management.Automation.ErrorCategory]::AuthenticationError) -Telemetry @([pscustomobject]@{ Attempt = 1; StatusCode = 401 }) -ErrorId 'GraphKit.OperationFailed.401'
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
@@ -265,10 +288,8 @@ Describe 'Get-PulseFailureClass' {
         $class | Should -Be 'AuthFailure'
     }
 
-    It 'classifies a StatusCode 500 exception property as Failed' {
-        $exception = [System.Management.Automation.RuntimeException]::new('boom')
-        Add-Member -InputObject $exception -NotePropertyName 'StatusCode' -NotePropertyValue 500
-        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Boom', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
+    It 'classifies a CategoryInfo.Category this function does not map (ResourceUnavailable, 5xx) as Failed' {
+        $errorRecord = New-TestGraphFailureRecord -Message "Get-GraphObject failed for 'DeviceConfiguration/List': Outcome 'Failed', Certainty 'Known', HTTP 500." -Category ([System.Management.Automation.ErrorCategory]::ResourceUnavailable) -Telemetry @([pscustomobject]@{ Attempt = 1; StatusCode = 500 }) -ErrorId 'GraphKit.OperationFailed.500'
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
@@ -278,14 +299,11 @@ Describe 'Get-PulseFailureClass' {
         $class | Should -Be 'Failed'
     }
 
-    # Item 17 (final fix wave): an enum-typed StatusCode (e.g.
-    # [System.Net.HttpStatusCode]::Forbidden) must be cast to [int] directly - [string] on
-    # an enum renders its NAME ('Forbidden'), not its numeric value ('403'), which
-    # previously made [int]::TryParse fail and silently lost the classification signal.
-    It 'classifies an enum-typed StatusCode ([System.Net.HttpStatusCode]::Forbidden) as PermissionDenied (final fix wave, item 17)' {
-        $exception = [System.Management.Automation.RuntimeException]::new('boom')
-        Add-Member -InputObject $exception -NotePropertyName 'StatusCode' -NotePropertyValue ([System.Net.HttpStatusCode]::Forbidden)
-        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Boom', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
+    It 'falls back to the Telemetry last-attempt StatusCode (signal 2) when CategoryInfo.Category is NotSpecified' {
+        $errorRecord = New-TestGraphFailureRecord -Message 'boom' -Category ([System.Management.Automation.ErrorCategory]::NotSpecified) -Telemetry @(
+            [pscustomobject]@{ Attempt = 1; StatusCode = 429 }
+            [pscustomobject]@{ Attempt = 2; StatusCode = 403 }
+        )
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
@@ -295,27 +313,20 @@ Describe 'Get-PulseFailureClass' {
         $class | Should -Be 'PermissionDenied'
     }
 
-    It 'classifies an enum-typed -SupplementalStatusCode the same way as an int one' {
-        # -ErrorRecord must be non-null here: Get-PulseFailureClass returns 'Failed'
-        # immediately for a $null ErrorRecord, before -SupplementalStatusCode is ever
-        # consulted - a genuine, structure-free ErrorRecord is required to reach the
-        # -SupplementalStatusCode fallback signal this test targets.
-        $errorRecord = $null
-        try {
-            throw 'a generic failure with no structured status at all'
-        } catch {
-            $errorRecord = $_
-        }
+    # Enum-typed Telemetry StatusCode must be cast to [int] directly - [string] on an enum
+    # renders its NAME ('Forbidden'), not its numeric value ('403').
+    It 'classifies an enum-typed Telemetry StatusCode ([System.Net.HttpStatusCode]::Forbidden) as PermissionDenied via signal 2' {
+        $errorRecord = New-TestGraphFailureRecord -Category ([System.Management.Automation.ErrorCategory]::NotSpecified) -Telemetry @([pscustomobject]@{ Attempt = 1; StatusCode = [System.Net.HttpStatusCode]::Forbidden })
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode ([int][System.Net.HttpStatusCode]::Forbidden)
+            Get-PulseFailureClass -ErrorRecord $errorRecord
         }
 
         $class | Should -Be 'PermissionDenied'
     }
 
-    It 'falls back to message text ("403") when no structured status is present' {
+    It 'falls back to message text ("403") when no CategoryInfo.Category or Telemetry status is present' {
         $errorRecord = $null
         try {
             throw "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known' (403 Forbidden)."
@@ -331,7 +342,7 @@ Describe 'Get-PulseFailureClass' {
         $class | Should -Be 'PermissionDenied'
     }
 
-    It 'falls back to message text (AADSTS code) as AuthFailure when no structured status is present' {
+    It 'falls back to message text (AADSTS code) as AuthFailure when no structured signal is present' {
         $errorRecord = $null
         try {
             throw 'Get-GraphContext token acquisition failed: AADSTS700016: Application not found in the directory.'
@@ -379,10 +390,8 @@ Describe 'Get-PulseFailureClass' {
         $class | Should -Be 'Failed'
     }
 
-    It 'is total: a string StatusCode ("403 Forbidden") never throws and classifies rather than raw-casting' {
-        $exception = [System.Management.Automation.RuntimeException]::new('Request failed: 403 Forbidden')
-        Add-Member -InputObject $exception -NotePropertyName 'StatusCode' -NotePropertyValue '403 Forbidden'
-        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Boom', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
+    It 'is total: a string Telemetry StatusCode ("403 Forbidden") never throws and classifies rather than raw-casting' {
+        $errorRecord = New-TestGraphFailureRecord -Message 'Request failed: 403 Forbidden' -Category ([System.Management.Automation.ErrorCategory]::NotSpecified) -Telemetry @([pscustomobject]@{ Attempt = 1; StatusCode = '403 Forbidden' })
 
         {
             InModuleScope TenantPulse -ArgumentList $errorRecord {
@@ -396,16 +405,13 @@ Describe 'Get-PulseFailureClass' {
             Get-PulseFailureClass -ErrorRecord $errorRecord
         }
 
-        # TryParse on the non-numeric StatusCode string fails cleanly, so this falls
-        # through to the message-text fallback, which still catches the '403'.
+        # TryParse on the non-numeric Telemetry StatusCode string fails cleanly, so this
+        # falls through to the message-text fallback, which still catches the '403'.
         $class | Should -Be 'PermissionDenied'
     }
 
-    It 'is total: a garbage-typed Response.StatusCode value never throws' {
-        $exception = [System.Management.Automation.RuntimeException]::new('boom')
-        $garbageResponse = [pscustomobject]@{ StatusCode = [pscustomobject]@{ Nonsense = @(1, 2, 3) } }
-        Add-Member -InputObject $exception -NotePropertyName 'Response' -NotePropertyValue $garbageResponse
-        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Boom', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
+    It 'is total: a garbage-typed TargetObject.Telemetry value never throws' {
+        $errorRecord = New-TestGraphFailureRecord -Category ([System.Management.Automation.ErrorCategory]::NotSpecified) -Telemetry @([pscustomobject]@{ Attempt = 1; StatusCode = [pscustomobject]@{ Nonsense = @(1, 2, 3) } })
 
         {
             InModuleScope TenantPulse -ArgumentList $errorRecord {
@@ -435,193 +441,62 @@ Describe 'Get-PulseFailureClass' {
 
         $class | Should -Be 'Failed'
     }
-
-    # Task 1.11 live gate (Ivy24 lab tenant): Get-GraphObject's real throw is the fixed
-    # message "Get-GraphObject failed for '<Type>/<Operation>': Outcome '<Outcome>',
-    # Certainty '<Certainty>'." - no Response/StatusCode property, no '403'/'forbidden'
-    # text. Every signal above this point is dead against that real shape; -StatusCode is
-    # the collector's channel for the status code it recovers out-of-band (see
-    # Get-PulseGraphFailureStatusCode) and hands in here instead.
-    It 'classifies PermissionDenied from -SupplementalStatusCode 403 when the ErrorRecord carries no structured status or matching text' {
-        $errorRecord = $null
-        try {
-            throw "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known'."
-        } catch {
-            $errorRecord = $_
-        }
-
-        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
-            param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode 403
-        }
-
-        $class | Should -Be 'PermissionDenied'
-    }
-
-    It 'classifies AuthFailure from -SupplementalStatusCode 401 when the ErrorRecord carries no structured status or matching text' {
-        $errorRecord = $null
-        try {
-            throw "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known'."
-        } catch {
-            $errorRecord = $_
-        }
-
-        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
-            param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode 401
-        }
-
-        $class | Should -Be 'AuthFailure'
-    }
-
-    It 'prefers the ErrorRecord''s own structured StatusCode over a conflicting -StatusCode override' {
-        $exception = [System.Management.Automation.RuntimeException]::new('boom')
-        Add-Member -InputObject $exception -NotePropertyName 'StatusCode' -NotePropertyValue 401
-        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Boom', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
-
-        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
-            param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode 403
-        }
-
-        $class | Should -Be 'AuthFailure'
-    }
-
-    It 'ignores a $null -StatusCode exactly as if it were omitted' {
-        $errorRecord = $null
-        try {
-            throw "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known'."
-        } catch {
-            $errorRecord = $_
-        }
-
-        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
-            param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode $null
-        }
-
-        $class | Should -Be 'Failed'
-    }
 }
 
-Describe 'Get-PulseGraphFailureStatusCode' {
-    # Mock-seam audit (Task 1.11 review round 2): a mock that never fires is invisible -
-    # the code under test can take an entirely different, unmocked path and a test can
-    # still report green if its assertion happens to hold anyway (this is exactly the
-    # shape of a real GraphKit incident: a staged-403 test whose mock's ParameterFilter
-    # never matched, so the call fell through and hit the live lab tenant instead - and
-    # the assertion passed regardless, because the live call also happened to 403).
-    # Every It below now pairs its Mock with an explicit Should-Invoke -Times -Exactly
-    # (with the SAME -ParameterFilter, where the Mock has one) proving the specific
-    # staged mock - not some other path - is what the assertion actually exercised.
-    It 'returns the last Telemetry attempt''s StatusCode from a supplemental Invoke-GraphOperation call' {
-        Mock Invoke-GraphOperation -ModuleName TenantPulse {
-            [pscustomobject]@{
-                PSTypeName = 'GraphKit.OperationResult'
-                Outcome    = 'Failed'
-                Certainty  = 'Known'
-                Telemetry  = @(
-                    [pscustomobject]@{ Attempt = 1; StatusCode = 429 }
-                    [pscustomobject]@{ Attempt = 2; StatusCode = 403 }
-                )
-            }
+Describe 'Test-PulseErrorRecordHasStructuredSignal' {
+    It 'returns $true when CategoryInfo.Category is a mapped, non-default category' {
+        $exception = [System.InvalidOperationException]::new('boom')
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'GraphKit.OperationFailed.403', [System.Management.Automation.ErrorCategory]::PermissionDenied, $null)
+
+        $result = InModuleScope TenantPulse -ArgumentList $errorRecord {
+            param($errorRecord)
+            Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $errorRecord
         }
 
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
-        $code = InModuleScope TenantPulse -ArgumentList $context {
-            param($context)
-            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
-        }
-
-        $code | Should -Be 403
-        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly
+        $result | Should -BeTrue
     }
 
-    # Item 17 (final fix wave): an enum-typed Telemetry StatusCode (e.g.
-    # [System.Net.HttpStatusCode]::Forbidden) must be cast to [int] directly, not
-    # stringified - [string] on an enum renders its NAME, not its numeric value.
-    It 'returns the numeric value of an enum-typed Telemetry StatusCode (final fix wave, item 17)' {
-        Mock Invoke-GraphOperation -ModuleName TenantPulse {
-            [pscustomobject]@{
-                Telemetry = @([pscustomobject]@{ StatusCode = [System.Net.HttpStatusCode]::Forbidden })
-            }
+    It 'returns $true when TargetObject.Telemetry carries a readable last-attempt StatusCode' {
+        $exception = [System.InvalidOperationException]::new('boom')
+        $targetObject = [pscustomobject]@{ Telemetry = @([pscustomobject]@{ StatusCode = 500 }) }
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'GraphKit.OperationFailed.500', [System.Management.Automation.ErrorCategory]::NotSpecified, $targetObject)
+
+        $result = InModuleScope TenantPulse -ArgumentList $errorRecord {
+            param($errorRecord)
+            Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $errorRecord
         }
 
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
-        $code = InModuleScope TenantPulse -ArgumentList $context {
-            param($context)
-            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
-        }
-
-        $code | Should -Be 403
-        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly
+        $result | Should -BeTrue
     }
 
-    It 'passes -Parameters through to Invoke-GraphOperation so a Get-scoped classification probe matches the failed read' {
-        Mock Invoke-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'abc' } {
-            [pscustomobject]@{ Telemetry = @([pscustomobject]@{ StatusCode = 403 }) }
+    It 'returns $false for a plain string-thrown ErrorRecord with no CategoryInfo.Category or Telemetry' {
+        $errorRecord = $null
+        try {
+            throw 'Get-GraphObject failed: 500 Internal Server Error.'
+        } catch {
+            $errorRecord = $_
         }
 
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
-        $code = InModuleScope TenantPulse -ArgumentList $context {
-            param($context)
-            Get-PulseGraphFailureStatusCode -Context $context -Type 'ManagedDevice' -Operation 'Get' -Parameters @{ id = 'abc' }
+        $result = InModuleScope TenantPulse -ArgumentList $errorRecord {
+            param($errorRecord)
+            Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $errorRecord
         }
 
-        $code | Should -Be 403
-        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
-            $Parameters.id -eq 'abc'
-        }
+        $result | Should -BeFalse
     }
 
-    It 'returns $null (never throws) when the supplemental Invoke-GraphOperation call itself fails' {
-        Mock Invoke-GraphOperation -ModuleName TenantPulse { throw 'transient network error' }
-
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
-
+    It 'is total: a $null ErrorRecord returns $false rather than throwing' {
         {
-            InModuleScope TenantPulse -ArgumentList $context {
-                param($context)
-                Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
+            InModuleScope TenantPulse {
+                Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $null
             }
         } | Should -Not -Throw
 
-        $code = InModuleScope TenantPulse -ArgumentList $context {
-            param($context)
-            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
+        $result = InModuleScope TenantPulse {
+            Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $null
         }
 
-        $code | Should -BeNullOrEmpty
-        # Two calls to Get-PulseGraphFailureStatusCode above (the -Should -Not -Throw
-        # probe and the value-capturing call) - both must have reached the mocked
-        # Invoke-GraphOperation for this test to mean anything.
-        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 2 -Exactly
-    }
-
-    It 'returns $null when the result carries no Telemetry' {
-        Mock Invoke-GraphOperation -ModuleName TenantPulse { [pscustomobject]@{ Outcome = 'Failed' } }
-
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
-        $code = InModuleScope TenantPulse -ArgumentList $context {
-            param($context)
-            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
-        }
-
-        $code | Should -BeNullOrEmpty
-        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly
-    }
-
-    It 'returns $null when Telemetry is an empty array' {
-        Mock Invoke-GraphOperation -ModuleName TenantPulse { [pscustomobject]@{ Telemetry = @() } }
-
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
-        $code = InModuleScope TenantPulse -ArgumentList $context {
-            param($context)
-            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
-        }
-
-        $code | Should -BeNullOrEmpty
-        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly
+        $result | Should -BeFalse
     }
 }
 
@@ -685,11 +560,13 @@ Describe 'Invoke-PulseCollection' {
     # the supplemental Invoke-GraphOperation classification call this dataset landed
     # Failed, not the Skipped/permission-denied honest-degradation contract the design
     # promises - this test pins the fix against the real shape, not the assumed one.
-    It 'classifies a real-shaped Get-GraphObject 403 (no status text in the message) as Skipped/permission-denied via the supplemental status-code probe' {
+    It 'classifies a real-shaped GraphKit 0.1.1 Get-GraphObject 403 ErrorRecord (CategoryInfo.Category PermissionDenied) as Skipped/permission-denied' {
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' -RequiredPermissions @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { throw "Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known'." }
-        Mock Invoke-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } {
-            [pscustomobject]@{ Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = 403 }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } {
+            $exception = [System.InvalidOperationException]::new("Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known', HTTP 403.")
+            $targetObject = [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Failed'; Certainty = 'Known'; Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = 403 }) }
+            $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'GraphKit.OperationFailed.403', [System.Management.Automation.ErrorCategory]::PermissionDenied, $targetObject)
+            throw $errorRecord
         }
 
         $manifest = @(
@@ -707,14 +584,10 @@ Describe 'Invoke-PulseCollection' {
         $result.datasets.conditionalAccessPolicies.reason | Should -Match '^permission-denied:'
         $result.datasets.conditionalAccessPolicies.reason | Should -Match 'Policy.Read.All'
 
-        # Mock-seam proof (Task 1.11 review round 2): the assertions above pass whether or
-        # not the supplemental Invoke-GraphOperation probe actually fired - permission-
-        # denied is also reachable if Get-PulseFailureClass's message-text fallback had
-        # matched. These Should-Invoke calls are what actually proves THIS test exercised
-        # the fix (the supplemental call recovering 403 from Telemetry) and not some other
-        # path that happened to land on the same reason string.
+        # Mock-seam proof (Task 1.11 GraphKit 0.1.1 migration): confirm the mocked
+        # Get-GraphObject 403 ErrorRecord is what this test actually exercised, not some
+        # other path that happened to land on the same reason string.
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' }
-        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' }
     }
 
     It 'writes Collected for a clean read, Skipped with a permission reason for a 403, and Failed for a 500 - each dataset attempted independently' {
@@ -758,15 +631,15 @@ Describe 'Invoke-PulseCollection' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceConfiguration' }
     }
 
-    # Item 18 (final fix wave): a supplemental status-recovery failure must be visible in
-    # the artifact itself, not just an easily-missed console warning.
-    It 'appends "(status unknown)" to a Failed reason when supplemental status recovery itself fails (final fix wave, item 18)' {
+    # GraphKit 0.1.1 migration: '(status unknown)' now means the ErrorRecord itself
+    # carried NO structured signal at all - no CategoryInfo.Category this classifier maps
+    # and no readable Telemetry StatusCode (see Test-PulseErrorRecordHasStructuredSignal) -
+    # not (as under GraphKit 0.1.0) that a separate out-of-band recovery call failed. A
+    # plain `throw "<message>"` (no ErrorRecord constructed with a mapped category or a
+    # TargetObject) is exactly that shape.
+    It 'appends "(status unknown)" to a Failed reason when the ErrorRecord carries no structured signal' {
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse { throw "Get-GraphObject failed for 'DeviceConfiguration/List': 500 Internal Server Error." }
-        # Default BeforeAll mock already throws for Invoke-GraphOperation ("must be mocked
-        # in this test") - re-staged here explicitly so the intent (supplemental recovery
-        # itself fails) is not left implicit.
-        Mock Invoke-GraphOperation -ModuleName TenantPulse { throw 'supplemental probe also failed: transient network error' }
 
         $manifest = @(
             [pscustomobject]@{ Dataset = 'deviceConfigurations'; Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false }
@@ -956,6 +829,42 @@ Describe 'Invoke-PulseCollection' {
         $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $result.datasets.organization.status | Should -Be 'Collected'
         $result.datasets.organizationMdmAuthority.status | Should -Be 'Collected'
+    }
+
+    # Task 1.11 GraphKit 0.1.1 live-gate surprise (Ivy24 lab tenant): Organization.id IS
+    # the raw tenant GUID. Write-PulseDataset now redacts the tenant GUID out of the
+    # organization.json FILE content (see Snapshot.Tests.ps1's Write-PulseDataset
+    # coverage) - this test pins that the IdFromDataset dependency lookup still reads the
+    # REAL id off the in-memory row (not the file-redacted pseudonym) so the dependent
+    # organizationMdmAuthority Graph call is parameterized correctly, not with a pseudonym
+    # Graph would reject.
+    It 'IdFromDataset: the dependency lookup uses the REAL id even when the dependency row''s id equals the context TenantId (redacted only in the written file)' {
+        $tenantId = 'REDACTED-TENANT-GUID'
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { @([pscustomobject]@{ id = $tenantId }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { @([pscustomobject]@{ mobileDeviceManagementAuthority = 'intune' }) }
+
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
+            [pscustomobject]@{ Dataset = 'organizationMdmAuthority'; Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = 'organization' }
+        )
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; TenantId = $tenantId }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
+            param($store, $manifest, $context)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'contoso' -TenantPseudonym 'tp-abc123'
+        }
+
+        # The dependent call must have received the REAL tenant GUID, not the pseudonym.
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Operation -eq 'GetMdmAuthority' -and $Parameters.id -eq $tenantId
+        }
+
+        # But the written organization.json file itself must carry the pseudonym, not the
+        # raw tenant GUID - the redaction still applies to what actually gets persisted.
+        $writtenJson = Get-Content -LiteralPath (Join-Path $script:store.DatasetsPath 'organization.json') -Raw
+        $writtenJson | Should -Not -Match ([regex]::Escape($tenantId))
+        $writtenJson | Should -Match 'tp-abc123'
     }
 
     It 'IdFromDataset: writes Failed with a dependency-unavailable reason and never calls Get-GraphObject when the dependency dataset is empty' {

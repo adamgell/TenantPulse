@@ -49,17 +49,61 @@ tool versions, an extended offline secret scan, and this file).
 
 See the repository's git history and commit messages for the itemized, per-fix detail.
 
-## Not yet done - three things, all operator actions, none of them code
+## GraphKit 0.1.1 migration (Task 1.11, complete)
 
-1. **GraphKit 0.1.1 release.** TenantPulse's module manifest (`source/TenantPulse.psd1`)
-   and `RequiredModules.psd1` both currently pin GraphKit 0.1.0, the version the live gate
-   ran clean against. A separate, already-fixed-upstream GraphKit dependency-resolution bug
-   is slated to ship in an unreleased GraphKit 0.1.1 - once it is published, bumping both
-   pins is a version-bump/republish step, not a blocking defect for Phase 1 as shipped.
-2. **`Policy.Read.All` grant on the Ivy24 lab app registration.** Without it,
-   Conditional-Access-backed checks (`TP.ENT.0003`-`0005`) stay honestly NotApplicable
-   rather than assessed - the pipeline proved it degrades correctly here, but coverage on
-   that category stays at 0% until the grant lands.
-3. **First publish to PSGallery**, which needs a PSGallery API key. Publish tooling is
+GraphKit 0.1.1 is published to PSGallery and both pins (`source/TenantPulse.psd1`,
+`RequiredModules.psd1`) are bumped. The migration:
+
+- Deleted the `Get-PulseGraphFailureStatusCode` supplemental-probe workaround entirely -
+  GraphKit 0.1.1's `Get-GraphObject` now throws an `ErrorRecord` with structured signal
+  (`CategoryInfo.Category`, `TargetObject.Telemetry[-1].StatusCode`) directly, so no
+  extra read-only Graph call is needed to recover a status code. `Get-PulseFailureClass`
+  was rewritten to consume that ErrorRecord's structured data first, falling back to the
+  rendered message only when neither signal is present.
+- Dropped `Pending = $true` from all six DatasetMap.psd1 entries that had it
+  (`securityDefaultsPolicy`, `directoryRoleAssignments`, `directoryRoleDefinitions`,
+  `organization`, `organizationMdmAuthority`, `entraDevices`) - the static read-only QA
+  gate (`tests/QA/ReadOnly.tests.ps1`) auto-upgraded all six to live catalog verification
+  against installed GraphKit 0.1.1 and they pass the real Read/Safe predicate. The
+  Pending mechanism itself stays covered by a synthetic fixture for the next descriptor
+  that ships Pending.
+- `./build.ps1 -Tasks pack` now produces `output/TenantPulse.0.1.0.nupkg` cleanly
+  (GraphKit's `ExternalModuleDependencies` fix resolved the prior pack-time blocker).
+  `scripts/Publish-TenantPulsePackage.ps1`'s dry run passes end-to-end (digest-manifest
+  verification, no key, no publish).
+
+**Two live-gate surprises, both fixed with regression tests** (first real run of the six
+newly-live descriptors against a real tenant):
+
+1. Two of the six datasets (`organization`, `directoryRoleAssignments`) carry the raw
+   tenant GUID as a genuine Graph response FIELD (`Organization.id`,
+   `DirectoryRoleAssignment.principalOrganizationId`), not merely a GraphKit provenance
+   stamp. Fixed with a new `Protect-PulseGraphRowTenantId` helper, wired into
+   `Write-PulseDataset`, that walks every row's value tree and redacts an exact match of
+   the raw tenant id to its pseudonym before the dataset file is written. +5 regression
+   tests in `Snapshot.Tests.ps1`.
+2. `Protect-PulseGraphRowTenantId`'s first cut walked Hashtable-valued properties (e.g. a
+   real `ConditionalAccessPolicy`'s `conditions`/`grantControls`, which GraphKit returns
+   as `OrderedHashtable`, not `PSCustomObject`) via `.PSObject.Properties` - which
+   surfaces a Hashtable's own adapter members (`Keys`, `Values`, `SyncRoot`, ...) rather
+   than its dictionary entries. A non-synchronized Hashtable's `SyncRoot` IS the same
+   hashtable, so the walk recursed into itself and blew PowerShell's call depth on every
+   policy row (reproduced live: ~4s burned per row before falling back to the unredacted
+   original - TOTAL-by-construction meant it never crashed the run, but it silently
+   defeated the redaction on any Hashtable-nested tenant id and made collection
+   pathologically slow). Fixed by walking `IDictionary` via its own `Keys`/`this[key]`
+   entries, checked before the generic PSObject branch. +1 regression test pinning a
+   Hashtable-nested tenant GUID redacts correctly and fast (<2s).
+
+**Live gate re-run against Ivy24 after both fixes, clean**: all 11 datasets Collected
+(including `securityDefaultsPolicy` - no 403; the tenant's granted `Policy.Read.All`
+covers it), all 10 seed checks resolved with real statuses (5 Pass, 3 Fail, 1
+NotApplicable, 0 Error), coverage 9/10 (90%), `-FromSnapshot` reproduced a byte-identical
+findings JSON, and the raw tenant GUID appears nowhere in the output tree (datasets,
+manifest, or findings) - only its `tp-...` pseudonym.
+
+## Not yet done - one thing, an operator action, not code
+
+1. **First publish to PSGallery**, which needs a PSGallery API key. Publish tooling is
    ready (`scripts/Publish-TenantPulsePackage.ps1`) but defaults to a dry run and refuses
    to publish without a resolved API key and `-Confirm`; Adam runs it.

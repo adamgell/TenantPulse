@@ -102,6 +102,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placeholder). Build-tool versions in `RequiredModules.psd1` (`InvokeBuild`,
   `PSScriptAnalyzer`, `ModuleBuilder`, `ChangelogManagement`) pinned to exact versions
   instead of `'latest'`.
+- **GraphKit 0.1.1 migration (Task 1.11).** Pin bumped to GraphKit 0.1.1 in both
+  `source/TenantPulse.psd1` and `RequiredModules.psd1`. Deleted the
+  `Get-PulseGraphFailureStatusCode` supplemental-probe workaround (function, call site,
+  and its unit tests) - GraphKit 0.1.1's `Get-GraphObject` now throws an `ErrorRecord`
+  carrying structured failure signal directly (`CategoryInfo.Category`,
+  `TargetObject.Telemetry[-1].StatusCode`), so no extra read-only Graph call is needed to
+  recover a status code. `Get-PulseFailureClass` rewritten to consume that structured
+  data first, falling back to the rendered exception message only when neither signal is
+  present; still TOTAL by construction. Dropped `Pending = $true` from all six
+  `DatasetMap.psd1` entries whose descriptors shipped in 0.1.1 (`securityDefaultsPolicy`,
+  `directoryRoleAssignments`, `directoryRoleDefinitions`, `organization`,
+  `organizationMdmAuthority`, `entraDevices`) - the static read-only QA gate now
+  live-verifies all six against the installed catalog instead of asserting a declared
+  expectation.
 
 ### Deprecated
 
@@ -111,6 +125,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **GraphKit 0.1.1 migration, live-gate surprises (Task 1.11, Ivy24 lab tenant):** the
+  first real run of the six newly-live descriptors surfaced two genuine bugs.
+  (1) Two datasets (`organization`, `directoryRoleAssignments`) carry the raw tenant GUID
+  as an actual Graph response field (`Organization.id`,
+  `DirectoryRoleAssignment.principalOrganizationId`), not merely a GraphKit provenance
+  stamp - unredacted in `datasets/*.json`. Fixed with a new
+  `Protect-PulseGraphRowTenantId` helper wired into `Write-PulseDataset` that walks every
+  collected row's value tree and redacts an exact, case-insensitive match of the raw
+  tenant id to its pseudonym. (2) That helper's first cut walked Hashtable-valued
+  properties (GraphKit returns several nested Graph properties, e.g. a real
+  `ConditionalAccessPolicy`'s `conditions`/`grantControls`, as `OrderedHashtable`, not
+  `PSCustomObject`) via `.PSObject.Properties`, which surfaces a Hashtable's own adapter
+  members (`Keys`, `Values`, `SyncRoot`, ...) rather than its dictionary entries - a
+  non-synchronized Hashtable's `SyncRoot` IS the same hashtable, so the walk recursed into
+  itself and blew PowerShell's call depth on every policy row (reproduced live: ~4s
+  burned per row before falling back, TOTAL-by-construction, to the unredacted original -
+  never crashed the run, but silently defeated redaction on any Hashtable-nested tenant id
+  and made collection pathologically slow). Fixed by walking `IDictionary` via its own
+  `Keys`/`this[key]` entries, checked and handled before the generic PSObject branch.
 - **Final fix-wave, determinism/redaction:** `Export-PulseReport` and
   `Export-PulseJsonReport` now parse JSON with `-DateKind String`, so a findings
   document's timestamp fields round-trip byte-identical through re-rendering (previously

@@ -54,9 +54,9 @@ PowerShellVersion = '7.4'
 RequiredModules = @(
     # TenantPulse reads the tenant exclusively through GraphKit's read-class descriptors.
     # See the design spec: no Graph SDK, no Connect-MgGraph, no URI strings of its own.
-    # GraphKit 0.1.0 is published to PSGallery - see RequiredModules.psd1, which pins the
+    # GraphKit 0.1.1 is published to PSGallery - see RequiredModules.psd1, which pins the
     # same version for build-time dependency resolution.
-    @{ ModuleName = 'GraphKit'; ModuleVersion = '0.1.0' }
+    @{ ModuleName = 'GraphKit'; ModuleVersion = '0.1.1' }
 )
 
 # Assemblies that must be loaded prior to importing this module

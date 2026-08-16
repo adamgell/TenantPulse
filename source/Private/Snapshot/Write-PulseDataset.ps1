@@ -4,11 +4,22 @@
     For -Status Collected, strips GraphKit's per-row provenance stamps (_Tenant,
     _RetrievedUtc, _GraphPath, _ApiVersion - see Remove-PulseGraphRowProvenance for why:
     all four duplicate a manifest field this dataset's own entry already carries, or carry
-    nothing TenantPulse's schema needs), serializes -Data through the canonical JSON
-    primitive, writes datasets/<Name>.json, hashes the exact bytes written, and records
-    status/apiVersion/sha256/itemCount/collectedUtc in the manifest. For -Status Failed or
-    -Status Skipped, no dataset file is written - only the manifest entry, via
-    Set-PulseManifestEntry, which is the sole function allowed to touch manifest.json.
+    nothing TenantPulse's schema needs), redacts the raw tenant GUID out of the row
+    CONTENT itself when -TenantId/-Pseudonym are supplied (see Protect-PulseGraphRowTenantId
+    for why - some Graph payloads, e.g. Organization.id and
+    DirectoryRoleAssignment.principalOrganizationId, carry the tenant's own id as a
+    genuine response field, not a GraphKit-added stamp), serializes -Data through the
+    canonical JSON primitive, writes datasets/<Name>.json, hashes the exact bytes written,
+    and records status/apiVersion/sha256/itemCount/collectedUtc in the manifest. For
+    -Status Failed or -Status Skipped, no dataset file is written - only the manifest
+    entry, via Set-PulseManifestEntry, which is the sole function allowed to touch
+    manifest.json.
+
+    -TenantId/-Pseudonym are optional (both must be supplied together to take effect;
+    Invoke-PulseCollection's own catch-all callers for Failed/Skipped never pass -Data at
+    all, so there is nothing to redact there) - omitting either leaves row content exactly
+    as GraphKit returned it minus the provenance stamps, matching this function's
+    pre-existing behavior for every caller that has no tenant id in scope.
 #>
 
 function Write-PulseDataset {
@@ -37,7 +48,17 @@ function Write-PulseDataset {
         # null the manifest schema and Set-PulseManifestEntry distinguish.
         [Parameter()]
         [AllowNull()]
-        $Reason
+        $Reason,
+
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $TenantId,
+
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $Pseudonym
     )
 
     Assert-PulseDatasetName -Name $Name
@@ -57,6 +78,9 @@ function Write-PulseDataset {
     # direct assignment does not have this problem, only @(functionCall) around a
     # comma-protected return does).
     $items = Remove-PulseGraphRowProvenance -Data $items
+    if (-not [string]::IsNullOrEmpty($TenantId) -and -not [string]::IsNullOrEmpty($Pseudonym)) {
+        $items = Protect-PulseGraphRowTenantId -Data $items -TenantId $TenantId -Pseudonym $Pseudonym
+    }
     $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $items
     $datasetPath = Join-Path $Store.DatasetsPath "$Name.json"
     # Atomic write via the shared helper (post-review fix - see its own docstring): a crash

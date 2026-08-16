@@ -21,35 +21,41 @@
     wrapped in a last-resort try/catch that falls back to 'Failed' - the most conservative
     classification - rather than propagating.
 
-    Isolated on purpose: this is the one place that has to guess at GraphKit's error
-    shape, so it is kept small, directly unit-testable against a synthetic ErrorRecord (or
-    even $null), and easy to swap once Task 1.11's live gate confirms the real shape
-    against an actual tenant. Signals are checked most-authoritative first:
+    GraphKit 0.1.1 (Task 1.11 GraphKit 0.1.1 migration): Get-GraphObject no longer throws a
+    bare, structure-free string. Its failure is now an ErrorRecord built by GraphKit's own
+    New-GraphOperationFailureRecord, which carries THREE structured signals a consumer can
+    branch on without a second, out-of-band Graph call:
 
-        1. Exception.Response.StatusCode / Exception.StatusCode - the shape a
-           System.Net.Http.HttpRequestException (or similar) carries when GraphKit's
-           transport surfaces the raw HTTP response. 403 -> PermissionDenied, 401 ->
-           AuthFailure, anything else numeric -> Failed.
-        2. -SupplementalStatusCode, an OPTIONAL out-of-band status code the caller already
-           recovered itself (see Get-PulseGraphFailureStatusCode). Confirmed against the
-           Ivy24 lab tenant (Task 1.11 live gate): Get-GraphObject's own throw carries
-           neither a structured status nor '403'/'forbidden' text - see that function's
-           docstring for the full story - so signal (1) above never fires against a real
-           Get-GraphObject failure and signal (3) below never matches either.
-           -SupplementalStatusCode is the collector's channel for handing this function the
-           status code GraphKit still knows (via a supplemental Invoke-GraphOperation call)
-           but Get-GraphObject itself discarded. Same 403/401/other-numeric mapping as
-           signal (1); only consulted when signal (1) found nothing.
+        1. $_.CategoryInfo.Category - mapped by GraphKit from the HTTP status of the last
+           attempt: AuthenticationError for 401, PermissionDenied for 403 (also
+           ObjectNotFound/404, LimitsExceeded/429, ResourceUnavailable/5xx, none of which
+           this classifier maps to AuthFailure/PermissionDenied - they fall through to the
+           signals below). This is checked FIRST and is authoritative: GraphKit computed
+           it directly from the status code, no parsing required on this side.
+        2. $_.TargetObject.Telemetry - the whole GraphKit.OperationResult envelope is the
+           ErrorRecord's TargetObject, so @($_.TargetObject.Telemetry)[-1].StatusCode (the
+           attempt the retry loop actually stopped on) is available whenever signal (1)
+           didn't already decide the classification (e.g. a category this function doesn't
+           map, or a caller that built an ErrorRecord with CategoryInfo.Category left at
+           its default NotSpecified). Same enum-aware 403/401/other-numeric mapping as
+           before: an [System.Net.HttpStatusCode]-typed StatusCode must be cast to [int]
+           directly, never stringified first ([string] on an enum renders its NAME, not
+           its numeric value, which would make a TryParse-based conversion fail silently).
         3. The rendered exception message, pattern-matched (case-insensitively) for an
            AADSTS error code, "token acquisition" or "unauthorized" -> AuthFailure; '403',
            'forbidden' or 'accessdenied' -> PermissionDenied - a last-resort fallback for
-           a plain `throw "<text>"` that carries no structured status at all and whose
-           caller had no -SupplementalStatusCode to offer either.
+           anything upstream of Get-GraphObject (e.g. Get-GraphContext's own auth
+           failures) that throws a plain string with no structured shape at all.
 
-    Kept even though live confirmation shows Get-GraphObject's real throw never satisfies
-    signals (1) or (3): a message-text match still catches errors from anything else in
-    the call chain (e.g. Get-GraphContext's own auth failures, or a future GraphKit
-    version) that DOES render status text into its message.
+    No out-of-band recovery call is needed anymore: GraphKit 0.1.1's own ErrorRecord is the
+    complete signal, so the Get-PulseGraphFailureStatusCode supplemental-probe workaround
+    (one extra read-only Graph call per failed dataset, purely to recover a status code
+    Get-GraphObject 0.1.0 discarded) has been deleted along with its call site and its
+    -SupplementalStatusCode parameter here. Invoke-PulseCollection's '(status unknown)'
+    suffix on a generic Failed reason now means signals (1)-(3) above ALL came up empty -
+    an ErrorRecord that carries no CategoryInfo.Category this function maps, no Telemetry
+    this function can read a status code from, and no message text either signal matches -
+    genuinely weaker signal, not (as before) "the supplemental probe itself failed".
 #>
 
 function Get-PulseFailureClass {
@@ -58,16 +64,7 @@ function Get-PulseFailureClass {
     param(
         [Parameter(Mandatory)]
         [AllowNull()]
-        [System.Management.Automation.ErrorRecord] $ErrorRecord,
-
-        # Out-of-band status code the caller already recovered (see
-        # Get-PulseGraphFailureStatusCode). Optional: omitted or $null falls through to
-        # the ErrorRecord-only signals exactly as before this parameter existed. Named
-        # -SupplementalStatusCode rather than -StatusCode deliberately - see the note
-        # beside its only use below.
-        [Parameter()]
-        [AllowNull()]
-        [System.Nullable[int]] $SupplementalStatusCode
+        [System.Management.Automation.ErrorRecord] $ErrorRecord
     )
 
     # Never throws: a TryParse-based, exception-swallowing conversion from an arbitrary
@@ -80,11 +77,11 @@ function Get-PulseFailureClass {
         try {
             if ($Value -is [int]) { return $Value }
 
-            # Enum-typed values (post-review fix, e.g. [System.Net.HttpStatusCode]::Forbidden)
-            # must be cast to [int] directly, BEFORE falling through to the TryParse path
-            # below - [string] on an enum value renders its NAME ('Forbidden'), not its
-            # underlying numeric value ('403'), so [int]::TryParse against that string would
-            # simply fail and this classifier would silently lose the status code signal.
+            # Enum-typed values (e.g. [System.Net.HttpStatusCode]::Forbidden) must be cast
+            # to [int] directly, BEFORE falling through to the TryParse path below -
+            # [string] on an enum value renders its NAME ('Forbidden'), not its underlying
+            # numeric value ('403'), so [int]::TryParse against that string would simply
+            # fail and this classifier would silently lose the status code signal.
             if ($Value -is [System.Enum]) { return [int] $Value }
 
             $parsed = 0
@@ -107,34 +104,45 @@ function Get-PulseFailureClass {
             return 'Failed'
         }
 
-        $statusCode = $null
-        $exception = $ErrorRecord.Exception
-
-        if ($null -ne $exception) {
-            $responseProperty = $exception.PSObject.Properties['Response']
-            if ($null -ne $responseProperty -and $null -ne $responseProperty.Value) {
-                $statusProperty = $responseProperty.Value.PSObject.Properties['StatusCode']
-                if ($null -ne $statusProperty) {
-                    $statusCode = ConvertTo-PulseNullableStatusCode -Value $statusProperty.Value
-                }
-            }
-
-            if ($null -eq $statusCode) {
-                $directStatusProperty = $exception.PSObject.Properties['StatusCode']
-                if ($null -ne $directStatusProperty) {
-                    $statusCode = ConvertTo-PulseNullableStatusCode -Value $directStatusProperty.Value
-                }
+        # Signal (1): GraphKit's own CategoryInfo.Category, mapped directly from the HTTP
+        # status of the last attempt. Checked first because GraphKit already did the
+        # status-to-category mapping - nothing to parse or infer on this side.
+        $category = $null
+        $categoryInfoProperty = $ErrorRecord.PSObject.Properties['CategoryInfo']
+        if ($null -ne $categoryInfoProperty -and $null -ne $categoryInfoProperty.Value) {
+            $categoryProperty = $categoryInfoProperty.Value.PSObject.Properties['Category']
+            if ($null -ne $categoryProperty) {
+                $category = [string] $categoryProperty.Value
             }
         }
 
-        # Signal (2): the caller's out-of-band status code, only consulted when the
-        # ErrorRecord itself carried nothing structured. NOTE: the parameter is named
-        # -SupplementalStatusCode, not -StatusCode - PowerShell variable names are
-        # case-INSENSITIVE, so a same-spelled parameter (any casing) would collide with
-        # the local $statusCode computed above and silently clobber it back to $null on
-        # every call, exactly the bug this comment is here to prevent reintroducing.
-        if ($null -eq $statusCode -and $null -ne $SupplementalStatusCode) {
-            $statusCode = $SupplementalStatusCode
+        if ($category -eq 'PermissionDenied') {
+            return 'PermissionDenied'
+        }
+
+        if ($category -eq 'AuthenticationError') {
+            return 'AuthFailure'
+        }
+
+        # Signal (2): the last Telemetry attempt's StatusCode, read off TargetObject (the
+        # whole GraphKit.OperationResult envelope GraphKit's New-GraphOperationFailureRecord
+        # attaches to the ErrorRecord it throws). Only consulted when signal (1) didn't
+        # already decide the classification - a category this function doesn't map (404,
+        # 429, 5xx, NotSpecified) falls through to here rather than short-circuiting.
+        $statusCode = $null
+        $targetObjectProperty = $ErrorRecord.PSObject.Properties['TargetObject']
+        if ($null -ne $targetObjectProperty -and $null -ne $targetObjectProperty.Value) {
+            $telemetryProperty = $targetObjectProperty.Value.PSObject.Properties['Telemetry']
+            if ($null -ne $telemetryProperty -and $null -ne $telemetryProperty.Value) {
+                $attempts = @($telemetryProperty.Value)
+                if ($attempts.Count -gt 0) {
+                    $lastAttempt = $attempts[$attempts.Count - 1]
+                    $statusProperty = $lastAttempt.PSObject.Properties['StatusCode']
+                    if ($null -ne $statusProperty) {
+                        $statusCode = ConvertTo-PulseNullableStatusCode -Value $statusProperty.Value
+                    }
+                }
+            }
         }
 
         if ($statusCode -eq 403) {
@@ -149,7 +157,11 @@ function Get-PulseFailureClass {
             return 'Failed'
         }
 
+        # Signal (3): the rendered exception message - a last-resort fallback for anything
+        # upstream of Get-GraphObject (e.g. Get-GraphContext's own auth failures) that
+        # throws a plain string with no structured CategoryInfo/Telemetry shape at all.
         $message = ''
+        $exception = $ErrorRecord.Exception
         if ($null -ne $exception -and $null -ne $exception.Message) {
             $message = [string] $exception.Message
         }

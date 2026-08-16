@@ -105,7 +105,7 @@ TenantPulse's findings should not be represented as one.
 ## Operator prerequisites
 
 - PowerShell 7.4 or later
-- [GraphKit](https://github.com/AdamGell/GraphKit) 0.1.0 or later, installed from PSGallery
+- [GraphKit](https://github.com/AdamGell/GraphKit) 0.1.1 or later, installed from PSGallery
   (TenantPulse declares this as a runtime dependency in its module manifest, so
   `Install-PSResource -Name TenantPulse` pulls it automatically)
 - A GraphKit profile already registered for the tenant you want to assess (see GraphKit's
@@ -117,6 +117,12 @@ TenantPulse's findings should not be represented as one.
   checks (`TP.ENT.0003`-`0005`), plus whichever Intune/device permissions the datasets you
   collect require
 - PSGallery access (or an internal mirror) to install TenantPulse and GraphKit
+
+Of the three operator gates Phase 1 originally identified, two are now closed: GraphKit
+0.1.1 is published to PSGallery (all ten seed checks' descriptors are live, none Pending),
+and `Policy.Read.All` has been granted on the Ivy24 lab app registration (Conditional-Access
+-backed checks assess for real). Only TenantPulse's own first publish to PSGallery remains
+- see `docs/STATUS.md` for the current live-gate results and that gate's status.
 
 ## Phase 1 scope - what this is and isn't, honestly
 

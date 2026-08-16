@@ -168,17 +168,21 @@ function Invoke-PulseCollection {
             }
 
             $rows = @(Get-GraphObject @graphObjectParams)
-            Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Collected'
+            # -TenantId/-Pseudonym (Task 1.11 GraphKit 0.1.1 live-gate surprise): some Graph
+            # payloads carry the raw tenant id as a genuine response field (Organization.id,
+            # DirectoryRoleAssignment.principalOrganizationId) - see
+            # Protect-PulseGraphRowTenantId's own docstring for the full story. Every
+            # Collected write goes through this so no dataset content ever ships the raw
+            # tenant id unredacted, not just the two datasets that happened to surface it.
+            Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Collected' -TenantId $contextTenantId -Pseudonym $TenantPseudonym
             $collectedRows[$entry.Dataset] = $rows
         } catch {
-            # Get-GraphObject's own throw carries no structured status and no '403'/
-            # 'forbidden' text (confirmed live against Ivy24 - see
-            # Get-PulseGraphFailureStatusCode's docstring), so Get-PulseFailureClass's
-            # ErrorRecord-only signals cannot see a 403/401 here. Recover the status code
-            # GraphKit still knows, via one supplemental Invoke-GraphOperation read-only
-            # call against the same descriptor, and hand it in as an out-of-band signal.
-            $supplementalStatusCode = Get-PulseGraphFailureStatusCode -Context $Context -Type $entry.Type -Operation $entry.Operation -Parameters $extraParameters
-            $failureClass = Get-PulseFailureClass -ErrorRecord $_ -SupplementalStatusCode $supplementalStatusCode
+            # GraphKit 0.1.1: Get-GraphObject's own ErrorRecord now carries the structured
+            # signal directly (CategoryInfo.Category, and the TargetObject.Telemetry
+            # envelope's last-attempt StatusCode) - see Get-PulseFailureClass's docstring.
+            # No supplemental out-of-band Graph call is needed to recover a status code
+            # anymore.
+            $failureClass = Get-PulseFailureClass -ErrorRecord $_
 
             if ($failureClass -eq 'PermissionDenied') {
                 $requiredPermissions = $null
@@ -229,15 +233,15 @@ function Invoke-PulseCollection {
 
                 return
             } else {
-                # Supplemental status recovery failure (post-review fix): a $null
-                # -SupplementalStatusCode here means Get-PulseGraphFailureStatusCode could
-                # not recover a real HTTP status code for this failure (see its own
-                # docstring/Write-Warning) - this Failed classification is therefore based
-                # on weaker signal than usual. That must be visible in the artifact itself,
-                # not only in a console warning an operator may never see - '(status
-                # unknown)' is appended to the reason so a reader of the snapshot manifest
-                # can tell this case apart from a Failed reason backed by a recovered code.
-                $statusSuffix = if ($null -eq $supplementalStatusCode) { ' (status unknown)' } else { '' }
+                # GraphKit 0.1.1: the ErrorRecord itself is the only signal source now (see
+                # Get-PulseFailureClass's docstring - no supplemental out-of-band recovery
+                # call exists anymore). '(status unknown)' now means the ErrorRecord carried
+                # NO structured signal at all - no CategoryInfo.Category this classifier
+                # maps and no readable Telemetry StatusCode - so this Failed classification
+                # fell all the way through to the message-text fallback (or found nothing
+                # there either). That must be visible in the artifact itself, not only in a
+                # console an operator may never see.
+                $statusSuffix = if (Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $_) { '' } else { ' (status unknown)' }
                 $reason = Protect-PulseReason -Message "$($_.Exception.Message)$statusSuffix" -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                 Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' -Reason $reason
             }

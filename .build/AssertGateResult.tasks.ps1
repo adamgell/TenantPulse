@@ -21,7 +21,7 @@
     green `test` run could still hide a discovery regression until CI caught it.
 #>
 
-$script:tenantPulseGateMinimumTests = 705
+$script:tenantPulseGateMinimumTests = 707
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
@@ -66,8 +66,16 @@ task Assert_Gate_Result {
         throw "Assert_Gate_Result: no NUnit test result file found under '$resultsDir' - the Pester task must run before this one."
     }
 
+    # AllowNotRun 1 (GraphKit 0.1.1 migration, Task 1.11): tests/QA/ReadOnly.tests.ps1's
+    # "every Pending dataset declares an expected Read/Safe descriptor" block is
+    # legitimately empty now - all six datasets that used to be Pending shipped in
+    # GraphKit 0.1.1 and had Pending dropped from DatasetMap.psd1 (see that file), leaving
+    # zero Pending entries to drive the -ForEach. The mechanism itself stays covered by a
+    # synthetic Pending fixture in Get-PulseTenantSnapshot.Tests.ps1's Invoke-PulseCollection
+    # Describe block; this allowance only covers the QA gate's now-empty live-catalog block,
+    # which will go back to 0 the moment a future descriptor ships Pending again.
     $gate = Join-Path $BuildRoot 'tests/QA/Assert-GateResult.ps1'
-    & $gate -ResultPath $resultFiles[0].FullName -MinimumTests $script:tenantPulseGateMinimumTests -AllowedSkips 0 -AllowNotRun 0
+    & $gate -ResultPath $resultFiles[0].FullName -MinimumTests $script:tenantPulseGateMinimumTests -AllowedSkips 0 -AllowNotRun 1
     if ($LASTEXITCODE -ne 0) {
         throw "Assert_Gate_Result: the local test run did not pass the whole-result gate (MinimumTests $script:tenantPulseGateMinimumTests) - see the Assert-GateResult.ps1 output above for the specific violation."
     }
