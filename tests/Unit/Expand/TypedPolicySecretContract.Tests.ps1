@@ -45,7 +45,13 @@ BeforeAll {
 
     function Get-PulseSnapshotFileTree {
         param($Store)
-        return @(Get-ChildItem -LiteralPath $Store.Root -Recurse -File -ErrorAction SilentlyContinue)
+        # -Force (task-2.3-review round 2, finding 2): without it, Get-ChildItem silently
+        # skips hidden files (and, on Windows, system files) - a real gap in the "walk
+        # EVERY file" capstone guarantee this function exists to provide. Any future
+        # operator-key/lock/dotfile artifact written under the store root must be swept
+        # too, not quietly exempted from the leak check just because it happens to be
+        # hidden.
+        return @(Get-ChildItem -LiteralPath $Store.Root -Recurse -Force -File -ErrorAction SilentlyContinue)
     }
 }
 

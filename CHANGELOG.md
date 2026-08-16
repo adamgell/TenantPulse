@@ -256,7 +256,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleartext in the raw snapshot for the life of every collection run, independent of
   whether `-ExpandSettings` was ever used. Fixed by a new redaction pass
   (`Protect-PulseTypedPolicySensitivePayload`) called before the first byte of a
-  map-covered dataset ever touches disk.
+  map-covered dataset ever touches disk. This redaction is scoped to the two datasets
+  `TypedPolicyMaps.psd1` maps (`deviceCompliancePolicies`/`deviceConfigurations`) -
+  every other collected dataset has no Sensitive-redaction concept applied to its raw
+  write at all, a boundary that (as of this note) lives only in that function's own
+  private docstring, not anywhere an operator would see it without reading the source.
   **OPERATOR ACTION REQUIRED: any local TenantPulse snapshot created BEFORE this fix that
   ever collected `deviceConfigurations` may contain Sensitive-flagged values (e.g. WiFi
   PSKs pushed via `windows10CustomConfiguration`'s `omaSettings`) in cleartext in its

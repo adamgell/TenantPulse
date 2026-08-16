@@ -75,9 +75,28 @@ function Protect-PulseTypedPolicyNestedElement {
     <#
         Private helper: clone one nested element (an omaSettings array entry, or a single
         installationSchedule-shaped object), redacting only the property names in
-        -SensitiveNames. Shape-preserving for both [IDictionary] and [PSObject] inputs;
-        anything else (a scalar sitting where an object was expected - an already-malformed
-        shape) is returned as-is, since there is nothing structured here to redact into.
+        -SensitiveNames. Shape-preserving for both [IDictionary] and [PSObject] inputs.
+
+        FAIL CLOSED (task-2.3-review round 2, finding 1 - reproduced fail-open):
+        -SensitiveNames is always non-empty at every call site (the caller,
+        Protect-PulseTypedPolicyRow's own Protect-PulseTypedPolicyPropertyValue closure,
+        only ever invokes this function when at least one Nested.Properties entry is
+        flagged Sensitive - see that function's own $nestedSpecByName construction). An
+        -Element that is NEITHER an [IDictionary] NOR a [PSObject] - a scalar sitting where
+        an object was expected (a raw string/int/bool array element, or a bare scalar
+        sitting in the single-object nested position), or any other shape this function
+        cannot structurally redact INTO - is therefore redacted WHOLESALE rather than
+        passed through unchanged. The pre-fix behavior returned an unrecognized-shape
+        element completely UNREDACTED, a real fail-open: top-level Sensitive redaction
+        (Protect-PulseTypedPolicyRow's own $sensitiveTopNames check) redacts
+        UNCONDITIONALLY regardless of the property's own value shape, but this nested path
+        only redacted when the CONTAINER shape matched what was expected - an asymmetry a
+        value shaped unexpectedly (e.g. a raw string sitting where an omaSettings[] element
+        is normally an object) walked straight through in cleartext. "Cannot confidently
+        redact just the flagged sub-property" now means "redact the whole thing", never
+        "pass it through" - the same fail-closed rule this module applies everywhere else a
+        shape cannot be confidently classified (see
+        Resolve-PulseSettingsCatalogValueClassification's own FAIL CLOSED docstring).
     #>
     param($Element, [string[]] $SensitiveNames)
 
@@ -98,7 +117,9 @@ function Protect-PulseTypedPolicyNestedElement {
         return $clone
     }
 
-    return $Element
+    # FAIL CLOSED: an unrecognized/scalar shape under a Sensitive-nested rule is redacted
+    # wholesale, never passed through - see this function's own docstring.
+    return New-PulseRedactedMarker
 }
 
 function Protect-PulseTypedPolicyRow {
@@ -158,11 +179,14 @@ function Protect-PulseTypedPolicyRow {
                 return , $clonedElements
             }
 
-            if (Test-PulseSettingsCatalogNode -Node $Value) {
-                return Protect-PulseTypedPolicyNestedElement -Element $Value -SensitiveNames $nestedSensitiveNames
-            }
-
-            return $Value
+            # Single-object shape (installationSchedule) OR an unrecognized/scalar shape
+            # sitting where an object was expected - Protect-PulseTypedPolicyNestedElement
+            # itself now fails closed on anything that is not [IDictionary]/[PSObject] (the
+            # FAIL-OPEN fix, task-2.3-review round 2 finding 1) - so every non-null, non-
+            # array value for a Sensitive-nested property routes through it uniformly;
+            # there is no longer a separate "recognized container vs. everything else"
+            # branch here that could let a wrong-shaped value pass through unredacted.
+            return Protect-PulseTypedPolicyNestedElement -Element $Value -SensitiveNames $nestedSensitiveNames
         }
 
         return $Value

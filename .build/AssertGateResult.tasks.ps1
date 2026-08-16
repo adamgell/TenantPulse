@@ -86,7 +86,17 @@
 # the real collect+expand pipeline, then walks EVERY file under the resulting snapshot
 # root and asserts the planted marker appears in none of them; verified to actually fail
 # red against a deliberately-disabled redaction pass before being restored green).
-$script:tenantPulseGateMinimumTests = 996
+# 996 -> 1011 (task-2.3-review C1 round 2, findings 1/3): +15 - the fail-closed fix for
+# Protect-PulseTypedPolicyNestedElement's own wrong-shaped-nested-value fail-open
+# (unknown/scalar shape under a Sensitive-nested rule now redacts wholesale rather than
+# passing through) plus its dedicated regression coverage
+# (tests/Unit/Collect/ProtectTypedPolicySensitivePayload.Tests.ps1 - 13 new It cases
+# pinning IDictionary/PSObject shape neutrality, unmapped-dataset/unmapped-type pass-
+# through, a compliance-family lossless round-trip, a multi-property row, and both
+# fail-open regression shapes: a bare scalar and a bare array planted where an object was
+# expected, at both the direct-helper level and end-to-end through
+# Protect-PulseTypedPolicySensitivePayload itself).
+$script:tenantPulseGateMinimumTests = 1011
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
