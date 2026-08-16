@@ -594,3 +594,78 @@ Describe 'Dataset name validation rejects path traversal (I2)' {
         } | Should -Throw -ExpectedMessage '*..\..\manifest*'
     }
 }
+
+Describe 'Get-PulseSnapshotStore' {
+    BeforeEach {
+        $script:openRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:openRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'opens an existing snapshot store created by New-PulseSnapshotStore, without creating anything new' {
+        $created = InModuleScope TenantPulse -ArgumentList $script:openRoot {
+            param($openRoot)
+            New-PulseSnapshotStore -Path $openRoot -Tenant 'tp-abc123'
+        }
+
+        $opened = InModuleScope TenantPulse -ArgumentList $script:openRoot {
+            param($openRoot)
+            Get-PulseSnapshotStore -Path $openRoot
+        }
+
+        $opened.Root | Should -Be $created.Root
+        $opened.ManifestPath | Should -Be $created.ManifestPath
+        $opened.DatasetsPath | Should -Be $created.DatasetsPath
+        $opened.ReferencePath | Should -Be $created.ReferencePath
+        $opened.ExpandedPath | Should -Be $created.ExpandedPath
+
+        $manifest = Get-Content -LiteralPath $opened.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.tenant | Should -Be 'tp-abc123'
+    }
+
+    It 'throws for a path that does not exist' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw
+    }
+
+    It 'throws for an existing directory with no manifest.json' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*manifest.json*'
+    }
+
+    It 'throws for a manifest.json with no schemaVersion' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"tenant":"tp-abc123"}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*schemaVersion*'
+    }
+
+    It 'throws for a manifest.json that is not valid JSON' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{ not json' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw
+    }
+}

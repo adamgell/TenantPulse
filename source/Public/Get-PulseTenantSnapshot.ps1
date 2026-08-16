@@ -76,9 +76,14 @@
         Drop checks whose Id is one of these values.
 
     .PARAMETER AssessmentProfile
-        Path to a .psd1 file supplying default IncludeCategory/ExcludeCategory/
-        IncludeCheck/ExcludeCheck values for this run. Any of the four filter parameters
-        passed explicitly on the command line always wins over the same key in this file.
+        Path to a .psd1 file supplying default Include/Exclude arrays for this run
+        (Task 1.8: unified with Invoke-PulseAssessment's assessment-profile schema, a
+        breaking change from this parameter's original IncludeCategory/ExcludeCategory/
+        IncludeCheck/ExcludeCheck key shape). Each entry in Include/Exclude is matched
+        against BOTH a check's Category (dotted-prefix) and its Id (exact) - see
+        Select-PulseCheck's own docstring for the full precedence rules. -IncludeCategory/
+        -ExcludeCategory/-IncludeCheck/-ExcludeCheck passed explicitly on the command line
+        always win over the profile file's Include/Exclude, even an empty array.
 #>
 function Get-PulseTenantSnapshot {
     [CmdletBinding()]
@@ -115,21 +120,20 @@ function Get-PulseTenantSnapshot {
     }
 
     # -AssessmentProfile only ever supplies DEFAULTS: an explicitly-bound CLI filter
-    # parameter always wins over the same key in the file, even an empty array.
+    # parameter always wins over the profile file's Include/Exclude, even an empty array.
+    # The profile's Include/Exclude arrays are folded into Select-PulseCheck's own
+    # -Include/-Exclude params (not -IncludeCategory/-IncludeCheck) - see
+    # Select-PulseCheck's docstring for why that is a deliberately separate vocabulary.
+    $profileInclude = $null
+    $profileExclude = $null
     if ($PSBoundParameters.ContainsKey('AssessmentProfile') -and -not [string]::IsNullOrWhiteSpace($AssessmentProfile)) {
         $profileData = Import-PowerShellDataFile -LiteralPath $AssessmentProfile -ErrorAction Stop
 
-        if (-not $PSBoundParameters.ContainsKey('IncludeCategory') -and $profileData.ContainsKey('IncludeCategory')) {
-            $IncludeCategory = @($profileData.IncludeCategory)
+        if ($profileData.ContainsKey('Include')) {
+            $profileInclude = @($profileData.Include)
         }
-        if (-not $PSBoundParameters.ContainsKey('ExcludeCategory') -and $profileData.ContainsKey('ExcludeCategory')) {
-            $ExcludeCategory = @($profileData.ExcludeCategory)
-        }
-        if (-not $PSBoundParameters.ContainsKey('IncludeCheck') -and $profileData.ContainsKey('IncludeCheck')) {
-            $IncludeCheck = @($profileData.IncludeCheck)
-        }
-        if (-not $PSBoundParameters.ContainsKey('ExcludeCheck') -and $profileData.ContainsKey('ExcludeCheck')) {
-            $ExcludeCheck = @($profileData.ExcludeCheck)
+        if ($profileData.ContainsKey('Exclude')) {
+            $profileExclude = @($profileData.Exclude)
         }
     }
 
@@ -138,10 +142,24 @@ function Get-PulseTenantSnapshot {
 
     $checks = @(Import-PulseCheckCatalog -DatasetMapPath $datasetMapPath)
 
-    if ($IncludeCategory) { $checks = @($checks | Where-Object { $_.Category -in $IncludeCategory }) }
-    if ($ExcludeCategory) { $checks = @($checks | Where-Object { $_.Category -notin $ExcludeCategory }) }
-    if ($IncludeCheck) { $checks = @($checks | Where-Object { $_.Id -in $IncludeCheck }) }
-    if ($ExcludeCheck) { $checks = @($checks | Where-Object { $_.Id -notin $ExcludeCheck }) }
+    # A CLI param on EITHER axis-specific include parameter counts as "the same axis" as
+    # the profile's single, axis-ambiguous Include array - if the caller explicitly bound
+    # -IncludeCategory or -IncludeCheck (even to an empty array), that wins outright and
+    # the profile's Include is not folded in at all. Same rule for Exclude.
+    $includeBoundOnCli = $PSBoundParameters.ContainsKey('IncludeCategory') -or $PSBoundParameters.ContainsKey('IncludeCheck')
+    $excludeBoundOnCli = $PSBoundParameters.ContainsKey('ExcludeCategory') -or $PSBoundParameters.ContainsKey('ExcludeCheck')
+
+    $selectParams = @{
+        Checks = $checks
+    }
+    if ($PSBoundParameters.ContainsKey('IncludeCategory')) { $selectParams.IncludeCategory = $IncludeCategory }
+    if ($PSBoundParameters.ContainsKey('ExcludeCategory')) { $selectParams.ExcludeCategory = $ExcludeCategory }
+    if ($PSBoundParameters.ContainsKey('IncludeCheck')) { $selectParams.IncludeCheck = $IncludeCheck }
+    if ($PSBoundParameters.ContainsKey('ExcludeCheck')) { $selectParams.ExcludeCheck = $ExcludeCheck }
+    if (-not $includeBoundOnCli -and $null -ne $profileInclude) { $selectParams.Include = $profileInclude }
+    if (-not $excludeBoundOnCli -and $null -ne $profileExclude) { $selectParams.Exclude = $profileExclude }
+
+    $checks = @(Select-PulseCheck @selectParams)
 
     $manifest = @(Get-PulseCollectionManifest -Checks $checks -DatasetMap $datasetMap)
 

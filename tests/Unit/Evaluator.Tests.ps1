@@ -861,3 +861,129 @@ Describe 'Invoke-PulseSandboxedExpression' {
         $result.Status | Should -Be 'Error'
     }
 }
+
+Describe 'Invoke-PulseEvaluation -Context' {
+    BeforeEach {
+        $script:contextStoreRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:contextKeyPath = Join-Path $script:contextStoreRoot '.opkey/operator.key'
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:contextStoreRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'threads -Context into a Function rule that opts in by declaring a -Context parameter' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureContextAwareRule' }
+        $context = @{ BreakGlassAccounts = @('breakglass@contoso.onmicrosoft.com') }
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:contextStoreRoot, $script:contextKeyPath, @($check), $context {
+            param($storeRoot, $keyPath, $checks, $context)
+
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            Write-PulseDataset -Store $store -Name 'datasetA' -Data @([pscustomobject]@{ id = 'a-1' }) -ApiVersion 'v1.0' -Status 'Collected'
+
+            function Test-PulseFixtureContextAwareRule {
+                param($Datasets, $Context)
+                $status = if ($Context.BreakGlassAccounts -contains 'breakglass@contoso.onmicrosoft.com') { 'Pass' } else { 'Fail' }
+                return New-PulseFinding -Status $status
+            }
+
+            Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath -Context $context
+        }
+
+        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+    }
+
+    It 'does not pass -Context to a Function rule that never declares the parameter (pre-Task-1.8 rules keep working unchanged)' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureNoContextParamRule' }
+        $context = @{ BreakGlassAccounts = @('breakglass@contoso.onmicrosoft.com') }
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:contextStoreRoot, $script:contextKeyPath, @($check), $context {
+            param($storeRoot, $keyPath, $checks, $context)
+
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            Write-PulseDataset -Store $store -Name 'datasetA' -Data @([pscustomobject]@{ id = 'a-1' }) -ApiVersion 'v1.0' -Status 'Collected'
+
+            # Deliberately does NOT declare -Context - proves this rule is called exactly
+            # as it would have been before -Context existed (no "parameter cannot be
+            # found" error).
+            function Test-PulseFixtureNoContextParamRule {
+                param($Datasets)
+                return New-PulseFinding -Status Pass
+            }
+
+            Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath -Context $context
+        }
+
+        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+    }
+
+    It 'omitting -Context entirely behaves exactly as before this parameter existed' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureNoContextParamRuleTwo' }
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:contextStoreRoot, $script:contextKeyPath, @($check) {
+            param($storeRoot, $keyPath, $checks)
+
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            Write-PulseDataset -Store $store -Name 'datasetA' -Data @([pscustomobject]@{ id = 'a-1' }) -ApiVersion 'v1.0' -Status 'Collected'
+
+            function Test-PulseFixtureNoContextParamRuleTwo {
+                param($Datasets)
+                return New-PulseFinding -Status Pass
+            }
+
+            Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath
+        }
+
+        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+    }
+
+    It 'threads -Context into an Expression rule as $Context' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = "`$Context.ServiceAccounts -contains 'svc@contoso.onmicrosoft.com'" }
+        $context = @{ ServiceAccounts = @('svc@contoso.onmicrosoft.com') }
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:contextStoreRoot, $script:contextKeyPath, @($check), $context {
+            param($storeRoot, $keyPath, $checks, $context)
+
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            Write-PulseDataset -Store $store -Name 'datasetA' -Data @([pscustomobject]@{ id = 'a-1' }) -ApiVersion 'v1.0' -Status 'Collected'
+
+            Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath -Context $context
+        }
+
+        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+    }
+
+    It 'an Expression rule sees an empty $Context when -Context is omitted, never a missing variable error' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$null -eq $Context.ServiceAccounts' }
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:contextStoreRoot, $script:contextKeyPath, @($check) {
+            param($storeRoot, $keyPath, $checks)
+
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            Write-PulseDataset -Store $store -Name 'datasetA' -Data @([pscustomobject]@{ id = 'a-1' }) -ApiVersion 'v1.0' -Status 'Collected'
+
+            Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath
+        }
+
+        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+    }
+}
+
+Describe 'Invoke-PulseSandboxedExpression -Context' {
+    It 'exposes -Context as $Context inside the sandbox' {
+        $result = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '$Context.ServiceAccounts -contains "svc@contoso.onmicrosoft.com"' -Datasets @{} -Context @{ ServiceAccounts = @('svc@contoso.onmicrosoft.com') }
+        }
+
+        $result.Status | Should -Be 'Pass'
+    }
+
+    It 'defaults to an empty $Context when -Context is omitted' {
+        $result = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '$null -eq $Context.ServiceAccounts' -Datasets @{}
+        }
+
+        $result.Status | Should -Be 'Pass'
+    }
+}

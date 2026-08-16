@@ -93,6 +93,33 @@
                on to the next check ("no silent gaps": one bad rule never hides every other
                check's result).
 
+    CONTEXT (Task 1.8): an optional -Context <hashtable> (e.g.
+    @{ BreakGlassAccounts = @(...); ServiceAccounts = @(...) }, folded in by
+    Invoke-PulseAssessment from an -AssessmentProfile file) is made available to a rule as
+    a variable named $Context, alongside $Datasets - for BOTH rule types, but via two
+    different mechanisms:
+        - Rule.Type 'Expression': always threaded through to
+          Invoke-PulseSandboxedExpression's own -Context param, which sets it as a sandbox
+          variable exactly like $Datasets. Since that runspace is fresh and isolated per
+          call, an always-present (defaulting to empty) $Context is harmless and needs no
+          opt-in gating - see that function's own docstring.
+        - Rule.Type 'Function': Function rules are plain PowerShell functions, not
+          sandboxed, so passing an unconditional -Context to `& $ruleFunction` would break
+          every EXISTING rule-function-shaped test double that declares only a -Datasets
+          param (PowerShell throws "a parameter cannot be found that matches parameter
+          name 'Context'" for a function that never declares it). -Context is therefore
+          OPT-IN on this path: it is passed to the rule function only when (a) -Context was
+          actually supplied to Invoke-PulseEvaluation itself AND (b) the target function's
+          own parameter set actually declares a -Context parameter (checked via
+          `(Get-Command $ruleFunction).Parameters.ContainsKey('Context')`). This keeps
+          every pre-Task-1.8 rule function working completely unchanged while giving a
+          Task 1.9+ check an opt-in $Context the moment it declares the parameter.
+    Omitting -Context entirely (the default, an empty hashtable) behaves exactly as before
+    this parameter existed - both paths still receive a (now merely empty, rather than
+    absent) $Context, which is indistinguishable from "no context" for any rule that reads
+    it defensively (e.g. `$Context.BreakGlassAccounts`, which is simply $null on an empty
+    hashtable).
+
     Evidence within a finding is sorted ordinally by SortKey then Identity
     ([System.StringComparer]::Ordinal / [string]::CompareOrdinal - the same ordinal-only
     rule ConvertTo-PulseCanonicalJson documents for its own key sort, since
@@ -120,7 +147,10 @@ function Invoke-PulseEvaluation {
         [object[]] $Checks,
 
         [Parameter()]
-        [string] $OperatorKeyPath = (Join-Path $HOME '.tenantpulse/operator.key')
+        [string] $OperatorKeyPath = (Join-Path $HOME '.tenantpulse/operator.key'),
+
+        [Parameter()]
+        [hashtable] $Context = @{}
     )
 
     $manifest = Get-PulseSnapshotManifest -Store $Store
@@ -149,7 +179,7 @@ function Invoke-PulseEvaluation {
     $findings = [System.Collections.Generic.List[pscustomobject]]::new()
 
     foreach ($check in $sortedChecks) {
-        $result = Invoke-PulseCheckEvaluation -Check $check -Store $Store -Manifest $manifest -DatasetCache $datasetCache
+        $result = Invoke-PulseCheckEvaluation -Check $check -Store $Store -Manifest $manifest -DatasetCache $datasetCache -Context $Context
 
         # H2 fix: by the time control reaches here, $result.Evidence entries are guaranteed
         # (by Invoke-PulseCheckEvaluation's own try/catch around evidence normalization) to
@@ -273,7 +303,10 @@ function Invoke-PulseCheckEvaluation {
         [hashtable] $Manifest,
 
         [Parameter(Mandatory)]
-        [hashtable] $DatasetCache
+        [hashtable] $DatasetCache,
+
+        [Parameter()]
+        [hashtable] $Context = @{}
     )
 
     $gateNames = @($Check.Data.Gates)
@@ -349,7 +382,20 @@ function Invoke-PulseCheckEvaluation {
             # error stream into pipeline output so it can be partitioned out explicitly,
             # rather than a rule's Write-Error silently vanishing (the default behavior
             # when a caller neither redirects nor observes the error stream).
-            $rawOutputs = @(& $ruleFunction -Datasets $clonedDatasets 2>&1)
+            #
+            # -Context opt-in (Task 1.8, see this file's own docstring CONTEXT section):
+            # only passed to the rule function when the caller actually supplied -Context
+            # AND the target function itself declares a -Context parameter - this is what
+            # keeps every pre-Task-1.8 rule-function-shaped test double (declaring only
+            # -Datasets) working completely unchanged.
+            $ruleCommand = Get-Command -Name $ruleFunction -ErrorAction SilentlyContinue
+            $ruleAcceptsContext = ($null -ne $ruleCommand) -and $ruleCommand.Parameters.ContainsKey('Context')
+
+            $rawOutputs = if ($PSBoundParameters.ContainsKey('Context') -and $ruleAcceptsContext) {
+                @(& $ruleFunction -Datasets $clonedDatasets -Context $Context 2>&1)
+            } else {
+                @(& $ruleFunction -Datasets $clonedDatasets 2>&1)
+            }
             $errorRecords = @($rawOutputs | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
             $outputs = @($rawOutputs | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
 
@@ -416,8 +462,10 @@ function Invoke-PulseCheckEvaluation {
         if ($Check.Rule.Type -eq 'Expression') {
             # C1 fix: evaluated in a fresh, isolated runspace - see
             # Invoke-PulseSandboxedExpression's own docstring for the full security
-            # rationale and its honestly documented residual.
-            $sandboxResult = Invoke-PulseSandboxedExpression -Expression $Check.Rule.Expression -Datasets $clonedDatasets
+            # rationale and its honestly documented residual. -Context is always threaded
+            # through (see this file's own CONTEXT docstring section) - no opt-in gating
+            # needed here, unlike the Function-rule path above.
+            $sandboxResult = Invoke-PulseSandboxedExpression -Expression $Check.Rule.Expression -Datasets $clonedDatasets -Context $Context
             return @{ Status = $sandboxResult.Status; Evidence = @(); Reason = $sandboxResult.Reason }
         }
 

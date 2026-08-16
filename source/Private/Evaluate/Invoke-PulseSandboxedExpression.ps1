@@ -79,7 +79,16 @@ function Invoke-PulseSandboxedExpression {
         [string] $Expression,
 
         [Parameter(Mandatory)]
-        [hashtable] $Datasets
+        [hashtable] $Datasets,
+
+        # Task 1.8: optional evaluation context (e.g. BreakGlassAccounts/ServiceAccounts
+        # from an -AssessmentProfile), exposed to the expression as $Context. Defaults to
+        # an empty hashtable - since this runspace is fresh and isolated per call, an
+        # always-present empty $Context is harmless and needs no opt-in gating the way the
+        # Function-rule path does (see Invoke-PulseEvaluation's own docstring for why that
+        # path DOES need to gate on the target function's declared parameters).
+        [Parameter()]
+        [hashtable] $Context = @{}
     )
 
     $initialSessionState = [System.Management.Automation.Runspaces.InitialSessionState]::Create()
@@ -112,6 +121,7 @@ function Invoke-PulseSandboxedExpression {
         # is unaffected by the runspace's LanguageMode or its cmdlet allowlist. This is the
         # ONLY thing handed into the sandbox.
         $runspace.SessionStateProxy.SetVariable('Datasets', $Datasets)
+        $runspace.SessionStateProxy.SetVariable('Context', $Context)
 
         $shell = [System.Management.Automation.PowerShell]::Create()
         $shell.Runspace = $runspace
