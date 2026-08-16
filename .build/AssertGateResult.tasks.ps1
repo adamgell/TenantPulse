@@ -195,7 +195,13 @@
 # TP.ENT.0007.psd1/Test-PulseAuthMethodsPolicyGeneralSettings.ps1/
 # TP.ENT.0007.Tests.ps1 files. 1215 is the real, measured ./build.ps1 -Tasks test
 # total; all four tracking locations bumped together in this commit.
-$script:tenantPulseGateMinimumTests = 1215
+# 1215 -> 1227 (Task 4.3 wave 2, TP.ENT.0009 - new check, EIDSCA AS04 SMS sign-in
+# disabled): +12 - 6 new It cases in tests/Unit/Checks/TP.ENT.0009.Tests.ps1, +1
+# CheckCatalog.Tests.ps1 count-pin bump (17 -> 18) plus per-file SecretScan.tests.ps1
+# growth for the new TP.ENT.0009.psd1/Test-PulseSmsSignInMethodDisabled.ps1/
+# TP.ENT.0009.Tests.ps1 files. 1227 is the real, measured ./build.ps1 -Tasks test
+# total; all four tracking locations bumped together in this commit.
+$script:tenantPulseGateMinimumTests = 1227
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
