@@ -116,3 +116,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Datasets are now deep-cloned per check for both rule types, closing a related
   isolation gap where one check's in-place mutation could change what a later check
   (sharing the same cached dataset) observed.
+- `Invoke-PulseSandboxedExpression` (round 2): the sandbox's `InitialSessionState` is
+  now built from an empty `::Create()` with an explicit five-cmdlet allowlist
+  (`Where-Object`/`ForEach-Object`/`Select-Object`/`Measure-Object`/`Sort-Object`, added
+  via `SessionStateCmdletEntry` against their real implementing types), replacing
+  `CreateDefault2()`. `CreateDefault2()` was proven to load
+  `Microsoft.PowerShell.Management` and `Microsoft.PowerShell.Utility`, not "Core
+  cmdlets only" as first documented - `New-Item`, `Get-Content`, `Set-Content`,
+  `Remove-Item`, `Invoke-WebRequest` and `Invoke-RestMethod` all executed successfully
+  from inside an Expression rule under that configuration, meaning a check descriptor
+  could read/write the host filesystem or make outbound network calls.
+  `ConstrainedLanguage` restricts .NET types, not which cmdlets are loaded - the fix
+  had to address the cmdlet surface directly.

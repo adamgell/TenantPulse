@@ -625,9 +625,13 @@ Describe 'Invoke-PulseEvaluation' {
         $evaluation.Document.findings[0].reason | Should -Be 'throttled: too many requests'
     }
 
-    # ---- C1: Expression rules run sandboxed - fresh runspace, ConstrainedLanguage, no ambient scope ----
+    # ---- C1: Expression rules run sandboxed - empty ISS + 5-cmdlet allowlist,
+    # ConstrainedLanguage, no ambient scope (round 2: CreateDefault2() was proven to load
+    # Management/Utility - Get-Content/Set-Content/New-Item/Remove-Item/Invoke-WebRequest/
+    # Invoke-RestMethod all executed under it. The fix rebuilds the ISS from an empty
+    # ::Create() with an explicit five-cmdlet allowlist instead.) ----
 
-    It 'never lets an Expression rule reach a caller-scope variable via Get-Variable (sandbox isolation)' {
+    It 'never lets an Expression rule reach a caller-scope variable via Get-Variable - the cmdlet itself is gone (sandbox isolation)' {
         $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{
             Type       = 'Expression'
             Expression = '$found = Get-Variable -Name operatorKey -ErrorAction SilentlyContinue; [bool]$found'
@@ -635,13 +639,14 @@ Describe 'Invoke-PulseEvaluation' {
 
         $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
 
-        # $found must be $null/false - operatorKey (the real HMAC key, alive two scopes up
-        # in the un-sandboxed implementation) is simply not reachable from inside the
-        # sandboxed runspace's own, separate session state.
-        $evaluation.Document.findings[0].status | Should -Be 'Fail'
+        # Get-Variable is not in the allowlist at all now (round 2) - the expression fails
+        # closed as a command-not-found Error, never as a Pass that could imply the real
+        # key was found.
+        $evaluation.Document.findings[0].status | Should -Be 'Error'
+        $evaluation.Document.findings[0].reason | Should -Match 'Get-Variable'
     }
 
-    It 'never lets an Expression rule''s Set-Variable escape into the caller''s process (sandbox isolation)' {
+    It 'never lets an Expression rule''s Set-Variable escape into the caller''s process - the cmdlet itself is gone (sandbox isolation)' {
         Remove-Variable -Name PulseSandboxCanary -Scope Global -ErrorAction SilentlyContinue
 
         $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{
@@ -651,9 +656,10 @@ Describe 'Invoke-PulseEvaluation' {
 
         $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
 
-        # The expression succeeds inside its OWN sandboxed session state...
-        $evaluation.Document.findings[0].status | Should -Be 'Pass'
-        # ...but nothing escaped into this test process's global scope.
+        # Set-Variable is not in the allowlist either (round 2) - fails closed as Error.
+        $evaluation.Document.findings[0].status | Should -Be 'Error'
+        $evaluation.Document.findings[0].reason | Should -Match 'Set-Variable'
+        # And, belt-and-braces: nothing escaped into this test process's global scope.
         (Get-Variable -Name PulseSandboxCanary -Scope Global -ErrorAction SilentlyContinue) | Should -BeNullOrEmpty
     }
 
@@ -676,6 +682,79 @@ Describe 'Invoke-PulseEvaluation' {
 
         ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0001' }).status | Should -Be 'Pass'
         ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0002' }).status | Should -Be 'Fail'
+    }
+
+    It 'still evaluates a Where-Object pipeline expression normally through the sandbox (allowlisted cmdlet)' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{
+            Type       = 'Expression'
+            Expression = '@($Datasets.datasetA | Where-Object { $_.id -eq "a-1" }).Count -eq 1'
+        }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+    }
+
+    # ---- round 2 re-review probes: these MUST fail closed, and MUST NOT touch the host ----
+
+    It 'never lets an Expression rule write a file to the host via New-Item/Set-Content (round 2 probe)' {
+        $probePath = Join-Path ([System.IO.Path]::GetTempPath()) "pulse-sandbox-probe-$([guid]::NewGuid()).txt"
+        Remove-Item -LiteralPath $probePath -ErrorAction SilentlyContinue
+
+        $checkNewItem = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{
+            Type       = 'Expression'
+            Expression = "New-Item -Path '$probePath' -ItemType File -Force; `$true"
+        }
+        $checkSetContent = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{
+            Type       = 'Expression'
+            Expression = "Set-Content -LiteralPath '$probePath' -Value 'leaked'; `$true"
+        }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($checkNewItem, $checkSetContent)
+
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0001' }).status | Should -Be 'Error'
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0002' }).status | Should -Be 'Error'
+        # The decisive assertion: the file must never actually land on the host.
+        Test-Path -LiteralPath $probePath | Should -BeFalse
+    }
+
+    It 'never lets an Expression rule read a host file via Get-Content, or let its content influence the result (round 2 probe)' {
+        $probePath = Join-Path ([System.IO.Path]::GetTempPath()) "pulse-sandbox-readprobe-$([guid]::NewGuid()).txt"
+        Set-Content -LiteralPath $probePath -Value 'known-secret-value' -NoNewline
+        try {
+            # Probe pattern: an expression that tries to compare against known file
+            # content can never legitimately return Pass, because Get-Content is not
+            # reachable to produce that content in the first place.
+            $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{
+                Type       = 'Expression'
+                Expression = "(Get-Content -LiteralPath '$probePath' -Raw) -eq 'known-secret-value'"
+            }
+
+            $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+            $evaluation.Document.findings[0].status | Should -Be 'Error'
+            $evaluation.Document.findings[0].reason | Should -Match 'Get-Content'
+        } finally {
+            Remove-Item -LiteralPath $probePath -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'never lets an Expression rule make an outbound network call via Invoke-WebRequest/Invoke-RestMethod (round 2 probe)' {
+        $checkWebRequest = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{
+            Type       = 'Expression'
+            Expression = '(Invoke-WebRequest -Uri "https://example.com" -UseBasicParsing).StatusCode -eq 200'
+        }
+        $checkRestMethod = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{
+            Type       = 'Expression'
+            Expression = '$null -ne (Invoke-RestMethod -Uri "https://example.com")'
+        }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($checkWebRequest, $checkRestMethod)
+
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0001' }).status | Should -Be 'Error'
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0001' }).reason | Should -Match 'Invoke-WebRequest'
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0002' }).status | Should -Be 'Error'
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0002' }).reason | Should -Match 'Invoke-RestMethod'
     }
 }
 
@@ -705,6 +784,57 @@ Describe 'Invoke-PulseSandboxedExpression' {
     It 'returns Error for a script that fails to parse' {
         $result = InModuleScope TenantPulse {
             Invoke-PulseSandboxedExpression -Expression '$Datasets.a -gt (' -Datasets @{ a = @(1, 2) }
+        }
+        $result.Status | Should -Be 'Error'
+    }
+
+    It 'has none of Get-Content/Set-Content/New-Item/Remove-Item/Invoke-WebRequest/Invoke-RestMethod/Get-Variable/Set-Variable/Get-Module reachable' {
+        $probeCmdlets = @(
+            'Get-Content', 'Set-Content', 'New-Item', 'Remove-Item',
+            'Invoke-WebRequest', 'Invoke-RestMethod',
+            'Get-Variable', 'Set-Variable', 'Get-Module'
+        )
+
+        foreach ($cmdletName in $probeCmdlets) {
+            $result = InModuleScope TenantPulse -ArgumentList $cmdletName {
+                param($cmdletName)
+                Invoke-PulseSandboxedExpression -Expression "$cmdletName" -Datasets @{}
+            }
+            $result.Status | Should -Be 'Error' -Because "$cmdletName must not resolve inside the sandbox"
+            $result.Reason | Should -Match ([regex]::Escape($cmdletName)) -Because "the error should name the unresolved command $cmdletName"
+        }
+    }
+
+    It 'still resolves the five allowlisted cmdlets (Where-Object, ForEach-Object, Select-Object, Measure-Object, Sort-Object)' {
+        $r1 = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '@(1,2,3 | Where-Object { $_ -gt 1 }).Count -eq 2' -Datasets @{}
+        }
+        $r1.Status | Should -Be 'Pass'
+
+        $r2 = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '@(1,2,3 | ForEach-Object { $_ * 2 }) -join "," -eq "2,4,6"' -Datasets @{}
+        }
+        $r2.Status | Should -Be 'Pass'
+
+        $r3 = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '(1,2,3 | Select-Object -First 1) -eq 1' -Datasets @{}
+        }
+        $r3.Status | Should -Be 'Pass'
+
+        $r4 = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '(1,2,3 | Measure-Object).Count -eq 3' -Datasets @{}
+        }
+        $r4.Status | Should -Be 'Pass'
+
+        $r5 = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '@(3,1,2 | Sort-Object)[0] -eq 1' -Datasets @{}
+        }
+        $r5.Status | Should -Be 'Pass'
+    }
+
+    It 'blocks raw .NET file access under ConstrainedLanguage even with no file cmdlets present' {
+        $result = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '[System.IO.File]::Exists("/etc/passwd")' -Datasets @{}
         }
         $result.Status | Should -Be 'Error'
     }

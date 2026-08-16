@@ -265,4 +265,25 @@ jobs:
           # redaction coverage (capped Error reason vs. verbatim NotApplicable reason), a
           # true evaluate-twice-independently byte-identity test, plus one
           # CheckCatalog.Tests.ps1 test for the new Rule.Expression parse-check.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 161 -AllowedSkips 0 -AllowNotRun 0
+          #
+          # Round 2 (same task, second re-review): CreateDefault2() - used for the
+          # Expression-rule sandbox above - was proven to load Microsoft.PowerShell.
+          # Management AND Utility, not "Core cmdlets only" as round 1's docstring
+          # claimed; New-Item/Get-Content/Set-Content/Remove-Item/Invoke-WebRequest/
+          # Invoke-RestMethod all executed successfully inside it. ConstrainedLanguage
+          # restricts .NET types, not which cmdlets are loaded. Fixed by rebuilding the
+          # sandbox's InitialSessionState from an empty ::Create() with an explicit
+          # five-cmdlet allowlist (Where-Object/ForEach-Object/Select-Object/
+          # Measure-Object/Sort-Object, added via SessionStateCmdletEntry against their
+          # real implementing types) - no Management, no file cmdlets, no network
+          # cmdlets, no Get-/Set-Variable, no Get-Module. 7 net new tests (161 -> 168):
+          # the two round-1 Get-Variable/Set-Variable isolation tests were updated to
+          # expect Error (the cmdlets are gone entirely now, a stronger guarantee than
+          # "found nothing"); added a Where-Object-still-works functional test; three
+          # host-facing round-2 probe tests (file write via New-Item/Set-Content never
+          # lands on disk, file read via Get-Content never influences the result,
+          # network calls via Invoke-WebRequest/Invoke-RestMethod never resolve); and
+          # three Invoke-PulseSandboxedExpression unit tests (all nine probed cmdlets
+          # unreachable, all five allowlisted cmdlets still resolve, raw .NET escape
+          # still blocked under ConstrainedLanguage).
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 168 -AllowedSkips 0 -AllowNotRun 0
