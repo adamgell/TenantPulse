@@ -586,7 +586,10 @@ jobs:
           # 965 -> 991 (post-review follow-ups): unified T2.2/T2.3 jsonl publication path
           # + sanitized-real GOLDEN fixtures for T2.3/T2.5 - see
           # .build/AssertGateResult.tasks.ps1's own accounting.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1011 -AllowedSkips 0 -AllowNotRun 1
+          # 991 -> 1011 (task-2.3-review C1 round 2) and 1011 -> 1063 (Task 2.6, conflict
+          # detection - artifact only) - see .build/AssertGateResult.tasks.ps1's own
+          # accounting for both, which must be bumped together with this value.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1063 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

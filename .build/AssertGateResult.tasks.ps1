@@ -96,7 +96,19 @@
 # fail-open regression shapes: a bare scalar and a bare array planted where an object was
 # expected, at both the direct-helper level and end-to-end through
 # Protect-PulseTypedPolicySensitivePayload itself).
-$script:tenantPulseGateMinimumTests = 1011
+# 1011 -> 1063 (Task 2.6, conflict detection - artifact only): +52 - the pure
+# ConvertTo-PulseConflictRecords builder (no-conflict/conflict/same-policy-repeats-itself/
+# zero-conflicts-is-valid, redaction-never-un-redacts incl. two independently-redacted
+# policies not conflicting with each other, the four assignmentOverlap states plus the
+# core-slice assignments-deferred 'unknown' path and its cross-family case, determinism
+# under reordered input, ordinal sort), Get-PulseExpansionRows' own verified-read gate
+# (missing entry/NotExpanded status/hash-mismatch tamper detection/happy path),
+# Publish-PulseConflictArtifact's own crash-consistent single-document publish (zero
+# families NotExpanded, zero-conflicts-Expanded, Partial-with-gaps, sha256 determinism
+# across two independent stores, the redaction-sentinel-never-reaches-disk regression),
+# and Invoke-PulseConflictDetection/Resolve-PulseConflictSnapshotExpansion's own
+# per-family-availability-vs-corruption-gap and -FromSnapshot verify-or-rederive coverage.
+$script:tenantPulseGateMinimumTests = 1063
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
