@@ -1,0 +1,39 @@
+{
+  "Policy": {
+    "createdDateTime": "2026-06-07T20:13:06.7135357Z",
+    "creationSource": null,
+    "description": "Sanitized fixture description.",
+    "lastModifiedDateTime": "2026-06-07T20:13:06.7135357Z",
+    "name": "Policy-10",
+    "platforms": "windows10",
+    "priorityMetaData": null,
+    "roleScopeTagIds": [
+      "0"
+    ],
+    "settingCount": 1,
+    "technologies": "mdm",
+    "id": "d3b226e4-d194-47ed-b90a-0eacacca1a63",
+    "templateReference": {
+      "templateId": "",
+      "templateFamily": "none",
+      "templateDisplayName": null,
+      "templateDisplayVersion": null
+    }
+  },
+  "Settings": {
+    "id": "0",
+    "settingInstance": {
+      "@odata.type": "#microsoft.graph.deviceManagementConfigurationSimpleSettingCollectionInstance",
+      "settingDefinitionId": "device_vendor_msft_policy_config_userrights_modifyobjectlabel",
+      "settingInstanceTemplateReference": null,
+      "auditRuleInformation": null,
+      "simpleSettingCollectionValue": [
+        {
+          "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
+          "settingValueTemplateReference": null,
+          "value": "<YOUROBJECT>"
+        }
+      ]
+    }
+  }
+}

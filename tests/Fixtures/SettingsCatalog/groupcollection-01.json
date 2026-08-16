@@ -1,0 +1,57 @@
+{
+  "Policy": {
+    "createdDateTime": "2026-06-07T20:14:12.9811763Z",
+    "creationSource": null,
+    "description": "Sanitized fixture description.",
+    "lastModifiedDateTime": "2026-06-07T20:14:12.9811763Z",
+    "name": "Policy-13",
+    "platforms": "windows10",
+    "priorityMetaData": null,
+    "roleScopeTagIds": [
+      "0"
+    ],
+    "settingCount": 1,
+    "technologies": "mdm,microsoftSense",
+    "id": "ed54fed4-6b88-4f53-9dc7-db39bde2c978",
+    "templateReference": {
+      "templateId": "25c080ed-b647-4a54-8466-ac67924a08e0_1",
+      "templateFamily": "endpointSecurityAttackSurfaceReduction",
+      "templateDisplayName": "Sanitized Template",
+      "templateDisplayVersion": "Version 1"
+    }
+  },
+  "Settings": {
+    "id": "0",
+    "settingInstance": {
+      "@odata.type": "#microsoft.graph.deviceManagementConfigurationGroupSettingCollectionInstance",
+      "settingDefinitionId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules",
+      "auditRuleInformation": null,
+      "settingInstanceTemplateReference": {
+        "settingInstanceTemplateId": "7de11a0b-3d45-43a3-8c6a-46e303e734ad"
+      },
+      "groupSettingCollectionValue": [
+        {
+          "settingValueTemplateReference": null,
+          "children": [
+            {
+              "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+              "settingDefinitionId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers",
+              "auditRuleInformation": null,
+              "settingInstanceTemplateReference": {
+                "settingInstanceTemplateId": "d12584ce-7534-49f9-a3ef-e921ca94ef63"
+              },
+              "choiceSettingValue": {
+                "value": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers_audit",
+                "settingValueTemplateReference": {
+                  "settingValueTemplateId": "b1f2639e-9d0b-4752-879c-19bbbf02a994",
+                  "useTemplateDefault": false
+                },
+                "children": []
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "Policy": {
+    "createdDateTime": "2026-06-07T20:12:15.9560462Z",
+    "creationSource": null,
+    "description": "Sanitized fixture description.",
+    "lastModifiedDateTime": "2026-06-07T20:12:15.9560462Z",
+    "name": "Policy-15",
+    "platforms": "windows10",
+    "priorityMetaData": null,
+    "roleScopeTagIds": [
+      "0"
+    ],
+    "settingCount": 1,
+    "technologies": "mdm",
+    "id": "094934b1-5250-49e3-94d0-39036aad8653",
+    "templateReference": {
+      "templateId": "",
+      "templateFamily": "none",
+      "templateDisplayName": null,
+      "templateDisplayVersion": null
+    }
+  },
+  "Settings": {
+    "id": "0",
+    "settingInstance": {
+      "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+      "settingDefinitionId": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions",
+      "settingInstanceTemplateReference": null,
+      "auditRuleInformation": null,
+      "choiceSettingValue": {
+        "settingValueTemplateReference": null,
+        "value": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_1",
+        "children": [
+          {
+            "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+            "settingDefinitionId": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osrecoverykeyusagedropdown_name",
+            "settingInstanceTemplateReference": null,
+            "auditRuleInformation": null,
+            "choiceSettingValue": {
+              "settingValueTemplateReference": null,
+              "value": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osrecoverykeyusagedropdown_name_2",
+              "children": []
+            }
+          },
+          {
+            "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+            "settingDefinitionId": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osrecoverypasswordusagedropdown_name",
+            "settingInstanceTemplateReference": null,
+            "auditRuleInformation": null,
+            "choiceSettingValue": {
+              "settingValueTemplateReference": null,
+              "value": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osrecoverypasswordusagedropdown_name_1",
+              "children": []
+            }
+          },
+          {
+            "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+            "settingDefinitionId": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osallowdra_name",
+            "settingInstanceTemplateReference": null,
+            "auditRuleInformation": null,
+            "choiceSettingValue": {
+              "settingValueTemplateReference": null,
+              "value": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osallowdra_name_0",
+              "children": []
+            }
+          },
+          {
+            "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+            "settingDefinitionId": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osactivedirectorybackupdropdown_name",
+            "settingInstanceTemplateReference": null,
+            "auditRuleInformation": null,
+            "choiceSettingValue": {
+              "settingValueTemplateReference": null,
+              "value": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osactivedirectorybackupdropdown_name_1",
+              "children": []
+            }
+          },
+          {
+            "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+            "settingDefinitionId": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osrequireactivedirectorybackup_name",
+            "settingInstanceTemplateReference": null,
+            "auditRuleInformation": null,
+            "choiceSettingValue": {
+              "settingValueTemplateReference": null,
+              "value": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osrequireactivedirectorybackup_name_0",
+              "children": []
+            }
+          },
+          {
+            "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+            "settingDefinitionId": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_oshiderecoverypage_name",
+            "settingInstanceTemplateReference": null,
+            "auditRuleInformation": null,
+            "choiceSettingValue": {
+              "settingValueTemplateReference": null,
+              "value": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_oshiderecoverypage_name_0",
+              "children": []
+            }
+          },
+          {
+            "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+            "settingDefinitionId": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osactivedirectorybackup_name",
+            "settingInstanceTemplateReference": null,
+            "auditRuleInformation": null,
+            "choiceSettingValue": {
+              "settingValueTemplateReference": null,
+              "value": "device_vendor_msft_bitlocker_systemdrivesrecoveryoptions_osactivedirectorybackup_name_0",
+              "children": []
+            }
+          }
+        ]
+      }
+    }
+  }
+}

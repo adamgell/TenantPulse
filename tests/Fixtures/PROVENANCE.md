@@ -31,3 +31,18 @@ or a third-party source without attribution. One line per fixture file.
 - `tests/Fixtures/Checks/invalid/bad-expression-syntax/bad.psd1` — synthetic
 - `tests/Fixtures/DatasetMap/malformed-syntax.psd1` — synthetic
 - `tests/Fixtures/DatasetMap/mutation-write-op.psd1` — synthetic
+- `tests/Fixtures/SettingsCatalog/choice-01.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/choice-02.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/choice-03.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/simple-01.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/simple-02.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/simple-03.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/choicecollection-01.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/choicecollection-02.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/choicecollection-03.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/simplecollection-01.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/simplecollection-02.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/simplecollection-03.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/groupcollection-01.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/groupcollection-02-nested.json` — sanitized(ivy24 spike 2026-08-16)
+- `tests/Fixtures/SettingsCatalog/groupcollection-03.json` — sanitized(ivy24 spike 2026-08-16)
