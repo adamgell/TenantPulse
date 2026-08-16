@@ -139,7 +139,12 @@
 # -ForEach-driven case counts do not grow here. 1126 is the real, measured
 # ./build.ps1 -Tasks test total at this commit, not merely 1112+8 - the declared floor was
 # already below the suite's actual size before this change.
-$script:tenantPulseGateMinimumTests = 1126
+# 1126 -> 1140 (Task 4.2, TP.ENT.0008 - EIDSCA AM01-AM04/AM06/AM07/AM09/AM10 Microsoft
+# Authenticator method configuration cluster): +14, matching
+# tests/Unit/Checks/TP.ENT.0008.Tests.ps1's 8 new It cases plus real suite growth already
+# present before this commit's own measurement (same "1126 is measured, not merely
+# additive" note as above).
+$script:tenantPulseGateMinimumTests = 1140
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
