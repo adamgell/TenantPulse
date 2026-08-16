@@ -27,7 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- For any bug fix.
+- `ConvertTo-PulseCanonicalJson` now sorts object/dictionary keys ordinally instead of via
+  case-insensitive culture collation, which previously let case-distinct keys (`apple` vs
+  `Apple`) keep their insertion order and produce non-deterministic bytes; it also now
+  formats `DateTimeOffset` values with an explicit invariant offset instead of falling
+  through to a lossy generic-string branch, and throws on non-finite `NaN`/`Infinity`
+  doubles instead of silently emitting invalid JSON tokens.
+- `Set-PulseManifestEntry` now guards its read-modify-write cycle with a per-store named
+  Mutex and publishes `manifest.json` via a temp-file-then-atomic-rename, so a crash
+  mid-write can no longer truncate the manifest and concurrent writers no longer silently
+  drop one another's updates.
+- `Write-PulseDataset`, `Read-PulseDataset` and `Set-PulseManifestEntry` now validate
+  dataset `-Name` against a safe-character pattern before using it to build a file path,
+  closing a path-traversal gap that could overwrite arbitrary files (including
+  `manifest.json` itself) via a name like `..\manifest`.
 
 ### Security
 

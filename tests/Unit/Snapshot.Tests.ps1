@@ -1,5 +1,6 @@
 BeforeAll {
-    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).ProviderPath
+    $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).ProviderPath
+    $repoRoot = $script:repoRoot
 
     # Import the BUILT module (never dot-source source files: they would redefine module
     # classes and Add-Type types in test scope). Pester discovers tests per file, so each
@@ -322,5 +323,274 @@ Describe 'ConvertTo-PulseCanonicalJson' {
         $bytesB = [System.Text.Encoding]::UTF8.GetBytes($jsonB)
 
         $bytesA | Should -Be $bytesB
+    }
+
+    It 'sorts case-distinct keys ordinally and byte-identically regardless of insertion order (C1)' {
+        # A PowerShell hash literal (even [ordered]) rejects 'zebra' and 'Zebra' as
+        # duplicate keys at parse time - its literal-syntax duplicate check is
+        # case-insensitive. A case-sensitive .NET Dictionary sidesteps that so both
+        # case variants of the same word can coexist as distinct keys, which is exactly
+        # the scenario ordinal-vs-culture sorting disagrees on.
+        $orderOne = [System.Collections.Generic.Dictionary[string, object]]::new()
+        $orderOne['zebra'] = 1
+        $orderOne['Zebra'] = 2
+        $orderOne['apple'] = 3
+        $orderOne['Apple'] = 4
+
+        $orderTwo = [System.Collections.Generic.Dictionary[string, object]]::new()
+        $orderTwo['Apple'] = 4
+        $orderTwo['apple'] = 3
+        $orderTwo['Zebra'] = 2
+        $orderTwo['zebra'] = 1
+
+        $jsonOne = InModuleScope TenantPulse -ArgumentList $orderOne {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+        $jsonTwo = InModuleScope TenantPulse -ArgumentList $orderTwo {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+
+        $bytesOne = [System.Text.Encoding]::UTF8.GetBytes($jsonOne)
+        $bytesTwo = [System.Text.Encoding]::UTF8.GetBytes($jsonTwo)
+        $bytesOne | Should -Be $bytesTwo
+
+        # Ordinal order: all uppercase letters sort before all lowercase letters, so the
+        # expected key order is Apple, Zebra, apple, zebra - not the case-insensitive
+        # 'Apple, apple, Zebra, zebra' a culture-aware sort would (incorrectly) produce.
+        $expected = @"
+{
+  "Apple": 4,
+  "Zebra": 2,
+  "apple": 3,
+  "zebra": 1
+}
+"@ -replace "`r`n", "`n"
+
+        $jsonOne | Should -Be $expected
+    }
+
+    It 'produces byte-identical golden output for a nested fixture (C1)' {
+        $fixture = [ordered]@{
+            zeta = [ordered]@{
+                nested = @(3, 1, 2)
+                flag   = $true
+            }
+            alpha = 'text with "quotes" and \backslash\'
+            mid   = $null
+        }
+
+        $json = InModuleScope TenantPulse -ArgumentList $fixture {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+
+        $expected = @"
+{
+  "alpha": "text with \"quotes\" and \\backslash\\",
+  "mid": null,
+  "zeta": {
+    "flag": true,
+    "nested": [
+      3,
+      1,
+      2
+    ]
+  }
+}
+"@ -replace "`r`n", "`n"
+
+        $json | Should -Be $expected
+    }
+
+    It 'produces byte-identical output regardless of the current thread culture (C1)' {
+        $obj = [ordered]@{ zebra = 1.5; apple = @('B', 'a'); Count = 10 }
+
+        $invariantJson = InModuleScope TenantPulse -ArgumentList $obj {
+            param($obj)
+            ConvertTo-PulseCanonicalJson -InputObject $obj
+        }
+
+        $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('de-DE')
+
+            $germanCultureJson = InModuleScope TenantPulse -ArgumentList $obj {
+                param($obj)
+                ConvertTo-PulseCanonicalJson -InputObject $obj
+            }
+        }
+        finally {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+        }
+
+        $invariantBytes = [System.Text.Encoding]::UTF8.GetBytes($invariantJson)
+        $germanBytes = [System.Text.Encoding]::UTF8.GetBytes($germanCultureJson)
+
+        $invariantBytes | Should -Be $germanBytes
+    }
+
+    It 'throws when two keys collide after string normalization (C1)' {
+        $obj = @{}
+        $obj[1] = 'int-one'
+        $obj['1'] = 'string-one'
+
+        {
+            InModuleScope TenantPulse -ArgumentList $obj {
+                param($obj)
+                ConvertTo-PulseCanonicalJson -InputObject $obj
+            }
+        } | Should -Throw -ExpectedMessage '*duplicate*'
+    }
+
+    It 'formats a DateTimeOffset with an explicit invariant offset, not a lossy UTC Z (M1)' {
+        # Built via AddTicks rather than the (..., millisecond, offset) constructor: that
+        # overload only accepts 0-999 milliseconds, but the golden value needs all 7
+        # fractional-second digits ('fffffff') that Graph timestamps can carry.
+        $dt = [datetime]::new(2026, 8, 15, 21, 30, 41, 0, [System.DateTimeKind]::Unspecified).AddTicks(1234567)
+        $dto = [datetimeoffset]::new($dt, [timespan]::FromHours(-4))
+
+        $json = InModuleScope TenantPulse -ArgumentList $dto {
+            param($value)
+            ConvertTo-PulseCanonicalJson -InputObject $value
+        }
+
+        $json | Should -Be '"2026-08-15T21:30:41.1234567-04:00"'
+    }
+
+    It 'throws on non-finite double values instead of emitting invalid JSON tokens (M2)' {
+        {
+            InModuleScope TenantPulse -ArgumentList ([double]::NaN) {
+                param($value)
+                ConvertTo-PulseCanonicalJson -InputObject $value
+            }
+        } | Should -Throw -ExpectedMessage '*non-finite*'
+
+        {
+            InModuleScope TenantPulse -ArgumentList ([double]::PositiveInfinity) {
+                param($value)
+                ConvertTo-PulseCanonicalJson -InputObject $value
+            }
+        } | Should -Throw -ExpectedMessage '*non-finite*'
+
+        {
+            InModuleScope TenantPulse -ArgumentList ([double]::NegativeInfinity) {
+                param($value)
+                ConvertTo-PulseCanonicalJson -InputObject $value
+            }
+        } | Should -Throw -ExpectedMessage '*non-finite*'
+    }
+}
+
+Describe 'Set-PulseManifestEntry atomicity and concurrency (I1)' {
+    BeforeEach {
+        $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'never leaves manifest.json.tmp behind after a write' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Set-PulseManifestEntry -Store $store -Name 'One' -Status 'Collected' -ApiVersion 'v1.0'
+        }
+
+        $tmpPath = "$($script:store.ManifestPath).tmp"
+        Test-Path -LiteralPath $tmpPath | Should -BeFalse
+    }
+
+    It 'loses no updates when two concurrent writers each write 20 distinct entries' {
+        $built = Get-ChildItem (Join-Path $script:repoRoot 'output/module/TenantPulse') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+        $manifestPath = Join-Path $built.FullName 'TenantPulse.psd1'
+
+        $scriptBlock = {
+            param($ManifestPath, $Store, $Prefix, $Count)
+
+            Import-Module $ManifestPath -Force
+            $module = Get-Module -Name TenantPulse
+
+            for ($i = 0; $i -lt $Count; $i++) {
+                & $module {
+                    param($Store, $Name)
+                    Set-PulseManifestEntry -Store $Store -Name $Name -Status 'Collected' -ApiVersion 'v1.0'
+                } $Store "$Prefix-$i"
+            }
+        }
+
+        $runspaces = @()
+        $handles = @()
+
+        foreach ($prefix in @('RunA', 'RunB')) {
+            $ps = [powershell]::Create()
+            [void] $ps.AddScript($scriptBlock).AddArgument($manifestPath).AddArgument($script:store).AddArgument($prefix).AddArgument(20)
+            $runspaces += $ps
+            $handles += $ps.BeginInvoke()
+        }
+
+        for ($i = 0; $i -lt $runspaces.Count; $i++) {
+            $runspaces[$i].EndInvoke($handles[$i])
+            $runspaces[$i].Streams.Error | Should -BeNullOrEmpty
+            $runspaces[$i].Dispose()
+        }
+
+        $manifest = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Get-PulseSnapshotManifest -Store $store
+        }
+
+        $manifest.datasets.Keys.Count | Should -Be 40
+        for ($i = 0; $i -lt 20; $i++) {
+            $manifest.datasets["RunA-$i"] | Should -Not -BeNullOrEmpty
+            $manifest.datasets["RunB-$i"] | Should -Not -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Dataset name validation rejects path traversal (I2)' {
+    BeforeEach {
+        $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'Write-PulseDataset throws naming the offending value for a traversal name' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Write-PulseDataset -Store $store -Name '..\manifest' -Data @() -ApiVersion 'v1.0' -Status 'Collected'
+            }
+        } | Should -Throw -ExpectedMessage '*..\manifest*'
+    }
+
+    It 'Read-PulseDataset throws naming the offending value for a traversal name' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Read-PulseDataset -Store $store -Name '../manifest'
+            }
+        } | Should -Throw -ExpectedMessage '*../manifest*'
+    }
+
+    It 'Set-PulseManifestEntry throws naming the offending value for a traversal name' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Set-PulseManifestEntry -Store $store -Name '..\..\manifest' -Status 'Collected' -ApiVersion 'v1.0'
+            }
+        } | Should -Throw -ExpectedMessage '*..\..\manifest*'
     }
 }

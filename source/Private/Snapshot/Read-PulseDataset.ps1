@@ -18,6 +18,8 @@ function Read-PulseDataset {
         [string] $Name
     )
 
+    Assert-PulseDatasetName -Name $Name
+
     $manifest = Get-PulseSnapshotManifest -Store $Store
     $fileName = "$Name.json"
 

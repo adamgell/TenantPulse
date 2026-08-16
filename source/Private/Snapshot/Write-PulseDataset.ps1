@@ -37,6 +37,8 @@ function Write-PulseDataset {
         $Reason
     )
 
+    Assert-PulseDatasetName -Name $Name
+
     if ($Status -ne 'Collected') {
         Set-PulseManifestEntry -Store $Store -Name $Name -Status $Status -Reason $Reason -ApiVersion $ApiVersion
         return
