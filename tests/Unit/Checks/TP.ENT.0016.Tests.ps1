@@ -105,4 +105,37 @@ Describe 'TP.ENT.0016 - Guest group ownership restriction (EIDSCA.ST08)' {
 
         $finding.status | Should -Be 'NotApplicable'
     }
+
+    It 'Pass: ST08/ST09 both explicitly set to their recommended values' {
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'AllowGuestsToBeGroupOwner'; value = 'false' }
+                    @{ name = 'AllowGuestsToAccessGroups'; value = 'True' }
+                )
+            })
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0016' -Datasets @(
+            @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        ($finding.evidence | Where-Object identity -eq 'EIDSCA.ST09').detail.explicitlyConfigured | Should -Be $true
+    }
+
+    It 'Fail: ST09 explicitly disabled - guest group-content access master toggle switched off' {
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'AllowGuestsToBeGroupOwner'; value = 'false' }
+                    @{ name = 'AllowGuestsToAccessGroups'; value = 'False' }
+                )
+            })
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0016' -Datasets @(
+            @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'EIDSCA.ST09'
+        ($finding.evidence | Where-Object identity -eq 'EIDSCA.ST09').detail.ok | Should -Be $false
+    }
 }
