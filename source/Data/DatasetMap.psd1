@@ -141,4 +141,20 @@
     # authorizationPolicy: single-object read, GET /policies/authorizationPolicy (beta) -
     # backs TP.ENT.0012 (AP01/AP04-AP10/AP14).
     authorizationPolicy = @{ Type = 'AuthorizationPolicy'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 4.2 (EIDSCA port, wave 1) - second G-batch descriptor need. This Type/Operation
+    # pair also does not resolve against the installed GraphKit 0.1.1 catalog (confirmed
+    # via Get-GraphOperation -List: no DirectorySetting Type exists in the catalog at
+    # all) - Pending for the same reason as authorizationPolicy above.
+    #
+    # directorySettings: LIST (not a parameterized per-setting Get, correcting the T4.2
+    # research entries' speculation of an `Entra.DirectorySettings.Values` descriptor
+    # "parameterized on settingName") - GET /settings (beta) returns every directorySetting
+    # object the tenant has ever explicitly customized, each carrying its own templateId
+    # and a values[] array of {name;value} pairs. ONE List call backs TP.ENT.0013 (CP01,
+    # first consumer) and its later siblings TP.ENT.0015 (PR01)/TP.ENT.0016 (ST08) - they
+    # read different (name) entries out of the SAME collection, not three different
+    # endpoints, the same "single dataset, many checks read different slices" pattern
+    # authenticationMethodsPolicy already uses for TP.ENT.0006/0008.
+    directorySettings = @{ Type = 'DirectorySetting'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }
