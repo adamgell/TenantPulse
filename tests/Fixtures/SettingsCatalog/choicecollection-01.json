@@ -84,7 +84,7 @@
                               {
                                 "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                                 "settingValueTemplateReference": null,
-                                "value": "REDACTED-ADMIN-NAME"
+                                "value": "LapsAdmin-Example"
                               }
                             ]
                           }

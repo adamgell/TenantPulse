@@ -220,7 +220,7 @@
                                 "simpleSettingValue": {
                                   "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                                   "settingValueTemplateReference": null,
-                                  "value": "identifier \"com.microsoft.dlp.daemon\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = UBF8T346G9"
+                                  "value": "identifier \"com.microsoft.dlp.daemon\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = EXAMPLETEAMID9"
                                 }
                               },
                               {
@@ -299,7 +299,7 @@
                                 "simpleSettingValue": {
                                   "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                                   "settingValueTemplateReference": null,
-                                  "value": "identifier \"com.microsoft.dlp.daemon\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = UBF8T346G9"
+                                  "value": "identifier \"com.microsoft.dlp.daemon\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = EXAMPLETEAMID9"
                                 }
                               },
                               {
@@ -378,7 +378,7 @@
                                 "simpleSettingValue": {
                                   "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                                   "settingValueTemplateReference": null,
-                                  "value": "identifier \"com.microsoft.wdav\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = UBF8T346G9"
+                                  "value": "identifier \"com.microsoft.wdav\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = EXAMPLETEAMID9"
                                 }
                               },
                               {
@@ -449,7 +449,7 @@
                                 "simpleSettingValue": {
                                   "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                                   "settingValueTemplateReference": null,
-                                  "value": "identifier \"com.microsoft.wdav.epsext\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = UBF8T346G9"
+                                  "value": "identifier \"com.microsoft.wdav.epsext\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = EXAMPLETEAMID9"
                                 }
                               },
                               {
@@ -520,7 +520,7 @@
                                 "simpleSettingValue": {
                                   "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                                   "settingValueTemplateReference": null,
-                                  "value": "identifier \"com.microsoft.dlp.daemon\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = UBF8T346G9"
+                                  "value": "identifier \"com.microsoft.dlp.daemon\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = EXAMPLETEAMID9"
                                 }
                               },
                               {
@@ -615,7 +615,7 @@
                         "simpleSettingValue": {
                           "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                           "settingValueTemplateReference": null,
-                          "value": "UBF8T346G9"
+                          "value": "EXAMPLETEAMID9"
                         }
                       }
                     ]
@@ -774,7 +774,7 @@
                 "simpleSettingValue": {
                   "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                   "settingValueTemplateReference": null,
-                  "value": "identifier \"com.microsoft.wdav.netext\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = UBF8T346G9"
+                  "value": "identifier \"com.microsoft.wdav.netext\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = EXAMPLETEAMID9"
                 }
               },
               {
@@ -818,7 +818,7 @@
                 "simpleSettingValue": {
                   "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                   "settingValueTemplateReference": null,
-                  "value": "REDACTED-FIXTURE-VALUE-01"
+                  "value": "Sanitized Organization Name"
                 }
               },
               {
@@ -840,7 +840,7 @@
                 "simpleSettingValue": {
                   "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                   "settingValueTemplateReference": null,
-                  "value": "REDACTED-FIXTURE-VALUE-02"
+                  "value": "Sanitized Content Filter Name"
                 }
               }
             ]

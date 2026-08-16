@@ -101,20 +101,33 @@ BeforeAll {
         'github.com'
     )
 
-    # Domain-shaped PREFIXES that are never a real domain no matter what follows them -
-    # the complement of $safeDomainSuffixes for cases where the fixed part is the front,
-    # not the back, of the match. 'microsoft.graph.' is the literal namespace prefix every
-    # Microsoft Graph OData type-discriminator VALUE uses (e.g.
-    # '#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance', matched here
-    # without its leading '#', which is not a domain-pattern character) - these values
+    # Domain-shaped EXACT PATTERNS that are never a real domain no matter what the whole
+    # matched token is - the complement of $safeDomainSuffixes for cases where the fixed
+    # part is the front, not the back, of the match. 'microsoft.graph.<Identifier>' is the
+    # literal namespace prefix every Microsoft Graph OData type-discriminator VALUE uses
+    # (e.g. '#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance', matched
+    # here without its leading '#', which is not a domain-pattern character) - these values
     # appear throughout tests/Fixtures/SettingsCatalog/*.json right next to real (remapped)
     # settingInstanceTemplateId/settingValueTemplateId GUIDs, and the task that produced
     # those fixtures requires @odata.type values to be kept VERBATIM (public schema), so
     # they cannot be scrubbed to dodge this check. A suffix-only allowlist cannot reach
-    # this shape (the "domain" here is the whole
-    # 'microsoft.graph.<PascalCaseTypeName>' run, not something ending in a known TLD).
-    $script:safeDomainPrefixes = @(
-        'microsoft.graph.'
+    # this shape (the "domain" here is the whole 'microsoft.graph.<PascalCaseTypeName>'
+    # run, not something ending in a known TLD).
+    #
+    # DELIBERATELY a full-token '^...$' regex, NOT a StartsWith/prefix check: a bare
+    # StartsWith('microsoft.graph.') would also admit a genuinely malicious domain that
+    # merely BEGINS with the same text, e.g. 'microsoft.graph.attacker-exfil.io' (a domain
+    # an attacker fully controls, registered specifically to slip past a naive prefix
+    # check) - the domain-matching regex's own greedy '(?:label\.)+label' shape means that
+    # whole string is captured as ONE token, and a prefix check has no way to tell "ends
+    # after the type name" apart from "has more attacker-controlled labels tacked on
+    # after it". Anchoring the WHOLE token to
+    # 'microsoft\.graph\.[A-Za-z0-9]+' with no further dots permitted closes that hole:
+    # every real @odata.type value is exactly 'microsoft.graph.<PascalCaseIdentifier>'
+    # with no additional dotted labels, so a legitimate value still matches while
+    # 'microsoft.graph.attacker-exfil.io' (three additional labels after 'graph') does not.
+    $script:safeDomainExactPatterns = @(
+        '^microsoft\.graph\.[A-Za-z0-9]+$'
     )
 
     <#
@@ -138,7 +151,7 @@ BeforeAll {
 
             [string[]] $SafeDomainSuffix = @(),
 
-            [string[]] $SafeDomainPrefix = @()
+            [string[]] $SafeDomainExactPattern = @()
         )
 
         $violations = [System.Collections.Generic.List[string]]::new()
@@ -230,8 +243,14 @@ BeforeAll {
                     }
                 }
                 if (-not $isSafe) {
-                    foreach ($prefix in $SafeDomainPrefix) {
-                        if ($domain.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    # -cmatch, not -match: $domain is already ToLowerInvariant()'d above and
+                    # every pattern in $SafeDomainExactPattern is written lowercase, so an
+                    # ordinal/case-sensitive match is both correct and marginally cheaper -
+                    # a case-INSENSITIVE match here would add no coverage (the domain can
+                    # never contain uppercase at this point) while being one more implicit
+                    # behavior to reason about.
+                    foreach ($pattern in $SafeDomainExactPattern) {
+                        if ($domain -cmatch $pattern) {
                             $isSafe = $true
                             break
                         }
@@ -377,36 +396,56 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
             $violations | Should -BeNullOrEmpty
         }
 
-        It 'does NOT flag a GUID near a "#microsoft.graph.<Type>" @odata.type VALUE (safe-domain-prefix, not suffix-gated)' {
+        It 'does NOT flag a GUID near a "#microsoft.graph.<Type>" @odata.type VALUE (safe-domain-exact-pattern, not suffix-gated)' {
             # Companion to the deny-listed '@odata.type' KEY case below: the @odata.type
             # VALUE itself ('#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance')
             # is also domain-shaped once its leading '#' is stripped by the domain pattern -
             # 'microsoft.graph.devicemanagementconfigurationchoicesettinginstance' is one
             # dotted run ending in a 2+ letter label. A suffix allowlist cannot reach this
-            # (it never ends in a known TLD), so this needs the prefix-based counterpart.
+            # (it never ends in a known TLD), so this needs the full-token-regex counterpart.
             $violations = @(Get-PulseSecretScanViolations `
                 -Content '"@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance", "settingInstanceTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f"' `
                 -RelativePath 'source/Fake.ps1' `
                 -AllowedGuid @() `
                 -SafeDomainSuffix $script:safeDomainSuffixes `
-                -SafeDomainPrefix $script:safeDomainPrefixes)
+                -SafeDomainExactPattern $script:safeDomainExactPatterns)
 
             $violations | Should -BeNullOrEmpty
         }
 
-        It 'still flags a GUID near a real-looking domain when SafeDomainPrefix is supplied but does not match' {
-            # Proves the prefix check is a genuine prefix match (StartsWith), not an
-            # accidental "contains" - a domain that merely mentions 'microsoft.graph'
-            # somewhere other than its start must still be flagged.
+        It 'still flags a GUID near a real-looking domain that merely MENTIONS "microsoft.graph" mid-string' {
+            # Proves the check is a genuine full-token match, not an accidental "contains" -
+            # a domain that merely has 'microsoft.graph' somewhere other than its start
+            # must still be flagged.
             $violations = @(Get-PulseSecretScanViolations `
                 -Content "tenantId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479' for evil-microsoft.graph.contoso-prod.example.com" `
                 -RelativePath 'source/Fake.ps1' `
                 -AllowedGuid @() `
                 -SafeDomainSuffix $script:safeDomainSuffixes `
-                -SafeDomainPrefix $script:safeDomainPrefixes)
+                -SafeDomainExactPattern $script:safeDomainExactPatterns)
 
             $violations.Count | Should -Be 1
             $violations[0] | Should -Match 'looks like a real tenant id/domain pair'
+        }
+
+        It 'still flags a GUID near "microsoft.graph.attacker-exfil.io" - the exact StartsWith-bypass mutation from code review' {
+            # The precise hole a naive StartsWith('microsoft.graph.') check would have left
+            # open: 'microsoft.graph.attacker-exfil.io' STARTS WITH the safe prefix but is a
+            # domain an attacker fully controls (registered specifically to look like a
+            # Graph OData type value at a glance). The full-token regex
+            # '^microsoft\.graph\.[A-Za-z0-9]+$' rejects it because real @odata.type values
+            # never have additional dotted labels after the type name - this one has three
+            # ('attacker-exfil' + '.' + 'io', on top of 'graph').
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "tenantId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479' for microsoft.graph.attacker-exfil.io" `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes `
+                -SafeDomainExactPattern $script:safeDomainExactPatterns)
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'looks like a real tenant id/domain pair'
+            $violations[0] | Should -Match ([regex]::Escape('microsoft.graph.attacker-exfil.io'))
         }
 
         It 'does NOT flag a GUID near the literal "@odata.type" JSON property key (deny-listed, not TLD-gated)' {
@@ -420,7 +459,7 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
                 -RelativePath 'source/Fake.ps1' `
                 -AllowedGuid @() `
                 -SafeDomainSuffix $script:safeDomainSuffixes `
-                -SafeDomainPrefix $script:safeDomainPrefixes)
+                -SafeDomainExactPattern $script:safeDomainExactPatterns)
 
             $violations | Should -BeNullOrEmpty
         }
@@ -650,7 +689,7 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
 
     It "'<RelativePath>' has no secret/PII-shaped content" -ForEach $secretScanCases {
         $content = Get-Content -LiteralPath $FullPath -Raw -ErrorAction Stop
-        $violations = @(Get-PulseSecretScanViolations -Content $content -RelativePath $RelativePath -AllowedGuid $script:allowedGuids -SafeDomainSuffix $script:safeDomainSuffixes -SafeDomainPrefix $script:safeDomainPrefixes)
+        $violations = @(Get-PulseSecretScanViolations -Content $content -RelativePath $RelativePath -AllowedGuid $script:allowedGuids -SafeDomainSuffix $script:safeDomainSuffixes -SafeDomainExactPattern $script:safeDomainExactPatterns)
 
         $violations | Should -BeNullOrEmpty -Because ($violations -join "`n")
     }

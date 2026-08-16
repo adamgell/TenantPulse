@@ -31,65 +31,95 @@ below). Run date: 2026-08-16.
   tenant, both comfortably inside GraphKit's 60 s headers/body timeout but a ~2x spread
   worth carrying into T2.1's budget as "TTFB is noisy, don't budget to the fast run."
 
-## 2. Per-policy `/settings` latency (stratified sample, n=120)
+## 2. Per-policy `/settings` latency (stratified sample + tail supplement, n=132)
 
-Sample selection: systematic stride across the full, as-returned 781-policy list
-(`step = floor(781/120) = 6`, indices `0, 6, 12, …`) — spread across the whole corpus
-rather than just the first N, so the sample isn't biased toward however policies happen to
-be ordered (observed to correlate with `createdDateTime`, i.e. import batches). This
-satisfies the task's "≥50 policies covering all instance kinds found" requirement — all 5
-`@odata.type` instance kinds present in the tenant (see §3) were represented well before
-reaching 120.
+**Correction (post-review):** the original stride-6 systematic sample
+(`step = floor(781/120) = 6`, indices `0, 6, 12, …, 714`) never reaches indices 715–780 —
+the newest 66-policy import batch (781 total, but `0 + 6×119 = 714` is the last index the
+stride touches) was never sampled at all. This was caught in review, not by this spike run
+itself. Fixed by adding a **12-policy supplementary sample** spread evenly across that
+715–780 tail (`scratch/Invoke-TailSupplement.ps1`, indices `715, 720, 725, …, 770`) and
+recombining both samples' raw payloads (`scratch/Merge-SpikeMeasurements.ps1`) for every
+number in this document. Corrected sample selection description:
+
+> Systematic stride-6 sample across indices `0`–`714` (120 policies) **plus** a
+> supplementary stride-5 sample across indices `715`–`780` (12 policies) — combined
+> stratified sample, n=132, covering the full 781-policy list end to end with no untested
+> range. (Indices 771–780, the last 10 policies, remain outside both strides; see
+> "Residual gap" below.)
 
 | Metric | Value (ms) |
 |---|---|
-| n | 120 |
-| min | 220 |
-| p50 | 306 |
-| p90 | 355 |
+| n | 132 |
+| min | 213 |
+| p50 | 298 |
+| p90 | 345 |
 | p99 | 430 |
 | max | 444 |
-| mean | 304.2 |
+| mean | 298.4 |
 | errors | 0 |
 
-Extrapolated to all 781 policies at the observed mean (304.2 ms/call, sequential, no
-concurrency): **~237.6 s (~4.0 minutes)** for a full-corpus `/settings` sweep. This is the
+The tail supplement's own latencies (213–274 ms, mean well within the main sample's range)
+did not shift the combined picture materially — the original stride-6 sample's numbers
+(mean 304.2 ms) were already representative of the full corpus, but that was not knowable
+without actually sampling the tail, which is why the gap needed closing rather than
+assumed away.
+
+Extrapolated to all 781 policies at the observed mean (298.4 ms/call, sequential, no
+concurrency): **~233.1 s (~3.9 minutes)** for a full-corpus `/settings` sweep. This is the
 number T2.1/T2.2 should budget against for any full-tenant settings collection — it is
 call-count-bound (not payload-size-bound; individual `/settings` payloads are small), so
 concurrency is the lever if a full sweep needs to run faster than ~4 minutes.
 
+**Residual gap**: indices 771–780 (the last 10 policies) still fall outside both strides
+(`floor(66/12) = 5`, so `715 + 5×11 = 770` is the tail stride's last index). This is a much
+smaller, lower-risk gap than the original 66-policy miss — T2.1/T2.2 should not assume it's
+zero-risk, but closing it further was judged not worth a third read-only sweep for this
+spike's purposes.
+
 ## 3. Instance-kind histogram
 
-Every `@odata.type` instance kind actually present in the sample, counted **recursively**
-(walking into `groupSettingCollectionValue`/`groupSettingValue`/`choiceSettingValue`/
-`choiceSettingCollectionValue` children, not just top-level settings):
+Every `@odata.type` instance kind actually present in the **combined 132-policy sample**
+(§2), counted **recursively** (walking into
+`groupSettingCollectionValue`/`groupSettingValue`/`choiceSettingValue`/
+`choiceSettingCollectionValue` children, not just top-level settings) —
+recomputed from the raw payloads on disk after the tail supplement was added, not summed
+from the two runs' separate summaries (to avoid any double-counting of overlapping ids):
 
-| `@odata.type` (short form) | Count |
-|---|---|
-| `ChoiceSettingInstance` | 257 |
-| `SimpleSettingInstance` | 54 |
-| `GroupSettingCollectionInstance` | 40 |
-| `SimpleSettingCollectionInstance` | 11 |
-| `ChoiceSettingCollectionInstance` | 2 |
+| `@odata.type` (short form) | Count | % |
+|---|---|---|
+| `ChoiceSettingInstance` | 550 | 77.6% |
+| `SimpleSettingInstance` | 79 | 11.1% |
+| `GroupSettingCollectionInstance` | 42 | 5.9% |
+| `SimpleSettingCollectionInstance` | 36 | 5.1% |
+| `ChoiceSettingCollectionInstance` | 2 | 0.3% |
+
+(The tail supplement shifted `ChoiceSettingInstance`'s share up from 63% to 77.6% and
+`SimpleSettingCollectionInstance`'s count up from 11 to 36 — the newest import batch skews
+more choice-heavy and has more collection-typed settings than the rest of the corpus. This
+is itself evidence the original 66-policy gap mattered, not just a formality.)
 
 All 5 instance kinds that exist in the Settings Catalog schema's instance-shape family were
 found in this tenant's real data (no `GroupSettingInstance` — the non-collection group
 variant — was observed in the sample; it's schema-legal but this tenant's policies happen
-not to use it). `ChoiceSettingInstance` dominates by a wide margin (~63% of all instances
-seen), which matches the CIS/security-baseline-heavy policy set in this tenant (most
-settings are toggle/dropdown choices, not free-form values).
+not to use it). `ChoiceSettingInstance` dominates by a wide margin, which matches the
+CIS/security-baseline-heavy policy set in this tenant (most settings are toggle/dropdown
+choices, not free-form values).
 
-`ChoiceSettingCollectionInstance` is rare (2 hits in the 120-sample, both nested *inside* a
-`GroupSettingCollectionInstance`, not top-level) — a 3rd, distinct example was located by
-extending the read-only search beyond the 120-sample (see §6, `choicecollection-03`).
+`ChoiceSettingCollectionInstance` is rare (2 hits in the combined 132-sample, both nested
+*inside* a `GroupSettingCollectionInstance`, not top-level) — a 3rd, distinct example was
+located by extending the read-only search beyond the sample (see §6, `choicecollection-03`;
+that extra policy is excluded from all counts in this document so the sample numbers stay
+a clean, well-defined 132).
 
 ## 4. Unresolved-definitionId rate vs. the corpus
 
-Every distinct `settingDefinitionId` observed across the 120-policy sample (295 distinct
-ids, counting nested children) was checked for membership in the full 18,227-item
-definitions corpus fetched in §1 (case-insensitive `id` match).
+Every distinct `settingDefinitionId` observed across the combined 132-policy sample (596
+distinct ids, counting nested children — up from 295 in the pre-tail-supplement sample) was
+checked for membership in the full 18,227-item definitions corpus fetched in §1
+(case-insensitive `id` match).
 
-**Unresolved rate: 0 / 295 = 0.00%.** Every setting definition id referenced by an actual
+**Unresolved rate: 0 / 596 = 0.00%.** Every setting definition id referenced by an actual
 policy in this tenant resolves cleanly against `ConfigurationSettingDefinition.ListBeta`'s
 output. This is a clean, expected result for a healthy tenant — it validates the join
 approach itself, but T2.1/T2.2 should NOT assume 0% is guaranteed in every tenant (a
@@ -99,21 +129,33 @@ elsewhere.
 
 ## 5. `<rootId>_name` convention hit rate on groupSettingCollection instances
 
-**Finding: the hypothesized `<rootId>_name` child-definitionId naming convention was NOT
-observed in this tenant's data — 0 / 22 distinct groupSettingCollection roots (0.0%).**
+**Finding: the `<rootId>_name` child-definitionId naming convention is structurally absent
+across all 24 distinct groupSettingCollection roots in the combined 132-policy sample
+(0/24, 0.0%), and corpus-verified absent for all 24 of those same roots** (up from 22
+roots / 1 corpus-checked root in the pre-review draft of this finding — see "Correction"
+below).
 
-This was verified two ways, not just via the histogram walk:
+1. **Structural** (all 24 sampled roots): none of the sampled policies'
+   `groupSettingCollectionValue` arrays ever had more than 1 row (every
+   `GroupSettingCollectionInstance` instance in this tenant's data is a single-row "group of
+   settings," not a true multi-row "collection of named items" — e.g. the ASR-rules example
+   below has exactly one row, and its child's `settingDefinitionId` is
+   `..._blockabuseofexploitedvulnerablesigneddrivers`, not `..._name`).
+2. **Corpus-level** (all 24 sampled roots, not a single spot-check): for every one of the
+   24 distinct groupSettingCollection root `settingDefinitionId`s seen in the sample, the
+   full 18,227-item definitions corpus was checked for a definition whose `id` is exactly
+   `<root>_name` — **zero matches across all 24 roots**
+   (`scratch/Merge-SpikeMeasurements.ps1`, `CorpusNameHits` in
+   `_combined-measurements.json`). The convention, if it is real anywhere in the Settings
+   Catalog schema, does not apply to any of the shapes this tenant's 781 policies exercise.
 
-1. **Structural**: none of the 120 sampled policies' `groupSettingCollectionValue` arrays
-   ever had more than 1 row (every `GroupSettingCollectionInstance` instance in this
-   tenant's data is a single-row "group of settings," not a true multi-row "collection of
-   named items" — e.g. the ASR-rules example below has exactly one row, and its child's
-   `settingDefinitionId` is `..._blockabuseofexploitedvulnerablesigneddrivers`, not
-   `..._name`).
-2. **Schema-level**: for the `device_vendor_msft_policy_config_defender_attacksurfacereductionrules`
-   root (one of the 22 sampled roots), the full definitions corpus was searched for any
-   definition id matching `<root>*name*` — **none exists**. The convention, if it is real
-   anywhere in the Settings Catalog schema, does not apply to this root's shape.
+**Correction (post-review)**: the original draft of this finding checked the corpus for
+only **1 of 22** sampled roots (`device_vendor_msft_policy_config_defender_attacksurfacereductionrules`)
+and stated the convention was "verified two ways" as if that were representative of all 22
+— an overclaim. The corpus-level check is cheap (it's a single `HashSet.Contains` per root
+against the corpus already held in memory), so rather than soften the wording further it
+was extended to check every one of the 24 roots in the corrected, combined sample instead
+of just one.
 
 One near-miss worth flagging explicitly so it isn't mistaken for a hit: the BitLocker
 recovery-options `ChoiceSettingInstance` (not a group collection) has children whose
@@ -159,6 +201,60 @@ kind, plus a 4th, richly-nested example for groupSettingCollection):
   Catalog schema, not tenant-identifying, and required verbatim for the fixtures to be
   useful against the real schema.
 
+### Value-level sanitization rule (added post-review — read this before making more fixtures)
+
+**The original sanitization pass covered `Policy.name`/`description`/`templateDisplayName`
+and every GUID, but NOT the actual setting VALUES carried inside `simpleSettingValue` /
+`simpleSettingCollectionValue` string content — free text an org chooses, not schema.**
+Code review caught one real leak this missed: `choicecollection-01.json` (the
+LocalUsersAndGroups "add to Administrators" example) carried `"value": "REDACTED-ADMIN-NAME"` —
+**this tenant's actual local-administrator account name**, not a placeholder. Fixed to
+`"LapsAdmin-Example"`.
+
+**The rule going forward, for T2.1/T2.2 and any future fixture-making from a real tenant**:
+after GUID remapping and `Policy.*` scrubbing, walk every `simpleSettingValue.value` and
+every `simpleSettingCollectionValue[].value` in the tree (`@odata.type` =
+`StringSettingValue`; integer/boolean values need no scrubbing — they can't carry identity)
+and scrub any value that is **org-chosen free text**, not a schema/public constant:
+account names, group names, URLs/hostnames with org content, filesystem paths with org
+content, certificate subjects that identify the *tenant's own* PKI (not a vendor's public,
+tenant-invariant identifier), and any other string a human at the org typed in. Do **not**
+scrub: well-known SID constants (e.g. `*S-1-5-32-544`, the built-in Administrators group —
+identical on every Windows machine everywhere), Microsoft's own published,
+tenant-invariant identifiers (e.g. app bundle IDs like `com.microsoft.OneDrive`, or
+Microsoft's own Apple code-signing Team ID, which is the same for every tenant that
+deploys a Microsoft macOS app and does not identify this tenant), default OS paths (e.g.
+`%systemroot%\system32\LogFiles\Firewall\pfirewall.log`), or literal template placeholder
+tokens a baseline's own authors left in (e.g. `<YOURACT>`, `<YOUROBJECT>`). When a value
+sits behind a `settingDefinitionId` whose own name says it's a free-text/organization field
+(e.g. `..._organization`, `..._userdefinedname`, `..._comment`), scrub it even if the
+observed value happens to look generic or vendor-related — the field being editable by the
+org is what matters, not whether this particular tenant's value happens to look safe.
+
+**Full re-pass results** (every fixture, every `simpleSettingValue`/
+`simpleSettingCollectionValue` string walked): 4 values across 3 fixtures needed scrubbing.
+
+| Fixture | Value found | `settingDefinitionId` | Scrubbed to |
+|---|---|---|---|
+| `choicecollection-01.json` | `REDACTED-ADMIN-NAME` (real tenant local-admin account name) | `..._accessgroup_users` | `LapsAdmin-Example` |
+| `groupcollection-02-nested.json` | `REDACTED-FIXTURE-VALUE-01` (free-text `_organization` field) | `com.apple.webcontent-filter_organization` | `Sanitized Organization Name` |
+| `groupcollection-02-nested.json` | `REDACTED-FIXTURE-VALUE-02` (free-text `_userdefinedname` field) | `com.apple.webcontent-filter_userdefinedname` | `Sanitized Content Filter Name` |
+| `groupcollection-02-nested.json` (×6) + `simple-02.json` (×2) | `UBF8T346G9` (Apple code-signing Team ID, appearing both standalone and inside cert-requirement strings) | various `com.apple.servicemanagement_rules_item_rulevalue` | `EXAMPLETEAMID9` (scrubbed out of caution per the review's explicit "certificate subjects" category, even though this specific value is Microsoft's own public, tenant-invariant Apple Team ID — see judgment call below) |
+
+**Judgment call on `UBF8T346G9`**: this is Microsoft's own published Apple Developer Team
+ID, documented in Microsoft's own Defender-for-Mac deployment guides and identical for
+every tenant that deploys a Microsoft macOS app — it does not identify Ivy24 specifically.
+It was scrubbed anyway because the review named "certificate subjects" as a scrub category
+without carving out vendor-public exceptions, and treating it as safe would have required
+a judgment call embedded in the fixture rather than stated explicitly in this doc.
+Documented here so T2.1/T2.2 can make an informed call if they hit the same tradeoff again
+(overwhelmingly Microsoft's own app bundle IDs like `com.microsoft.OneDrive`,
+`com.microsoft.wdav`, etc. were judged safe and left verbatim, for the same
+tenant-invariant reasoning — see the "do not scrub" list above).
+
+All 15 fixtures were re-validated as well-formed JSON after these edits and re-passed
+through both QA gates (see below).
+
 All 15 fixtures are declared in `tests/Fixtures/PROVENANCE.md` as
 `sanitized(ivy24 spike 2026-08-16)` and pass both `tests/QA/FixtureProvenance.tests.ps1`
 and `tests/QA/SecretScan.tests.ps1`.
@@ -181,13 +277,25 @@ object):
 
 Fixed by (a) adding `'odata.type'` to the existing `$denyListedDomains` set (same pattern
 as the `tp.ent`/`tp.int` precedent) and (b) adding a new, narrower
-`$safeDomainPrefixes = @('microsoft.graph.')` allowlist with a `StartsWith` check —
-the suffix-based `$safeDomainSuffixes` mechanism can't reach a value that never ends in a
-known TLD. Both changes are covered by new unit tests in
-`tests/QA/SecretScan.tests.ps1` (including a negative test proving the prefix check is a
-genuine `StartsWith`, not an accidental substring match). Full gate re-run after the fix:
-**284/284 SecretScan assertions pass**, and the full `./build.ps1 -Tasks test` gate is
-green (746 tests, 0 failed).
+`$safeDomainExactPatterns = @('^microsoft\.graph\.[A-Za-z0-9]+$')` allowlist matched with a
+full-token regex.
+
+**Correction (post-review)**: the first version of fix (b) used a plain
+`StartsWith('microsoft.graph.')` check, which admits any domain that merely *begins* with
+that text — including an attacker-controlled domain like
+`microsoft.graph.attacker-exfil.io`, registered specifically to slip past a naive prefix
+check. Fixed by anchoring the *whole* matched token to
+`^microsoft\.graph\.[A-Za-z0-9]+$` (no further dots permitted): every real `@odata.type`
+value is exactly `microsoft.graph.<PascalCaseIdentifier>` with no additional dotted labels,
+so legitimate values still match while `microsoft.graph.attacker-exfil.io` (which has three
+more labels after `graph`) does not. The exact mutation from review is now a named
+regression test (`'still flags a GUID near "microsoft.graph.attacker-exfil.io" - the exact
+StartsWith-bypass mutation from code review'`), alongside the original "does not match"
+negative test.
+
+Both changes are covered by unit tests in `tests/QA/SecretScan.tests.ps1`. Full gate
+re-run after all fixes: **285/285 SecretScan assertions pass**, and the full
+`./build.ps1 -Tasks test` gate is green.
 
 ## 7. Reproducing
 
@@ -199,6 +307,8 @@ accident (see the `.gitignore` comment above the `scratch/` entry). To reproduce
 ```powershell
 Import-Module GraphKit -RequiredVersion 0.1.1
 ./scratch/Invoke-SettingsCatalogSpike.ps1 -ProfileId ivy24 -SampleSize 120
+./scratch/Invoke-TailSupplement.ps1 -ProfileId ivy24 -TailStart 715 -TailSampleSize 12
+./scratch/Merge-SpikeMeasurements.ps1 -ProfileId ivy24   # recomputes histogram/unresolved/rootId_name over the combined sample
 ./scratch/New-SanitizedFixtures.ps1   # re-sanitizes into tests/Fixtures/SettingsCatalog/
 ```
 
@@ -208,13 +318,23 @@ Import-Module GraphKit -RequiredVersion 0.1.1
   high-water / 20–36 s fetch, all safely inside GraphKit 0.1.1's 60 s headers/body timeout
   for this operation — but budget for the high end (36 s TTFB, ~1.2 GB heap), not the fast
   run.
-- Per-policy `/settings`: ~304 ms mean, p99 ~430 ms, call-count-bound. A full 781-policy
-  sweep is ~4 minutes sequential; plan for concurrency if that needs to shrink.
-- Instance kinds: `Choice` (63%) and `Simple` (13%) dominate;
-  `GroupSettingCollection` (10%) is common enough to require real nested-child handling
-  (not just top-level flattening); `SimpleSettingCollection` (3%) and
-  `ChoiceSettingCollection` (0.5%) are both real but rare — sample sizes for either in any
-  future test corpus should not assume even distribution.
-- Unresolved-definitionId rate: 0% in this tenant — join logic should still fail
-  gracefully (not silently drop) for the case where it isn't 0% elsewhere.
-- `<rootId>_name` convention: not observed; do not build on it as a general rule (§5).
+- Per-policy `/settings`: ~298 ms mean (n=132, full corpus coverage incl. tail), p99 ~430
+  ms, call-count-bound. A full 781-policy sweep is ~3.9 minutes sequential; plan for
+  concurrency if that needs to shrink.
+- Instance kinds (n=132, full-corpus-coverage sample): `Choice` (77.6%) dominates even more
+  than the pre-correction number suggested; `Simple` (11.1%),
+  `GroupSettingCollection` (5.9%, common enough to require real nested-child handling, not
+  just top-level flattening), `SimpleSettingCollection` (5.1%) and
+  `ChoiceSettingCollection` (0.3%) are all real but rare — sample sizes for any of these in
+  a future test corpus should not assume even distribution, and should not assume the
+  newest import batch looks like the rest of the corpus (it doesn't, see §3).
+- Unresolved-definitionId rate: 0% in this tenant (0/596, full-corpus-coverage sample) —
+  join logic should still fail gracefully (not silently drop) for the case where it isn't
+  0% elsewhere.
+- `<rootId>_name` convention: structurally and corpus-verified absent across all 24
+  sampled roots; do not build on it as a general rule (§5).
+- **Value-level sanitization**: setting VALUES (not just policy names/GUIDs) can carry real
+  tenant identity — see the value-scrub rule added to §6 after review caught a real leak
+  (`REDACTED-ADMIN-NAME`, this tenant's actual local-admin account name). Any future fixture-making
+  from a real tenant must walk `simpleSettingValue`/`simpleSettingCollectionValue` strings,
+  not just `Policy.*` fields and GUIDs.
