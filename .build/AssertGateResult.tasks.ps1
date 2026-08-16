@@ -32,7 +32,12 @@
 # 905 -> 912 (Task 2.2 re-review fix): +7 - IsNullOrWhiteSpace policy-id prevalidation
 # (a whitespace-only id previously passed IsNullOrEmpty and reached Get-GraphObject) plus
 # its own WHITESPACE-ID regression test.
-$script:tenantPulseGateMinimumTests = 912
+# 912 -> 916 (Task 2.2 re-review round 2): +4 - the known-safe-value-shape suffix-match
+# secret-leak bypass fix (exact fully-qualified string match, mirroring P1-9's instance-type
+# fix) plus its own regression suite (suffix-bypass for both known-safe shapes, the
+# real-type-still-matches control, and an end-to-end walker-level plaintext-never-leaks
+# assertion). Set to the REAL total, not a headroom-padded number - the gate IS the count.
+$script:tenantPulseGateMinimumTests = 916
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

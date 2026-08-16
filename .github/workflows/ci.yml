@@ -568,7 +568,12 @@ jobs:
           # 905 -> 912 (Task 2.2 re-review fix): +7 - IsNullOrWhiteSpace policy-id
           # prevalidation (a whitespace-only id previously passed IsNullOrEmpty and reached
           # Get-GraphObject) plus its own WHITESPACE-ID regression test.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 912 -AllowedSkips 0 -AllowNotRun 1
+          # 912 -> 916 (Task 2.2 re-review round 2): +4 - the known-safe-value-shape
+          # suffix-match secret-leak bypass fix (exact fully-qualified string match,
+          # mirroring P1-9's instance-type fix) plus its own regression suite. Set to the
+          # REAL total, not a headroom-padded number - the gate IS the count. Matches
+          # .build/AssertGateResult.tasks.ps1's own -MinimumTests.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 916 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
