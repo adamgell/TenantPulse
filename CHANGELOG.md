@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dataset `-Name` against a safe-character pattern before using it to build a file path,
   closing a path-traversal gap that could overwrite arbitrary files (including
   `manifest.json` itself) via a name like `..\manifest`.
+- `Get-PulseOperatorKey` now creates its key file exclusively (`FileMode.CreateNew`), so
+  two concurrent first callers on a machine with no key yet can no longer each write and
+  silently diverge on their own key - the loser now reads the winner's key instead. On
+  non-Windows the file is chmod'd to owner-only before any key bytes are written (not
+  after), and the parent directory it creates is chmod'd `0700`. Reading a key file now
+  requires it to be exactly 32 bytes, throwing a clear "corrupt key file" error naming the
+  actual byte count and the path to delete, instead of silently returning a truncated key
+  or an opaque `$null`-related error.
 
 ### Security
 

@@ -65,6 +65,65 @@ Describe 'Get-PulseOperatorKey' {
         $mode | Should -Be ([System.IO.UnixFileMode]::UserRead -bor [System.IO.UnixFileMode]::UserWrite)
     }
 
+    It 'writes 0700-equivalent permissions on the parent directory it creates, on non-Windows platforms' {
+        if ($IsWindows) {
+            Set-ItResult -Skipped -Because 'POSIX permission bits do not apply on Windows'
+            return
+        }
+
+        InModuleScope TenantPulse -ArgumentList $script:keyPath {
+            param($keyPath)
+            Get-PulseOperatorKey -KeyPath $keyPath
+        }
+
+        $dirMode = [System.IO.File]::GetUnixFileMode($script:keyRoot)
+        $dirMode | Should -Be (
+            [System.IO.UnixFileMode]::UserRead -bor
+            [System.IO.UnixFileMode]::UserWrite -bor
+            [System.IO.UnixFileMode]::UserExecute)
+    }
+
+    It 'converges on identical key bytes when two processes race the first create' {
+        $built = Get-ChildItem (Join-Path $script:repoRoot 'output/module/TenantPulse') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+        $manifestPath = Join-Path $built.FullName 'TenantPulse.psd1'
+
+        $scriptBlock = {
+            param($ManifestPath, $KeyPath)
+
+            Import-Module $ManifestPath -Force
+            $module = Get-Module -Name TenantPulse
+
+            & $module {
+                param($KeyPath)
+                $key = Get-PulseOperatorKey -KeyPath $KeyPath
+                [System.Convert]::ToBase64String($key)
+            } $KeyPath
+        }
+
+        $runspaces = @()
+        $handles = @()
+
+        foreach ($i in 1..2) {
+            $ps = [powershell]::Create()
+            [void] $ps.AddScript($scriptBlock).AddArgument($manifestPath).AddArgument($script:keyPath)
+            $runspaces += $ps
+            $handles += $ps.BeginInvoke()
+        }
+
+        $results = @()
+        for ($i = 0; $i -lt $runspaces.Count; $i++) {
+            $output = $runspaces[$i].EndInvoke($handles[$i])
+            $runspaces[$i].Streams.Error | Should -BeNullOrEmpty
+            $results += ($output -join '')
+            $runspaces[$i].Dispose()
+        }
+
+        $results.Count | Should -Be 2
+        $results[0] | Should -Not -BeNullOrEmpty
+        $results[0] | Should -Be $results[1]
+    }
+
     It 'throws and never creates a key file when KeyPath points inside a snapshot root' {
         $snapshotRoot = Join-Path $script:keyRoot 'snapshot'
         New-Item -Path $snapshotRoot -ItemType Directory -Force | Out-Null
@@ -101,9 +160,53 @@ Describe 'Get-PulseOperatorKey' {
 
         Test-Path -LiteralPath $badKeyPath | Should -BeFalse
     }
+
+    It 'throws instead of reading a pre-existing key file that lives inside a snapshot root' {
+        $snapshotRoot = Join-Path $script:keyRoot 'snapshot3'
+        New-Item -Path $snapshotRoot -ItemType Directory -Force | Out-Null
+        $manifestPath = Join-Path $snapshotRoot 'manifest.json'
+        Set-Content -LiteralPath $manifestPath -Value '{"schemaVersion":"1.0.0"}' -NoNewline -Encoding utf8NoBOM
+
+        $preExistingKeyPath = Join-Path $snapshotRoot 'operator.key'
+        [System.IO.File]::WriteAllBytes($preExistingKeyPath, [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+
+        {
+            InModuleScope TenantPulse -ArgumentList $preExistingKeyPath {
+                param($keyPath)
+                Get-PulseOperatorKey -KeyPath $keyPath
+            }
+        } | Should -Throw -ExpectedMessage '*snapshot*'
+    }
+
+    It 'throws a clear corrupt-key error instead of returning a truncated key' {
+        New-Item -Path $script:keyRoot -ItemType Directory -Force | Out-Null
+        [System.IO.File]::WriteAllBytes($script:keyPath, [byte[]] (0..15))
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:keyPath {
+                param($keyPath)
+                Get-PulseOperatorKey -KeyPath $keyPath
+            }
+        } | Should -Throw -ExpectedMessage '*corrupt*16 bytes, expected 32*'
+    }
 }
 
 Describe 'Get-PulsePseudonym' {
+    It 'matches a pinned known-answer vector (HMAC-SHA256, key bytes 0..31, value "contoso-tenant-id")' {
+        # Expected digest computed independently (Python hmac/hashlib and openssl dgst
+        # -mac hmac, both agreeing) outside this module, then hardcoded here, so this
+        # test catches encoding/casing/algorithm drift that a self-referential
+        # "compute it the same way and compare" test could never catch.
+        $key = [byte[]] (0..31)
+
+        $pseudonym = InModuleScope TenantPulse -ArgumentList 'contoso-tenant-id', $key {
+            param($value, $key)
+            Get-PulsePseudonym -Value $value -Key $key
+        }
+
+        $pseudonym | Should -Be 'tp-f6417c6f751acdc537bd9df382e599d2c2d666384072866eba462bbd212f95c6'
+    }
+
     It 'matches the tp- prefixed 64-hex-digit format' {
         $key = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
 

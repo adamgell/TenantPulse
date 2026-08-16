@@ -98,17 +98,23 @@ jobs:
           # functions (the original 14, plus 11 added fixing a post-review Critical/
           # Important/load-bearing-Minor pass: ordinal key sorting, DateTimeOffset/NaN
           # handling, atomic+locked manifest writes, and dataset-name path-traversal
-          # validation) = 29. Task 1.3 added the operator key + pseudonymization layer:
-          # 9 Identity.Tests.ps1 tests (5 for Get-PulseOperatorKey covering auto-create,
-          # reuse, 0600-equivalent permissions, and the never-inside-a-snapshot-root
-          # guard at both direct and nested depth; 4 for Get-PulsePseudonym covering
-          # format, stability, and divergence across keys/values) = 38. This minimum
-          # must keep ratcheting up as check/function test suites are added in later
-          # tasks - see docs/superpowers/sdd for the phase plan.
+          # validation) = 29. Task 1.3 added the operator key + pseudonymization layer,
+          # then hardened it after review (exclusive first-create via FileMode.CreateNew
+          # to fix a check-then-act race, pre-write chmod ordering, 0700 on the created
+          # key directory, strict 32-byte re-read validation, and documentation-only
+          # fixes for the Windows permission story and the snapshot-root guard's
+          # fail-open contract): 14 Identity.Tests.ps1 tests (9 for Get-PulseOperatorKey
+          # covering auto-create, reuse, 0600 file / 0700 directory permissions,
+          # concurrent-create convergence, the never-inside-a-snapshot-root guard on
+          # both the create and read paths at direct and nested depth, and the
+          # corrupt-key-file error; 5 for Get-PulsePseudonym covering a pinned
+          # known-answer vector, format, stability, and divergence across keys/values)
+          # = 43. This minimum must keep ratcheting up as check/function test suites are
+          # added in later tasks - see docs/superpowers/sdd for the phase plan.
           #
           # -AllowNotRun 6 still covers the "Quality for module" (2 It) and "Help for
           # module" (4 It) Describe blocks: FunctionsToExport is still empty (Task 1.3's
           # functions are private), so Get-Command -Module still returns nothing to drive
           # their -ForEach. This must drop to 0 the moment the first function is exported
           # and those blocks start actually running.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 38 -AllowedSkips 0 -AllowNotRun 6
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 43 -AllowedSkips 0 -AllowNotRun 6
