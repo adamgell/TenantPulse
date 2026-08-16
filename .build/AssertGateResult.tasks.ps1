@@ -207,7 +207,14 @@
 # growth for the new TP.ENT.0010.psd1/Test-PulseTemporaryAccessPassConfigured.ps1/
 # TP.ENT.0010.Tests.ps1 files. 1240 is the real, measured ./build.ps1 -Tasks test
 # total; all four tracking locations bumped together in this commit.
-$script:tenantPulseGateMinimumTests = 1240
+# 1240 -> 1252 (Task 4.3 wave 2, TP.ENT.0011 - new check, EIDSCA AV01 Voice call
+# disabled, completes wave 2): +12 - 6 new It cases in
+# tests/Unit/Checks/TP.ENT.0011.Tests.ps1, +1 CheckCatalog.Tests.ps1 count-pin bump
+# (19 -> 20) plus per-file SecretScan.tests.ps1 growth for the new
+# TP.ENT.0011.psd1/Test-PulseVoiceCallMethodDisabled.ps1/TP.ENT.0011.Tests.ps1 files.
+# 1252 is the real, measured ./build.ps1 -Tasks test total; all four tracking
+# locations bumped together in this commit.
+$script:tenantPulseGateMinimumTests = 1252
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

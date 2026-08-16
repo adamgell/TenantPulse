@@ -610,12 +610,11 @@ jobs:
           # value moves: this gate step, .build/AssertGateResult.tasks.ps1, the publish
           # script, and its own test's fabricated fixture total - bump all four together,
           # every time.
-          # 1193 -> 1195 -> 1199 -> 1201 -> 1215 -> 1227 -> 1240 (Task 4.3 wave 2,
-          # TP.ENT.0013 CP03/CP04, then TP.ENT.0015 PR02/PR03/PR05/PR06, then
-          # TP.ENT.0016 ST09, then TP.ENT.0007 new check, then TP.ENT.0009 new check,
-          # then TP.ENT.0010 new check) - see .build/AssertGateResult.tasks.ps1's own
-          # per-cluster accounting.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1240 -AllowedSkips 0 -AllowNotRun 1
+          # 1193 -> 1195 -> 1199 -> 1201 -> 1215 -> 1227 -> 1240 -> 1252 (Task 4.3
+          # wave 2, TP.ENT.0013 CP03/CP04, then TP.ENT.0015 PR02/PR03/PR05/PR06, then
+          # TP.ENT.0016 ST09, then TP.ENT.0007/0009/0010/0011 new checks, in order) -
+          # see .build/AssertGateResult.tasks.ps1's own per-cluster accounting.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1252 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
