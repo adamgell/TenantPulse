@@ -21,7 +21,7 @@
     green `test` run could still hide a discovery regression until CI caught it.
 #>
 
-$script:tenantPulseGateMinimumTests = 707
+$script:tenantPulseGateMinimumTests = 713
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

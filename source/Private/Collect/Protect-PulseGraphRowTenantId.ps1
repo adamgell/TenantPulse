@@ -40,13 +40,42 @@
     the original row objects - and therefore $collectedRows - carrying the real, unredacted
     id a dependent Graph call actually needs.
 
-    TOTAL by construction, exactly like the collector's other per-dataset helpers: a $null
-    or empty -TenantId (the pre-context total-failure path, or any caller that has no
-    tenant id to redact) returns -Data completely unchanged (no cloning at all - nothing to
-    redact means nothing to protect against downstream mutation either), never a throw, and
-    a malformed/unexpected row shape is walked defensively (AllowNull row elements
-    tolerated, exactly like Remove-PulseGraphRowProvenance) rather than aborting collection
-    over a single odd row.
+    -MaxDepth (post-live-gate-review hardening; default 64, matching
+    ConvertTo-PulseCanonicalJson's own -Depth default): every recursive descent checks
+    -CurrentDepth against -MaxDepth BEFORE doing any work, and throws immediately - never
+    just "eventually" via a native call-depth overflow - once the budget is exhausted. This
+    is what actually closes the bug class the Hashtable/SyncRoot self-reference fix (see
+    the IDictionary branch below) exposed: a Hashtable was ONE concrete cycle GraphKit's
+    real responses happen to produce, but the underlying risk is any cyclic or
+    pathologically deep in-memory structure reaching this function, GraphKit-shaped or
+    not - a native PowerShell call-depth overflow is slow (each frame costs real CPU before
+    the CLR gives up) and, more importantly, was being SWALLOWED by the old catch-and-
+    fall-back-to-unredacted behavior (see FAIL CLOSED below), silently shipping whatever
+    the cycle happened to reach before overflowing. An explicit, cheap, first-thing-in-the-
+    function depth check turns an eventual slow crash into an immediate, named, catchable
+    error. -CurrentDepth starts at 1, not 0, for each row passed to the internal walker -
+    accounting for the root array level ConvertTo-PulseCanonicalJson's own -Depth budget
+    counts (Write-PulseDataset serializes the WHOLE redacted array as one document, and
+    that array is depth 0 in the serializer's own accounting; each row inside it is
+    already one level in), so a row that would trip the canonical serializer's own depth
+    gate on write is refused here first, at redaction time, with a clearer, redaction-
+    specific error rather than surfacing only much later as a serialization failure.
+
+    FAIL CLOSED (post-live-gate-review hardening - this replaces this function's own prior
+    behavior, and is the important correction): a traversal error of ANY kind - a depth-
+    budget exhaustion, or literally any other exception the recursive walk could raise -
+    now PROPAGATES OUT of this function instead of being caught here and silently
+    downgraded to "return the original, UNREDACTED row". That prior behavior was a
+    fail-OPEN on this function's entire reason for existing: a row this function cannot
+    prove it redacted was, before this fix, written to disk anyway, unredacted, with only a
+    Write-Verbose line (which most operators never see) marking the failure. A caller that
+    cannot confirm redaction succeeded must not silently ship the unredacted alternative -
+    it must fail loudly instead. Invoke-PulseCollection's per-dataset try/catch (the same
+    one wrapping Get-GraphObject) already exists to turn exactly this kind of exception
+    into a Failed dataset with a redacted reason and NO dataset file written (Write-
+    PulseDataset never reaches its own file-write step - the throw happens during
+    redaction, before serialization starts) - this function now uses that existing
+    machinery instead of quietly defeating it.
 #>
 
 function Protect-PulseGraphRowTenantId {
@@ -64,7 +93,12 @@ function Protect-PulseGraphRowTenantId {
         [string] $TenantId,
 
         [Parameter(Mandatory)]
-        [string] $Pseudonym
+        [string] $Pseudonym,
+
+        # Matches ConvertTo-PulseCanonicalJson's own -Depth default (see this function's
+        # own docstring for why 64, and why -CurrentDepth below starts at 1 rather than 0).
+        [ValidateRange(1, [int]::MaxValue)]
+        [int] $MaxDepth = 64
     )
 
     if ([string]::IsNullOrEmpty($TenantId)) {
@@ -76,8 +110,18 @@ function Protect-PulseGraphRowTenantId {
     # $Pseudonym. Non-string, non-container values (numbers, booleans, DateTime, $null)
     # are returned as-is - the same reference is fine there since they are immutable/
     # value-shaped in PowerShell.
+    #
+    # -CurrentDepth/-MaxDepth: checked FIRST, before any other work at this level -
+    # including before dereferencing $Value's members - so a cyclic or pathologically deep
+    # structure is refused quickly (one cheap integer comparison per level) rather than
+    # walked until a native call-depth overflow eventually (and slowly) stops it. The
+    # thrown message names the exhausted depth, per this function's own docstring.
     function Protect-PulseGraphValue {
-        param($Value, [string] $TenantId, [string] $Pseudonym)
+        param($Value, [string] $TenantId, [string] $Pseudonym, [int] $CurrentDepth, [int] $MaxDepth)
+
+        if ($CurrentDepth -gt $MaxDepth) {
+            throw "Protect-PulseGraphRowTenantId: row content exceeds the maximum redaction depth of $MaxDepth (reached depth $CurrentDepth) - refusing to continue, which would otherwise risk an unbounded or cyclic traversal."
+        }
 
         if ($null -eq $Value) { return $Value }
 
@@ -96,13 +140,15 @@ function Protect-PulseGraphRowTenantId {
         # IsReadOnly, IsFixedSize, IsSynchronized, SyncRoot, ...), not its dictionary
         # entries - and a non-synchronized Hashtable's own SyncRoot property returns the
         # SAME hashtable instance. Walking .PSObject.Properties on a Hashtable therefore
-        # recurses into itself via SyncRoot and blows PowerShell's call depth on every real
-        # Graph row that has one (reproduced live against Ivy24 - see this function's own
-        # docstring and the regression test in Snapshot.Tests.ps1).
+        # recurses into itself via SyncRoot (reproduced live against Ivy24 - see this
+        # function's own docstring and the regression tests in Snapshot.Tests.ps1); the
+        # -MaxDepth guard above is this function's general-purpose backstop against that
+        # WHOLE class of self-reference, GraphKit-shaped or not, but walking dictionary
+        # entries correctly here means a real Graph row never gets anywhere near it.
         if ($Value -is [System.Collections.IDictionary]) {
             $clone = [ordered] @{}
             foreach ($key in @($Value.Keys)) {
-                $clone[$key] = Protect-PulseGraphValue -Value $Value[$key] -TenantId $TenantId -Pseudonym $Pseudonym
+                $clone[$key] = Protect-PulseGraphValue -Value $Value[$key] -TenantId $TenantId -Pseudonym $Pseudonym -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth
             }
             return $clone
         }
@@ -110,7 +156,7 @@ function Protect-PulseGraphRowTenantId {
         if ($Value -is [System.Management.Automation.PSObject]) {
             $clone = [pscustomobject]@{}
             foreach ($property in @($Value.PSObject.Properties)) {
-                $redactedValue = Protect-PulseGraphValue -Value $property.Value -TenantId $TenantId -Pseudonym $Pseudonym
+                $redactedValue = Protect-PulseGraphValue -Value $property.Value -TenantId $TenantId -Pseudonym $Pseudonym -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth
                 Add-Member -InputObject $clone -NotePropertyName $property.Name -NotePropertyValue $redactedValue
             }
             return $clone
@@ -120,7 +166,7 @@ function Protect-PulseGraphRowTenantId {
             $items = @($Value)
             $clonedItems = [object[]]::new($items.Count)
             for ($i = 0; $i -lt $items.Count; $i++) {
-                $clonedItems[$i] = Protect-PulseGraphValue -Value $items[$i] -TenantId $TenantId -Pseudonym $Pseudonym
+                $clonedItems[$i] = Protect-PulseGraphValue -Value $items[$i] -TenantId $TenantId -Pseudonym $Pseudonym -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth
             }
             return , $clonedItems
         }
@@ -136,15 +182,14 @@ function Protect-PulseGraphRowTenantId {
             continue
         }
 
-        try {
-            $clonedRows[$i] = Protect-PulseGraphValue -Value $row -TenantId $TenantId -Pseudonym $Pseudonym
-        } catch {
-            # Total: a single unreadable/unclonable row must never abort collection - fall
-            # back to the original row (unredacted, but at least present) rather than
-            # propagate or silently drop it.
-            Write-Verbose "Protect-PulseGraphRowTenantId: could not redact row $($i): $($_.Exception.Message)"
-            $clonedRows[$i] = $row
-        }
+        # FAIL CLOSED (see this function's own docstring): no try/catch here anymore. A
+        # row this function cannot prove it redacted - whatever the reason - must not be
+        # silently shipped unredacted; the exception propagates to Write-PulseDataset and
+        # then to Invoke-PulseCollection's own per-dataset catch, which classifies the
+        # WHOLE dataset Failed (with a redacted reason) and writes no dataset file at all,
+        # rather than this function quietly downgrading one bad row to "unredacted but
+        # present".
+        $clonedRows[$i] = Protect-PulseGraphValue -Value $row -TenantId $TenantId -Pseudonym $Pseudonym -CurrentDepth 1 -MaxDepth $MaxDepth
     }
 
     return , $clonedRows

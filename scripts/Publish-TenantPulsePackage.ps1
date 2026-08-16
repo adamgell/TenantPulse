@@ -163,16 +163,17 @@ else {
         throw "Test result '$TestResultPath' does not exist."
     }
 
-    # MinimumTests 707 / -AllowNotRun 1 (Task 1.11, GraphKit 0.1.1 migration): see
-    # .build/AssertGateResult.tasks.ps1 and .github/workflows/ci.yml for the accounting -
-    # net -6 tests from deleting the Get-PulseGraphFailureStatusCode workaround and its
-    # unit tests, and the now-legitimately-empty Pending Context in
+    # MinimumTests 713 / -AllowNotRun 1 (Task 1.11, GraphKit 0.1.1 migration + post-review
+    # hardening): see .build/AssertGateResult.tasks.ps1 and .github/workflows/ci.yml for
+    # the full accounting - net -6 from deleting the Get-PulseGraphFailureStatusCode
+    # workaround and its unit tests, the now-legitimately-empty Pending Context in
     # tests/QA/ReadOnly.tests.ps1 once GraphKit 0.1.1 shipped all six previously-Pending
-    # descriptors.
+    # descriptors, +7 for the raw-tenant-GUID redaction and Hashtable/SyncRoot live-gate
+    # fixes, and +6 for the MaxDepth/fail-closed hardening on Protect-PulseGraphRowTenantId.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
-    & pwsh -NoProfile -File $gate -ResultPath $TestResultPath -MinimumTests 707 -AllowedSkips 0 -AllowNotRun 1 | Write-Verbose
+    & pwsh -NoProfile -File $gate -ResultPath $TestResultPath -MinimumTests 713 -AllowedSkips 0 -AllowNotRun 1 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {
-        throw "The supplied test result did not pass the whole-result gate, so this package must not be published. Run: pwsh -File tests/QA/Assert-GateResult.ps1 -ResultPath '$TestResultPath' -MinimumTests 707"
+        throw "The supplied test result did not pass the whole-result gate, so this package must not be published. Run: pwsh -File tests/QA/Assert-GateResult.ps1 -ResultPath '$TestResultPath' -MinimumTests 713"
     }
 
     # The result must belong to this version, or it proves nothing about these bits.

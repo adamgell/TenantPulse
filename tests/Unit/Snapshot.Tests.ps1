@@ -389,6 +389,110 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
     }
 }
 
+# Post-live-gate-review hardening (empirically probed: cyclic in-memory structures hang
+# Protect-PulseGraphRowTenantId indefinitely - live Graph responses are bounded so no live
+# field ever produces one, but the module hardens by construction rather than relying on
+# that being true forever). Covers both halves of the fix: (1) a MaxDepth/CurrentDepth
+# budget - matching ConvertTo-PulseCanonicalJson's own 64-level default, accounting for the
+# root array level - that throws quickly, by name, instead of eventually blowing a native
+# call stack; (2) FAIL CLOSED - any traversal error now propagates instead of being
+# swallowed into "return the row unredacted", so a row that cannot be proven redacted is
+# never written to disk.
+Describe 'Protect-PulseGraphRowTenantId depth guard and fail-closed hardening' {
+    BeforeEach {
+        $script:tenantId = 'REDACTED-TENANT-GUID'
+    }
+
+    # Builds a chain of $Depth nested [pscustomobject] wrappers (outermost = depth 1, the
+    # row itself) around a leaf object carrying $LeafValue - lets a test assert both "did
+    # it throw" AND, for the succeeding case, "did it actually redact all the way down",
+    # so a depth budget that silently truncated the walk instead of correctly completing
+    # it would still be caught.
+    function script:New-PulseDepthFixture {
+        param([int] $Depth, [string] $LeafValue)
+
+        $node = [pscustomobject] @{ leaf = $LeafValue }
+        for ($d = 2; $d -le $Depth; $d++) {
+            $node = [pscustomobject] @{ child = $node }
+        }
+        return $node
+    }
+
+    It 'a row nested to depth 63 (within the 64-level budget) succeeds and is fully redacted at the deepest level' {
+        $row = New-PulseDepthFixture -Depth 63 -LeafValue $script:tenantId
+
+        $result = InModuleScope TenantPulse -ArgumentList $row, $script:tenantId {
+            param($row, $tenantId)
+            Protect-PulseGraphRowTenantId -Data @($row) -TenantId $tenantId -Pseudonym 'tp-abc123'
+        }
+
+        $leaf = $result[0]
+        for ($d = 2; $d -le 63; $d++) { $leaf = $leaf.child }
+        $leaf.leaf | Should -Be 'tp-abc123'
+    }
+
+    It 'a row nested to depth 65 (beyond the 64-level budget) throws quickly, naming the exhausted depth' {
+        $row = New-PulseDepthFixture -Depth 65 -LeafValue $script:tenantId
+
+        $duration = Measure-Command {
+            {
+                InModuleScope TenantPulse -ArgumentList $row, $script:tenantId {
+                    param($row, $tenantId)
+                    Protect-PulseGraphRowTenantId -Data @($row) -TenantId $tenantId -Pseudonym 'tp-abc123'
+                }
+            } | Should -Throw -ExpectedMessage '*maximum redaction depth*64*'
+        }
+        $duration.TotalSeconds | Should -BeLessThan 2
+    }
+
+    It 'a self-referential (cyclic) Hashtable throws the depth error quickly instead of hanging' {
+        $cyclic = @{ id = 'p1' }
+        $cyclic['self'] = $cyclic
+        $row = [pscustomobject] @{ id = $script:tenantId; nested = $cyclic }
+
+        $duration = Measure-Command {
+            {
+                InModuleScope TenantPulse -ArgumentList $row, $script:tenantId {
+                    param($row, $tenantId)
+                    Protect-PulseGraphRowTenantId -Data @($row) -TenantId $tenantId -Pseudonym 'tp-abc123'
+                }
+            } | Should -Throw -ExpectedMessage '*maximum redaction depth*'
+        }
+        $duration.TotalSeconds | Should -BeLessThan 5
+    }
+
+    It 'a self-referential (cyclic) PSObject throws the depth error quickly instead of hanging' {
+        $cyclic = [pscustomobject] @{ id = $script:tenantId }
+        Add-Member -InputObject $cyclic -NotePropertyName 'self' -NotePropertyValue $cyclic
+
+        $duration = Measure-Command {
+            {
+                InModuleScope TenantPulse -ArgumentList $cyclic, $script:tenantId {
+                    param($row, $tenantId)
+                    Protect-PulseGraphRowTenantId -Data @($row) -TenantId $tenantId -Pseudonym 'tp-abc123'
+                }
+            } | Should -Throw -ExpectedMessage '*maximum redaction depth*'
+        }
+        $duration.TotalSeconds | Should -BeLessThan 5
+    }
+
+    It 'a self-referential (cyclic) array/enumerable throws the depth error quickly instead of hanging' {
+        $cyclicArray = [object[]]::new(1)
+        $cyclicArray[0] = $cyclicArray
+        $row = [pscustomobject] @{ id = $script:tenantId; items = $cyclicArray }
+
+        $duration = Measure-Command {
+            {
+                InModuleScope TenantPulse -ArgumentList $row, $script:tenantId {
+                    param($row, $tenantId)
+                    Protect-PulseGraphRowTenantId -Data @($row) -TenantId $tenantId -Pseudonym 'tp-abc123'
+                }
+            } | Should -Throw -ExpectedMessage '*maximum redaction depth*'
+        }
+        $duration.TotalSeconds | Should -BeLessThan 5
+    }
+}
+
 Describe 'Remove-PulseGraphRowProvenance' {
     It 'removes all four GraphKit stamp properties and leaves every other property untouched' {
         $row = [pscustomobject]@{

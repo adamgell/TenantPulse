@@ -590,6 +590,37 @@ Describe 'Invoke-PulseCollection' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' }
     }
 
+    # Post-live-gate-review hardening: Protect-PulseGraphRowTenantId is now FAIL CLOSED -
+    # a row it cannot prove it redacted (here, a cyclic row that trips its MaxDepth guard)
+    # must fail the WHOLE dataset, not silently ship the row unredacted. This exercises
+    # that through the real collector call site (Write-PulseDataset's -TenantId/-Pseudonym
+    # path inside Invoke-PulseCollection's own try/catch), not just Protect-
+    # PulseGraphRowTenantId in isolation - proving the existing Failed-classification
+    # machinery actually catches this the same way it catches a Graph read failure.
+    It 'a row that cannot be redacted (traversal error) fails the dataset Failed with a reason and writes NO dataset file - never ships a row unredacted' {
+        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
+        $cyclicRow = [pscustomobject] @{ id = 'p1' }
+        Add-Member -InputObject $cyclicRow -NotePropertyName 'self' -NotePropertyValue $cyclicRow
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { @($cyclicRow) }
+
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
+        )
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; TenantId = 'REDACTED-TENANT-GUID' }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
+            param($store, $manifest, $context)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'contoso' -TenantPseudonym 'tp-abc123'
+        }
+
+        $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $result.datasets.conditionalAccessPolicies.status | Should -Be 'Failed'
+        $result.datasets.conditionalAccessPolicies.reason | Should -Match 'maximum redaction depth'
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'conditionalAccessPolicies.json'
+        Test-Path -LiteralPath $datasetFile | Should -Be $false
+    }
+
     It 'writes Collected for a clean read, Skipped with a permission reason for a 403, and Failed for a 500 - each dataset attempted independently' {
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' -RequiredPermissions @(@{ Type = 'Application'; Value = 'Policy.Read.All' }, @{ Type = 'Application'; Value = 'Directory.Read.All' }) }
