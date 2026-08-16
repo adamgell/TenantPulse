@@ -287,7 +287,7 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
     # Organization.id IS the tenant GUID, DirectoryRoleAssignment.principalOrganizationId is
     # also the tenant GUID. See Protect-PulseGraphRowTenantId's own docstring.
     It '-TenantId/-Pseudonym redact the raw tenant GUID out of row content, including a value equal to `id`' {
-        $tenantId = 'REDACTED-TENANT-GUID'
+        $tenantId = '00000000-1111-2222-3333-444444444444'
         $data = @(
             [pscustomobject]@{ id = $tenantId; displayName = 'Contoso' }
         )
@@ -311,7 +311,7 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
     }
 
     It 'redacts a nested tenant GUID (e.g. a DirectoryRoleAssignment-shaped principalOrganizationId) too' {
-        $tenantId = 'REDACTED-TENANT-GUID'
+        $tenantId = '00000000-1111-2222-3333-444444444444'
         $data = @(
             [pscustomobject]@{
                 id                     = 'assignment-1'
@@ -339,7 +339,7 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
     }
 
     It 'omitting -TenantId/-Pseudonym leaves row content completely unredacted (pre-existing behavior for every other caller)' {
-        $tenantId = 'REDACTED-TENANT-GUID'
+        $tenantId = '00000000-1111-2222-3333-444444444444'
         $data = @([pscustomobject]@{ id = $tenantId })
 
         InModuleScope TenantPulse -ArgumentList $script:store, $data {
@@ -355,7 +355,7 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
     }
 
     It 'does NOT mutate the caller''s original -Data row objects (the collector reads the real id off these for IdFromDataset)' {
-        $tenantId = 'REDACTED-TENANT-GUID'
+        $tenantId = '00000000-1111-2222-3333-444444444444'
         $originalRow = [pscustomobject]@{ id = $tenantId }
         $data = @($originalRow)
 
@@ -379,7 +379,7 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
     # into a call-depth overflow on every real policy row (reproduced live: ~4s burned per
     # row before falling back to the unredacted original - see Protect-PulseGraphRowTenantId).
     It 'redacts a tenant GUID nested inside a Hashtable-valued property (e.g. a real ConditionalAccessPolicy''s conditions/grantControls shape) without call-depth overflow' {
-        $tenantId = 'REDACTED-TENANT-GUID'
+        $tenantId = '00000000-1111-2222-3333-444444444444'
         $data = @(
             [pscustomobject]@{
                 id         = 'policy-1'
@@ -426,7 +426,7 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
 # never written to disk.
 Describe 'Protect-PulseGraphRowTenantId depth guard and fail-closed hardening' {
     BeforeEach {
-        $script:tenantId = 'REDACTED-TENANT-GUID'
+        $script:tenantId = '00000000-1111-2222-3333-444444444444'
     }
 
     # Builds a chain of $Depth nested [pscustomobject] wrappers (outermost = depth 1, the

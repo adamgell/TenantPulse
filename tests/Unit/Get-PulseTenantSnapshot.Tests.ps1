@@ -606,7 +606,7 @@ Describe 'Invoke-PulseCollection' {
         $manifest = @(
             [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso'; TenantId = 'REDACTED-TENANT-GUID' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; TenantId = '00000000-1111-2222-3333-444444444444' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -870,7 +870,7 @@ Describe 'Invoke-PulseCollection' {
     # organizationMdmAuthority Graph call is parameterized correctly, not with a pseudonym
     # Graph would reject.
     It 'IdFromDataset: the dependency lookup uses the REAL id even when the dependency row''s id equals the context TenantId (redacted only in the written file)' {
-        $tenantId = 'REDACTED-TENANT-GUID'
+        $tenantId = '00000000-1111-2222-3333-444444444444'
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { @([pscustomobject]@{ id = $tenantId }) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { @([pscustomobject]@{ mobileDeviceManagementAuthority = 'intune' }) }

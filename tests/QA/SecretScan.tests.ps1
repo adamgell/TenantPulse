@@ -14,6 +14,17 @@
            SQL-style Server=/Data Source=...Password=... in EITHER key order, or a URL
            with embedded userinfo credentials).
         5. a Shared Access Signature (SAS) token query parameter ([?&]sig=/[?&]se=...).
+        7. an EXACT-MATCH banned identifier: the Ivy24 lab tenant's real Entra tenant GUID
+           (leaked into tests/Unit/Snapshot.Tests.ps1 and
+           tests/Unit/Get-PulseTenantSnapshot.Tests.ps1 by Task 1.11's live-gate work,
+           scrubbed to a synthetic placeholder in the same task that added this check).
+           Bare-value, zero-heuristic: item 1's GUID-near-domain check is deliberately
+           narrow (requires a real-looking domain in a 200-char window) and a lone tenant
+           GUID sitting in a PowerShell test variable with no domain nearby - exactly the
+           shape that leaked - walks straight through it. This one specific known-real
+           value gets an unconditional "never again, anywhere, in any context" rule
+           instead. See Get-PulseSecretScanViolations' own comment for why this file never
+           spells the value out as one literal string.
     Plus, scoped to BOTH source/ and tests/:
         6. a raw NUL or other C0 control byte - the exact class of mistake Task 1.8
            introduced and then fixed (a literal NUL byte typed into a .ps1 comment instead
@@ -129,6 +140,26 @@ BeforeAll {
     $script:safeDomainExactPatterns = @(
         '^microsoft\.graph\.[A-Za-z0-9]+$'
     )
+
+    <#
+        Single source of truth for the item-7 banned-identifier check: the Ivy24 lab
+        tenant's real Entra tenant GUID, stored here as its own character-reversal so the
+        value never appears as one literal, greppable string anywhere in this tracked
+        file (see the item-7 comment inside Get-PulseSecretScanViolations for why that
+        matters). Both the production check and its own unit test below call this
+        function rather than each carrying a separate copy of the reversed literal, so
+        there is exactly one place that needs to change if this value is ever revisited.
+    #>
+    function Get-PulseBannedTenantGuid {
+        [CmdletBinding()]
+        [OutputType([string])]
+        param()
+
+        $reversed = 'a1b372de4293-5a2b-31b4-7dba-760d2bd8'
+        $chars = $reversed.ToCharArray()
+        [array]::Reverse($chars)
+        return -join $chars
+    }
 
     <#
         Scans one file's text CONTENT for the four PII/secret-shaped patterns described in
@@ -295,6 +326,30 @@ BeforeAll {
         # URLs use regardless of which resource they were minted for.
         if ($Content -match '(?i)[?&](sig|se)=[A-Za-z0-9%._~+/=-]{16,}') {
             $violations.Add("$RelativePath : SAS-token-shaped query parameter found ([?&]sig=/[?&]se=...).")
+        }
+
+        # 7. EXACT-MATCH banned identifier: the Ivy24 lab tenant's real Entra tenant GUID.
+        # Deliberately a bare substring check, not a heuristic - item 1's GUID-near-domain
+        # check requires a real-looking domain within 200 characters, and this exact value
+        # leaked in a shape that has NO domain nearby (a bare GUID assigned to a
+        # PowerShell test variable, e.g. `$tenantId = '<guid>'`), which evades that
+        # heuristic by design. A single known-real value gets its own unconditional rule:
+        # never appear in a tracked file, in any context, no allowlist, no window.
+        #
+        # This file's own docstring explains why tests/QA/ is excluded from the real-repo
+        # scan below (this file necessarily contains the detection patterns as literal
+        # text) - but that exclusion is exactly why the banned value is NEVER written here
+        # as one literal string: this file is itself a tracked file, and spelling the real
+        # GUID out here, even inside a comment, would reintroduce the exact leak this check
+        # exists to prevent (and would defeat `git log -S` / `grep` sweeps for it, since
+        # the string search would report a hit for the "safe" line that stored it). Instead
+        # the value is reassembled at scan time from its own character-reversal, which
+        # contains none of the original substring runs a naive `grep '<guid-prefix>'` would
+        # key off - see Get-PulseBannedTenantGuid below for the single source of truth both
+        # this check and its own unit test share.
+        $bannedTenantGuid = Get-PulseBannedTenantGuid
+        if ($Content.ToLowerInvariant().Contains($bannedTenantGuid)) {
+            $violations.Add("$RelativePath : banned identifier found (Ivy24 lab tenant GUID) - this exact value must never appear in a tracked file in any context; see Get-PulseSecretScanViolations' own comment for why this is an exact-match rule rather than the GUID-near-domain heuristic.")
         }
 
         return $violations.ToArray()
@@ -563,6 +618,28 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
 
             $violations.Count | Should -Be 1
             $violations[0] | Should -Match 'SAS-token-shaped'
+        }
+
+        It 'flags the banned Ivy24 lab tenant GUID via exact-match, with no domain anywhere nearby (proving this is NOT gated by item 1''s GUID-near-domain heuristic)' {
+            $bannedGuid = Get-PulseBannedTenantGuid
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "`$tenantId = '$bannedGuid'" `
+                -RelativePath 'tests/Fake.Tests.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'banned identifier'
+        }
+
+        It 'does NOT flag an ordinary synthetic placeholder GUID as the banned Ivy24 tenant GUID' {
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "`$tenantId = '00000000-1111-2222-3333-444444444444'" `
+                -RelativePath 'tests/Fake.Tests.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations | Should -BeNullOrEmpty
         }
 
         It 'flags a URL with embedded userinfo credentials' {

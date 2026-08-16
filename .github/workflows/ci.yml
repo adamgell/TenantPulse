@@ -578,7 +578,10 @@ jobs:
           # persistence coverage - see .build/AssertGateResult.tasks.ps1's own accounting.
           # 959 -> 963 (Task 2.5): isBaseline now reflects the 'baseline' template family
           # specifically, not "any template-bearing policy" - see that file's own note.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 963 -AllowedSkips 0 -AllowNotRun 1
+          # 963 -> 965 (GUID hygiene fix): the SecretScan QA gate's new item-7 exact-match
+          # banned-identifier check (Ivy24 lab tenant GUID) plus its own regression suite -
+          # see .build/AssertGateResult.tasks.ps1's own accounting.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 965 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

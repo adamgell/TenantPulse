@@ -60,7 +60,12 @@
 # Describe block: a real baseline family, a non-baseline-but-template-bearing endpoint
 # security family, an ordinary non-template policy, and a future 'baseline*' variant
 # family (prefix match, not exact).
-$script:tenantPulseGateMinimumTests = 963
+# 963 -> 965 (GUID hygiene fix): +2 - the SecretScan QA gate's new item-7 exact-match
+# banned-identifier check (the Ivy24 lab tenant GUID leaked into
+# tests/Unit/Snapshot.Tests.ps1 and tests/Unit/Get-PulseTenantSnapshot.Tests.ps1, now
+# scrubbed to a synthetic placeholder) plus its own regression suite (fires with no
+# domain nearby; does not fire for an ordinary synthetic placeholder GUID).
+$script:tenantPulseGateMinimumTests = 965
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
