@@ -247,3 +247,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could read/write the host filesystem or make outbound network calls.
   `ConstrainedLanguage` restricts .NET types, not which cmdlets are loaded - the fix
   had to address the cmdlet surface directly.
+- **Raw dataset writes now redact Sensitive typed-policy values (Task 2.3 review, C1).**
+  `Invoke-PulseCollection` previously wrote every Graph row for `deviceCompliancePolicies`/
+  `deviceConfigurations` to `datasets/<name>.json` verbatim - `TypedPolicyMaps.psd1`'s own
+  `Sensitive` classifications (e.g. `windows10CustomConfiguration`'s `omaSettings[].value`
+  - a WiFi pre-shared key/VPN secret/certificate push channel) only ever drove redaction in
+  the setting-expansion walk, never the raw dataset write, so a Sensitive value sat in
+  cleartext in the raw snapshot for the life of every collection run, independent of
+  whether `-ExpandSettings` was ever used. Fixed by a new redaction pass
+  (`Protect-PulseTypedPolicySensitivePayload`) called before the first byte of a
+  map-covered dataset ever touches disk.
+  **OPERATOR ACTION REQUIRED: any local TenantPulse snapshot created BEFORE this fix that
+  ever collected `deviceConfigurations` may contain Sensitive-flagged values (e.g. WiFi
+  PSKs pushed via `windows10CustomConfiguration`'s `omaSettings`) in cleartext in its
+  `datasets/deviceConfigurations.json` file. Delete any such pre-existing local snapshot
+  directories - do not assume they are safe to keep around or share.**
