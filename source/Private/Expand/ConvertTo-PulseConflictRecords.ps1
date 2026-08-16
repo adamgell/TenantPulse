@@ -244,7 +244,19 @@ function ConvertTo-PulseConflictRecords {
 
     # defId -> [ordered]@{ groupKey -> pscustomobject{ CanonicalValue; Redacted; PolicyIds:HashSet; Policies:List } }
     $defIndex = [ordered]@{}
-    $settingNameByDef = @{}
+    # defId -> HashSet of every DISTINCT resolved (nameResolved:true, non-empty) settingName
+    # seen for that defId. DETERMINISM FIX (review round 2): a bare first-seen-wins pick
+    # here previously made settingName (and therefore the whole conflicts.json byte
+    # stream) depend on -Rows' own input order whenever two policies disagree on the
+    # display name for the same definitionId - a real, reproduced shape (T2.4/legacy
+    # configuration types are already known to carry inconsistent display strings across
+    # policy authors). Fixed deterministically: collect every distinct name, then at
+    # emission time pick the ORDINAL-MINIMUM as settingName (a fixed, input-order-
+    # independent rule) and surface every other distinct name via the conflict record's
+    # own nameVariants array - itself a real signal (the same setting definition being
+    # labeled differently across policies is worth an operator's attention, not silently
+    # discarded by whichever name happened to stream past first).
+    $settingNamesByDef = @{}
     # Assignments normalized ONCE per policy, referenced (not copied) into every
     # compactRecord that names the same policyId - see this file's own top-level
     # docstring. First-seen wins; every row for the same policy carries the identical
@@ -263,8 +275,11 @@ function ConvertTo-PulseConflictRecords {
             $assignmentsByPolicy[$policyId] = $row.assignments
         }
 
-        if (-not $settingNameByDef.ContainsKey($defId) -and $row.nameResolved -and -not [string]::IsNullOrEmpty([string] $row.settingName)) {
-            $settingNameByDef[$defId] = [string] $row.settingName
+        if ($row.nameResolved -and -not [string]::IsNullOrEmpty([string] $row.settingName)) {
+            if (-not $settingNamesByDef.ContainsKey($defId)) {
+                $settingNamesByDef[$defId] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            }
+            [void] $settingNamesByDef[$defId].Add([string] $row.settingName)
         }
 
         $redacted = [bool] $row.redacted
@@ -326,11 +341,24 @@ function ConvertTo-PulseConflictRecords {
             }
         }
 
-        $settingName = if ($settingNameByDef.ContainsKey($defId)) { $settingNameByDef[$defId] } else { $null }
+        # ORDINAL-MINIMUM PICK (deterministic, input-order-independent - see this file's
+        # own top-level $settingNamesByDef docstring): every other distinct resolved name
+        # for this defId is surfaced via nameVariants (sorted ordinal, same rule), never
+        # silently dropped - null when there was zero or exactly one distinct name (no
+        # disagreement to report).
+        $settingName = $null
+        $nameVariants = $null
+        if ($settingNamesByDef.ContainsKey($defId)) {
+            $sortedNames = @($settingNamesByDef[$defId])
+            [System.Array]::Sort($sortedNames, [System.StringComparer]::Ordinal)
+            $settingName = $sortedNames[0]
+            if ($sortedNames.Count -gt 1) { $nameVariants = $sortedNames }
+        }
 
         $conflicts.Add([pscustomobject]@{
                 settingDefinitionId     = $defId
                 settingName             = $settingName
+                nameVariants            = $nameVariants
                 assignmentOverlap       = $overlap.State
                 assignmentOverlapReason = $overlap.Reason
                 values                  = @($valueRecords)

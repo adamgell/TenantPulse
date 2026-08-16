@@ -121,7 +121,19 @@
 # plus +1 for the mixed-captured-state control that proves the skip does not over-fire) -
 # see task-74fix-report.md for the full accounting. Matches .github/workflows/ci.yml's own
 # -MinimumTests, reconciled separately by the peer session already owning that file.
-$script:tenantPulseGateMinimumTests = 1079
+# 1079 -> 1087 (Task 2.6 review round 2): +8, NOT +34-in-a-vacuum - see task-2.6-report.md's
+# addendum for why the first-round 1011->1063 (+52) accounting only ever had 34 explicit
+# It blocks: the other 18 were SecretScan.tests.ps1's own auto-generated 2-cases-per-file
+# (secret/PII scan + control-byte scan) firing for the 9 new source+test files that round
+# added. This round adds ONE new file (ConflictDetectionEndToEnd.Tests.ps1, +2 SecretScan
+# cases) plus 6 explicit It blocks: the settingName determinism fix's own two regressions
+# (ordinal-minimum pick + nameVariants-null-when-no-disagreement) in
+# ConvertTo-PulseConflictRecords.ps1/ConflictDetection.Tests.ps1, the three-or-more-policy
+# assignmentOverlap precedence suite (proven-wins/possible-when-no-proven/none-only-when-
+# every-pair-is-disjoint, 3 cases), and the single end-to-end golden pipeline test that
+# threads a planted secret through the REAL T2.2 Settings Catalog + T2.3 typed-policy
+# expansion pipelines into a REAL Invoke-PulseConflictDetection run.
+$script:tenantPulseGateMinimumTests = 1087
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

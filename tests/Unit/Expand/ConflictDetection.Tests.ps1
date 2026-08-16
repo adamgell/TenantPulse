@@ -212,6 +212,39 @@ Describe 'ConvertTo-PulseConflictRecords' {
         }
     }
 
+    Context 'assignment overlap - three-or-more-policy precedence' {
+        It 'reports proven when ANY cross-group pair proves overlap, even though other pairs are none/possible' {
+            # Three distinct values -> three groups: p1/p2 share an identical concrete
+            # target set (proven), p1/p3 are demonstrably disjoint (none), p2/p3 mix a
+            # filter in (possible). The whole conflict must report 'proven' - the
+            # strongest available positive signal - not the first or last pair evaluated.
+            $rows = @(
+                (New-TestRow -PolicyId 'p1' -Value 'a' -Assignments @((New-TestAssignment -GroupId 'g1'))),
+                (New-TestRow -PolicyId 'p2' -Value 'b' -Assignments @((New-TestAssignment -GroupId 'g1'))),
+                (New-TestRow -PolicyId 'p3' -Value 'c' -Assignments @((New-TestAssignment -GroupId 'g9' -FilterId 'f1')))
+            )
+            (Invoke-ConflictBuild -Rows $rows)[0].assignmentOverlap | Should -Be 'proven'
+        }
+
+        It 'reports possible when no pair proves overlap but at least one cross-group pair cannot rule it out' {
+            $rows = @(
+                (New-TestRow -PolicyId 'p1' -Value 'a' -Assignments @((New-TestAssignment -GroupId 'g1'))),
+                (New-TestRow -PolicyId 'p2' -Value 'b' -Assignments @((New-TestAssignment -GroupId 'g2'))),
+                (New-TestRow -PolicyId 'p3' -Value 'c' -Assignments @((New-TestAssignment -TargetType 'allDevices')))
+            )
+            (Invoke-ConflictBuild -Rows $rows)[0].assignmentOverlap | Should -Be 'possible'
+        }
+
+        It 'reports none only when EVERY cross-group pair across three-or-more policies is demonstrably disjoint' {
+            $rows = @(
+                (New-TestRow -PolicyId 'p1' -Value 'a' -Assignments @((New-TestAssignment -GroupId 'g1'))),
+                (New-TestRow -PolicyId 'p2' -Value 'b' -Assignments @((New-TestAssignment -GroupId 'g2'))),
+                (New-TestRow -PolicyId 'p3' -Value 'c' -Assignments @((New-TestAssignment -GroupId 'g3')))
+            )
+            (Invoke-ConflictBuild -Rows $rows)[0].assignmentOverlap | Should -Be 'none'
+        }
+    }
+
     Context 'cross-family conflicts' {
         It 'a settingsCatalog-shaped row (assignments:null) conflicting with a typed-policy row is unknown, not proven/possible/none' {
             $scRow = New-TestRow -PolicyId 'sc-1' -Value 'catalogValue' -Assignments $null
@@ -239,6 +272,35 @@ Describe 'ConvertTo-PulseConflictRecords' {
             $jsonB = InModuleScope TenantPulse -ArgumentList (, $resultB) { param($c) ConvertTo-PulseCanonicalJson -InputObject $c }
 
             $jsonA | Should -Be $jsonB
+        }
+
+        It 'settingName resolution is deterministic (ordinal-minimum) and surfaces disagreeing names via nameVariants, regardless of input order' {
+            $rowsA = @(
+                (New-TestRow -PolicyId 'p1' -Value 'a' -SettingName 'Zebra Display Name'),
+                (New-TestRow -PolicyId 'p2' -Value 'b' -SettingName 'Apple Display Name')
+            )
+            $rowsB = @($rowsA[1], $rowsA[0])
+
+            $resultA = (Invoke-ConflictBuild -Rows $rowsA)
+            $resultB = (Invoke-ConflictBuild -Rows $rowsB)
+
+            $resultA[0].settingName | Should -Be 'Apple Display Name'
+            $resultA[0].nameVariants | Should -Be @('Apple Display Name', 'Zebra Display Name')
+
+            $jsonA = InModuleScope TenantPulse -ArgumentList (, $resultA) { param($c) ConvertTo-PulseCanonicalJson -InputObject $c }
+            $jsonB = InModuleScope TenantPulse -ArgumentList (, $resultB) { param($c) ConvertTo-PulseCanonicalJson -InputObject $c }
+
+            $jsonA | Should -Be $jsonB
+        }
+
+        It 'nameVariants is null when every policy agrees on the settingName' {
+            $rows = @(
+                (New-TestRow -PolicyId 'p1' -Value 'a' -SettingName 'Same Name'),
+                (New-TestRow -PolicyId 'p2' -Value 'b' -SettingName 'Same Name')
+            )
+            $result = (Invoke-ConflictBuild -Rows $rows)
+            $result[0].settingName | Should -Be 'Same Name'
+            $result[0].nameVariants | Should -BeNullOrEmpty
         }
 
         It 'sorts conflicts ordinally by settingDefinitionId' {
