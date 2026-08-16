@@ -48,4 +48,36 @@ Describe 'Export-PulseReport' {
         $result.ReportPaths.Json | Should -Be $expectedPath
         Test-Path -LiteralPath $expectedPath -PathType Leaf | Should -BeTrue
     }
+
+    # Item 2 (final fix wave): parity with Invoke-PulseAssessment's return object.
+    It 'returns a FindingsPath property equal to the file it read' {
+        $findingsPath = Join-Path $script:outputRoot 'source-findings.json'
+        Set-Content -LiteralPath $findingsPath -Value '{}' -NoNewline
+
+        $result = Export-PulseReport -FindingsPath $findingsPath -Format Json -OutputPath $script:outputRoot
+
+        $result.FindingsPath | Should -Be $findingsPath
+    }
+
+    # Item 6 (final fix wave): a 7-digit-fraction timestamp must round-trip byte-identical -
+    # ConvertFrom-Json's default behavior parses an ISO-8601-looking string into [datetime],
+    # which the canonical serializer then reformats at millisecond precision, silently
+    # dropping the extra fractional digits.
+    It 'round-trips a 7-digit-fraction timestamp byte-identical through the rendered report (final fix wave, item 6)' {
+        $sourceDocument = InModuleScope TenantPulse {
+            ConvertTo-PulseCanonicalJson -InputObject ([pscustomobject]@{
+                schemaVersion = '1.0'
+                generatedUtc  = '2026-08-15T00:00:00.1234567Z'
+                findings      = @()
+            })
+        }
+        $findingsPath = Join-Path $script:outputRoot 'source-findings.json'
+        Set-Content -LiteralPath $findingsPath -Value $sourceDocument -NoNewline
+
+        $result = Export-PulseReport -FindingsPath $findingsPath -Format Json -OutputPath $script:outputRoot
+
+        $renderedRaw = Get-Content -LiteralPath $result.ReportPaths.Json -Raw
+        $renderedRaw | Should -Match '2026-08-15T00:00:00\.1234567Z'
+        $renderedRaw | Should -Be $sourceDocument
+    }
 }

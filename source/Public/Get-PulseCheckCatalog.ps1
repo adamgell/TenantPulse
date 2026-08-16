@@ -23,7 +23,7 @@
         (<ModuleBase>/Data/Checks) as {id; title; category; severity; authorities} rows.
 
     .EXAMPLE
-        Get-PulseCheckCatalog -Path './my-checks' | Where-Object { $_.category -like 'Entra.*' }
+        Get-PulseCheckCatalog -CatalogPath './my-checks' | Where-Object { $_.category -like 'Entra.*' }
 
         Lists every check descriptor from a custom catalog directory, then filters the
         projected view down to the Entra category tree using ordinary pipeline filtering
@@ -31,9 +31,14 @@
         Select-PulseCheck for the module's actual selection filter, used by the commands
         that run an assessment rather than merely list one).
 
-    .PARAMETER Path
+    .PARAMETER CatalogPath
         Directory containing check descriptor .psd1 files. Defaults to
         Import-PulseCheckCatalog's own default (<ModuleBase>/Data/Checks) when omitted.
+
+    .PARAMETER Path
+        DEPRECATED alias for -CatalogPath, kept for one release for backward
+        compatibility. Use -CatalogPath instead; this alias will be removed in a future
+        release.
 
     .PARAMETER DatasetMapPath
         Path to the shared DatasetMap.psd1 used to cross-check each descriptor's declared
@@ -45,14 +50,15 @@ function Get-PulseCheckCatalog {
     [OutputType([pscustomobject[]])]
     param(
         [Parameter()]
-        [string] $Path,
+        [Alias('Path')]
+        [string] $CatalogPath,
 
         [Parameter()]
         [string] $DatasetMapPath
     )
 
     $catalogParams = @{}
-    if ($PSBoundParameters.ContainsKey('Path')) { $catalogParams.Path = $Path }
+    if ($PSBoundParameters.ContainsKey('CatalogPath')) { $catalogParams.Path = $CatalogPath }
     if ($PSBoundParameters.ContainsKey('DatasetMapPath')) { $catalogParams.DatasetMapPath = $DatasetMapPath }
 
     $checks = @(Import-PulseCheckCatalog @catalogParams)

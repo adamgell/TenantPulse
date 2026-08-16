@@ -63,7 +63,19 @@ Describe 'Get-PulseCheckCatalog' {
         $result.Count | Should -Be 0
     }
 
-    It 'passes -Path and -DatasetMapPath through to Import-PulseCheckCatalog when bound' {
+    It 'passes -CatalogPath and -DatasetMapPath through to Import-PulseCheckCatalog when bound' {
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @() }
+
+        Get-PulseCheckCatalog -CatalogPath 'C:/fake/checks' -DatasetMapPath 'C:/fake/DatasetMap.psd1' | Out-Null
+
+        Should -Invoke Import-PulseCheckCatalog -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Path -eq 'C:/fake/checks' -and $DatasetMapPath -eq 'C:/fake/DatasetMap.psd1'
+        }
+    }
+
+    # Item 2 (final fix wave): -Path renamed to -CatalogPath; -Path kept as a deprecated
+    # alias for one release and must still work.
+    It '-Path still works as a deprecated alias for -CatalogPath' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @() }
 
         Get-PulseCheckCatalog -Path 'C:/fake/checks' -DatasetMapPath 'C:/fake/DatasetMap.psd1' | Out-Null

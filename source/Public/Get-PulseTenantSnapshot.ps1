@@ -33,33 +33,50 @@
         with no further Graph calls - they would all fail identically. Either way,
         collection never silently produces an empty, unexplained snapshot.
 
-        The tenant identifier is never written to the snapshot in the clear, in the
-        `tenant` field or in any reason string: the manifest's `tenant` field is always the
-        HMAC pseudonym of -ProfileId (Get-PulsePseudonym under the local operator key),
-        and every reason is routed through Protect-PulseReason, which redacts -ProfileId
-        (and the raw tenant id, once resolved) out of any caught exception message before
-        it is ever written to the snapshot.
+        PSEUDONYM INPUT (spec section 2a - post-review fix): the manifest's `tenant` field
+        is the HMAC pseudonym of the TENANT ID, never of -ProfileId. -ProfileId is only a
+        local, operator-chosen label for a GraphKit profile - the same tenant can be
+        reached under two differently-named profiles, and a profile can be renamed without
+        the tenant itself changing. Pseudonymizing -ProfileId would let a profile rename
+        silently change the pseudonym for the same tenant, breaking every cross-run
+        correlation the pseudonym exists to support. Get-GraphContext performs zero network
+        calls (see its own docstring) so $context.TenantId is available immediately after
+        it succeeds, with no extra Graph round-trip - Get-GraphContext is therefore called
+        BEFORE the snapshot store is created, so the pseudonym is always derived from the
+        real tenant id when one is obtainable at all. The ONE exception is the pre-context
+        total-failure path below: if Get-GraphContext itself throws, there is no context
+        and therefore no TenantId to pseudonymize - that path falls back to pseudonymizing
+        -ProfileId instead (the pre-fix behavior, kept only because there is nothing else
+        to key the snapshot's tenant field on), which is why a caller must not treat the
+        `tenant` field on a total-failure snapshot as tenant-stable across a profile
+        rename the way every other snapshot's `tenant` field is.
 
     .EXAMPLE
-        Get-PulseTenantSnapshot -ProfileId 'contoso' -Path './snapshot'
+        Get-PulseTenantSnapshot -ProfileId 'contoso' -OutputPath './snapshot'
 
         Collects every dataset the loaded check catalog needs for the GraphKit 'contoso'
         profile and writes a pseudonymized snapshot store to ./snapshot.
 
     .EXAMPLE
-        Get-PulseTenantSnapshot -ProfileId 'contoso' -Path './snapshot' -ExcludeCategory 'Entra.ConditionalAccess'
+        Get-PulseTenantSnapshot -ProfileId 'contoso' -OutputPath './snapshot' -ExcludeCategory 'Entra.ConditionalAccess'
 
         Same as above, but skips every check (and therefore every dataset needed only by
         those checks) whose Category is 'Entra.ConditionalAccess'.
 
     .PARAMETER ProfileId
         The GraphKit tenant profile identifier to resolve into a context via
-        Get-GraphContext. Also the value pseudonymized into the snapshot manifest's
-        `tenant` field.
+        Get-GraphContext. No longer the value pseudonymized into the snapshot manifest's
+        `tenant` field on a normal run - see the PSEUDONYM INPUT section above; it is used
+        for that field only on the pre-context total-failure fallback path.
+
+    .PARAMETER OutputPath
+        The directory to create (or reuse) as the snapshot store; passed straight through
+        to New-PulseSnapshotStore. Named -OutputPath because it is always an OUTPUT
+        directory this command writes into, never an input to read from.
 
     .PARAMETER Path
-        The directory to create (or reuse) as the snapshot store; passed straight through
-        to New-PulseSnapshotStore.
+        DEPRECATED alias for -OutputPath, kept for one release for backward compatibility.
+        Use -OutputPath instead; this alias will be removed in a future release.
 
     .PARAMETER IncludeCategory
         Only load checks whose Category dotted-path prefix-matches one of these values
@@ -97,8 +114,9 @@ function Get-PulseTenantSnapshot {
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
+        [Alias('Path')]
         [ValidateNotNullOrEmpty()]
-        [string] $Path,
+        [string] $OutputPath,
 
         [Parameter()]
         [string[]] $IncludeCategory,
@@ -139,29 +157,40 @@ function Get-PulseTenantSnapshot {
 
     $manifest = @(Get-PulseCollectionManifest -Checks $checks -DatasetMap $datasetMap)
 
-    # Tenant id is pseudonymized before it ever reaches the store - the raw id is never
-    # written to the manifest, see Get-PulsePseudonym and the module-wide pseudonymization
-    # rule.
     $operatorKey = Get-PulseOperatorKey
-    $tenantPseudonym = Get-PulsePseudonym -Value $ProfileId -Key $operatorKey
 
-    $store = New-PulseSnapshotStore -Path $Path -Tenant $tenantPseudonym
+    # producer.graphKit (post-review fix, previously always null - see
+    # New-PulseSnapshotStore's own -GraphKitVersion docstring): resolved once, from
+    # whatever GraphKit module is actually loaded in THIS session, regardless of which
+    # branch below ends up creating the store - a failed Get-GraphContext call does not by
+    # itself mean GraphKit is not loaded, only that this ProfileId could not be resolved.
+    # Left $null, honestly, only when GraphKit truly is not loaded/available.
+    $graphKitModule = Get-Module -Name GraphKit
+    $graphKitVersion = if ($graphKitModule) { $graphKitModule.Version.ToString() } else { $null }
 
+    # GraphKit's Get-GraphContext performs zero network calls and never acquires a token
+    # (see its own docstring) - called BEFORE the snapshot store is created specifically so
+    # $context.TenantId is available to pseudonymize before anything is written to disk
+    # (see the PSEUDONYM INPUT docstring section above). This can fail on a malformed/
+    # unknown ProfileId or a broken profile store, but a real *authentication* failure will
+    # not surface here. That case is handled inside Invoke-PulseCollection instead, at the
+    # first dataset attempt that actually talks to Graph (see its AuthFailure handling) -
+    # both paths converge on the same collectionFailure contract, this one just covers the
+    # failure mode that genuinely happens before any dataset could be attempted.
     try {
-        # GraphKit's Get-GraphContext performs zero network calls and never acquires a
-        # token (see its own docstring) - this can fail on a malformed/unknown ProfileId
-        # or a broken profile store, but a real *authentication* failure will not surface
-        # here. That case is handled inside Invoke-PulseCollection instead, at the first
-        # dataset attempt that actually talks to Graph (see its AuthFailure handling) -
-        # both paths converge on the same collectionFailure contract, this one just covers
-        # the failure mode that genuinely happens before any dataset could be attempted.
         $context = Get-GraphContext -ProfileId $ProfileId -ErrorAction Stop
     } catch {
-        # Total collection failure: no dataset could even be attempted. The snapshot is
-        # still written - every dataset Failed, plus the top-level collectionFailure - so
-        # a caller never mistakes "we never got a token" for "the tenant has no data" or
-        # loses the run's provenance entirely.
-        $failureReason = Protect-PulseReason -Message "auth: $($_.Exception.Message)" -ProfileId $ProfileId -Pseudonym $tenantPseudonym
+        # Total collection failure: no context (and therefore no TenantId) was ever
+        # obtained. There is nothing else to key the snapshot's tenant field on, so this
+        # ONE path falls back to pseudonymizing -ProfileId instead - see the PSEUDONYM
+        # INPUT docstring section above for why this is documented, not an oversight.
+        $tenantPseudonym = Get-PulsePseudonym -Value $ProfileId -Key $operatorKey
+        $store = New-PulseSnapshotStore -Path $OutputPath -Tenant $tenantPseudonym -GraphKitVersion $graphKitVersion
+
+        # The tenant id is never resolved on this path, so Protect-PulseReason has only
+        # -ProfileId to redact out of the caught exception message before it is written to
+        # the snapshot.
+        $failureReason = Protect-PulseReason -Message "auth-failure: $($_.Exception.Message)" -ProfileId $ProfileId -Pseudonym $tenantPseudonym
 
         foreach ($entry in $manifest) {
             Write-PulseDataset -Store $store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' -Reason $failureReason
@@ -171,6 +200,21 @@ function Get-PulseTenantSnapshot {
 
         return $store
     }
+
+    $contextTenantId = $null
+    if ($null -ne $context -and $context.PSObject.Properties['TenantId'] -and $context.TenantId) {
+        $contextTenantId = [string] $context.TenantId
+    }
+
+    # Pseudonym source is the real tenant id whenever the context actually carries one
+    # (the normal case - see the PSEUDONYM INPUT docstring section above). A context that
+    # succeeded but did not carry a TenantId (not expected from a real GraphKit context,
+    # but not assumed away either) falls back to -ProfileId so the snapshot always gets a
+    # tenant pseudonym rather than one derived from $null.
+    $pseudonymSource = if ($contextTenantId) { $contextTenantId } else { $ProfileId }
+    $tenantPseudonym = Get-PulsePseudonym -Value $pseudonymSource -Key $operatorKey
+
+    $store = New-PulseSnapshotStore -Path $OutputPath -Tenant $tenantPseudonym -GraphKitVersion $graphKitVersion
 
     Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
 

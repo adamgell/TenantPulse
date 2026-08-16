@@ -58,8 +58,13 @@
         rule-authored Reason or an engine Error reason is capped (Protect-PulseReason) but
         never identity-substituted, so a raw identifier that leaks into free-text exception
         or reason text (e.g. a UPN embedded in a caught error message) can still survive a
-        redacted report. Full reason/detail-text identity substitution is future work, not
-        part of this task.
+        redacted report. Evidence Detail objects are NOT redacted at all, on top of that -
+        a rule author is free to put whatever fields it judges useful into Detail (e.g.
+        TP.INT.0005's deviceName), and -Redact does not attempt to identify or substitute
+        identity-shaped values inside them; only the Identity (and identity-defaulted
+        sortKey) field is substituted. Full reason/detail-text identity substitution is
+        future work, not part of this task - -Redact should be read as "identity fields are
+        pseudonymized", not "this report is fully de-identified".
 
         Returns a summary object: { SnapshotPath; FindingsPath; ReportPaths; Scores;
         Coverage }. SnapshotPath is the store's root directory. FindingsPath is the
@@ -192,8 +197,8 @@ function Invoke-PulseAssessment {
     } else {
         $snapshotPath = Join-Path $resolvedOutputPath 'snapshot'
         $collectParams = @{
-            ProfileId = $ProfileId
-            Path      = $snapshotPath
+            ProfileId  = $ProfileId
+            OutputPath = $snapshotPath
         }
 
         if ($selectedIds.Count -gt 0) {

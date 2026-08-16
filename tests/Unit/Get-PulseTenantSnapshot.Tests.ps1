@@ -278,6 +278,43 @@ Describe 'Get-PulseFailureClass' {
         $class | Should -Be 'Failed'
     }
 
+    # Item 17 (final fix wave): an enum-typed StatusCode (e.g.
+    # [System.Net.HttpStatusCode]::Forbidden) must be cast to [int] directly - [string] on
+    # an enum renders its NAME ('Forbidden'), not its numeric value ('403'), which
+    # previously made [int]::TryParse fail and silently lost the classification signal.
+    It 'classifies an enum-typed StatusCode ([System.Net.HttpStatusCode]::Forbidden) as PermissionDenied (final fix wave, item 17)' {
+        $exception = [System.Management.Automation.RuntimeException]::new('boom')
+        Add-Member -InputObject $exception -NotePropertyName 'StatusCode' -NotePropertyValue ([System.Net.HttpStatusCode]::Forbidden)
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'Boom', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
+
+        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
+            param($errorRecord)
+            Get-PulseFailureClass -ErrorRecord $errorRecord
+        }
+
+        $class | Should -Be 'PermissionDenied'
+    }
+
+    It 'classifies an enum-typed -SupplementalStatusCode the same way as an int one' {
+        # -ErrorRecord must be non-null here: Get-PulseFailureClass returns 'Failed'
+        # immediately for a $null ErrorRecord, before -SupplementalStatusCode is ever
+        # consulted - a genuine, structure-free ErrorRecord is required to reach the
+        # -SupplementalStatusCode fallback signal this test targets.
+        $errorRecord = $null
+        try {
+            throw 'a generic failure with no structured status at all'
+        } catch {
+            $errorRecord = $_
+        }
+
+        $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
+            param($errorRecord)
+            Get-PulseFailureClass -ErrorRecord $errorRecord -SupplementalStatusCode ([int][System.Net.HttpStatusCode]::Forbidden)
+        }
+
+        $class | Should -Be 'PermissionDenied'
+    }
+
     It 'falls back to message text ("403") when no structured status is present' {
         $errorRecord = $null
         try {
@@ -500,6 +537,26 @@ Describe 'Get-PulseGraphFailureStatusCode' {
         Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly
     }
 
+    # Item 17 (final fix wave): an enum-typed Telemetry StatusCode (e.g.
+    # [System.Net.HttpStatusCode]::Forbidden) must be cast to [int] directly, not
+    # stringified - [string] on an enum renders its NAME, not its numeric value.
+    It 'returns the numeric value of an enum-typed Telemetry StatusCode (final fix wave, item 17)' {
+        Mock Invoke-GraphOperation -ModuleName TenantPulse {
+            [pscustomobject]@{
+                Telemetry = @([pscustomobject]@{ StatusCode = [System.Net.HttpStatusCode]::Forbidden })
+            }
+        }
+
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $code = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseGraphFailureStatusCode -Context $context -Type 'ConditionalAccessPolicy' -Operation 'List'
+        }
+
+        $code | Should -Be 403
+        Should-Invoke Invoke-GraphOperation -ModuleName TenantPulse -Times 1 -Exactly
+    }
+
     It 'passes -Parameters through to Invoke-GraphOperation so a Get-scoped classification probe matches the failed read' {
         Mock Invoke-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'abc' } {
             [pscustomobject]@{ Telemetry = @([pscustomobject]@{ StatusCode = 403 }) }
@@ -701,6 +758,31 @@ Describe 'Invoke-PulseCollection' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceConfiguration' }
     }
 
+    # Item 18 (final fix wave): a supplemental status-recovery failure must be visible in
+    # the artifact itself, not just an easily-missed console warning.
+    It 'appends "(status unknown)" to a Failed reason when supplemental status recovery itself fails (final fix wave, item 18)' {
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphObject -ModuleName TenantPulse { throw "Get-GraphObject failed for 'DeviceConfiguration/List': 500 Internal Server Error." }
+        # Default BeforeAll mock already throws for Invoke-GraphOperation ("must be mocked
+        # in this test") - re-staged here explicitly so the intent (supplemental recovery
+        # itself fails) is not left implicit.
+        Mock Invoke-GraphOperation -ModuleName TenantPulse { throw 'supplemental probe also failed: transient network error' }
+
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'deviceConfigurations'; Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false }
+        )
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
+            param($store, $manifest, $context)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'contoso' -TenantPseudonym 'tp-abc123'
+        }
+
+        $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $result.datasets.deviceConfigurations.status | Should -Be 'Failed'
+        $result.datasets.deviceConfigurations.reason | Should -Match '\(status unknown\)$'
+    }
+
     It 'writes Skipped with a descriptor-pending reason and never calls Get-GraphObject for a Pending dataset' {
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
         Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must not be called for a Pending dataset.' }
@@ -789,6 +871,35 @@ Describe 'Invoke-PulseCollection' {
         # Only the first dataset's Get-GraphObject call happened; the two remaining
         # datasets must never have been attempted against Graph.
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
+    }
+
+    # Item 14 (final fix wave): a Pending dataset caught by the auth-abort loop must keep
+    # its own descriptor-pending reason, not get overwritten to auth-failure.
+    It 'on an AuthFailure: a remaining Pending dataset keeps its descriptor-pending reason, not auth-failure (final fix wave, item 14)' {
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } {
+            throw 'Get-GraphObject failed: AADSTS700016: Application not found in the directory.'
+        }
+
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
+            [pscustomobject]@{ Dataset = 'entraDevices'; Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'deviceConfigurations'; Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
+        )
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
+            param($store, $manifest, $context)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'contoso' -TenantPseudonym 'tp-abc123'
+        }
+
+        $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+
+        $result.datasets.entraDevices.status | Should -Be 'Skipped'
+        $result.datasets.entraDevices.reason | Should -Match '^descriptor-pending:'
+
+        $result.datasets.deviceConfigurations.status | Should -Be 'Failed'
+        $result.datasets.deviceConfigurations.reason | Should -Be 'auth-failure: collection aborted'
     }
 
     It 'redacts the raw ProfileId out of a Failed reason' {
@@ -921,7 +1032,7 @@ Describe 'Get-PulseTenantSnapshot' {
         $checkTwo = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies')
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne, $checkTwo) }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { @([pscustomobject]@{ id = 'p1' }) }
@@ -946,6 +1057,49 @@ Describe 'Get-PulseTenantSnapshot' {
         $manifest.datasets.deviceCompliancePolicies.reason | Should -Match '^permission-denied:'
     }
 
+    # Item 1 (final fix wave, spec 2a): the pseudonym is keyed on the resolved TENANT ID,
+    # never -ProfileId - the same tenant reached under two differently-named profiles must
+    # pseudonymize identically, and renaming a profile must never change the pseudonym.
+    It 'pseudonymizes the same tenant identically across two differently-named GraphKit profiles' {
+        $checkOne = New-TestCheck -Id 'TP.ENT.0001' -Datasets @('conditionalAccessPolicies')
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne) }
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
+        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+
+        # Two distinct ProfileIds ('contoso-prod' and 'contoso-renamed') resolving to the
+        # SAME synthetic tenant id - as if the same tenant were reached under a
+        # differently-named GraphKit profile, or the profile were renamed between runs.
+        $sameTenantId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        Mock Get-GraphContext -ModuleName TenantPulse -ParameterFilter { $ProfileId -eq 'contoso-prod' } {
+            [pscustomobject]@{ ProfileId = 'contoso-prod'; TenantId = $sameTenantId }
+        }
+        Mock Get-GraphContext -ModuleName TenantPulse -ParameterFilter { $ProfileId -eq 'contoso-renamed' } {
+            [pscustomobject]@{ ProfileId = 'contoso-renamed'; TenantId = $sameTenantId }
+        }
+
+        $storeRootA = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $storeRootB = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        try {
+            $storeA = InModuleScope TenantPulse -ArgumentList $storeRootA {
+                param($root)
+                Get-PulseTenantSnapshot -ProfileId 'contoso-prod' -OutputPath $root
+            }
+            $storeB = InModuleScope TenantPulse -ArgumentList $storeRootB {
+                param($root)
+                Get-PulseTenantSnapshot -ProfileId 'contoso-renamed' -OutputPath $root
+            }
+
+            $manifestA = Get-Content -LiteralPath $storeA.ManifestPath -Raw | ConvertFrom-Json
+            $manifestB = Get-Content -LiteralPath $storeB.ManifestPath -Raw | ConvertFrom-Json
+
+            $manifestA.tenant | Should -Not -BeNullOrEmpty
+            $manifestA.tenant | Should -Be $manifestB.tenant
+        } finally {
+            Remove-Item -LiteralPath $storeRootA -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $storeRootB -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     # Task 1.11 review follow-up: GraphKit's Get-GraphObject stamps every row with
     # _Tenant (the ProfileId - an operator-chosen label, not the raw tenant GUID, but
     # still an identifier with no place in a pseudonymized artifact), _RetrievedUtc,
@@ -958,7 +1112,7 @@ Describe 'Get-PulseTenantSnapshot' {
         $checkOne = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies')
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne) }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse {
             # Reproduces exactly what Get-GraphObject stamps onto a real returned row.
@@ -1024,7 +1178,7 @@ Describe 'Get-PulseTenantSnapshot' {
         $checkTwo = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies')
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne, $checkTwo) }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphObject -ModuleName TenantPulse { throw 'AADSTS700016: Application not found in the directory.' }
 
@@ -1048,7 +1202,7 @@ Describe 'Get-PulseTenantSnapshot' {
         $outOfScope = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies') -Category 'Intune.Compliance'
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($inScope, $outOfScope) }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
 
@@ -1077,5 +1231,22 @@ Describe 'Get-PulseTenantSnapshot' {
                 Get-PulseTenantSnapshot -ProfileId 'contoso-tenant-id' -Path ''
             }
         } | Should -Throw
+    }
+
+    # Item 2 (final fix wave): -Path renamed to -OutputPath; -Path kept as a deprecated
+    # alias for one release and must still work.
+    It '-Path still works as a deprecated alias for -OutputPath' {
+        $checkOne = New-TestCheck -Id 'TP.ENT.0001' -Datasets @('conditionalAccessPolicies')
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne) }
+        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
+        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+
+        $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot {
+            param($snapshotRoot)
+            Get-PulseTenantSnapshot -ProfileId 'contoso-tenant-id' -Path $snapshotRoot
+        }
+
+        Test-Path -LiteralPath $store.ManifestPath -PathType Leaf | Should -BeTrue
     }
 }
