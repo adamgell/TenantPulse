@@ -109,6 +109,97 @@ Describe 'TP.INT.0005 - Devices inactive for more than 90 days' {
         $finding.reason | Should -Match '1 Entra-registered device'
     }
 
+    # ---- post-review: newly-enrolled, never-synced devices (L5) ----
+
+    It 'Pass: a device enrolled recently (< 30 days) with no sync yet is NOT counted as stale' {
+        $recentEnroll = [datetime]::UtcNow.AddDays(-3).ToString('o')
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0005' -Datasets @(
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'm1'; deviceName = 'brand-new'; enrolledDateTime = $recentEnroll }) }
+            @{ Name = 'entraDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].detail.status | Should -Be 'newly enrolled, never synced'
+    }
+
+    It 'Fail: a device never synced with an OLD enrolledDateTime (>= 30 days) keeps the original fail-closed behavior' {
+        $oldEnroll = [datetime]::UtcNow.AddDays(-200).ToString('o')
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0005' -Datasets @(
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'm1'; deviceName = 'old-never-synced'; enrolledDateTime = $oldEnroll }) }
+            @{ Name = 'entraDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence[0].identity | Should -Be 'managed:m1'
+        $finding.evidence[0].detail.status | Should -BeNullOrEmpty
+    }
+
+    # ---- post-review: population gap as evidence entries, not just Reason text (Important) ----
+
+    It 'Fail: the Entra-vs-Intune population gap appears as evidence entries (a summary plus one per unmanaged device)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0005' -Datasets @(
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'm1'; deviceName = 'stale'; lastSyncDateTime = $script:isoStale; azureADDeviceId = 'aad-1' }) }
+            @{ Name = 'entraDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'e1'; displayName = 'device-1'; deviceId = 'aad-1'; approximateLastSignInDateTime = $script:isoNow }
+                [pscustomobject]@{ id = 'e2'; displayName = 'unmanaged-device'; deviceId = 'aad-unmanaged'; approximateLastSignInDateTime = $script:isoNow }
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $summary = $finding.evidence | Where-Object { $_.identity -eq 'gap:summary' }
+        $summary | Should -Not -BeNullOrEmpty
+        $summary.detail.entraRegisteredNotIntuneManagedCount | Should -Be 1
+
+        $perDevice = $finding.evidence | Where-Object { $_.identity -eq 'gap:e2' }
+        $perDevice | Should -Not -BeNullOrEmpty
+        $perDevice.detail.displayName | Should -Be 'unmanaged-device'
+    }
+
+    # ---- post-review: wall-clock determinism (H2 adjudicated) ----
+
+    It 'produces the identical status and evidence across two evaluations of the SAME snapshot (wall-clock determinism, borderline timing)' {
+        $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $keyPath = Join-Path $storeRoot '.opkey/operator.key'
+
+        try {
+            $results = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath {
+                param($storeRoot, $keyPath)
+
+                $catalog = @(Import-PulseCheckCatalog)
+                $check = $catalog | Where-Object { $_.Id -eq 'TP.INT.0005' }
+
+                $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+                $manifestCreatedUtc = (Get-PulseSnapshotManifest -Store $store).createdUtc
+                # Borderline by design: exactly 1 hour past the 90-day cutoff, measured from
+                # THIS store's own createdUtc - a wall-clock-based cutoff would risk this
+                # flipping between two evaluations seconds apart; a manifest-anchored cutoff
+                # cannot, because both evaluations read the same createdUtc from disk.
+                $borderlineSync = ([datetime]::Parse($manifestCreatedUtc)).AddDays(-90).AddHours(-1).ToString('o')
+
+                Write-PulseDataset -Store $store -Name 'managedDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data @([pscustomobject]@{ id = 'm1'; deviceName = 'borderline'; lastSyncDateTime = $borderlineSync })
+                Write-PulseDataset -Store $store -Name 'entraDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data @()
+
+                $first = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                Start-Sleep -Milliseconds 1200
+                $second = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+
+                [pscustomobject]@{
+                    First  = $first.Document.findings[0]
+                    Second = $second.Document.findings[0]
+                }
+            }
+
+            $results.Second.status | Should -Be $results.First.status
+            $results.Second.reason | Should -Be $results.First.reason
+            @($results.Second.evidence).Count | Should -Be @($results.First.evidence).Count
+        } finally {
+            Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'gate-degraded: NotApplicable when managedDevices failed to collect' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0005' -Datasets @(
             @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Failed'; Reason = 'throttled: too many requests' }

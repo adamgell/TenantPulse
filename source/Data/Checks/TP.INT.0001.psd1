@@ -1,3 +1,20 @@
+<#
+    RESEARCH NOTE (post-review, adjudicated, C1): mobileDeviceManagementAuthority is
+    SELECT-ONLY - it is genuinely absent from the plain /organization list/entity response
+    (which is why the two-dataset organization + organizationMdmAuthority pattern exists at
+    all), but the GraphKit Organization.GetMdmAuthority operation this check's
+    organizationMdmAuthority dataset resolves to is a real, working $select-in-path read on
+    the organization ENTITY (GET /organization/{id}?$select=mobileDeviceManagementAuthority),
+    NOT a removed/dead Graph API "action". Live-verified this week: a real call against both
+    v1.0 and beta returned 200 with 'intune' on both. An earlier pass at this descriptor
+    cited https://learn.microsoft.com/en-us/graph/api/organization-getmdmauthority, which is
+    the DEAD action-doc URL for a getMdmAuthority ACTION Microsoft has since removed from the
+    API surface - a confusable but different thing from the property-select read this check
+    actually performs. References.Authorities below cites the organization RESOURCE doc
+    instead, which documents mobileDeviceManagementAuthority as a real (if $select-only)
+    property. See DatasetMap.psd1's own organizationMdmAuthority entry comment for the same
+    clarification at the dataset-map level.
+#>
 @{
     Id         = 'TP.INT.0001'
     Title      = 'MDM authority is set to Intune'
@@ -35,7 +52,7 @@ $authority -eq 'intune'
     References = @{
         Research    = 'docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#6-intune-operational-guidance'
         Authorities = @(
-            'https://learn.microsoft.com/en-us/graph/api/organization-getmdmauthority'
+            'https://learn.microsoft.com/en-us/graph/api/resources/organization?view=graph-rest-1.0'
             'https://learn.microsoft.com/en-us/mem/intune/fundamentals/deployment-guide-enrollment'
         )
     }

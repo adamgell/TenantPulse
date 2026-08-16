@@ -99,6 +99,34 @@ Describe 'TP.INT.0002 - A compliance policy exists for every enrolled platform' 
         $finding.evidence[0].identity | Should -Be 'Android'
     }
 
+    It 'Pass (post-review, M1): a Linux device is out-of-scope and never causes a Fail, even with zero compliance policies' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
+            @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Linux')
+            ) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $finding.reason | Should -Match 'out-of-scope'
+        $finding.reason | Should -Match 'Linux'
+    }
+
+    It 'Fail: Windows is missing a policy while Linux is separately noted as out-of-scope, never counted against Windows' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
+            @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
+                (New-PulseManagedDevice -Id 'd2' -OperatingSystem 'Linux')
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'Windows'
+        $finding.reason | Should -Match 'out-of-scope'
+    }
+
     It 'Pass: Android compliance matches any Android policy variant (androidWorkProfileCompliancePolicy)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
             @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(

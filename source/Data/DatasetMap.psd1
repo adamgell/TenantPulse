@@ -48,6 +48,16 @@
     ABSENT mobileDeviceManagementAuthority property on that read is treated (Error, never
     Fail/Pass - the field-absence lens this whole task applies).
 
+    CLARIFICATION (post-review, adjudicated, C1): Organization.GetMdmAuthority is a
+    PROPERTY-SELECT PATH TEMPLATE against the organization ENTITY
+    (GET /organization/{id}?$select=mobileDeviceManagementAuthority), not a Graph API
+    "action" - Microsoft did remove an actual getMdmAuthority ACTION from the API surface at
+    some point (the now-404ing organization-getmdmauthority action doc some tooling still
+    cites), which is a different, dead thing this operation name can be confused with. This
+    GraphKit operation is real and live-verified this week: 200 with 'intune' on both v1.0
+    and beta. See TP.INT.0001's own descriptor for the corrected References.Authorities URL
+    (the organization RESOURCE doc, not the dead action doc).
+
     directoryRoleDefinitions is deliberately mapped to the BETA List operation: isPrivileged
     and templateId-complete role metadata are beta-only - the v1.0 List silently omits
     fields TP.ENT.0002's Global Administrator join depends on.
@@ -71,6 +81,10 @@
     directoryRoleAssignments  = @{ Type = 'DirectoryRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
     directoryRoleDefinitions  = @{ Type = 'DirectoryRoleDefinition'; Operation = 'ListBeta'; ApiVersion = 'beta'; Pending = $true }
     organization               = @{ Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
+    # GetMdmAuthority is a $select-in-path property read on the organization entity
+    # (/organization/{id}?$select=mobileDeviceManagementAuthority), NOT the removed
+    # getMdmAuthority action - see the CLARIFICATION note above. Live-verified 200 'intune'
+    # on both v1.0 and beta this week.
     organizationMdmAuthority  = @{ Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $true; IdFromDataset = 'organization' }
     entraDevices               = @{ Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
 }
