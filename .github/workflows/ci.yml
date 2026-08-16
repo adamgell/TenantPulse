@@ -541,7 +541,14 @@ jobs:
           # level regression proving a traversal error fails the WHOLE dataset (Failed,
           # redacted reason) with NO dataset file written, through the real
           # Invoke-PulseCollection call site (Get-PulseTenantSnapshot.Tests.ps1).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 713 -AllowedSkips 0 -AllowNotRun 1
+          # 713 -> 791 (Task 2.1, snapshot schema 1.1.0 + definitions corpus capture): +78
+          # tests across Snapshot.Tests.ps1 (schema 1.1.0 round-trip, Set-PulseReferenceEntry/
+          # Set-PulseExpansionEntry write/verify/tamper-throw, path-traversal rejection for
+          # reference/expansion names) and the new tests/Unit/Expand/DefinitionCorpus.Tests.ps1
+          # (index compactness, IsSecretCapable mapping, Save-PulseSettingDefinitionCorpus
+          # capture/failure contract) plus dynamically-generated per-file QA assertions for
+          # the 5 new source files.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 791 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

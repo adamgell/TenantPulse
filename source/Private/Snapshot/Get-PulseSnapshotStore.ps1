@@ -16,14 +16,25 @@
     {"schemaVersion":"9999.0.0"} opened cleanly and re-evaluated into a confident-looking,
     entirely NotApplicable scored report with a null tenant and null generatedUtc - the
     exact silent-gap failure this module forbids everywhere else). schemaVersion must now
-    equal $script:PulseSnapshotSchemaVersion EXACTLY (kept as one module-level constant,
-    matching the literal '1.0.0' New-PulseSnapshotStore itself writes - if that literal
-    ever changes, this is the only other place that has to change with it). createdUtc,
-    producer and datasets must also be present as real members - the same four fields
-    Invoke-PulseEvaluation actually reads off the manifest later - so a structurally
+    equal one of $script:PulseSnapshotSupportedSchemaVersions EXACTLY (kept as one
+    module-level array, matching the literals New-PulseSnapshotStore has ever written - if
+    those literals ever change, this is the only other place that has to change with them).
+    createdUtc, producer and datasets must also be present as real members - the same four
+    fields Invoke-PulseEvaluation actually reads off the manifest later - so a structurally
     foreign or hand-edited manifest.json is rejected here, at open time, with a specific
     field name, rather than surfacing later as null/missing data quietly baked into a
     "successful" scored report.
+
+    SCHEMA 1.1.0 (Task 2.1): New-PulseSnapshotStore now writes schemaVersion '1.1.0' (adds
+    the `references`/`expansions` manifest namespaces - see that function's own
+    docstring), but a schemaVersion '1.0.0' snapshot written by an earlier release must
+    still open here successfully - readonly-compatible, not rejected. '1.0.0' is kept in
+    $script:PulseSnapshotSupportedSchemaVersions for exactly that reason. A '1.0.0'
+    manifest has no `references`/`expansions` members at all; this function does not
+    require or backfill them - every reader of those namespaces (Get-PulseReferenceData,
+    a future expansion reader) treats an absent member as "nothing captured/expanded for
+    this store," not as a validation failure, so opening an old-schema store never throws
+    here on that account.
 
     The returned handle has the exact same shape New-PulseSnapshotStore returns (Root/
     DatasetsPath/ReferencePath/ExpandedPath/ManifestPath), so every downstream consumer
@@ -36,10 +47,12 @@
     pre-emptively (and possibly wrongly) rejected here.
 #>
 
-# The one schemaVersion this module's writer (New-PulseSnapshotStore) actually produces -
-# see that function's own literal. Kept as a single named constant so Get-PulseSnapshotStore
-# never has to duplicate (and risk drifting from) the literal string.
-$script:PulseSnapshotSchemaVersion = '1.0.0'
+# Every schemaVersion this module's writer (New-PulseSnapshotStore) has ever produced -
+# '1.1.0' is the current literal it writes today; '1.0.0' is the pre-Task-2.1 literal,
+# kept here so an older snapshot on disk still opens read-only-compatible (see this
+# function's own SCHEMA 1.1.0 docstring section). Kept as a single named array so
+# Get-PulseSnapshotStore never has to duplicate (and risk drifting from) either literal.
+$script:PulseSnapshotSupportedSchemaVersions = @('1.0.0', '1.1.0')
 
 function Get-PulseSnapshotStore {
     [CmdletBinding()]
@@ -73,8 +86,9 @@ function Get-PulseSnapshotStore {
     }
 
     $actualSchemaVersion = [string] $manifestContent.schemaVersion
-    if (-not [string]::Equals($actualSchemaVersion, $script:PulseSnapshotSchemaVersion, [System.StringComparison]::Ordinal)) {
-        throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '$actualSchemaVersion', but this module only supports '$script:PulseSnapshotSchemaVersion' - '$resolvedRoot' is not a snapshot root this version of TenantPulse can safely re-evaluate."
+    if ($script:PulseSnapshotSupportedSchemaVersions -notcontains $actualSchemaVersion) {
+        $supportedText = $script:PulseSnapshotSupportedSchemaVersions -join ', '
+        throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '$actualSchemaVersion', but this module only supports '$supportedText' - '$resolvedRoot' is not a snapshot root this version of TenantPulse can safely re-evaluate."
     }
 
     foreach ($requiredMember in @('createdUtc', 'producer', 'datasets')) {

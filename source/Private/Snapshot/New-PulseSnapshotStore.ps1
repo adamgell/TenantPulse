@@ -5,8 +5,23 @@
     (collector, evaluator, renderers) builds on: datasets/ holds the raw collected data,
     reference/ holds supporting reference data, expanded/ holds derived/expanded artifacts,
     and manifest.json tracks the status, provenance and hash of every dataset written into
-    the store. This is the FINAL snapshot-manifest schema - later tasks consume it and must
-    not extend it; scoringModelVersion belongs to the findings document, not the snapshot.
+    the store.
+
+    SCHEMA 1.1.0 (Task 2.1 - the schema is no longer frozen; the "later tasks must not
+    extend it" note above this comment was wrong and is corrected here): the manifest gains
+    two new top-level namespaces this function initializes empty on every fresh store -
+    `references` (one entry per captured reference-data file, e.g. the settings-catalog
+    definitions corpus; written by Set-PulseReferenceEntry) and `expansions` (one entry per
+    derived/expanded artifact, e.g. a per-policy settings walk; written by
+    Set-PulseExpansionEntry). Both reuse Set-PulseManifestEntry's own mutex/atomic
+    tmp+rename machinery - see that function's docstring - rather than forking a second
+    read-modify-write path. scoringModelVersion still belongs to the findings document, not
+    the snapshot; that one boundary has not moved. A snapshot opened via Get-PulseSnapshotStore
+    that declares schemaVersion 1.0.0 (written before this task) has NO `references`/
+    `expansions` members at all - every reader of those namespaces treats an absent member
+    exactly like an absent entry (nothing captured/expanded), never as an error; see
+    Get-PulseSnapshotStore's own docstring for the read-side half of this compatibility
+    contract.
 
     -Tenant (Task 1.5 handshake): the manifest's `tenant` field previously had no writer.
     The collector (Get-PulseTenantSnapshot) is the sole caller expected to pass this - it
@@ -79,7 +94,7 @@ function New-PulseSnapshotStore {
     }
 
     $manifest = [ordered]@{
-        schemaVersion     = '1.0.0'
+        schemaVersion     = '1.1.0'
         createdUtc        = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [System.Globalization.CultureInfo]::InvariantCulture)
         tenant            = $Tenant
         producer          = [ordered]@{
@@ -88,6 +103,8 @@ function New-PulseSnapshotStore {
         }
         collectionFailure = $null
         datasets          = [ordered]@{}
+        references        = [ordered]@{}
+        expansions        = [ordered]@{}
     }
 
     $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $manifest
