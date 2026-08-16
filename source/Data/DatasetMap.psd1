@@ -129,4 +129,16 @@
     # section for why T2.3's assignment fan-out is real, not deferred.
     deviceCompliancePolicyAssignments = @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
     deviceConfigurationAssignments    = @{ Type = 'DeviceConfigurationAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+
+    # Task 4.2 (EIDSCA port, wave 1) - G-batch descriptor need. This Type/Operation pair
+    # does not resolve against the installed GraphKit 0.1.1 catalog (confirmed via
+    # Get-GraphOperation -List at implementation time: no AuthorizationPolicy Type exists
+    # in the catalog at all) - Pending per this file's own header mechanism, so
+    # TP.ENT.0012 gets an honest descriptor-pending NotApplicable at evaluation time
+    # instead of being skipped from the catalog. See the T4.2 report for the exact
+    # requested-descriptor shape to ride into the next GraphKit release.
+    #
+    # authorizationPolicy: single-object read, GET /policies/authorizationPolicy (beta) -
+    # backs TP.ENT.0012 (AP01/AP04-AP10/AP14).
+    authorizationPolicy = @{ Type = 'AuthorizationPolicy'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }

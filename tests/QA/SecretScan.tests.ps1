@@ -115,6 +115,11 @@ BeforeAll {
         '29232cdf-9323-42fd-ade2-1d097af3e4de' # Exchange Administrator
         '729827e3-9c14-49f7-bb1b-9608f156bbb8' # Helpdesk Administrator
         '966707d0-3269-4727-9be2-8c3a10f19b9d' # Password Administrator
+        # Entra built-in DIRECTORY ROLE ids (public, tenant-stable, documented by
+        # Microsoft's authorizationPolicy.guestUserRoleId reference) - Task 4.2,
+        # source/Private/Checks/Test-PulseAuthorizationPolicyDefaults.ps1 (EIDSCA.AP07).
+        '2af84b1e-32c8-42b7-82bc-daa82404023b' # Restricted Guest User role (recommended)
+        '10dae51f-b6af-4016-8d66-8c2a99b929b3' # Guest User role (Microsoft's permissive default)
         # TenantPulse's own module manifest GUID (source/TenantPulse.psd1) - a public
         # package identifier, never a tenant id.
         'a2f6d0f0-6d0c-4a6b-9f7e-9c9e6f6c7c2f' # TenantPulse module GUID
