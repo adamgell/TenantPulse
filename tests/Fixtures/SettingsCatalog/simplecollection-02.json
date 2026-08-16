@@ -1,0 +1,44 @@
+{
+  "Policy": {
+    "createdDateTime": "2026-06-07T20:12:48.9176093Z",
+    "creationSource": null,
+    "description": "Sanitized fixture description.",
+    "lastModifiedDateTime": "2026-06-07T20:12:48.9176093Z",
+    "name": "Policy-11",
+    "platforms": "windows10",
+    "priorityMetaData": null,
+    "roleScopeTagIds": [
+      "0"
+    ],
+    "settingCount": 1,
+    "technologies": "mdm",
+    "id": "0e3c05c0-668d-4c5f-8507-9d2adc252b7b",
+    "templateReference": {
+      "templateId": "",
+      "templateFamily": "none",
+      "templateDisplayName": null,
+      "templateDisplayVersion": null
+    }
+  },
+  "Settings": {
+    "id": "0",
+    "settingInstance": {
+      "@odata.type": "#microsoft.graph.deviceManagementConfigurationSimpleSettingCollectionInstance",
+      "settingDefinitionId": "device_vendor_msft_policy_config_userrights_denyremotedesktopserviceslogon",
+      "settingInstanceTemplateReference": null,
+      "auditRuleInformation": null,
+      "simpleSettingCollectionValue": [
+        {
+          "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
+          "settingValueTemplateReference": null,
+          "value": "*S-1-5-32-546"
+        },
+        {
+          "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
+          "settingValueTemplateReference": null,
+          "value": "*S-1-5-113"
+        }
+      ]
+    }
+  }
+}

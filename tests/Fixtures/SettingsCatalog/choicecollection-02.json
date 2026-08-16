@@ -1,0 +1,175 @@
+{
+  "Policy": {
+    "createdDateTime": "2026-06-07T20:14:20.8804502Z",
+    "creationSource": null,
+    "description": "Sanitized fixture description.",
+    "lastModifiedDateTime": "2026-06-07T20:14:20.8804502Z",
+    "name": "Policy-08",
+    "platforms": "windows10",
+    "priorityMetaData": null,
+    "roleScopeTagIds": [
+      "0"
+    ],
+    "settingCount": 2,
+    "technologies": "mdm",
+    "id": "9c9e035e-42ec-4074-836b-d98fa9de33b1",
+    "templateReference": {
+      "templateId": "bbfb69e7-400c-4787-8ff8-ce6f0b48d983_1",
+      "templateFamily": "endpointSecurityAttackSurfaceReduction",
+      "templateDisplayName": "Sanitized Template",
+      "templateDisplayVersion": "Version 1"
+    }
+  },
+  "Settings": [
+    {
+      "id": "0",
+      "settingInstance": {
+        "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+        "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_settings_allowwindowsdefenderapplicationguard",
+        "auditRuleInformation": null,
+        "settingInstanceTemplateReference": {
+          "settingInstanceTemplateId": "0610a35a-ff5c-4f12-adc7-f4625b8d2c8c"
+        },
+        "choiceSettingValue": {
+          "value": "device_vendor_msft_windowsdefenderapplicationguard_settings_allowwindowsdefenderapplicationguard_3",
+          "settingValueTemplateReference": {
+            "settingValueTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f",
+            "useTemplateDefault": false
+          },
+          "children": [
+            {
+              "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+              "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_installwindowsdefenderapplicationguard",
+              "settingInstanceTemplateReference": null,
+              "auditRuleInformation": null,
+              "choiceSettingValue": {
+                "value": "device_vendor_msft_windowsdefenderapplicationguard_installwindowsdefenderapplicationguard_install",
+                "settingValueTemplateReference": {
+                  "settingValueTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f",
+                  "useTemplateDefault": false
+                },
+                "children": []
+              }
+            },
+            {
+              "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+              "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_settings_allowpersistence",
+              "settingInstanceTemplateReference": null,
+              "auditRuleInformation": null,
+              "choiceSettingValue": {
+                "value": "device_vendor_msft_windowsdefenderapplicationguard_settings_allowpersistence_0",
+                "settingValueTemplateReference": {
+                  "settingValueTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f",
+                  "useTemplateDefault": false
+                },
+                "children": []
+              }
+            },
+            {
+              "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+              "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_settings_allowcameramicrophoneredirection",
+              "settingInstanceTemplateReference": null,
+              "auditRuleInformation": null,
+              "choiceSettingValue": {
+                "value": "device_vendor_msft_windowsdefenderapplicationguard_settings_allowcameramicrophoneredirection_0",
+                "settingValueTemplateReference": {
+                  "settingValueTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f",
+                  "useTemplateDefault": false
+                },
+                "children": []
+              }
+            },
+            {
+              "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+              "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_settings_savefilestohost",
+              "settingInstanceTemplateReference": null,
+              "auditRuleInformation": null,
+              "choiceSettingValue": {
+                "value": "device_vendor_msft_windowsdefenderapplicationguard_settings_savefilestohost_0",
+                "settingValueTemplateReference": {
+                  "settingValueTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f",
+                  "useTemplateDefault": false
+                },
+                "children": []
+              }
+            },
+            {
+              "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+              "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_settings_allowvirtualgpu",
+              "settingInstanceTemplateReference": null,
+              "auditRuleInformation": null,
+              "choiceSettingValue": {
+                "value": "device_vendor_msft_windowsdefenderapplicationguard_settings_allowvirtualgpu_0",
+                "settingValueTemplateReference": {
+                  "settingValueTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f",
+                  "useTemplateDefault": false
+                },
+                "children": []
+              }
+            },
+            {
+              "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+              "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_settings_clipboardsettings",
+              "settingInstanceTemplateReference": null,
+              "auditRuleInformation": null,
+              "choiceSettingValue": {
+                "value": "device_vendor_msft_windowsdefenderapplicationguard_settings_clipboardsettings_0",
+                "settingValueTemplateReference": {
+                  "settingValueTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f",
+                  "useTemplateDefault": false
+                },
+                "children": []
+              }
+            },
+            {
+              "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+              "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_settings_clipboardfiletype",
+              "settingInstanceTemplateReference": null,
+              "auditRuleInformation": null,
+              "choiceSettingValue": {
+                "value": "device_vendor_msft_windowsdefenderapplicationguard_settings_clipboardfiletype_1",
+                "settingValueTemplateReference": {
+                  "settingValueTemplateId": "04a00609-ef59-430d-b7b7-a8238b93d84f",
+                  "useTemplateDefault": false
+                },
+                "children": []
+              }
+            },
+            {
+              "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingCollectionInstance",
+              "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_settings_printingsettings",
+              "settingInstanceTemplateReference": null,
+              "auditRuleInformation": null,
+              "choiceSettingCollectionValue": [
+                {
+                  "settingValueTemplateReference": null,
+                  "value": "device_vendor_msft_windowsdefenderapplicationguard_settings_printingsettings_0",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "1",
+      "settingInstance": {
+        "@odata.type": "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance",
+        "settingDefinitionId": "device_vendor_msft_windowsdefenderapplicationguard_audit_auditapplicationguard",
+        "auditRuleInformation": null,
+        "settingInstanceTemplateReference": {
+          "settingInstanceTemplateId": "4a72df80-f067-471f-a2f0-908c1839fafe"
+        },
+        "choiceSettingValue": {
+          "value": "device_vendor_msft_windowsdefenderapplicationguard_audit_auditapplicationguard_0",
+          "settingValueTemplateReference": {
+            "settingValueTemplateId": "830e0a9f-ba43-4b39-9f87-8c17b62f7d5b",
+            "useTemplateDefault": false
+          },
+          "children": []
+        }
+      }
+    }
+  ]
+}
