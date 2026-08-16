@@ -133,6 +133,11 @@
         Replace every evidence identity in the rendered report with its pseudonym, built
         from this call's own fresh evaluation. Not available on Export-PulseReport, whose
         render-only path never has an evaluation-time redaction map to draw from.
+
+    .PARAMETER ExpandSettings
+        Phase 2 (T2.2): pass-through to Get-PulseTenantSnapshot's own -ExpandSettings.
+        Default OFF this task - runs the Settings Catalog per-policy fan-out/walk after
+        collection when set. Only accepted on the 'Collect' parameter set.
 #>
 function Invoke-PulseAssessment {
     [CmdletBinding(DefaultParameterSetName = 'Collect')]
@@ -170,7 +175,14 @@ function Invoke-PulseAssessment {
         [string] $Format = 'Json',
 
         [Parameter()]
-        [switch] $Redact
+        [switch] $Redact,
+
+        # Phase 2 (T2.2): pass-through to Get-PulseTenantSnapshot's own -ExpandSettings -
+        # default OFF this task (see that parameter's own docstring). Not accepted on the
+        # 'FromSnapshot' parameter set: re-evaluating an existing snapshot never collects
+        # anything, so there is nothing here to expand fresh.
+        [Parameter(ParameterSetName = 'Collect')]
+        [switch] $ExpandSettings
     )
 
     if (-not (Test-Path -LiteralPath $OutputPath -PathType Container)) {
@@ -215,6 +227,10 @@ function Invoke-PulseAssessment {
             # of including none, so an empty selection never silently collects the whole
             # catalog's datasets.
             $collectParams.ExcludeCheck = [string[]] @($fullCatalog | ForEach-Object { [string] $_.Id })
+        }
+
+        if ($ExpandSettings) {
+            $collectParams.ExpandSettings = $true
         }
 
         $store = Get-PulseTenantSnapshot @collectParams

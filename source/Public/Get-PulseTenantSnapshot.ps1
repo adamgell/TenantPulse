@@ -104,6 +104,16 @@
         Select-PulseCheck's own docstring for the full precedence rules. -IncludeCategory/
         -ExcludeCategory/-IncludeCheck/-ExcludeCheck passed explicitly on the command line
         always win over the profile file's Include/Exclude, even an empty array.
+
+    .PARAMETER ExpandSettings
+        Phase 2 (T2.2): default OFF this task (flipped on by default in T2.7 after the
+        live gate). When set, after the normal check-driven dataset collection above has
+        finished, this also collects `configurationPolicies`, captures the settings-
+        definitions corpus, and runs the Settings Catalog per-policy fan-out/walk (see
+        Invoke-PulseSettingsCatalogExpansionPipeline's own docstring). Every emitted row
+        carries assignments:null - the ConfigurationPolicyAssignment sub-fetch is
+        unreleased GraphKit per the G-gate sequencing amendment and slots in later, in
+        Phase 2b.
 #>
 function Get-PulseTenantSnapshot {
     [CmdletBinding()]
@@ -131,7 +141,19 @@ function Get-PulseTenantSnapshot {
         [string[]] $ExcludeCheck,
 
         [Parameter()]
-        [string] $AssessmentProfile
+        [string] $AssessmentProfile,
+
+        # Phase 2 (T2.2): default OFF this task, per the plan's own G-gate sequencing
+        # amendment - flipped on by default in T2.7 after the live gate. When set, AFTER
+        # the normal check-driven dataset collection below has finished, this collects
+        # `configurationPolicies`, captures the settings-definitions corpus, and runs the
+        # Settings Catalog per-policy fan-out/walk (see
+        # Invoke-PulseSettingsCatalogExpansionPipeline's own docstring) - every emitted row
+        # carries assignments:null (the G-gate sequencing amendment: the
+        # ConfigurationPolicyAssignment sub-fetch is unreleased GraphKit and slots in later,
+        # in Phase 2b).
+        [Parameter()]
+        [switch] $ExpandSettings
     )
 
     $moduleBase = if ($MyInvocation.MyCommand.Module) {
@@ -217,6 +239,10 @@ function Get-PulseTenantSnapshot {
     $store = New-PulseSnapshotStore -Path $OutputPath -Tenant $tenantPseudonym -GraphKitVersion $graphKitVersion
 
     Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
+
+    if ($ExpandSettings) {
+        Invoke-PulseSettingsCatalogExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
+    }
 
     return $store
 }
