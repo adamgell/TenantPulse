@@ -231,15 +231,34 @@ sits behind a `settingDefinitionId` whose own name says it's a free-text/organiz
 observed value happens to look generic or vendor-related — the field being editable by the
 org is what matters, not whether this particular tenant's value happens to look safe.
 
-**Full re-pass results** (every fixture, every `simpleSettingValue`/
-`simpleSettingCollectionValue` string walked): 4 values across 3 fixtures needed scrubbing.
+**Re-pass results, corrected (honest history):** the first re-pass, done in response to
+round 1 of review, claimed to have walked "every fixture, every `simpleSettingValue`/
+`simpleSettingCollectionValue` string" and reported 4 values across 3 fixtures scrubbed.
+That claim was **not actually true** — round 2 of review caught 2 more values that pass
+missed: `simple-02.json`'s two `com.apple.servicemanagement_rules_item_comment` values,
+`"REDACTED-FIXTURE-VALUE-03"` and `"REDACTED-FIXTURE-VALUE-04"`. These are exactly the shape the rule
+above already called out (a `_comment` field is free-text/org-editable by definitionId
+name, "scrub it even if the observed value happens to look generic") — the rule was
+correct, the sweep that was supposed to apply it simply missed these two instances despite
+claiming completeness. Fixed to `"Sanitized rule comment 1"` / `"Sanitized rule comment 2"`
+in round 2. **6 values across 4 fixtures** needed scrubbing in total, across both rounds:
 
-| Fixture | Value found | `settingDefinitionId` | Scrubbed to |
-|---|---|---|---|
-| `choicecollection-01.json` | `REDACTED-ADMIN-NAME` (real tenant local-admin account name) | `..._accessgroup_users` | `LapsAdmin-Example` |
-| `groupcollection-02-nested.json` | `REDACTED-FIXTURE-VALUE-01` (free-text `_organization` field) | `com.apple.webcontent-filter_organization` | `Sanitized Organization Name` |
-| `groupcollection-02-nested.json` | `REDACTED-FIXTURE-VALUE-02` (free-text `_userdefinedname` field) | `com.apple.webcontent-filter_userdefinedname` | `Sanitized Content Filter Name` |
-| `groupcollection-02-nested.json` (×6) + `simple-02.json` (×2) | `UBF8T346G9` (Apple code-signing Team ID, appearing both standalone and inside cert-requirement strings) | various `com.apple.servicemanagement_rules_item_rulevalue` | `EXAMPLETEAMID9` (scrubbed out of caution per the review's explicit "certificate subjects" category, even though this specific value is Microsoft's own public, tenant-invariant Apple Team ID — see judgment call below) |
+| Fixture | Value found | `settingDefinitionId` | Scrubbed to | Caught in |
+|---|---|---|---|---|
+| `choicecollection-01.json` | `REDACTED-ADMIN-NAME` (real tenant local-admin account name) | `..._accessgroup_users` | `LapsAdmin-Example` | round 1 |
+| `groupcollection-02-nested.json` | `REDACTED-FIXTURE-VALUE-01` (free-text `_organization` field) | `com.apple.webcontent-filter_organization` | `Sanitized Organization Name` | round 1 |
+| `groupcollection-02-nested.json` | `REDACTED-FIXTURE-VALUE-02` (free-text `_userdefinedname` field) | `com.apple.webcontent-filter_userdefinedname` | `Sanitized Content Filter Name` | round 1 |
+| `groupcollection-02-nested.json` (×6) + `simple-02.json` (×2) | `UBF8T346G9` (Apple code-signing Team ID, appearing both standalone and inside cert-requirement strings) | various `com.apple.servicemanagement_rules_item_rulevalue` | `EXAMPLETEAMID9` (scrubbed out of caution per the review's explicit "certificate subjects" category, even though this specific value is Microsoft's own public, tenant-invariant Apple Team ID — see judgment call below) | round 1 |
+| `simple-02.json` (×2) | `"REDACTED-FIXTURE-VALUE-03"` / `"REDACTED-FIXTURE-VALUE-04"` (free-text `_comment` field) | `com.apple.servicemanagement_rules_item_comment` | `"Sanitized rule comment 1"` / `"Sanitized rule comment 2"` | **round 2** — missed by round 1's re-pass despite that pass's "every value walked" claim |
+
+**Lesson for T2.1/T2.2**: a manual grep-and-eyeball sweep, even one done carefully against
+a written rule, is not a reliable substitute for a scripted, exhaustive walk of every
+`simpleSettingValue`/`simpleSettingCollectionValue` node against the `settingDefinitionId`
+free-text-field heuristic. If more fixtures are sanitized from a real tenant later, prefer
+automating this check (flag every string value whose `settingDefinitionId` matches
+`_comment|_organization|_userdefinedname|_name$` or similar, and require each one to be
+either on an explicit "known safe" allowlist or scrubbed) over a one-off manual pass that
+can silently claim completeness it didn't have.
 
 **Judgment call on `UBF8T346G9`**: this is Microsoft's own published Apple Developer Team
 ID, documented in Microsoft's own Defender-for-Mac deployment guides and identical for

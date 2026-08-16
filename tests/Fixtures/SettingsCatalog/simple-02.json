@@ -49,7 +49,7 @@
                         "simpleSettingValue": {
                           "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                           "settingValueTemplateReference": null,
-                          "value": "REDACTED-FIXTURE-VALUE-03"
+                          "value": "Sanitized rule comment 1"
                         }
                       },
                       {
@@ -87,7 +87,7 @@
                         "simpleSettingValue": {
                           "@odata.type": "#microsoft.graph.deviceManagementConfigurationStringSettingValue",
                           "settingValueTemplateReference": null,
-                          "value": "REDACTED-FIXTURE-VALUE-04"
+                          "value": "Sanitized rule comment 2"
                         }
                       },
                       {
