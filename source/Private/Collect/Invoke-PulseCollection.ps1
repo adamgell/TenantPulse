@@ -95,6 +95,15 @@ function Invoke-PulseCollection {
         $contextTenantId = [string] $Context.TenantId
     }
 
+    # SECRET CONTRACT (C1 fix): loaded ONCE per collection run (not per-dataset) - see
+    # Protect-PulseTypedPolicySensitivePayload.ps1's own docstring for the redaction this
+    # drives. A load failure is a module-authoring bug (a missing/malformed shipped file),
+    # not a per-tenant runtime outcome; it is allowed to propagate, matching every other
+    # module-relative Data/ load in this codebase (e.g. Get-PulseTenantSnapshot.ps1's own
+    # DatasetMap.psd1 load).
+    $moduleBase = if ($MyInvocation.MyCommand.Module) { $MyInvocation.MyCommand.Module.ModuleBase } else { $PSScriptRoot }
+    $typedPolicyMaps = Import-PowerShellDataFile -LiteralPath (Join-Path $moduleBase 'Data/TypedPolicyMaps.psd1') -ErrorAction Stop
+
     # Tracks, for every entry processed so far this run, the rows written for it (only ever
     # consulted by a LATER entry's IdFromDataset - see this file's own docstring). Populated
     # on every Collected outcome; left absent (never looked up as anything but "unavailable")
@@ -168,6 +177,15 @@ function Invoke-PulseCollection {
             }
 
             $rows = @(Get-GraphObject @graphObjectParams)
+            # SECRET CONTRACT (C1 fix): Sensitive-flagged properties (per TypedPolicyMaps.psd1
+            # - e.g. windows10CustomConfiguration's omaSettings[].value) are redacted
+            # BEFORE this row set ever reaches Write-PulseDataset - the raw dataset file
+            # must never carry a Sensitive value in cleartext, exactly like the Settings
+            # Catalog's own raw-payload redaction (Protect-PulseSettingsCatalogSecretPayload).
+            # PASS-THROUGH for every dataset other than deviceCompliancePolicies/
+            # deviceConfigurations - see that function's own DATASET SCOPE docstring
+            # section for the honest boundary this implies.
+            $rows = Protect-PulseTypedPolicySensitivePayload -Data $rows -DatasetName $entry.Dataset -TypedPolicyMaps $typedPolicyMaps
             # -TenantId/-Pseudonym (Task 1.11 GraphKit 0.1.1 live-gate surprise): some Graph
             # payloads carry the raw tenant id as a genuine response field (Organization.id,
             # DirectoryRoleAssignment.principalOrganizationId) - see

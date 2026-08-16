@@ -584,7 +584,7 @@ jobs:
           # 965 -> 991 (post-review follow-ups): unified T2.2/T2.3 jsonl publication path
           # + sanitized-real GOLDEN fixtures for T2.3/T2.5 - see
           # .build/AssertGateResult.tasks.ps1's own accounting.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 991 -AllowedSkips 0 -AllowNotRun 1
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 996 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

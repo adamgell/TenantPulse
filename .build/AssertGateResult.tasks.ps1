@@ -78,7 +78,15 @@
 # fixtures (choicecollection-01/-02); plus the SecretScan QA gate's own new allowlist-
 # entry regression coverage for the 7 new fixture GUIDs. Set to the REAL total for this
 # task's own tree.
-$script:tenantPulseGateMinimumTests = 991
+# 991 -> 996 (task-2.3-review C1/capstone fix round): +5 - C1's raw-dataset Sensitive-
+# redaction pass (Protect-PulseTypedPolicySensitivePayload.ps1, wired into
+# Invoke-PulseCollection.ps1 before the FIRST Write-PulseDataset call for
+# deviceCompliancePolicies/deviceConfigurations) plus its own capstone end-to-end
+# regression (TypedPolicySecretContract.Tests.ps1 - plants a WiFi-PSK-class secret through
+# the real collect+expand pipeline, then walks EVERY file under the resulting snapshot
+# root and asserts the planted marker appears in none of them; verified to actually fail
+# red against a deliberately-disabled redaction pass before being restored green).
+$script:tenantPulseGateMinimumTests = 996
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
