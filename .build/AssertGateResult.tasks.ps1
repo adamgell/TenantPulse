@@ -37,7 +37,13 @@
 # fix) plus its own regression suite (suffix-bypass for both known-safe shapes, the
 # real-type-still-matches control, and an end-to-end walker-level plaintext-never-leaks
 # assertion). Set to the REAL total, not a headroom-padded number - the gate IS the count.
-$script:tenantPulseGateMinimumTests = 916
+# 916 -> 947 (Task 2.3): +31 - the compliance/legacy typed-policy walk (shape-neutrality,
+# Sensitive nested-property redaction, Nested object vs array-element walking, unpopulated-
+# shell shape), the per-family fan-out driver (real assignment fetch, unmapped-type gap
+# wording, exact-match dispatch, assignment-fetch-failure whole-policy gap, planted-secret-
+# never-leaks, empty-policy-list Expanded), and the two-family pipeline (both datasets
+# unavailable, one family independent of the other).
+$script:tenantPulseGateMinimumTests = 947
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
