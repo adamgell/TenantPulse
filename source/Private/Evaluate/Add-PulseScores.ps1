@@ -39,15 +39,24 @@
     out from under them, and calling this function twice against the same input is
     trivially side-effect-free.
 
-    DETERMINISM: `byCategory` is built by iterating category names in ordinal sort order
-    (the same [string]::CompareOrdinal index-sort pattern used throughout this codebase -
-    see ConvertTo-PulseCanonicalJson and Invoke-PulseEvaluation's own docstrings for why:
-    Sort-Object -Culture collation is culture-dependent and therefore non-deterministic
-    across locales). ConvertTo-PulseCanonicalJson would independently re-sort a hashtable's
-    keys ordinally on its own when this document is later serialized, so this ordering is
-    belt-and-braces rather than load-bearing for the JSON output - but it also makes
-    Add-PulseScores' own return value deterministic for any caller that inspects it
-    in-memory, before serialization.
+    DETERMINISM: accumulation into `categoryStats` (and, from it, `overallEarned` /
+    `overallPossible` / `overallAssessed` / `overallApplicable`) iterates category names in
+    ordinal sort order (the same [string]::CompareOrdinal index-sort pattern used
+    throughout this codebase - see ConvertTo-PulseCanonicalJson and
+    Invoke-PulseEvaluation's own docstrings for why: Sort-Object -Culture collation is
+    culture-dependent and therefore non-deterministic across locales). That is what this
+    sort actually buys: a fixed, reproducible ORDER OF ACCUMULATION for sums that are
+    (in floating point) not strictly order-independent. It does NOT control - and must not
+    be relied on to control - the in-memory enumeration order of the `$scoresByCategory` /
+    `$coverageByCategory` hashtables themselves: .NET Hashtable/Dictionary key enumeration
+    is bucket-ordered and hash-randomized per process, not insertion-ordered, even though
+    entries were added in sorted order (verified empirically: the same insertion sequence
+    enumerates differently across two processes). The actual guarantee that the JSON this
+    document eventually serializes to is byte-identical across runs comes from
+    ConvertTo-PulseCanonicalJson's own ordinal re-sort of every object's keys at
+    serialization time - that re-sort is load-bearing; this function's accumulation-order
+    sort is not a substitute for it and a caller must never assume `.Keys` on the returned
+    byCategory hashtables comes back in any particular order.
 #>
 
 function Add-PulseScores {
@@ -60,6 +69,16 @@ function Add-PulseScores {
 
     if ($null -eq $Findings.producer -or [string]::IsNullOrEmpty($Findings.producer.scoringModelVersion)) {
         throw 'Add-PulseScores: input document is missing producer.scoringModelVersion.'
+    }
+
+    # This function implements ONE scoring model, 1.0, exactly as pinned by spec section
+    # 2e. A document that claims a different scoringModelVersion must never silently be
+    # run through 1.0's math anyway - that would be a silent gap (a v2.0-tagged document
+    # scored as if it were v1.0, with nothing in the output revealing the mismatch). Fail
+    # loudly instead, naming both the version the document claims and the version this
+    # function actually implements.
+    if ($Findings.producer.scoringModelVersion -ne '1.0') {
+        throw "Add-PulseScores: input document declares producer.scoringModelVersion '$($Findings.producer.scoringModelVersion)', but this function only implements scoring model '1.0'."
     }
 
     # Deep clone - see NON-MUTATION note above. Reuses the same

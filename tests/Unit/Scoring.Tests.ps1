@@ -247,6 +247,29 @@ Describe 'Add-PulseScores' {
         $result.scores.overall.percent | Should -Be 33.3
     }
 
+    It 'rounds 0.05 percent away from zero to 0.1, not to 0.0 (discriminates AwayFromZero from banker''s/ToEven rounding)' {
+        # 1 Low Warn (earned 0.5, possible 1) + 99 Critical Fail (possible 990) + 1 High
+        # Fail (possible 6) + 1 Medium Fail (possible 3) -> earned 0.5, possible 1000 ->
+        # exactly 0.05%. AwayFromZero rounds 0.05 up to 0.1; ToEven (banker's rounding)
+        # would round it down to 0.0 (0 is the even digit) - this fixture is the one that
+        # actually tells the two rounding modes apart, unlike the 33.3% case above.
+        $findings = [System.Collections.Generic.List[object]]::new()
+        $findings.Add((New-PulseFixtureFinding -Id 'TP.INT.0001' -Severity 'Low' -Status 'Warn'))
+        for ($i = 1; $i -le 99; $i++) {
+            $findings.Add((New-PulseFixtureFinding -Id ('TP.INT.{0:D4}' -f (1000 + $i)) -Severity 'Critical' -Status 'Fail'))
+        }
+        $findings.Add((New-PulseFixtureFinding -Id 'TP.INT.2000' -Severity 'High' -Status 'Fail'))
+        $findings.Add((New-PulseFixtureFinding -Id 'TP.INT.2001' -Severity 'Medium' -Status 'Fail'))
+
+        $doc = New-PulseFixtureScoringDocument -Findings $findings.ToArray()
+
+        $result = Invoke-PulseFixtureScoring -Document $doc
+
+        $result.scores.overall.earned | Should -Be 0.5
+        $result.scores.overall.possible | Should -Be 1000.0
+        $result.scores.overall.percent | Should -Be 0.1
+    }
+
     It 'does not mutate the input document in place' {
         $doc = New-PulseFixtureScoringDocument -Findings @(
             (New-PulseFixtureFinding -Id 'TP.INT.0001' -Severity 'High' -Status 'Pass')
@@ -281,5 +304,13 @@ Describe 'Add-PulseScores' {
         }
 
         [System.Text.Encoding]::UTF8.GetBytes($jsonA) | Should -Be ([System.Text.Encoding]::UTF8.GetBytes($jsonB))
+    }
+
+    It 'throws instead of silently scoring a document that declares a different scoringModelVersion' {
+        $doc = New-PulseFixtureScoringDocument -ScoringModelVersion '2.0' -Findings @(
+            (New-PulseFixtureFinding -Id 'TP.INT.0001' -Severity 'High' -Status 'Pass')
+        )
+
+        { Invoke-PulseFixtureScoring -Document $doc } | Should -Throw '*2.0*1.0*'
     }
 }
