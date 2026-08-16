@@ -101,11 +101,25 @@ function Import-PulseCheckCatalog {
 
     # 'DatasetMap.psd1' living inside the catalog directory is the shared map, not a check
     # descriptor - excluded by name so it is never scanned/validated as one.
-    $files = @(
-        Get-ChildItem -LiteralPath $Path -Filter '*.psd1' -File |
-            Where-Object { $_.Name -ne 'DatasetMap.psd1' } |
-            Sort-Object -Property Name
-    )
+    #
+    # Ordinal sort (post-review fix): Sort-Object -Property Name uses PowerShell's default
+    # culture-aware, case-INSENSITIVE comparison - non-deterministic across locales/hosts,
+    # exactly the trap this file's own docblock (see 'Ordinal sort' above) warns about for
+    # the Id sort below. This file-iteration order feeds every error message this loop
+    # accumulates (a parse failure, a validation error), so a culture-sensitive sort here
+    # meant error-message ORDER could silently vary by host locale too, not just the
+    # descriptor Id order the docblock already called out. Index-sorted with
+    # [string]::CompareOrdinal, matching the same pattern this file uses for its Id sort
+    # below.
+    $unsortedFiles = @(Get-ChildItem -LiteralPath $Path -Filter '*.psd1' -File | Where-Object { $_.Name -ne 'DatasetMap.psd1' })
+    $files = [object[]] $unsortedFiles
+    if ($files.Count -gt 1) {
+        $fileNames = [string[]] @($files | ForEach-Object { $_.Name })
+        $fileOrder = [int[]] (0 .. ($files.Count - 1))
+        $fileComparison = [System.Comparison[int]] { param($a, $b) [string]::CompareOrdinal($fileNames[$a], $fileNames[$b]) }
+        [System.Array]::Sort($fileOrder, $fileComparison)
+        $files = [object[]] @(foreach ($i in $fileOrder) { $files[$i] })
+    }
 
     if ($files.Count -eq 0) {
         if ($allErrors.Count -gt 0) {

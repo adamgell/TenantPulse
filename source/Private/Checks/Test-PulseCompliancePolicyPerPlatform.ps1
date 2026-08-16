@@ -39,7 +39,17 @@ function Test-PulseCompliancePolicyPerPlatform {
     )
 
     $devices = @($Datasets.managedDevices)
-    $enrolledPlatforms = @($devices | ForEach-Object { [string] $_.operatingSystem } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    # Ordinal sort/dedup (post-review fix, matching every other "deterministic ordering
+    # everywhere" rule in this codebase - see ConvertTo-PulseCanonicalJson and
+    # Import-PulseCheckCatalog): Sort-Object -Unique uses PowerShell's default culture-aware,
+    # case-INSENSITIVE comparison, which is non-deterministic across locales/hosts. A
+    # HashSet with an ordinal comparer dedups, then [System.Array]::Sort with an ordinal
+    # StringComparer sorts - never Sort-Object without an explicit ordinal comparer.
+    $rawPlatforms = @($devices | ForEach-Object { [string] $_.operatingSystem } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $uniquePlatformSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($platform in $rawPlatforms) { [void] $uniquePlatformSet.Add($platform) }
+    $enrolledPlatforms = [string[]] @($uniquePlatformSet)
+    [System.Array]::Sort($enrolledPlatforms, [System.StringComparer]::Ordinal)
 
     if ($enrolledPlatforms.Count -eq 0) {
         return New-PulseFinding -Status Pass -Reason 'No managed devices are enrolled on any platform - there is nothing to require a compliance policy for yet.'
