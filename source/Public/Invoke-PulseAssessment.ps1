@@ -215,6 +215,9 @@ function Invoke-PulseAssessment {
         # for the compliance/deviceConfiguration typed-policy expansions - see that
         # function's own docstring.
         Resolve-PulseTypedPolicySnapshotExpansion -Store $store
+        # Task 2.6 sibling: verify-or-rederive the conflicts artifact - from the family
+        # jsonl artifacts already on disk, never Graph. See that function's own docstring.
+        Resolve-PulseConflictSnapshotExpansion -Store $store
     } else {
         $snapshotPath = Join-Path $resolvedOutputPath 'snapshot'
         $collectParams = @{

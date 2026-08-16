@@ -252,6 +252,11 @@ function Get-PulseTenantSnapshot {
         # descriptors already released, unlike T2.2's own deferred assignments). Same void-
         # return discipline as the call above - see this file's own docstring.
         $null = Invoke-PulseTypedPolicyExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
+
+        # Task 2.6: conflict detection - purely derived from the family expansion jsonl
+        # artifacts just produced above, never Graph. Same void-return discipline as the
+        # two calls above - see this file's own docstring.
+        $null = Invoke-PulseConflictDetection -Store $store -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
     }
 
     return $store

@@ -65,6 +65,18 @@ function Set-PulseExpansionEntry {
         [AllowEmptyString()]
         [string] $Sha256,
 
+        # Task 2.6 addition: every T2.2/T2.3 producer writes a JSON-Lines expansion file
+        # (one row per line), so 'jsonl' stays the default - no existing caller passes this
+        # and every one of them keeps recording 'jsonl' exactly as before. The T2.6
+        # conflicts artifact is a single canonical JSON DOCUMENT, not a line-delimited file
+        # (Publish-PulseConflictArtifact's own docstring explains why a per-conflict jsonl
+        # line shape does not fit - conflict records need a whole-document ordinal sort key
+        # the row-schema-v1 producers' own comparator does not carry), so it is the one
+        # caller that passes -Format 'json'.
+        [Parameter()]
+        [ValidateSet('jsonl', 'json')]
+        [string] $Format = 'jsonl',
+
         [Parameter()]
         [AllowNull()]
         [System.Nullable[int]] $PolicyCount,
@@ -129,7 +141,7 @@ function Set-PulseExpansionEntry {
     }
 
     Set-PulseManifestEntry -Store $Store -ExpansionName $Name -ExpansionStatus $Status `
-        -ExpansionPath $Path -ExpansionFormat 'jsonl' -ExpansionSchemaVersion $SchemaVersion `
+        -ExpansionPath $Path -ExpansionFormat $Format -ExpansionSchemaVersion $SchemaVersion `
         -ExpansionSha256 $Sha256 -ExpansionPolicyCount $PolicyCount -ExpansionRowCount $RowCount `
         -ExpansionUnresolvedNameCount $UnresolvedNameCount -ExpansionRedactedSecretCount $RedactedSecretCount `
         -ExpansionGaps $Gaps -ExpansionReason $Reason @publishParams
