@@ -188,7 +188,14 @@
 # ST09) plus per-file SecretScan.tests.ps1 growth for this commit's changed files. 1201
 # is the real, measured ./build.ps1 -Tasks test total; all four tracking locations
 # bumped together in this commit per the standing RATCHET rule.
-$script:tenantPulseGateMinimumTests = 1201
+# 1201 -> 1215 (Task 4.3 wave 2, TP.ENT.0007 - new check, EIDSCA AG01-AG03 general
+# settings, not part of T4.2's wave-1 port): +14 - 8 new It cases in
+# tests/Unit/Checks/TP.ENT.0007.Tests.ps1, +1 CheckCatalog.Tests.ps1 count-pin bump
+# (16 -> 17 catalog descriptors) plus per-file SecretScan.tests.ps1 growth for the new
+# TP.ENT.0007.psd1/Test-PulseAuthMethodsPolicyGeneralSettings.ps1/
+# TP.ENT.0007.Tests.ps1 files. 1215 is the real, measured ./build.ps1 -Tasks test
+# total; all four tracking locations bumped together in this commit.
+$script:tenantPulseGateMinimumTests = 1215
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
