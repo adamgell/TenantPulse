@@ -187,7 +187,10 @@ task Assert_Gate_Result {
     # Describe block; this allowance only covers the QA gate's now-empty live-catalog block,
     # which will go back to 0 the moment a future descriptor ships Pending again.
     $gate = Join-Path $BuildRoot 'tests/QA/Assert-GateResult.ps1'
-    & $gate -ResultPath $resultFiles[0].FullName -MinimumTests $script:tenantPulseGateMinimumTests -AllowedSkips 0 -AllowNotRun 1
+    # Platform-aware skips: the two $IsWindows-gated POSIX-permission tests (Identity
+    # key file 0600 / key dir 0700) skip by design on Windows; zero-skip everywhere else.
+    $allowedSkips = if ($IsWindows) { 2 } else { 0 }
+    & $gate -ResultPath $resultFiles[0].FullName -MinimumTests $script:tenantPulseGateMinimumTests -AllowedSkips $allowedSkips -AllowNotRun 1
     if ($LASTEXITCODE -ne 0) {
         throw "Assert_Gate_Result: the local test run did not pass the whole-result gate (MinimumTests $script:tenantPulseGateMinimumTests) - see the Assert-GateResult.ps1 output above for the specific violation."
     }
