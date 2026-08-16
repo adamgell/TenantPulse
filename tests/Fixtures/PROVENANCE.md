@@ -28,4 +28,6 @@ or a third-party source without attribution. One line per fixture file.
 - `tests/Fixtures/Checks/invalid/bad-effort/bad.psd1` — synthetic
 - `tests/Fixtures/Checks/invalid/bad-impact/bad.psd1` — synthetic
 - `tests/Fixtures/Checks/invalid/parse-failure/broken.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/bad-expression-syntax/bad.psd1` — synthetic
 - `tests/Fixtures/DatasetMap/malformed-syntax.psd1` — synthetic
+- `tests/Fixtures/DatasetMap/mutation-write-op.psd1` — synthetic
