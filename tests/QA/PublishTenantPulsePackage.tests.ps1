@@ -11,7 +11,7 @@
         <fixture>/output/module/TenantPulse/<version>/TenantPulse.psm1
         <fixture>/output/testResults/NUnitXml_*.xml + PesterObject_*.xml
 
-    The NUnit/PesterObject test-result fixture is fabricated (not a real 1227+ test Pester
+    The NUnit/PesterObject test-result fixture is fabricated (not a real 1240+ test Pester
     run) with just enough shape - root attributes, one Passed test-suite, an empty
     Containers list - to satisfy Assert-GateResult.ps1's own whole-result gate, so these
     tests stay fast and independent of the real suite while still exercising the actual
@@ -89,13 +89,13 @@ BeforeAll {
         finally { $archive.Dispose() }
 
         # A fabricated but gate-passing NUnit result + sibling PesterObject CLIXML, so
-        # Assert-GateResult.ps1's own whole-result checks pass without a real 1227-test run.
-        # total="1227" tracks scripts/Publish-TenantPulsePackage.ps1's own -MinimumTests
+        # Assert-GateResult.ps1's own whole-result checks pass without a real 1240-test run.
+        # total="1240" tracks scripts/Publish-TenantPulsePackage.ps1's own -MinimumTests
         # value (see this file's own header docstring) - bump both together.
         $resultPath = Join-Path $testResultsDir "NUnitXml_TenantPulse_v$Version.Fixture.xml"
         $nunitXml = @"
 <?xml version="1.0" encoding="utf-8"?>
-<test-results name="TenantPulse $Version" total="1227" failures="0" errors="0" skipped="0">
+<test-results name="TenantPulse $Version" total="1240" failures="0" errors="0" skipped="0">
   <test-suite type="TestFixture" name="Fixture" result="Passed">
     <results>
       <test-case name="fixture test" result="Success" />
