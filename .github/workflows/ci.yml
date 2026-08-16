@@ -213,4 +213,22 @@ jobs:
           # Task 1.4's placeholder allowance is gone; any NotRun block reappearing here
           # means test-case generation silently broke again and must be investigated,
           # not re-allowed.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 117 -AllowedSkips 0 -AllowNotRun 0
+          #
+          # Task 1.6 added the evaluator (source/Private/Evaluate/): New-PulseFinding
+          # (the rule-result contract every Function rule returns), Get-PulseGateStatus
+          # (the Phase 1 gate stub - always 'Unknown', never degrades a check) and
+          # Invoke-PulseEvaluation itself (the engine that turns a snapshot + check
+          # catalog into the findings document and its in-memory redaction map). 22 new
+          # tests (117 -> 139): New-PulseFinding evidence normalization/validation (4),
+          # Get-PulseGateStatus's Unknown-for-any-gate stub contract (1), and 17
+          # Invoke-PulseEvaluation tests covering Expression/Function rule Pass/Fail/
+          # Warn/Error paths, Function-rule-throws-then-run-continues, NotApplicable
+          # degrade for missing/Failed/Skipped datasets (reason quoted verbatim from the
+          # manifest), gate-declared-but-Unknown-does-not-degrade, ordinal findings/
+          # evidence sort, generatedUtc pinned to the manifest's createdUtc (not wall
+          # clock), the RedactionMap covering every evidence identity, no raw
+          # pseudonyms/PSTypeName leaking into the serialized findings JSON, and
+          # byte-identical double serialization through ConvertTo-PulseCanonicalJson.
+          # This minimum must keep ratcheting up as check/function test suites are added
+          # in later tasks - see docs/superpowers/sdd for the phase plan.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 139 -AllowedSkips 0 -AllowNotRun 0

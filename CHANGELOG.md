@@ -32,6 +32,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error, each line prefixed with its source filename and naming the offending
   descriptor and property, rather than failing on the first bad file. Schema documented
   verbatim in `source/Data/Checks/README.md`.
+- Evaluator: `Invoke-PulseEvaluation` runs a check catalog against a snapshot store and
+  produces the canonical findings document (`source/Private/Evaluate/FindingsSchema.md`),
+  plus an in-memory-only `RedactionMap` covering every evidence identity seen (built at
+  evaluate, applied at render). `New-PulseFinding` is the rule-result contract every
+  Function rule (`Test-Pulse* -Datasets <hashtable>`) returns to produce `Pass`/`Warn`/
+  `Fail` with evidence; Expression rules resolve straight to `[bool]` with no evidence.
+  `NotApplicable` and `Error` are engine-assigned only: a missing/`Failed`/`Skipped`
+  dataset degrades a check to `NotApplicable` quoting the manifest's own (already
+  redacted) reason verbatim, and a throwing or malformed-output rule becomes `Error`
+  without aborting the rest of the run. `Get-PulseGateStatus` is a Phase 1 gate stub -
+  every gate resolves `Unknown`, which never degrades a check. Findings are sorted
+  ordinally by check Id, each finding's evidence ordinally by sortKey then identity, and
+  `generatedUtc` is pinned to the snapshot manifest's own `createdUtc` (never wall
+  clock), so re-evaluating the same snapshot is byte-identical through
+  `ConvertTo-PulseCanonicalJson`.
 
 ### Changed
 
