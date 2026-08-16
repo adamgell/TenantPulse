@@ -231,4 +231,38 @@ jobs:
           # byte-identical double serialization through ConvertTo-PulseCanonicalJson.
           # This minimum must keep ratcheting up as check/function test suites are added
           # in later tasks - see docs/superpowers/sdd for the phase plan.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 139 -AllowedSkips 0 -AllowNotRun 0
+          #
+          # Post-review security/robustness fixes to Task 1.6 (same task, second pass):
+          # C1 (Critical) - Expression rules now run in Invoke-PulseSandboxedExpression's
+          # own fresh, isolated runspace (ConstrainedLanguage, no ambient scope/variables,
+          # only a deep-cloned $Datasets) instead of in-process via ScriptBlock.
+          # InvokeWithContext, which was proven able to read $operatorKey, write parent/
+          # global scope, mutate the shared dataset cache, and reach module-private
+          # functions. H2 (High) - a malformed/duck-typed rule evidence entry (no Identity)
+          # used to throw OUTSIDE the per-check try/catch at the redaction-map line and
+          # kill the whole evaluation; evidence is now normalized and validated INSIDE
+          # Invoke-PulseCheckEvaluation's try/catch via the shared
+          # ConvertTo-PulseNormalizedEvidence helper, so a bad entry degrades only that
+          # check to Error. Plus: datasets are deep-cloned per check for BOTH rule types
+          # (no more shared-reference mutation across checks); Get-PulseGateStatus's
+          # 'Unavailable' status is now actually wired to a NotApplicable degrade; every
+          # Error/rule-authored Reason is routed through Protect-PulseReason (NotApplicable
+          # reasons stay verbatim, per the manifest reason contract); evidence Detail is
+          # validated to survive ConvertTo-PulseCanonicalJson and never carry a literal
+          # 'PSTypeName' key; a Function rule emitting anything other than exactly one
+          # output is now Error (previously silently truncated via
+          # `Select-Object -Last 1`); non-terminating rule errors (2>&1) are captured into
+          # the finding's reason instead of silently dropping; duplicate (SortKey,
+          # Identity) evidence pairs are rejected to keep [Array]::Sort's result
+          # deterministic; Rule.Expression syntax is now parse-checked at catalog import
+          # time via [scriptblock]::Create. 22 new tests (139 -> 161): 4 sandbox-isolation
+          # tests (Get-Variable/Set-Variable/raw-.NET escape attempts all fail to reach
+          # anything, plain boolean expressions still work), 4 Invoke-PulseSandboxedExpression
+          # unit tests, H2 regression coverage (duck-typed no-Identity evidence, duplicate
+          # evidence, non-serializable Detail, PSTypeName-in-Detail), multi-output/
+          # no-output Function rule Error coverage, non-terminating-error capture, per-check
+          # dataset isolation for both rule types, gate-Unavailable wiring, reason-
+          # redaction coverage (capped Error reason vs. verbatim NotApplicable reason), a
+          # true evaluate-twice-independently byte-identity test, plus one
+          # CheckCatalog.Tests.ps1 test for the new Rule.Expression parse-check.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 161 -AllowedSkips 0 -AllowNotRun 0

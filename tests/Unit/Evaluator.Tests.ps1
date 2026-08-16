@@ -100,6 +100,66 @@ BeforeAll {
                 return [pscustomobject]@{ NotAStatus = 'nonsense' }
             }
 
+            function Test-PulseFixtureDuckTypedNoIdentityRule {
+                param($Datasets)
+                # Deliberately NOT built via New-PulseFinding - a hand-shaped duck-typed
+                # RuleResult whose one evidence entry has no Identity at all (H2 regression
+                # fixture).
+                return [pscustomobject]@{
+                    PSTypeName = 'TenantPulse.RuleResult'
+                    Status     = 'Fail'
+                    Evidence   = @([pscustomobject]@{ Detail = 'no identity on this one' })
+                    Reason     = 'duck-typed, missing Identity'
+                }
+            }
+
+            function Test-PulseFixtureDuplicateEvidenceRule {
+                param($Datasets)
+                return New-PulseFinding -Status Warn -Evidence @(
+                    @{ Identity = 'dup-1'; Detail = 'first' },
+                    @{ Identity = 'dup-1'; Detail = 'second' }
+                )
+            }
+
+            function Test-PulseFixtureNonSerializableDetailRule {
+                param($Datasets)
+                return New-PulseFinding -Status Warn -Evidence @(@{ Identity = 'obj-1'; Detail = [double]::NaN })
+            }
+
+            function Test-PulseFixturePSTypeNameDetailRule {
+                param($Datasets)
+                # A raw hashtable literally KEYED 'PSTypeName' - unlike
+                # `[pscustomobject]@{ PSTypeName = 'X'; ... }` (which PowerShell consumes
+                # entirely into .PSObject.TypeNames, leaving no visible property - verified
+                # empirically, NOT the leak vector), a plain hashtable's 'PSTypeName' key is
+                # just an ordinary dictionary key that serializes straight through.
+                $detail = @{ PSTypeName = 'Sneaky.Type'; a = 1 }
+                return New-PulseFinding -Status Warn -Evidence @(@{ Identity = 'obj-1'; Detail = $detail })
+            }
+
+            function Test-PulseFixtureMultiOutputRule {
+                param($Datasets)
+                Write-Output 'a stray pipeline output before the real result'
+                return New-PulseFinding -Status Pass
+            }
+
+            function Test-PulseFixtureNoOutputRule {
+                param($Datasets)
+                # Deliberately emits nothing.
+            }
+
+            function Test-PulseFixtureNonTerminatingErrorRule {
+                param($Datasets)
+                Write-Error 'a non-terminating error the rule forgot to handle' -ErrorAction Continue
+                return New-PulseFinding -Status Pass
+            }
+
+            function Test-PulseFixtureMutatesDatasetsRule {
+                param($Datasets)
+                $Datasets.datasetA = @()
+                return New-PulseFinding -Status Pass
+            }
+
             Invoke-PulseEvaluation -Store $Store -Checks $Checks -OperatorKeyPath $KeyPath
         }
     }
@@ -145,18 +205,19 @@ Describe 'New-PulseFinding' {
 }
 
 Describe 'Get-PulseGateStatus' {
-    It 'returns Unknown for any gate name (Phase 1 stub registry)' {
+    It 'returns Status Unknown (and no Detail) for any gate name (Phase 1 stub registry)' {
         $status = InModuleScope TenantPulse {
             Get-PulseGateStatus -Gate 'EntraP1' -Manifest @{}
         }
 
-        $status | Should -Be 'Unknown'
+        $status.Status | Should -Be 'Unknown'
+        $status.Detail | Should -BeNullOrEmpty
 
         $status2 = InModuleScope TenantPulse {
             Get-PulseGateStatus -Gate 'SomeOtherGate' -Manifest @{}
         }
 
-        $status2 | Should -Be 'Unknown'
+        $status2.Status | Should -Be 'Unknown'
     }
 }
 
@@ -385,5 +446,266 @@ Describe 'Invoke-PulseEvaluation' {
         $bytesA = [System.Text.Encoding]::UTF8.GetBytes($jsonA)
         $bytesB = [System.Text.Encoding]::UTF8.GetBytes($jsonB)
         $bytesA | Should -Be $bytesB
+    }
+
+    It 'produces byte-identical documents across two INDEPENDENT Invoke-PulseEvaluation runs against the same snapshot' {
+        $checkB = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureWarnRule' }
+        $checkA = New-PulseFixtureCheck -Id 'TP.ENT.0001' -Datasets @('datasetFailed') -Rule @{ Type = 'Expression'; Expression = '$true' }
+
+        $firstRun = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($checkB, $checkA)
+        $secondRun = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($checkB, $checkA)
+
+        $jsonFirst = InModuleScope TenantPulse -ArgumentList $firstRun.Document {
+            param($doc)
+            ConvertTo-PulseCanonicalJson -InputObject $doc
+        }
+        $jsonSecond = InModuleScope TenantPulse -ArgumentList $secondRun.Document {
+            param($doc)
+            ConvertTo-PulseCanonicalJson -InputObject $doc
+        }
+
+        [System.Text.Encoding]::UTF8.GetBytes($jsonFirst) | Should -Be ([System.Text.Encoding]::UTF8.GetBytes($jsonSecond))
+    }
+
+    # ---- H2: malformed evidence must degrade only the offending check, never crash the run ----
+
+    It 'degrades a check to Error (not a crash) when a duck-typed RuleResult has an evidence entry with no Identity' {
+        $bad = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuckTypedNoIdentityRule' }
+        $ok = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixturePassRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($bad, $ok)
+
+        $evaluation.Document.findings.Count | Should -Be 2
+        $badFinding = $evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0001' }
+        $badFinding.status | Should -Be 'Error'
+        $badFinding.reason | Should -Match 'Identity'
+
+        $okFinding = $evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0002' }
+        $okFinding.status | Should -Be 'Pass'
+
+        # The redaction map must never have been asked to key on a null/empty identity.
+        $evaluation.RedactionMap.Keys | Should -Not -Contain $null
+        $evaluation.RedactionMap.Keys | Should -Not -Contain ''
+    }
+
+    It 'degrades a check to Error when its evidence has a duplicate (SortKey, Identity) pair' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuplicateEvidenceRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'duplicate'
+    }
+
+    It 'degrades a check to Error when evidence Detail cannot survive ConvertTo-PulseCanonicalJson' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureNonSerializableDetailRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'not serializable'
+    }
+
+    It 'degrades a check to Error when evidence Detail itself carries a PSTypeName key' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixturePSTypeNameDetailRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'PSTypeName'
+    }
+
+    # ---- do-now minors: multi-output truncation, non-terminating error capture ----
+
+    It 'degrades a check to Error naming the output count when a Function rule emits more than one output' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureMultiOutputRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'emitted 2 output'
+    }
+
+    It 'degrades a check to Error naming the output count when a Function rule emits no output' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureNoOutputRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'emitted 0 output'
+    }
+
+    It 'captures a Function rule''s non-terminating error into the finding''s reason instead of silently dropping it' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureNonTerminatingErrorRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'a non-terminating error the rule forgot to handle'
+    }
+
+    # ---- IMPORTANT: per-check dataset cloning - no rule can affect another check's data ----
+
+    It 'never lets a Function rule''s in-place mutation of $Datasets affect a later check sharing the same dataset' {
+        $mutating = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureMutatesDatasetsRule' }
+        $observing = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Expression'; Expression = '$Datasets.datasetA.Count -eq 2' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($mutating, $observing)
+
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0001' }).status | Should -Be 'Pass'
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0002' }).status | Should -Be 'Pass'
+    }
+
+    It 'never lets an Expression rule''s in-place mutation of $Datasets affect a later check sharing the same dataset' {
+        $mutating = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$Datasets.datasetA = @(); $true' }
+        $observing = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Expression'; Expression = '$Datasets.datasetA.Count -eq 2' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($mutating, $observing)
+
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0001' }).status | Should -Be 'Pass'
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0002' }).status | Should -Be 'Pass'
+    }
+
+    # ---- IMPORTANT: gate wiring - Unavailable now really degrades, Unknown/Available run ----
+
+    It 'degrades to NotApplicable with a reason quoting the gate name and detail when Get-PulseGateStatus reports Unavailable' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Gates @('EntraP1') -Rule @{ Type = 'Expression'; Expression = '$true' }
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:store, $script:keyPath, $check {
+            param($store, $keyPath, $check)
+
+            # Overrides the real (Phase 1 stub) Get-PulseGateStatus for this scope only, so
+            # the evaluator's 'Unavailable' wiring can be exercised even though the stub
+            # itself never returns it.
+            function Get-PulseGateStatus {
+                param($Gate, $Manifest)
+                return [pscustomobject]@{ Status = 'Unavailable'; Detail = 'no EntraP1 license data collected' }
+            }
+
+            Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+        }
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Be "gate 'EntraP1' unavailable: no EntraP1 license data collected"
+    }
+
+    # ---- IMPORTANT: reason redaction on the evaluate path ----
+
+    It 'routes an Error reason through Protect-PulseReason (caps at 500 characters)' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureThrowingRule' }
+
+        $longThrowCheck = InModuleScope TenantPulse -ArgumentList $script:store, $script:keyPath, $check {
+            param($store, $keyPath, $check)
+
+            function Test-PulseFixtureLongThrowRule {
+                param($Datasets)
+                throw ('x' * 600)
+            }
+            $check.Rule.Function = 'Test-PulseFixtureLongThrowRule'
+
+            Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+        }
+
+        $reason = $longThrowCheck.Document.findings[0].reason
+        $reason.Length | Should -Be 500
+    }
+
+    It 'does not route a NotApplicable reason through Protect-PulseReason (quoted verbatim, uncapped by this path)' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Datasets @('datasetFailed') -Rule @{ Type = 'Expression'; Expression = '$true' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].reason | Should -Be 'throttled: too many requests'
+    }
+
+    # ---- C1: Expression rules run sandboxed - fresh runspace, ConstrainedLanguage, no ambient scope ----
+
+    It 'never lets an Expression rule reach a caller-scope variable via Get-Variable (sandbox isolation)' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{
+            Type       = 'Expression'
+            Expression = '$found = Get-Variable -Name operatorKey -ErrorAction SilentlyContinue; [bool]$found'
+        }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        # $found must be $null/false - operatorKey (the real HMAC key, alive two scopes up
+        # in the un-sandboxed implementation) is simply not reachable from inside the
+        # sandboxed runspace's own, separate session state.
+        $evaluation.Document.findings[0].status | Should -Be 'Fail'
+    }
+
+    It 'never lets an Expression rule''s Set-Variable escape into the caller''s process (sandbox isolation)' {
+        Remove-Variable -Name PulseSandboxCanary -Scope Global -ErrorAction SilentlyContinue
+
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{
+            Type       = 'Expression'
+            Expression = "Set-Variable -Name PulseSandboxCanary -Value 'leaked-out' -Scope Global; `$true"
+        }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        # The expression succeeds inside its OWN sandboxed session state...
+        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+        # ...but nothing escaped into this test process's global scope.
+        (Get-Variable -Name PulseSandboxCanary -Scope Global -ErrorAction SilentlyContinue) | Should -BeNullOrEmpty
+    }
+
+    It 'blocks a raw .NET escape attempt under ConstrainedLanguage (sandbox isolation)' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{
+            Type       = 'Expression'
+            Expression = '[System.IO.File]::Exists("/etc/passwd")'
+        }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].status | Should -Be 'Error'
+    }
+
+    It 'still evaluates a plain boolean Expression rule normally through the sandbox' {
+        $checkTrue = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$Datasets.datasetA.Count -gt 0' }
+        $checkFalse = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Expression'; Expression = '$Datasets.datasetA.Count -gt 99' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($checkTrue, $checkFalse)
+
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0001' }).status | Should -Be 'Pass'
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0002' }).status | Should -Be 'Fail'
+    }
+}
+
+Describe 'Invoke-PulseSandboxedExpression' {
+    It 'evaluates a true expression to Pass' {
+        $result = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '$Datasets.a.Count -gt 0' -Datasets @{ a = @(1, 2) }
+        }
+        $result.Status | Should -Be 'Pass'
+    }
+
+    It 'evaluates a false expression to Fail' {
+        $result = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '$Datasets.a.Count -gt 99' -Datasets @{ a = @(1, 2) }
+        }
+        $result.Status | Should -Be 'Fail'
+    }
+
+    It 'returns Error for a non-boolean result' {
+        $result = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '$Datasets.a.Count' -Datasets @{ a = @(1, 2) }
+        }
+        $result.Status | Should -Be 'Error'
+        $result.Reason | Should -Match 'boolean'
+    }
+
+    It 'returns Error for a script that fails to parse' {
+        $result = InModuleScope TenantPulse {
+            Invoke-PulseSandboxedExpression -Expression '$Datasets.a -gt (' -Datasets @{ a = @(1, 2) }
+        }
+        $result.Status | Should -Be 'Error'
     }
 }

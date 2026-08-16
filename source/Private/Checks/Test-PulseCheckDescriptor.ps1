@@ -208,7 +208,20 @@ function Test-PulseCheckDescriptor {
                 $errors.Add("${Label}: Rule.Function: command '$ruleFunction' does not resolve at import time.")
             }
         } elseif ($ruleType -eq 'Expression') {
-            Test-PulseScalarStringField -Container $rule -Key 'Expression' -FieldPath 'Rule.Expression' -Required | Out-Null
+            $expressionText = Test-PulseScalarStringField -Container $rule -Key 'Expression' -FieldPath 'Rule.Expression' -Required
+            # Parse-check at import time (post-review, do-now minor): a syntax typo in
+            # Rule.Expression previously only surfaced as a per-check Error at evaluation
+            # time, with no file/line context. [scriptblock]::Create parses without
+            # executing - it never runs the expression, just confirms it is valid
+            # PowerShell - so a bad expression is caught here, aggregated with every other
+            # catalog problem, and reported against the descriptor's own file/Id/property.
+            if ($null -ne $expressionText) {
+                try {
+                    [void] [scriptblock]::Create($expressionText)
+                } catch {
+                    $errors.Add("${Label}: Rule.Expression: does not parse as PowerShell: $($_.Exception.Message)")
+                }
+            }
         }
     }
 

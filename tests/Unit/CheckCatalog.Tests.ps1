@@ -130,6 +130,15 @@ Describe 'Import-PulseCheckCatalog' {
         } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0015*Rule.Function*does not resolve*'
     }
 
+    It 'throws naming the file, Id, property and "does not parse" for a Rule.Expression with a PowerShell syntax error' {
+        {
+            InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/bad-expression-syntax') {
+                param($path)
+                Import-PulseCheckCatalog -Path $path
+            }
+        } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0020*Rule.Expression*does not parse*'
+    }
+
     It 'throws naming the file, the (malformed) Id value, property and "does not match" for a malformed Id' {
         {
             InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/bad-id') {

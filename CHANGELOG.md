@@ -100,3 +100,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - In case of vulnerabilities.
+- `Invoke-PulseEvaluation`: Expression-type check rules now execute in
+  `Invoke-PulseSandboxedExpression`'s own fresh, isolated PowerShell runspace
+  (`ConstrainedLanguage`, no ambient variables, no scope chain to the caller, only a
+  deep-cloned `$Datasets`) instead of in-process via `ScriptBlock.InvokeWithContext`.
+  The prior implementation was proven able to read `$operatorKey` (the raw HMAC
+  pseudonymization key) and other caller-scope variables, write parent/global scope,
+  mutate the shared dataset cache by reference, and reach TenantPulse's own private
+  functions from within a check descriptor's Rule.Expression text. A malformed or
+  duck-typed rule result whose evidence entry lacked an `Identity` previously threw
+  outside the per-check `try`/`catch`, at the redaction-map build step, aborting the
+  entire evaluation run instead of degrading only that one check to `Error` - evidence
+  is now normalized and validated inside `Invoke-PulseCheckEvaluation`'s own
+  containment boundary via a shared `ConvertTo-PulseNormalizedEvidence` helper.
+  Datasets are now deep-cloned per check for both rule types, closing a related
+  isolation gap where one check's in-place mutation could change what a later check
+  (sharing the same cached dataset) observed.

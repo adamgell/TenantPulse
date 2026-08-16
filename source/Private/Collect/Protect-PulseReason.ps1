@@ -27,7 +27,15 @@ function Protect-PulseReason {
         [AllowEmptyString()]
         [string] $Message,
 
+        # AllowEmptyString (post-review, Task 1.6): the docstring below already documents
+        # "-ProfileId alone is redacted whenever this is omitted or empty" - the evaluator
+        # (Invoke-PulseEvaluation) has no raw profile id to redact by the time it runs (the
+        # manifest's own `tenant` field is already a pseudonym), so it deliberately calls
+        # this with -ProfileId '' to get the 500-character cap with no substring
+        # replacement. Without this attribute a Mandatory [string] parameter rejects an
+        # empty string outright, which contradicted that documented behavior.
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
