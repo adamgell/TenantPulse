@@ -30,12 +30,31 @@
     expected, silent-redact case with no gap.
 
     KNOWN-SAFE WHITELIST (deliberately small and explicit, matching the two `@odata.type`
-    suffixes T2.0's own golden fixtures actually exercise - see docs/spike/2026-08-16-
-    settings-catalog-spike.md): `StringSettingValue`, `IntegerSettingValue`. Anything else -
+    shapes T2.0's own golden fixtures actually exercise - see docs/spike/2026-08-16-
+    settings-catalog-spike.md): the two FULLY-QUALIFIED strings
+    `#microsoft.graph.deviceManagementConfigurationStringSettingValue` and
+    `#microsoft.graph.deviceManagementConfigurationIntegerSettingValue`. Anything else -
     including a value shape this task's fixtures never saw - is NOT assumed safe; it is
     classified secret (fail closed) so a future/unrecognized Settings Catalog value shape
     can never silently leak through as "not secret" just because nobody has written a rule
     for it yet.
+
+    EXACT MATCH, NOT SUFFIX (re-review round 2 - reproduced bypass): the whitelist is
+    compared as an EXACT, case-insensitive, FULLY-QUALIFIED string
+    ([string]::Equals(..., OrdinalIgnoreCase)) - mirroring exactly the fix
+    Test-PulseSettingsCatalogInstanceType already applies to the five known instance types
+    (ConvertTo-PulseSettingRows.ps1's own P1-9 fix), for the identical reason. The pre-fix
+    shape here matched by SUFFIX (`(?i)$([regex]::Escape($safeShape))$`), which the
+    re-review reproduced as a real secret-leak bypass: a value whose `@odata.type` merely
+    ENDS in `...IntegerSettingValue` - e.g. a hypothetical/unknown
+    `#microsoft.graph.deviceManagementConfigurationFutureIntegerSettingValue` - matched the
+    whitelist and shipped `redacted:false` with the plaintext value intact and ZERO gaps,
+    the exact opposite of this function's own FAIL CLOSED contract above. Note this is
+    asymmetric with the SECRET-type check just above (case 2): that one is INTENTIONALLY
+    still a suffix match - over-matching a string as secret only ever REDACTS something
+    that might not strictly have needed it (fails closed, safe direction); only the
+    known-safe whitelist's suffix match was the actual vulnerability, because over-matching
+    THERE means classifying something safe that is not.
 
     ValueState VALIDATION: only Graph's own three documented enum-ish values -
     'notEncrypted', 'encryptedValueToken', 'invalidValueState' - are ever returned in
@@ -47,7 +66,12 @@
     known values.
 #>
 
-$script:PulseSettingsCatalogKnownSafeValueShapes = @('StringSettingValue', 'IntegerSettingValue')
+# EXACT, fully-qualified strings (re-review round 2 - see this file's own EXACT MATCH, NOT
+# SUFFIX docstring section for the reproduced suffix-match secret-leak bypass this closes).
+$script:PulseSettingsCatalogKnownSafeValueShapes = @(
+    '#microsoft.graph.deviceManagementConfigurationStringSettingValue'
+    '#microsoft.graph.deviceManagementConfigurationIntegerSettingValue'
+)
 $script:PulseSettingsCatalogKnownValueStates = @('notEncrypted', 'encryptedValueToken', 'invalidValueState')
 
 function Get-PulseSettingsCatalogValueProperty {
@@ -164,7 +188,7 @@ function Resolve-PulseSettingsCatalogValueClassification {
     $isKnownSafeShape = $false
     if ($hasDiscriminator) {
         foreach ($safeShape in $script:PulseSettingsCatalogKnownSafeValueShapes) {
-            if ($odataType -match "(?i)$([regex]::Escape($safeShape))`$") {
+            if ([string]::Equals($odataType, $safeShape, [System.StringComparison]::OrdinalIgnoreCase)) {
                 $isKnownSafeShape = $true
                 break
             }

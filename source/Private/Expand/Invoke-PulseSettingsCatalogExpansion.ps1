@@ -339,18 +339,32 @@ function Invoke-PulseSettingsCatalogExpansion {
     $allRows = [System.Collections.Generic.List[object]]::new()
     $gapEntries = [System.Collections.Generic.List[object]]::new()
 
-    # READ-ONLY ENFORCEMENT (P0/task-review Critical): asserted ONCE here, before any
-    # per-policy fetch/BeginInvoke is issued - not per policy (this is a static, no-network
-    # metadata-catalog lookup against GraphKit's own descriptor table, not something that
-    # can drift call-to-call within one run) and not inside Invoke-PulseSettingsCatalogPolicy
-    # itself (which would mean re-resolving the SAME descriptor up to N times for an
-    # N-policy fan-out, including once per parallel worker runspace, for no additional
-    # safety). Skipped entirely on -FromCapturedPayloads: that path makes no Graph call at
-    # all, so there is no descriptor to assert against and GraphKit need not even be
-    # loaded. A genuine read-only-predicate violation is fatal (module-authoring bug,
+    # READ-ONLY ENFORCEMENT (P0/task-review Critical) - TWO ASSERTION POINTS, BY DESIGN, NOT
+    # A CONTRADICTION (re-review round 2 fix - a prior revision of this comment claimed the
+    # assertion ran "not inside Invoke-PulseSettingsCatalogPolicy", which was never true of
+    # the actual code - see that file's own READ-ONLY ENFORCEMENT section for its half):
+    #   1. HERE, once, before any per-policy fetch/BeginInvoke is issued at all - a fast-fail
+    #      for the common case: if the descriptor is genuinely broken, this catches it before
+    #      a single Graph call or worker is spun up, rather than only discovering it after
+    #      dispatching some number of policies. Skipped entirely on -FromCapturedPayloads
+    #      (that path makes no Graph call at all, so there is no descriptor to assert against
+    #      and GraphKit need not even be loaded).
+    #   2. ALSO inside Invoke-PulseSettingsCatalogPolicy itself, once per policy, immediately
+    #      before ITS OWN Get-GraphObject call - required, not redundant, on the PARALLEL
+    #      path: each worker runs in its own RunspacePool runspace and does not inherit
+    #      anything this function checked in the parent runspace, so a worker that skipped
+    #      its own assertion would have no read-only guard at all. The per-policy check is
+    #      the one that actually backs the "never a write-shaped descriptor" guarantee for
+    #      every dispatched Graph call; this function's own upfront check is an
+    #      early-exit optimization on top of it, not a replacement for it - a broken
+    #      descriptor is still caught (as a per-policy gap) by (2) even if some other future
+    #      change ever bypassed (1).
+    # A genuine read-only-predicate violation is fatal at both points (module-authoring bug,
     # matches Assert-PulseReadOnlyDescriptor's own contract - see Invoke-PulseCollection's
-    # identical pattern); a 'descriptor-version-drift' message is downgraded to NotExpanded
-    # instead, exactly like Invoke-PulseCollection downgrades a per-dataset drift to Failed.
+    # identical pattern); a 'descriptor-version-drift' message downgrades to NotExpanded here
+    # (nothing has been attempted yet) or to a per-policy gap in Invoke-PulseSettingsCatalogPolicy
+    # (that one policy's fetch is abandoned, the rest of the fan-out continues) - exactly
+    # like Invoke-PulseCollection downgrades a per-dataset drift to Failed.
     if (-not $FromCapturedPayloads.IsPresent) {
         try {
             Assert-PulseReadOnlyDescriptor -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' -ApiVersion 'beta'

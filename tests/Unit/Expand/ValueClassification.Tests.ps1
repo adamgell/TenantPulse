@@ -91,4 +91,75 @@ Describe 'Resolve-PulseSettingsCatalogValueClassification (P0-2 shared classifie
             $result.ValueState | Should -Be $state
         }
     }
+
+    It 'SUFFIX-BYPASS (re-review round 2, reproduced): an @odata.type that merely ENDS in "...IntegerSettingValue" but is NOT the real fully-qualified type fails closed - no plaintext leak' {
+        $plantedSecret = 'PLANTED-plaintext-suffix-bypass-zzz777'
+        # Same textual SUFFIX as the real known-safe type ('...IntegerSettingValue'), but a
+        # DIFFERENT, unrecognized fully-qualified type - the exact shape a suffix-regex
+        # whitelist would have wrongly classified safe.
+        $value = [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.deviceManagementConfigurationFutureIntegerSettingValue'
+            value         = $plantedSecret
+        }
+        $result = InModuleScope TenantPulse -ArgumentList $value { param($v) Resolve-PulseSettingsCatalogValueClassification -SettingValue $v }
+
+        $result.IsSecret | Should -BeTrue -Because 'a suffix-only match must not satisfy the known-safe whitelist'
+        $result.IsKnownSafeShape | Should -BeFalse
+        $result.IsSecretByType | Should -BeFalse
+
+        $serialized = $result | ConvertTo-Json -Depth 10 -Compress
+        $serialized | Should -Not -Match ([regex]::Escape($plantedSecret))
+    }
+
+    It 'SUFFIX-BYPASS (re-review round 2, reproduced): the same trap for "...StringSettingValue" also fails closed' {
+        $plantedSecret = 'PLANTED-plaintext-string-suffix-bypass-qqq888'
+        $value = [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.deviceManagementConfigurationLegacyStringSettingValue'
+            value         = $plantedSecret
+        }
+        $result = InModuleScope TenantPulse -ArgumentList $value { param($v) Resolve-PulseSettingsCatalogValueClassification -SettingValue $v }
+
+        $result.IsSecret | Should -BeTrue
+        $result.IsKnownSafeShape | Should -BeFalse
+    }
+
+    It 'the REAL fully-qualified StringSettingValue/IntegerSettingValue types (exact match) still classify safe' {
+        $stringValue = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.deviceManagementConfigurationStringSettingValue'; value = 'ok' }
+        $integerValue = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.deviceManagementConfigurationIntegerSettingValue'; value = 1 }
+
+        $stringResult = InModuleScope TenantPulse -ArgumentList $stringValue { param($v) Resolve-PulseSettingsCatalogValueClassification -SettingValue $v }
+        $integerResult = InModuleScope TenantPulse -ArgumentList $integerValue { param($v) Resolve-PulseSettingsCatalogValueClassification -SettingValue $v }
+
+        $stringResult.IsKnownSafeShape | Should -BeTrue
+        $stringResult.IsSecret | Should -BeFalse
+        $integerResult.IsKnownSafeShape | Should -BeTrue
+        $integerResult.IsSecret | Should -BeFalse
+    }
+
+    It 'END-TO-END SUFFIX-BYPASS: the walker never emits plaintext for a suffix-bypass-shaped simpleSettingValue' {
+        $plantedSecret = 'PLANTED-walker-suffix-bypass-yyy999'
+        $settingsPayload = [pscustomobject]@{
+            id              = '0'
+            settingInstance = [pscustomobject]@{
+                '@odata.type'       = '#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance'
+                settingDefinitionId = 'setting-suffix-bypass'
+                simpleSettingValue  = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.deviceManagementConfigurationFutureIntegerSettingValue'
+                    value         = $plantedSecret
+                }
+            }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $settingsPayload {
+            param($settingsPayload)
+            ConvertTo-PulseSettingRows -PolicyId 'policy-suffix-bypass-1' -SettingsPayload $settingsPayload
+        }
+
+        $row = $result.Rows[0]
+        $row.redacted | Should -BeTrue
+        $row.value | Should -BeNullOrEmpty
+
+        $serialized = $row | ConvertTo-Json -Depth 20 -Compress
+        $serialized | Should -Not -Match ([regex]::Escape($plantedSecret))
+    }
 }
