@@ -178,9 +178,13 @@
 # resolution): net +3 It cases in tests/Unit/Checks/TP.ENT.0013.Tests.ps1 (2 new Fail
 # cases, 1 new Pass-shape assertion folded into the existing two Pass tests rather than
 # duplicated) plus per-file SecretScan.tests.ps1 growth for this commit's changed files.
-# 1195 is the real, measured ./build.ps1 -Tasks test total; all four tracking locations
-# bumped together in this commit per the standing RATCHET rule.
-$script:tenantPulseGateMinimumTests = 1195
+# 1195 -> 1199 (Task 4.3 wave 2, TP.ENT.0015 - EIDSCA PR02/PR03/PR05/PR06
+# UNVERIFIED-flag resolution): +4 net new It cases in tests/Unit/Checks/TP.ENT.0015.Tests.ps1
+# (4 new Fail cases covering PR02/PR03/PR05/PR06 independently) plus per-file
+# SecretScan.tests.ps1 growth for this commit's changed files. 1199 is the real, measured
+# ./build.ps1 -Tasks test total; all four tracking locations bumped together in this
+# commit per the standing RATCHET rule.
+$script:tenantPulseGateMinimumTests = 1199
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

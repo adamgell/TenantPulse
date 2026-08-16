@@ -59,8 +59,17 @@ Describe 'TP.ENT.0015 - Password Protection mode (EIDSCA.PR01)' {
         ($catalog | Where-Object { $_.Id -eq 'TP.ENT.0015' }) | Should -Not -BeNullOrEmpty
     }
 
-    It 'Pass: BannedPasswordCheckOnPremisesMode explicitly set to Enforce (hashtable shape)' {
-        $rows = @(@{ id = 's1'; values = @(@{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Enforce' }) })
+    It 'Pass: all five PR0x settings explicitly set to their recommended values (hashtable shape)' {
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Enforce' }
+                    @{ name = 'EnableBannedPasswordCheckOnPremises'; value = 'True' }
+                    @{ name = 'EnableBannedPasswordCheck'; value = 'True' }
+                    @{ name = 'LockoutDurationInSeconds'; value = '120' }
+                    @{ name = 'LockoutThreshold'; value = '5' }
+                )
+            })
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0015' -Datasets @(
             @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
         )
@@ -69,7 +78,16 @@ Describe 'TP.ENT.0015 - Password Protection mode (EIDSCA.PR01)' {
     }
 
     It 'Pass (PSObject shape)' {
-        $rows = @(@{ id = 's1'; values = @(@{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Enforce' }) })
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Enforce' }
+                    @{ name = 'EnableBannedPasswordCheckOnPremises'; value = 'True' }
+                    @{ name = 'EnableBannedPasswordCheck'; value = 'True' }
+                    @{ name = 'LockoutDurationInSeconds'; value = '60' }
+                    @{ name = 'LockoutThreshold'; value = '10' }
+                )
+            })
         $pso = @(ConvertTo-PSObjectShape -Value $rows[0])
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0015' -Datasets @(
             @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $pso }
@@ -79,7 +97,16 @@ Describe 'TP.ENT.0015 - Password Protection mode (EIDSCA.PR01)' {
     }
 
     It 'Fail: mode explicitly set to Audit - the audit-vs-enforce trap' {
-        $rows = @(@{ id = 's1'; values = @(@{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Audit' }) })
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Audit' }
+                    @{ name = 'EnableBannedPasswordCheckOnPremises'; value = 'True' }
+                    @{ name = 'EnableBannedPasswordCheck'; value = 'True' }
+                    @{ name = 'LockoutDurationInSeconds'; value = '60' }
+                    @{ name = 'LockoutThreshold'; value = '10' }
+                )
+            })
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0015' -Datasets @(
             @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
         )
@@ -88,13 +115,93 @@ Describe 'TP.ENT.0015 - Password Protection mode (EIDSCA.PR01)' {
         $finding.reason | Should -Match "mode 'Audit'"
     }
 
-    It 'Fail: setting never customized - defaults to the non-enforcing EIDSCA default (Audit)' {
+    It 'Fail: setting never customized - defaults to the non-enforcing EIDSCA defaults (Audit, PR02 False)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0015' -Datasets @(
             @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = @() }
         )
 
         $finding.status | Should -Be 'Fail'
         $finding.reason | Should -Match "mode 'Audit'"
+        $finding.reason | Should -Match 'EIDSCA.PR02'
+        ($finding.evidence | Where-Object identity -eq 'EIDSCA.PR03').detail.ok | Should -Be $true
+        ($finding.evidence | Where-Object identity -eq 'EIDSCA.PR05').detail.ok | Should -Be $true
+        ($finding.evidence | Where-Object identity -eq 'EIDSCA.PR06').detail.ok | Should -Be $true
+    }
+
+    It 'Fail: PR02 on-premises proxy explicitly disabled' {
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Enforce' }
+                    @{ name = 'EnableBannedPasswordCheckOnPremises'; value = 'False' }
+                    @{ name = 'EnableBannedPasswordCheck'; value = 'True' }
+                    @{ name = 'LockoutDurationInSeconds'; value = '60' }
+                    @{ name = 'LockoutThreshold'; value = '10' }
+                )
+            })
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0015' -Datasets @(
+            @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'EIDSCA.PR02'
+    }
+
+    It 'Fail: PR03 custom banned-password list explicitly disabled' {
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Enforce' }
+                    @{ name = 'EnableBannedPasswordCheckOnPremises'; value = 'True' }
+                    @{ name = 'EnableBannedPasswordCheck'; value = 'False' }
+                    @{ name = 'LockoutDurationInSeconds'; value = '60' }
+                    @{ name = 'LockoutThreshold'; value = '10' }
+                )
+            })
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0015' -Datasets @(
+            @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'EIDSCA.PR03'
+    }
+
+    It 'Fail: PR05 lockout duration below the 60-second minimum' {
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Enforce' }
+                    @{ name = 'EnableBannedPasswordCheckOnPremises'; value = 'True' }
+                    @{ name = 'EnableBannedPasswordCheck'; value = 'True' }
+                    @{ name = 'LockoutDurationInSeconds'; value = '30' }
+                    @{ name = 'LockoutThreshold'; value = '10' }
+                )
+            })
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0015' -Datasets @(
+            @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'EIDSCA.PR05'
+    }
+
+    It 'Fail: PR06 lockout threshold above the 10-attempt maximum' {
+        $rows = @(@{
+                id     = 's1'
+                values = @(
+                    @{ name = 'BannedPasswordCheckOnPremisesMode'; value = 'Enforce' }
+                    @{ name = 'EnableBannedPasswordCheckOnPremises'; value = 'True' }
+                    @{ name = 'EnableBannedPasswordCheck'; value = 'True' }
+                    @{ name = 'LockoutDurationInSeconds'; value = '60' }
+                    @{ name = 'LockoutThreshold'; value = '15' }
+                )
+            })
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0015' -Datasets @(
+            @{ Name = 'directorySettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'EIDSCA.PR06'
     }
 
     It 'descriptor-pending: NotApplicable when directorySettings was skipped (no released GraphKit descriptor)' {
