@@ -19,9 +19,9 @@
     ChangelogManagement         = 'latest'
     Sampler                     = '0.120.1'
 
-    # NOTE: GraphKit is a runtime dependency (see source/TenantPulse.psd1 RequiredModules)
-    # but is intentionally NOT listed here. GraphKit is not yet published to PSGallery, so
-    # Resolve-Dependency (PSResourceGet/PowerShellGet against PSGallery) cannot resolve it
-    # and the build would fail before it started. Once GraphKit is published this entry can
-    # be added back.
+    # GraphKit is a runtime dependency (see source/TenantPulse.psd1 RequiredModules,
+    # pinned to the same version) and is now published to PSGallery, so
+    # Resolve-Dependency (PSResourceGet/PowerShellGet against PSGallery) resolves it here
+    # like every other build dependency.
+    GraphKit                    = '0.1.0'
 }

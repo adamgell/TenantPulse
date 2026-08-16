@@ -18,15 +18,27 @@
         "broken". Any other failure is written Failed with the caught error's message. A
         dataset flagged Pending in DatasetMap.psd1 (no GraphKit descriptor exists yet) is
         written Skipped with reason 'descriptor-pending: awaiting GraphKit release' and
-        never attempted at all. If acquiring a GraphKit context for -ProfileId fails
-        outright (a total auth failure before any dataset could even be attempted), the
-        snapshot is still written: every dataset is recorded Failed and the manifest's
-        top-level collectionFailure names the reason - collection never silently produces
-        an empty, unexplained snapshot.
+        never attempted at all.
 
-        The tenant identifier is never written to the snapshot in the clear: the manifest's
-        `tenant` field is always the HMAC pseudonym of -ProfileId (Get-PulsePseudonym under
-        the local operator key), matching the module-wide pseudonymization rule.
+        Two distinct paths cover a total authentication failure, because GraphKit's
+        Get-GraphContext performs zero network calls and never acquires a token (see its
+        own docstring): if resolving a context for -ProfileId fails outright before any
+        dataset could even be attempted (a malformed profile, a broken profile store), the
+        snapshot is still written with every dataset Failed and the top-level
+        collectionFailure set. If context resolution succeeds but the *first* dataset
+        attempt is the one that actually discovers the auth failure (an expired
+        certificate, a revoked app registration - an AADSTS-shaped error), that dataset is
+        written Failed, collectionFailure is set from that same reason, and every
+        remaining dataset is written Failed with reason 'auth-failure: collection aborted'
+        with no further Graph calls - they would all fail identically. Either way,
+        collection never silently produces an empty, unexplained snapshot.
+
+        The tenant identifier is never written to the snapshot in the clear, in the
+        `tenant` field or in any reason string: the manifest's `tenant` field is always the
+        HMAC pseudonym of -ProfileId (Get-PulsePseudonym under the local operator key),
+        and every reason is routed through Protect-PulseReason, which redacts -ProfileId
+        (and the raw tenant id, once resolved) out of any caught exception message before
+        it is ever written to the snapshot.
 
     .EXAMPLE
         Get-PulseTenantSnapshot -ProfileId 'contoso' -Path './snapshot'
@@ -73,9 +85,11 @@ function Get-PulseTenantSnapshot {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string] $Path,
 
         [Parameter()]
@@ -140,13 +154,20 @@ function Get-PulseTenantSnapshot {
     $store = New-PulseSnapshotStore -Path $Path -Tenant $tenantPseudonym
 
     try {
-        $context = Get-GraphContext -ProfileId $ProfileId
+        # GraphKit's Get-GraphContext performs zero network calls and never acquires a
+        # token (see its own docstring) - this can fail on a malformed/unknown ProfileId
+        # or a broken profile store, but a real *authentication* failure will not surface
+        # here. That case is handled inside Invoke-PulseCollection instead, at the first
+        # dataset attempt that actually talks to Graph (see its AuthFailure handling) -
+        # both paths converge on the same collectionFailure contract, this one just covers
+        # the failure mode that genuinely happens before any dataset could be attempted.
+        $context = Get-GraphContext -ProfileId $ProfileId -ErrorAction Stop
     } catch {
         # Total collection failure: no dataset could even be attempted. The snapshot is
         # still written - every dataset Failed, plus the top-level collectionFailure - so
         # a caller never mistakes "we never got a token" for "the tenant has no data" or
         # loses the run's provenance entirely.
-        $failureReason = "auth: $($_.Exception.Message)"
+        $failureReason = Protect-PulseReason -Message "auth: $($_.Exception.Message)" -ProfileId $ProfileId -Pseudonym $tenantPseudonym
 
         foreach ($entry in $manifest) {
             Write-PulseDataset -Store $store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' -Reason $failureReason
@@ -157,7 +178,7 @@ function Get-PulseTenantSnapshot {
         return $store
     }
 
-    Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context
+    Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
 
     return $store
 }

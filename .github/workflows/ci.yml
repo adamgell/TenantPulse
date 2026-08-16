@@ -157,7 +157,11 @@ jobs:
           # GraphKit commands TenantPulse calls (Get-GraphContext, Get-GraphObject,
           # Invoke-GraphOperation, Get-GraphOperation) are stubbed directly inside the
           # TenantPulse module scope in BeforeAll with a default throwing mock
-          # registered first, so these tests never depend on a real GraphKit install:
+          # registered first. GraphKit 0.1.0 is a real, importable RequiredModules
+          # dependency of TenantPulse itself (published to PSGallery) and IS present in
+          # the test environment - it is the module-scope stub shadowing every call
+          # TenantPulse's own code makes, not GraphKit's absence, that keeps these tests
+          # deterministic and independent of a live tenant:
           # 18 Get-PulseTenantSnapshot.Tests.ps1 tests covering manifest
           # dedup/union/unknown-dataset/ordinal-sort/Pending-passthrough (6),
           # Assert-PulseReadOnlyDescriptor throwing for Write/NeverReplay and passing
@@ -171,9 +175,36 @@ jobs:
           # with every dataset Failed and collectionFailure set, and -IncludeCategory
           # narrows the collected dataset set (3). Plus the "Quality for module" and
           # "Help for module" Describe blocks now actually running against the first
-          # exported function (8 more, via module.tests.ps1's -ForEach) = 99. This
-          # minimum must keep ratcheting up as check/function test suites are added in
-          # later tasks - see docs/superpowers/sdd for the phase plan.
+          # exported function (8 more, via module.tests.ps1's -ForEach) = 99. Task 1.5's
+          # two-reviewer fix round then closed six gaps: Get-PulseFailureClass is now
+          # TOTAL (a nested TryParse-based status-code conversion, never a bare [int]
+          # cast that throws on a string StatusCode like "403 Forbidden", and the whole
+          # body wrapped so a $null ErrorRecord or a garbage-typed status value can never
+          # itself throw out of the collector's catch), gained an AuthFailure
+          # classification (401 / AADSTS-code / "token acquisition" / "unauthorized"
+          # shapes); a new Protect-PulseReason redacts -ProfileId (and, once resolved,
+          # the raw tenant id) out of every reason string before it reaches the manifest,
+          # capped at 500 chars, routed through unconditionally in both
+          # Get-PulseTenantSnapshot and Invoke-PulseCollection; Invoke-PulseCollection
+          # now handles the lazy-auth case GraphKit's zero-network-call Get-GraphContext
+          # implies - an AuthFailure at the FIRST dataset attempt sets collectionFailure,
+          # fails every remaining dataset with reason 'auth-failure: collection aborted'
+          # and makes no further Graph calls, then returns (the store is still written);
+          # Assert-PulseReadOnlyDescriptor gained an -ApiVersion drift check, downgraded
+          # to a per-dataset Failed outcome (never run-aborting, unlike the read-only
+          # predicate violation which stays fatal); every GraphKit-facing call
+          # (Get-GraphContext, Get-GraphObject, Get-GraphOperation) now passes
+          # -ErrorAction Stop so a non-terminating error can never record a silently
+          # empty Collected dataset; and -ProfileId/-Path both gained
+          # [ValidateNotNullOrEmpty()]. 18 new tests (99 -> 117): AuthFailure/never-throws
+          # classification coverage for Get-PulseFailureClass (7), Protect-PulseReason
+          # redaction/cap/empty-message coverage (4), Assert-PulseReadOnlyDescriptor
+          # ApiVersion-match/drift coverage (2), Invoke-PulseCollection's version-drift
+          # downgrade, lazy-auth abort, and reason-redaction coverage (3), and
+          # Get-PulseTenantSnapshot's lazy-auth-at-first-dataset and empty-ProfileId/
+          # -Path validation coverage (2). This minimum must keep ratcheting up as
+          # check/function test suites are added in later tasks - see docs/superpowers/sdd
+          # for the phase plan.
           #
           # -AllowNotRun 0: the "Quality for module" (2 It) and "Help for module" (4
           # It) Describe blocks now have exactly one function (Get-PulseTenantSnapshot)
@@ -182,4 +213,4 @@ jobs:
           # Task 1.4's placeholder allowance is gone; any NotRun block reappearing here
           # means test-case generation silently broke again and must be investigated,
           # not re-allowed.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 99 -AllowedSkips 0 -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 117 -AllowedSkips 0 -AllowNotRun 0

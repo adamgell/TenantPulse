@@ -16,8 +16,7 @@ model are not yet stable.
 ## Requirements
 
 - PowerShell 7.4 or later
-- [GraphKit](https://github.com/AdamGell/GraphKit) (not yet published to PSGallery; see
-  Development below)
+- [GraphKit](https://github.com/AdamGell/GraphKit) 0.1.0 or later (published to PSGallery)
 
 ## Development
 
@@ -35,11 +34,18 @@ The `pack` task produces the package from the tested build output. Generated art
 are written under `output/` and should not be edited directly.
 
 GraphKit is declared as a runtime dependency in the module manifest
-(`source/TenantPulse.psd1`) but is intentionally omitted from `RequiredModules.psd1`
-(the Sampler build-dependency file): GraphKit is not yet published to PSGallery, so
-`Resolve-Dependency` cannot resolve it there. Until GraphKit is published, make it
-available on `$env:PSModulePath` locally (for example, by building GraphKit and adding
-its `output/module/GraphKit` directory to the path) before importing TenantPulse.
+(`source/TenantPulse.psd1`) and pinned to the same version in `RequiredModules.psd1`
+(the Sampler build-dependency file), so `./build.ps1 -ResolveDependency` resolves it from
+PSGallery like every other build dependency - no manual `$env:PSModulePath` setup needed.
+
+Unit tests never import real GraphKit: every GraphKit command TenantPulse calls
+(`Get-GraphContext`, `Get-GraphObject`, `Invoke-GraphOperation`, `Get-GraphOperation`) is
+stubbed inside the TenantPulse module scope in each test file's `BeforeAll`, with a
+default mock that throws registered before any test-specific mock (GraphKit's own test
+convention). GraphKit is still importable in the test environment (it is a
+`RequiredModules` dependency of TenantPulse itself), but the module-scope stubs shadow it
+for every call TenantPulse's own code makes - that shadowing, not the absence of
+GraphKit, is what keeps the tests deterministic and independent of a live tenant.
 
 ## Project layout
 
