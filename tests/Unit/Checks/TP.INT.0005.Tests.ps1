@@ -209,4 +209,42 @@ Describe 'TP.INT.0005 - Devices inactive for more than 90 days' {
         $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Be 'throttled: too many requests'
     }
+
+    # Item 13 (final fix wave): a malformed snapshot createdUtc must surface as Error, never
+    # silently fall back to wall-clock "now" (which would mask the staleness cutoff being
+    # undeterminable). Invoke-PulseEvaluation always populates $Context.EvaluationCutoffBase
+    # from the manifest's own createdUtc, so this hand-corrupts manifest.json directly - the
+    # only way to reach this path, since New-PulseSnapshotStore itself always writes a valid
+    # timestamp.
+    It 'Error: a malformed snapshot createdUtc never falls back to wall-clock time (final fix wave, item 13)' {
+        $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $keyPath = Join-Path $storeRoot '.opkey/operator.key'
+
+        try {
+            $finding = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath {
+                param($storeRoot, $keyPath)
+
+                $catalog = @(Import-PulseCheckCatalog)
+                $check = $catalog | Where-Object { $_.Id -eq 'TP.INT.0005' }
+
+                $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+                Write-PulseDataset -Store $store -Name 'managedDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data @([pscustomobject]@{ id = 'm1'; deviceName = 'device-1'; lastSyncDateTime = (Get-Date).ToString('o') })
+                Write-PulseDataset -Store $store -Name 'entraDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data @()
+
+                # Corrupt createdUtc directly - the only way to reach this without a
+                # dedicated malformed-manifest constructor.
+                $manifestJson = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+                $manifestJson.createdUtc = 'banana'
+                Set-Content -LiteralPath $store.ManifestPath -Value ($manifestJson | ConvertTo-Json -Depth 10) -NoNewline -Encoding utf8
+
+                $evaluation = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $evaluation.Document.findings[0]
+            }
+
+            $finding.status | Should -Be 'Error'
+            $finding.reason | Should -Match 'banana'
+        } finally {
+            Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }

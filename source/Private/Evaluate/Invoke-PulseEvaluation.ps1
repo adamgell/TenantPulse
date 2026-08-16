@@ -373,7 +373,15 @@ function Invoke-PulseCheckEvaluation {
 
         $entry = $manifestDatasets[$name]
 
-        if ($entry.status -eq 'Failed' -or $entry.status -eq 'Skipped') {
+        # Fail-closed gate (post-review fix): compares against the ONE known-good status
+        # ('Collected') rather than enumerating the known-bad ones ('Failed'/'Skipped').
+        # Enumerating bad statuses means a novel, unrecognized status string (a future
+        # collector status this evaluator has never heard of, or a corrupted manifest
+        # value) falls through as if it were 'Collected' and gets read - exactly the
+        # silent-gap failure this module forbids everywhere else. Gating on `-ne 'Collected'`
+        # instead means ANY status other than the one this evaluator actually trusts is
+        # degraded to NotApplicable, including one that does not exist yet.
+        if ($entry.status -ne 'Collected') {
             $reason = $entry.reason
             if ([string]::IsNullOrEmpty($reason)) {
                 $reason = "dataset '$name' has status '$($entry.status)' with no reason recorded."

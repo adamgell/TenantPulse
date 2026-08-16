@@ -29,7 +29,10 @@
               to that same reason, every REMAINING (not yet attempted) dataset in the
               manifest is written Failed with reason 'auth-failure: collection aborted'
               with NO further Graph calls (they would all fail identically), and
-              collection stops.
+              collection stops - EXCEPT a remaining entry that is itself Pending
+              (post-review fix): it keeps its normal descriptor-pending Skipped outcome
+              rather than being overwritten to auth-failure, since it was never going to
+              be attempted this run regardless of the auth failure.
             * Anything else writes Failed with the caught exception's (redacted) message
               as the reason.
 
@@ -202,16 +205,40 @@ function Invoke-PulseCollection {
                 Set-PulseManifestEntry -Store $Store -CollectionFailure $redactedReason
 
                 # No further Graph calls: every remaining dataset would fail identically
-                # against the same broken auth context.
+                # against the same broken auth context. A remaining entry that is itself
+                # Pending (post-review fix) is the ONE exception: it was never going to be
+                # attempted this run regardless of the auth failure (see the Pending branch
+                # above - no descriptor exists for it yet), so overwriting its reason to
+                # 'auth-failure: collection aborted' would replace an accurate, unrelated
+                # explanation ('descriptor-pending: ...') with a misleading one that blames
+                # this run's auth failure for a gap that predates it and is independent of
+                # it. Pending entries are written Skipped with their normal
+                # descriptor-pending reason instead, exactly as the non-aborted Pending
+                # branch above would have written them.
                 $remainingReason = Protect-PulseReason -Message 'auth-failure: collection aborted' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                 for ($j = $i + 1; $j -lt $Manifest.Count; $j++) {
                     $remaining = $Manifest[$j]
+                    if ($remaining.Pending) {
+                        $pendingDatasets.Add($remaining.Dataset) | Out-Null
+                        $pendingReason = Protect-PulseReason -Message 'descriptor-pending: awaiting GraphKit release' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                        Write-PulseDataset -Store $Store -Name $remaining.Dataset -ApiVersion $remaining.ApiVersion -Status 'Skipped' -Reason $pendingReason
+                        continue
+                    }
                     Write-PulseDataset -Store $Store -Name $remaining.Dataset -ApiVersion $remaining.ApiVersion -Status 'Failed' -Reason $remainingReason
                 }
 
                 return
             } else {
-                $reason = Protect-PulseReason -Message $_.Exception.Message -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                # Supplemental status recovery failure (post-review fix): a $null
+                # -SupplementalStatusCode here means Get-PulseGraphFailureStatusCode could
+                # not recover a real HTTP status code for this failure (see its own
+                # docstring/Write-Warning) - this Failed classification is therefore based
+                # on weaker signal than usual. That must be visible in the artifact itself,
+                # not only in a console warning an operator may never see - '(status
+                # unknown)' is appended to the reason so a reader of the snapshot manifest
+                # can tell this case apart from a Failed reason backed by a recovered code.
+                $statusSuffix = if ($null -eq $supplementalStatusCode) { ' (status unknown)' } else { '' }
+                $reason = Protect-PulseReason -Message "$($_.Exception.Message)$statusSuffix" -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                 Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' -Reason $reason
             }
         }

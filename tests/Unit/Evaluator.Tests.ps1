@@ -389,6 +389,38 @@ Describe 'Invoke-PulseEvaluation' {
         $finding.reason | Should -Be 'permission-denied: DeviceManagementConfiguration.Read.All'
     }
 
+    # Item 12 (final fix wave): gate on `-ne 'Collected'` rather than enumerating known-bad
+    # statuses - a novel/unrecognized status string must fail closed the same way
+    # Failed/Skipped do, not silently read as collected.
+    It 'degrades to NotApplicable for a novel/unrecognized dataset status string, not just Failed/Skipped (final fix wave, item 12)' {
+        # Write-PulseDataset/Set-PulseManifestEntry both ValidateSet their -Status, so a
+        # truly novel status can only be injected by editing the manifest file directly -
+        # exactly the "a future collector status this evaluator has never heard of, or a
+        # corrupted manifest value" scenario the fix targets.
+        $manifestPath = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            $store.ManifestPath
+        }
+        $manifestText = Get-Content -LiteralPath $manifestPath -Raw
+        $manifestJson = $manifestText | ConvertFrom-Json
+        $manifestJson.datasets | Add-Member -NotePropertyName 'datasetQuarantined' -NotePropertyValue ([pscustomobject]@{
+            status       = 'Quarantined'
+            apiVersion   = 'v1.0'
+            reason       = $null
+            sha256       = $null
+            itemCount    = $null
+            collectedUtc = $null
+        })
+        Set-Content -LiteralPath $manifestPath -Value ($manifestJson | ConvertTo-Json -Depth 10) -NoNewline -Encoding utf8
+
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Datasets @('datasetQuarantined') -Rule @{ Type = 'Expression'; Expression = '$true' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'NotApplicable'
+    }
+
     It 'degrades to NotApplicable for a dataset entirely missing from the manifest' {
         $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Datasets @('datasetNeverCollected') -Rule @{ Type = 'Expression'; Expression = '$true' }
 

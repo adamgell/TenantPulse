@@ -69,17 +69,36 @@ function Test-PulseAdminMfaEnforced {
         return $null
     }
 
+    # 'All' COVERS ADMINS BY DEFINITION (post-review fix): in Entra Conditional Access
+    # policy semantics, conditions.users.includeUsers = @('All') means every user in the
+    # tenant, admins included - there is no way to be an admin role member and NOT be
+    # covered by an 'All' policy. The original shape check only ever looked at
+    # includeRoles, so a tenant-wide MFA policy scoped via includeUsers='All' (a very
+    # common, arguably STRONGER pattern than role-scoping) was not counted toward admin MFA
+    # coverage at all - a false Fail against a tenant doing the right thing.
     $isMfaForRolesShape = {
         param($policy)
         $mechanism = & $getMfaMechanism $policy
         $includeRoles = @($policy.conditions.users.includeRoles)
-        return ($null -ne $mechanism) -and ($includeRoles.Count -gt 0)
+        $includeUsers = @($policy.conditions.users.includeUsers)
+        $coversAllUsers = $includeUsers -contains 'All'
+        return ($null -ne $mechanism) -and (($includeRoles.Count -gt 0) -or $coversAllUsers)
     }
 
     $enabledMfaPolicies = @($allPolicies | Where-Object { $_.state -eq 'enabled' -and (& $isMfaForRolesShape $_) })
 
     $coveredRoleIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($policy in $enabledMfaPolicies) {
+        $includeUsers = @($policy.conditions.users.includeUsers)
+        if ($includeUsers -contains 'All') {
+            # Covers every one of the 9 required roles by definition - see the docstring
+            # note above.
+            foreach ($roleId in $requiredAdminRoles.Keys) {
+                $coveredRoleIds.Add([string] $roleId) | Out-Null
+            }
+            continue
+        }
+
         foreach ($roleId in @($policy.conditions.users.includeRoles)) {
             $coveredRoleIds.Add([string] $roleId) | Out-Null
         }

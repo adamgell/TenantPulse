@@ -24,12 +24,17 @@
     Fail - Fail is reserved for a genuine, provable exclusion gap. See the descriptor's own
     Remediation for the GUID requirement stated to the operator.
 
-    INCLUDE-SCOPE EXEMPTION (post-review, M2): a policy whose conditions.users.includeUsers
-    is explicitly scoped (non-empty, and not the literal 'All') and does not name the
-    break-glass account is PROVABLY unable to apply to that account regardless of its
-    excludeUsers list - there is nothing to exclude FROM. Such a policy is exempted from
-    that account's evidence entirely (not counted as a gap), and this function's Reason
-    notes when an exemption applied.
+    INCLUDE-SCOPE EXEMPTION (post-review, M2; narrowed post-review, fail-closed fix): a
+    policy whose conditions.users.includeUsers is explicitly scoped (non-empty, and not the
+    literal 'All'), does not name the break-glass account, AND has no non-empty
+    includeGroups or includeRoles either is exempted from that account's evidence entirely
+    (not counted as a gap) - such a policy is PROVABLY unable to apply to the account
+    regardless of its excludeUsers list, there is nothing to exclude FROM. The original
+    version of this exemption looked at includeUsers alone and was NOT provably correct: a
+    policy scoped via includeGroups or includeRoles can still reach the account through
+    group or role membership even though includeUsers never names it directly, so a
+    non-empty includeGroups/includeRoles now fails closed (treated as reachable, not
+    exempted) instead. This function's Reason notes when an exemption applied.
 
     HONEST LIMITATION: exclusion matching is against conditions.users.excludeUsers only -
     a break-glass account excluded only via GROUP membership (excludeGroups) is not detected
@@ -72,7 +77,31 @@ function Test-PulseBreakGlassExcluded {
         $unexcludedPolicyNames = @()
         foreach ($policy in $enabledPolicies) {
             $includeUsers = @($policy.conditions.users.includeUsers)
-            $policyCanReachAccount = ($includeUsers.Count -eq 0) -or ($includeUsers -contains 'All') -or ($includeUsers -contains $account)
+            # @($null) is a ONE-element array in PowerShell (containing $null), not an
+            # empty one - a policy fixture/live row with no includeGroups/includeRoles
+            # member at all (property access on a PSCustomObject returns $null, not a
+            # missing-member error) would otherwise wrongly count as "has 1 included
+            # group/role" and always fail closed, even when the property is genuinely
+            # absent rather than genuinely populated. $null is filtered out explicitly
+            # before the @() wrap so only a REAL, non-null entry counts.
+            $includeGroupsRaw = $policy.conditions.users.includeGroups
+            $includeRolesRaw = $policy.conditions.users.includeRoles
+            $includeGroups = if ($null -eq $includeGroupsRaw) { @() } else { @($includeGroupsRaw) }
+            $includeRoles = if ($null -eq $includeRolesRaw) { @() } else { @($includeRolesRaw) }
+            # Fail-closed fix (post-review): a policy is only PROVABLY unable to reach the
+            # account when includeUsers is scoped away from it AND there is no OTHER path
+            # (a group or role membership) that could still reach it. The original check
+            # only ever looked at includeUsers - a policy scoped to includeGroups (the
+            # account is a member of an included group) or includeRoles (the account holds
+            # an included role) can still apply to the account even though its own object
+            # id never appears in includeUsers, so exempting on includeUsers alone was
+            # wrong: it could exempt an account that is genuinely still exposed. Neither
+            # group nor role membership is resolved here (see this file's own HONEST
+            # LIMITATION note - group-based exclusion resolution is future work), so any
+            # non-empty includeGroups/includeRoles means this function cannot PROVE the
+            # policy can't reach the account - it fails closed (treated as reachable, so a
+            # missing excludeUsers entry still counts as a gap) rather than exempting.
+            $policyCanReachAccount = ($includeUsers.Count -eq 0) -or ($includeUsers -contains 'All') -or ($includeUsers -contains $account) -or ($includeGroups.Count -gt 0) -or ($includeRoles.Count -gt 0)
             if (-not $policyCanReachAccount) {
                 # Provably cannot cover this account - exempt, not a gap.
                 $exemptionsApplied = $true

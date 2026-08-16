@@ -54,10 +54,13 @@ function Test-PulseStaleDevices {
     $newlyEnrolledGraceDays = 30
 
     $cutoffBaseText = $null
+    $cutoffBaseKeyPresent = $false
     if ($Context -and $Context.ContainsKey('EvaluationCutoffBase') -and $Context.EvaluationCutoffBase) {
         $cutoffBaseText = [string] $Context.EvaluationCutoffBase
+        $cutoffBaseKeyPresent = $true
     } elseif ($Context -and $Context.ContainsKey('SnapshotCreatedUtc') -and $Context.SnapshotCreatedUtc) {
         $cutoffBaseText = [string] $Context.SnapshotCreatedUtc
+        $cutoffBaseKeyPresent = $true
     }
 
     function ConvertTo-PulseNullableUtcDateTime {
@@ -73,11 +76,26 @@ function Test-PulseStaleDevices {
         }
     }
 
-    # Wall-clock fallback only when no -Context was supplied at all (documented above as a
-    # legacy/direct-call path - every real Invoke-PulseEvaluation run supplies one of the
-    # two keys unconditionally).
     $cutoffBase = ConvertTo-PulseNullableUtcDateTime $cutoffBaseText
     if ($null -eq $cutoffBase) {
+        if ($cutoffBaseKeyPresent) {
+            # MALFORMED createdUtc (post-review fix): a -Context was supplied and it DID
+            # carry a cutoff-base value, but that value could not be parsed as a
+            # timestamp - e.g. the snapshot manifest's own createdUtc is corrupt. Falling
+            # back to [datetime]::UtcNow here would silently mask that corruption behind a
+            # wall-clock "now" cutoff, exactly the kind of confident-but-wrong staleness
+            # verdict this whole engine exists to prevent (see the WALL-CLOCK DETERMINISM
+            # docstring note above - a wall-clock cutoff is exactly what this function must
+            # never fall back to when it actually has real, if malformed, snapshot data).
+            # Throwing surfaces this check as Error (New-PulseFinding's Status is
+            # rule-author-facing only - Error is engine-assigned, from a thrown rule - see
+            # New-PulseFinding's own docstring), not a confident, silently-wrong Pass/Fail.
+            throw "Test-PulseStaleDevices: the snapshot's cutoff-base timestamp ('$cutoffBaseText') could not be parsed as a date - the snapshot manifest's createdUtc is malformed. Refusing to fall back to wall-clock time, which would silently mask this."
+        }
+
+        # Wall-clock fallback only when no -Context was supplied at all (documented above
+        # as a legacy/direct-call path - every real Invoke-PulseEvaluation run supplies one
+        # of the two keys unconditionally).
         $cutoffBase = [datetime]::UtcNow
     }
 
@@ -133,7 +151,12 @@ function Test-PulseStaleDevices {
     if ($entraOnlyDevices.Count -gt 0) {
         $evidence.Add(@{ Identity = 'gap:summary'; Detail = @{ source = 'population-gap'; entraRegisteredNotIntuneManagedCount = $entraOnlyDevices.Count } })
         foreach ($device in $entraOnlyDevices) {
-            $evidence.Add(@{ Identity = "gap:$($device.id)"; Detail = @{ source = 'population-gap'; displayName = $device.displayName; deviceId = $device.deviceId } })
+            # -Redact residual fix (post-review): deviceId dropped from Detail - Identity
+            # ("gap:$($device.id)") is already the redacted evidence key, and deviceId here
+            # duplicated/leaked the same device identity -Redact is supposed to hide. See
+            # this module's -Redact docstring for the honest, non-overclaiming statement of
+            # what detail redaction does and does not cover today.
+            $evidence.Add(@{ Identity = "gap:$($device.id)"; Detail = @{ source = 'population-gap'; displayName = $device.displayName } })
         }
     }
 
