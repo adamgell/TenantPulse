@@ -20,10 +20,38 @@
     entry (Set-PulseExpansionEntry's sole implementation). Both go through the exact same
     mutex-guarded read-modify-write-then-atomic-publish cycle as the Dataset set, rather than
     forking a second copy of that machinery - this remains the one function that ever writes
-    manifest.json. A manifest opened here that predates schema 1.1.0 (no `references`/
-    `expansions` member at all - see New-PulseSnapshotStore's own docstring) has that member
-    initialized to an empty ordered dictionary before the entry is set, exactly like the
-    existing `datasets` auto-vivification below.
+    manifest.json.
+
+    REJECTS a 1.0.0-schema store (post-review fix, omp finding #4): a manifest that predates
+    schema 1.1.0 has no `references`/`expansions` member AT ALL (see New-PulseSnapshotStore's
+    own docstring) - this function used to auto-vivify an empty `[ordered]@{}` for whichever
+    namespace was missing and write the entry anyway, which silently promoted a 1.0.0-schema
+    manifest to something that LOOKS like 1.1.0 (it now has a `references` or `expansions`
+    key) without actually being one - the manifest's own `schemaVersion` field still reads
+    '1.0.0', a self-contradictory document no reader was ever designed to handle. A caller
+    that tries to write a reference/expansion entry to a store whose manifest lacks that
+    namespace now gets an immediate, named throw instead of silent corruption of the
+    declared schema shape.
+
+    ATOMIC FILE-PUBLISH-THEN-MANIFEST-UPDATE (post-review fix, omp finding #1 - "File+manifest
+    publication is not one transaction"): -PublishTempPath/-PublishFinalPath (Reference and
+    Expansion sets only) let a caller stage a reference/expansion FILE at a unique temp path
+    ahead of time, then publish it - `[System.IO.File]::Move($PublishTempPath,
+    $PublishFinalPath, $true)` - and record the manifest entry describing it, BOTH inside this
+    function's single mutex hold, as one indivisible operation from any OTHER writer's point
+    of view. Before this fix, Save-PulseSettingDefinitionCorpus wrote its reference FILE via
+    its own separate atomic tmp+rename (outside any mutex), THEN separately called
+    Set-PulseReferenceEntry to record the manifest entry (a second, independently-mutex-guarded
+    operation) - two writers targeting the SAME reference name could interleave their file
+    writes and manifest writes across that gap, producing "split-brain": writer A's manifest
+    entry (hash, itemCount) describing writer B's file content, reproduced with a two-runspace
+    test. Folding the rename into this function's existing mutex hold closes that window
+    entirely - no other writer can observe the file and the manifest entry in a
+    partially-updated pairing, because no other writer can even acquire the mutex until this
+    whole publish (rename + manifest write) has completed. The move happens ONLY once the
+    mutex is held and BEFORE the manifest is re-read/rewritten, so the manifest snapshot this
+    function serializes always describes the file exactly as it exists on disk at that same
+    instant.
 #>
 
 function Set-PulseManifestEntry {
@@ -104,6 +132,16 @@ function Set-PulseManifestEntry {
         [AllowNull()]
         $ReferenceReason,
 
+        [Parameter(ParameterSetName = 'Reference')]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $ReferencePublishTempPath,
+
+        [Parameter(ParameterSetName = 'Reference')]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $ReferencePublishFinalPath,
+
         [Parameter(Mandatory, ParameterSetName = 'Expansion')]
         [string] $ExpansionName,
 
@@ -149,7 +187,23 @@ function Set-PulseManifestEntry {
 
         [Parameter(ParameterSetName = 'Expansion')]
         [AllowNull()]
-        $ExpansionReason
+        $ExpansionReason,
+
+        # Symmetric with the Reference set's own -ReferencePublishTempPath/-FinalPath (see
+        # this file's own docstring) - not yet exercised by any T2.1 caller (Save-
+        # PulseSettingDefinitionCorpus only writes a reference, not an expansion), but T2.2's
+        # per-policy JSONL walk output needs the identical file+manifest atomicity guarantee,
+        # and forking a second copy of this logic later would be exactly the kind of drift
+        # this function exists to prevent.
+        [Parameter(ParameterSetName = 'Expansion')]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $ExpansionPublishTempPath,
+
+        [Parameter(ParameterSetName = 'Expansion')]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $ExpansionPublishFinalPath
     )
 
     if ($PSCmdlet.ParameterSetName -eq 'Dataset') {
@@ -180,8 +234,23 @@ function Set-PulseManifestEntry {
             $manifest.collectionFailure = $CollectionFailure
         }
         elseif ($PSCmdlet.ParameterSetName -eq 'Reference') {
-            if (-not $manifest.ContainsKey('references') -or $null -eq $manifest.references) {
-                $manifest.references = [ordered]@{}
+            # REJECT, do not auto-vivify (post-review fix, omp finding #4) - see this file's
+            # own docstring. A 1.0.0-schema manifest has no `references` member at all; a
+            # reference write here is refused rather than silently promoting the manifest to
+            # a self-contradictory "schemaVersion 1.0.0 but has a references key" shape.
+            if (-not $manifest.ContainsKey('references') -or $manifest.references -isnot [System.Collections.IDictionary]) {
+                throw "Set-PulseManifestEntry: cannot write reference entry '$ReferenceName' - '$($Store.Root)' declares schemaVersion '$($manifest.schemaVersion)', which has no 'references' namespace. References were introduced in schema 1.1.0; only a store created (or already upgraded) to that schema accepts Set-PulseReferenceEntry writes."
+            }
+
+            # ATOMIC PUBLISH (post-review fix, omp finding #1) - see this file's own
+            # docstring: the rename happens HERE, inside the mutex hold, immediately before
+            # the manifest that describes it is written, so no other writer targeting this
+            # same store can ever observe the file and its manifest entry out of sync.
+            if (-not [string]::IsNullOrEmpty($ReferencePublishTempPath)) {
+                if ([string]::IsNullOrEmpty($ReferencePublishFinalPath)) {
+                    throw "Set-PulseManifestEntry: -ReferencePublishTempPath was supplied without -ReferencePublishFinalPath for reference '$ReferenceName' - both or neither."
+                }
+                [System.IO.File]::Move($ReferencePublishTempPath, $ReferencePublishFinalPath, $true)
             }
 
             $manifest.references[$ReferenceName] = [ordered]@{
@@ -196,8 +265,19 @@ function Set-PulseManifestEntry {
             }
         }
         elseif ($PSCmdlet.ParameterSetName -eq 'Expansion') {
-            if (-not $manifest.ContainsKey('expansions') -or $null -eq $manifest.expansions) {
-                $manifest.expansions = [ordered]@{}
+            # REJECT, do not auto-vivify - same rule as the Reference set above, see this
+            # file's own docstring (omp finding #4).
+            if (-not $manifest.ContainsKey('expansions') -or $manifest.expansions -isnot [System.Collections.IDictionary]) {
+                throw "Set-PulseManifestEntry: cannot write expansion entry '$ExpansionName' - '$($Store.Root)' declares schemaVersion '$($manifest.schemaVersion)', which has no 'expansions' namespace. Expansions were introduced in schema 1.1.0; only a store created (or already upgraded) to that schema accepts Set-PulseExpansionEntry writes."
+            }
+
+            # ATOMIC PUBLISH - symmetric with the Reference set above (see this file's own
+            # docstring); not yet exercised by any T2.1 caller.
+            if (-not [string]::IsNullOrEmpty($ExpansionPublishTempPath)) {
+                if ([string]::IsNullOrEmpty($ExpansionPublishFinalPath)) {
+                    throw "Set-PulseManifestEntry: -ExpansionPublishTempPath was supplied without -ExpansionPublishFinalPath for expansion '$ExpansionName' - both or neither."
+                }
+                [System.IO.File]::Move($ExpansionPublishTempPath, $ExpansionPublishFinalPath, $true)
             }
 
             # Computed OUTSIDE the hashtable literal below, deliberately: an `if {} else {}`

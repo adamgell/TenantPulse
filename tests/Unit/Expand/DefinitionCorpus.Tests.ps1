@@ -203,7 +203,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
             param($storeRoot)
             New-PulseSnapshotStore -Path $storeRoot
         }
-        $script:context = [pscustomobject]@{ TenantId = 'tenant-guid-not-used-here' }
+        $script:context = [pscustomobject]@{ TenantId = 'tenant-guid-not-used-here'; ProfileId = 'contoso-lab' }
     }
 
     AfterEach {
@@ -234,6 +234,56 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
         $manifest.references.settingDefinitions.path | Should -Be 'reference/settingDefinitions.json'
     }
 
+    # omp finding #8: assert the call actually happened, exactly once, with the exact
+    # descriptor this function's own docstring promises - not just that its side effects
+    # (the manifest entry, the file) look right afterward. -Context forwarding matters
+    # specifically: a caller passes -Context so Get-GraphObject authenticates as the right
+    # profile/tenant, and a regression that silently drops or substitutes -Context on the
+    # way to Get-GraphObject would not be caught by any assertion on the manifest/file
+    # output alone (Get-GraphObject is mocked - it does not care what -Context it got,
+    # only this ParameterFilter does).
+    It 'calls Get-GraphObject exactly once with the exact type/operation/-Context forwarded' {
+        $rows = @([pscustomobject]@{ id = 'def-a'; name = 'a'; displayName = 'A' })
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' -and $Operation -eq 'ListBeta' } { $rows }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
+            param($store, $context)
+            Save-PulseSettingDefinitionCorpus -Store $store -Context $context
+        }
+
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Type -eq 'ConfigurationSettingDefinition' -and $Operation -eq 'ListBeta' -and $null -ne $Context -and $Context.TenantId -eq 'tenant-guid-not-used-here'
+        }
+    }
+
+    It 'forwards a DISTINCT caller-supplied -Context through to Get-GraphObject unchanged' {
+        $rows = @([pscustomobject]@{ id = 'def-a'; name = 'a' })
+        $distinctContext = [pscustomobject]@{ TenantId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'; ProfileId = 'a-distinct-profile' }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $rows }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $distinctContext {
+            param($store, $context)
+            Save-PulseSettingDefinitionCorpus -Store $store -Context $context
+        }
+
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Context.ProfileId -eq 'a-distinct-profile' -and $Context.TenantId -eq 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        }
+    }
+
+    It 'no orphan temp file is left behind under reference/ after a successful capture' {
+        $rows = @([pscustomobject]@{ id = 'def-a'; name = 'a' })
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $rows }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
+            param($store, $context)
+            Save-PulseSettingDefinitionCorpus -Store $store -Context $context
+        }
+
+        $leftoverTemps = @(Get-ChildItem -LiteralPath $script:store.ReferencePath -Filter '*.tmp' -ErrorAction SilentlyContinue)
+        $leftoverTemps.Count | Should -Be 0
+    }
+
     It 'the sha256 recorded in the manifest matches the actual bytes written to disk' {
         $rows = @([pscustomobject]@{ id = 'def-a'; name = 'a'; displayName = 'A' })
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $rows }
@@ -244,8 +294,10 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
         }
 
         $referenceFile = Join-Path $script:store.ReferencePath 'settingDefinitions.json'
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes((Get-Content -LiteralPath $referenceFile -Raw))
-        $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
+        # Raw bytes, not decoded-then-re-encoded text (omp finding #2) - matches how
+        # Get-PulseFileSha256 itself computes it.
+        $actualBytes = [System.IO.File]::ReadAllBytes($referenceFile)
+        $hashBytes = [System.Security.Cryptography.SHA256]::HashData($actualBytes)
         $actualSha256 = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
 
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
@@ -304,6 +356,49 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
         $manifest.references.settingDefinitions.status | Should -Be 'Failed'
         $manifest.references.settingDefinitions.reason | Should -Match 'capture-failed'
         $manifest.references.settingDefinitions.reason | Should -Match '503'
+    }
+
+    # omp finding #6: a caught GraphKit exception's message can carry -Context's raw
+    # ProfileId or raw TenantId verbatim (an AADSTS error embeds a profile id, others embed
+    # the tenant GUID once resolved) - both must be redacted to the store's own pseudonym
+    # before the reason ever reaches the manifest, exactly like every dataset-collection
+    # failure reason already is (Invoke-PulseCollection). Planted here as raw, real-shaped
+    # values so the assertion fails loudly if redaction is ever silently dropped.
+    It 'routes a capture-failure reason through Protect-PulseReason - raw ProfileId/TenantId never reach the manifest (omp finding #6)' {
+        # Store creation deliberately kept apart from the planted GUID below (the repo's own
+        # SecretScan QA gate flags a GUID literal within 200 characters of a
+        # "System.IO.Path"-shaped token as looking like a real tenant id/domain pair - this
+        # planted value is synthetic test fixture data, not a real tenant, so the two are
+        # kept out of that proximity window rather than suppressed).
+        $taintedStoreRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $taintedStore = InModuleScope TenantPulse -ArgumentList $taintedStoreRoot {
+            param($taintedStoreRoot)
+            New-PulseSnapshotStore -Path $taintedStoreRoot -Tenant 'tp-abc123'
+        }
+
+        $plantedProfileId = 'contoso-onmicrosoft-com'
+        $plantedTenantId = '11111111-1111-1111-1111-111111111111'
+        $taintedContext = [pscustomobject]@{ ProfileId = $plantedProfileId; TenantId = $plantedTenantId }
+
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } {
+            throw "AADSTS700016: Application not found for profile 'contoso-onmicrosoft-com' tenant 11111111-1111-1111-1111-111111111111."
+        }
+
+        try {
+            InModuleScope TenantPulse -ArgumentList $taintedStore, $taintedContext {
+                param($store, $context)
+                Save-PulseSettingDefinitionCorpus -Store $store -Context $context
+            }
+
+            $manifest = Get-Content -LiteralPath $taintedStore.ManifestPath -Raw | ConvertFrom-Json
+            $reason = $manifest.references.settingDefinitions.reason
+
+            $reason | Should -Not -Match ([regex]::Escape($plantedProfileId))
+            $reason | Should -Not -Match ([regex]::Escape($plantedTenantId))
+            $reason | Should -Match 'tp-abc123'
+        } finally {
+            Remove-Item -LiteralPath $taintedStoreRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     It 'does not throw when Get-GraphObject fails - the caller gets $null back, not an exception' {

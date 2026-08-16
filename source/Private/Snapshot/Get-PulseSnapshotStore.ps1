@@ -31,10 +31,24 @@
     still open here successfully - readonly-compatible, not rejected. '1.0.0' is kept in
     $script:PulseSnapshotSupportedSchemaVersions for exactly that reason. A '1.0.0'
     manifest has no `references`/`expansions` members at all; this function does not
-    require or backfill them - every reader of those namespaces (Get-PulseReferenceData,
-    a future expansion reader) treats an absent member as "nothing captured/expanded for
-    this store," not as a validation failure, so opening an old-schema store never throws
-    here on that account.
+    require or backfill them for that schema version - every reader of those namespaces
+    against a '1.0.0' store (Get-PulseReferenceData, a future expansion reader) treats an
+    absent member as "nothing captured/expanded for this store," not as a validation
+    failure.
+
+    SCHEMA-VERSION-CONDITIONAL requiredness (post-review fix, omp finding #3): a manifest
+    declaring schemaVersion '1.1.0' is a DIFFERENT case - that schema version's whole
+    reason for existing is the `references`/`expansions` namespaces, so a '1.1.0' manifest
+    that is missing either one, or carries a wrong-typed value for either (null, a bare
+    string, an array - anything that is not a real object), is now rejected here, at open
+    time, by the same "no silent gaps" rule the `datasets`/`producer` type checks below
+    already apply - exactly the reproduced hole this task's review closed: before this fix,
+    a hand-edited or truncated '1.1.0' manifest missing `references` opened cleanly and
+    every later reference-entry write against it would silently auto-vivify a fresh empty
+    namespace, masking that the store's declared schema and its actual shape had already
+    diverged. This requirement is schema-version-conditional, not global: it applies ONLY
+    when `schemaVersion` is '1.1.0' (or a later version whose contract also requires these
+    namespaces); a '1.0.0' manifest is correctly exempt, per the paragraph above.
 
     The returned handle has the exact same shape New-PulseSnapshotStore returns (Root/
     DatasetsPath/ReferencePath/ExpandedPath/ManifestPath), so every downstream consumer
@@ -132,6 +146,23 @@ function Get-PulseSnapshotStore {
     if ($null -eq $manifestContent.producer -or $manifestContent.producer -isnot [System.Management.Automation.PSObject]) {
         $actualDescription = if ($null -eq $manifestContent.producer) { 'null' } else { $manifestContent.producer.GetType().Name }
         throw "Get-PulseSnapshotStore: '$manifestPath' has a 'producer' member that is not a non-null object (got: $actualDescription) - '$resolvedRoot' is not a valid snapshot root."
+    }
+
+    # SCHEMA-VERSION-CONDITIONAL requiredness (post-review fix, omp finding #3) - see this
+    # file's own docstring: only a '1.1.0' manifest must carry non-null object `references`/
+    # `expansions` members; a '1.0.0' manifest is exempt (those namespaces did not exist in
+    # that schema at all).
+    if ($actualSchemaVersion -eq '1.1.0') {
+        foreach ($namespaceMember in @('references', 'expansions')) {
+            if ($manifestContent.PSObject.Properties.Name -notcontains $namespaceMember) {
+                throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '1.1.0' but is missing required member '$namespaceMember' - '$resolvedRoot' is not a valid snapshot root."
+            }
+            $namespaceValue = $manifestContent.$namespaceMember
+            if ($null -eq $namespaceValue -or $namespaceValue -isnot [System.Management.Automation.PSObject]) {
+                $actualDescription = if ($null -eq $namespaceValue) { 'null' } else { $namespaceValue.GetType().Name }
+                throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '1.1.0' but has a '$namespaceMember' member that is not a non-null object (got: $actualDescription) - '$resolvedRoot' is not a valid snapshot root."
+            }
+        }
     }
 
     return [pscustomobject]@{

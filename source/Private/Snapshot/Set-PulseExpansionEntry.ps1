@@ -25,6 +25,16 @@
     'Expanded' outcome) and is written through unmodified - this function does not validate
     the shape of individual gap entries, matching Set-PulseManifestEntry's own "callers
     supply pre-validated data" convention for structured, deep manifest fields.
+
+    STATUS-DEPENDENT FIELD INVARIANTS (post-review fix, omp finding #5 - same rule
+    Set-PulseReferenceEntry now enforces, see its own docstring): -Status 'Expanded' or
+    'Partial' both describe a written expansion FILE and require -Path/-SchemaVersion/
+    -Sha256/-PolicyCount/-RowCount all be supplied - a caller cannot record either outcome
+    without the fields a reader needs to locate and trust the file. -Status 'Partial'
+    additionally requires a non-empty -Gaps (a Partial outcome with no gap entries is a
+    contradiction - if nothing was ungapped, the outcome is 'Expanded'). -Status
+    'NotExpanded' or 'Failed' both describe "no usable file was produced" and require
+    -Reason - a caller cannot write either with no explanation.
 #>
 
 function Set-PulseExpansionEntry {
@@ -78,12 +88,49 @@ function Set-PulseExpansionEntry {
 
         [Parameter()]
         [AllowNull()]
-        $Reason
+        $Reason,
+
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $PublishFromTempPath
     )
+
+    if ($Status -eq 'Expanded' -or $Status -eq 'Partial') {
+        $missing = [System.Collections.Generic.List[string]]::new()
+        if ([string]::IsNullOrEmpty($Path)) { $missing.Add('Path') }
+        if ([string]::IsNullOrEmpty($SchemaVersion)) { $missing.Add('SchemaVersion') }
+        if ([string]::IsNullOrEmpty($Sha256)) { $missing.Add('Sha256') }
+        if ($null -eq $PolicyCount) { $missing.Add('PolicyCount') }
+        if ($null -eq $RowCount) { $missing.Add('RowCount') }
+        if ($missing.Count -gt 0) {
+            throw "Set-PulseExpansionEntry: -Status '$Status' for expansion '$Name' requires $($missing -join ', ') to be supplied - an $Status entry missing any of these cannot be trusted or located by a reader."
+        }
+        # $null -Gaps must count as ZERO gaps, not one - @($null) is a one-element array
+        # containing $null, the same trap Set-PulseManifestEntry's own gaps-serialization
+        # fix (see its docstring) already had to guard against.
+        $suppliedGapsCount = if ($null -eq $Gaps) { 0 } else { @($Gaps).Count }
+        if ($Status -eq 'Partial' -and $suppliedGapsCount -eq 0) {
+            throw "Set-PulseExpansionEntry: -Status 'Partial' for expansion '$Name' requires a non-empty -Gaps - a Partial outcome with no gap entries is a contradiction (use -Status 'Expanded' if nothing was ungapped)."
+        }
+    } elseif ($Status -eq 'NotExpanded' -or $Status -eq 'Failed') {
+        if ([string]::IsNullOrEmpty([string] $Reason)) {
+            throw "Set-PulseExpansionEntry: -Status '$Status' for expansion '$Name' requires -Reason - a $Status entry with no explanation is not actionable."
+        }
+    }
+
+    $publishParams = @{}
+    if (-not [string]::IsNullOrEmpty($PublishFromTempPath)) {
+        $finalPath = Join-Path $Store.ExpandedPath "$Name.jsonl"
+        $publishParams = @{
+            ExpansionPublishTempPath  = $PublishFromTempPath
+            ExpansionPublishFinalPath = $finalPath
+        }
+    }
 
     Set-PulseManifestEntry -Store $Store -ExpansionName $Name -ExpansionStatus $Status `
         -ExpansionPath $Path -ExpansionFormat 'jsonl' -ExpansionSchemaVersion $SchemaVersion `
         -ExpansionSha256 $Sha256 -ExpansionPolicyCount $PolicyCount -ExpansionRowCount $RowCount `
         -ExpansionUnresolvedNameCount $UnresolvedNameCount -ExpansionRedactedSecretCount $RedactedSecretCount `
-        -ExpansionGaps $Gaps -ExpansionReason $Reason
+        -ExpansionGaps $Gaps -ExpansionReason $Reason @publishParams
 }

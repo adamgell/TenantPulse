@@ -83,12 +83,17 @@ function Write-PulseDataset {
     }
     $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $items
     $datasetPath = Join-Path $Store.DatasetsPath "$Name.json"
-    # Atomic write via the shared helper (post-review fix - see its own docstring): a crash
-    # or interruption mid-write must never leave a truncated dataset file on disk with a
-    # manifest entry that claims it was Collected.
-    Set-PulseAtomicFileContent -Path $datasetPath -Value $canonicalJson
 
+    # Hash-what-you-write (post-review fix, omp finding #2): compute the byte array ONCE
+    # and both write it (via -Bytes, bypassing Set-Content's own text encoder entirely) and
+    # hash it - so the recorded sha256 is provably the hash of the bytes actually persisted,
+    # not a separately re-encoded copy of the same string that merely SHOULD match. Atomic
+    # write via the shared helper (post-review fix - see its own docstring): a crash or
+    # interruption mid-write must never leave a truncated dataset file on disk with a
+    # manifest entry that claims it was Collected.
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($canonicalJson)
+    Set-PulseAtomicFileContent -Path $datasetPath -Bytes $bytes
+
     $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
     $sha256 = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
 

@@ -224,6 +224,32 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
         } | Should -Throw -ExpectedMessage '*Sample.json*'
     }
 
+    # omp finding #2: a UTF-16 re-encode of the IDENTICAL decoded text must still fail the
+    # hash check - the pre-fix code hashed a re-encoding of Get-Content-decoded text, not
+    # the actual on-disk bytes, so this exact swap silently passed before this fix.
+    It 'throws when the on-disk file is swapped for a UTF-16 re-encode of the identical text (omp finding #2)' {
+        $data = @([pscustomobject]@{ id = 'a' })
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $data {
+            param($store, $data)
+            Write-PulseDataset -Store $store -Name 'Sample' -Data $data -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        $datasetFile = Join-Path $script:store.DatasetsPath 'Sample.json'
+        $originalText = Get-Content -LiteralPath $datasetFile -Raw
+        # Re-save the IDENTICAL decoded text as UTF-16LE with a BOM - Get-Content -Raw
+        # auto-detects the BOM and decodes back to the same string, but the actual on-disk
+        # BYTES are completely different from what was hashed at write time.
+        [System.IO.File]::WriteAllText($datasetFile, $originalText, [System.Text.Encoding]::Unicode)
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Read-PulseDataset -Store $store -Name 'Sample'
+            }
+        } | Should -Throw -ExpectedMessage '*Sample.json*'
+    }
+
     It 'writes only a manifest entry, no dataset file, for a Failed status' {
         InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)
@@ -1237,6 +1263,69 @@ Describe 'Get-PulseSnapshotStore' {
         $manifest.ContainsKey('references') | Should -BeFalse
         $manifest.ContainsKey('expansions') | Should -BeFalse
     }
+
+    # omp finding #3: a 1.1.0 manifest REQUIRES references/expansions as non-null objects -
+    # each of these is a reproduced acceptance (pre-fix, every one of these opened cleanly).
+
+    It 'throws for a 1.1.0 manifest missing the references member entirely' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.1.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{},"expansions":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*references*'
+    }
+
+    It 'throws for a 1.1.0 manifest missing the expansions member entirely' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.1.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{},"references":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*expansions*'
+    }
+
+    It 'throws for a 1.1.0 manifest with "references":null (reproduced acceptance)' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.1.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{},"references":null,"expansions":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*references*'
+    }
+
+    It 'throws for a 1.1.0 manifest with "expansions":"x" - a bare string (reproduced acceptance)' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.1.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{},"references":{},"expansions":"x"}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*expansions*'
+    }
+
+    It 'throws for a 1.1.0 manifest with "references":[] - an array, not an object (reproduced acceptance)' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.1.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{},"references":[],"expansions":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*references*'
+    }
 }
 
 Describe 'New-PulseSnapshotStore schema 1.1.0 (Task 2.1)' {
@@ -1369,6 +1458,39 @@ Describe 'Set-PulseReferenceEntry / Get-PulseReferenceData (Task 2.1)' {
         } | Should -Throw -ExpectedMessage '*settingDefinitions.json*'
     }
 
+    # omp finding #2: same UTF-16 re-encode regression as Read-PulseDataset's own test above.
+    It 'throws when the on-disk reference file is swapped for a UTF-16 re-encode of the identical text (omp finding #2)' {
+        $roundTripSha256 = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+
+            $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject @([pscustomobject]@{ id = 'def-1' })
+            $referencePath = Join-Path $store.ReferencePath 'settingDefinitions.json'
+            Set-PulseAtomicFileContent -Path $referencePath -Value $canonicalJson
+
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($canonicalJson)
+            $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
+            $sha256 = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+
+            Set-PulseReferenceEntry -Store $store -Name 'settingDefinitions' -Status 'Captured' `
+                -Path 'reference/settingDefinitions.json' -SchemaVersion '1.0.0' -Sha256 $sha256 `
+                -ItemCount 1 -RetrievedUtc '2026-08-16T12:00:00.000Z'
+
+            $sha256
+        }
+        $roundTripSha256 | Should -Not -BeNullOrEmpty
+
+        $referenceFile = Join-Path $script:store.ReferencePath 'settingDefinitions.json'
+        $originalText = Get-Content -LiteralPath $referenceFile -Raw
+        [System.IO.File]::WriteAllText($referenceFile, $originalText, [System.Text.Encoding]::Unicode)
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Get-PulseReferenceData -Store $store -Name 'settingDefinitions'
+            }
+        } | Should -Throw -ExpectedMessage '*settingDefinitions.json*'
+    }
+
     It 'throws naming the reference name when no manifest entry exists for it' {
         {
             InModuleScope TenantPulse -ArgumentList $script:store {
@@ -1378,13 +1500,88 @@ Describe 'Set-PulseReferenceEntry / Get-PulseReferenceData (Task 2.1)' {
         } | Should -Throw -ExpectedMessage '*neverCaptured*'
     }
 
+    # omp finding #5 repro: a stale file left on disk from a prior run must NOT be returned
+    # for a reference whose manifest entry says 'Failed' - the entry's status governs, not
+    # merely "does a file happen to exist at that path".
+    It 'throws naming the status, not silently returning stale on-disk data, for a Failed entry (repro)' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+
+            # A stale file left over from some earlier, unrelated run - present on disk even
+            # though THIS capture attempt failed.
+            $referencePath = Join-Path $store.ReferencePath 'settingDefinitions.json'
+            $staleJson = ConvertTo-PulseCanonicalJson -InputObject @([pscustomobject]@{ id = 'stale-from-a-prior-run' })
+            Set-PulseAtomicFileContent -Path $referencePath -Value $staleJson
+
+            Set-PulseReferenceEntry -Store $store -Name 'settingDefinitions' -Status 'Failed' -Reason 'capture-failed: 503 Service Unavailable'
+        }
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Get-PulseReferenceData -Store $store -Name 'settingDefinitions'
+            }
+        } | Should -Throw -ExpectedMessage "*'Failed'*"
+    }
+
     It 'throws naming the offending value for a path-traversal reference name' {
         {
             InModuleScope TenantPulse -ArgumentList $script:store {
                 param($store)
-                Set-PulseReferenceEntry -Store $store -Name '..\manifest' -Status 'Captured'
+                Set-PulseReferenceEntry -Store $store -Name '..\manifest' -Status 'Captured' `
+                    -Path 'reference/x.json' -SchemaVersion '1.0.0' -Sha256 'abc123' -ItemCount 1 -RetrievedUtc '2026-08-16T12:00:00.000Z'
             }
         } | Should -Throw -ExpectedMessage '*..\manifest*'
+    }
+
+    # omp finding #5: -Status 'Captured' requires the fields a reader needs to trust/locate
+    # the data; -Status 'Failed' requires -Reason.
+
+    It 'throws naming the missing fields when -Status Captured omits them' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Set-PulseReferenceEntry -Store $store -Name 'settingDefinitions' -Status 'Captured'
+            }
+        } | Should -Throw -ExpectedMessage '*Path*SchemaVersion*Sha256*ItemCount*RetrievedUtc*'
+    }
+
+    It 'throws when -Status Failed omits -Reason' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Set-PulseReferenceEntry -Store $store -Name 'settingDefinitions' -Status 'Failed'
+            }
+        } | Should -Throw -ExpectedMessage '*Reason*'
+    }
+
+    # omp finding #4: a schema 1.0.0 store must reject a reference write, not auto-vivify.
+
+    It 'throws when writing a reference entry to a schema 1.0.0 store (no auto-vivify)' {
+        $oldStoreRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        New-Item -Path $oldStoreRoot -ItemType Directory -Force | Out-Null
+        New-Item -Path (Join-Path $oldStoreRoot 'reference') -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $oldStoreRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{}}' -NoNewline
+
+        try {
+            $oldStore = InModuleScope TenantPulse -ArgumentList $oldStoreRoot {
+                param($oldStoreRoot)
+                Get-PulseSnapshotStore -Path $oldStoreRoot
+            }
+
+            {
+                InModuleScope TenantPulse -ArgumentList $oldStore {
+                    param($oldStore)
+                    Set-PulseReferenceEntry -Store $oldStore -Name 'settingDefinitions' -Status 'Captured' `
+                        -Path 'reference/x.json' -SchemaVersion '1.0.0' -Sha256 'abc123' -ItemCount 1 -RetrievedUtc '2026-08-16T12:00:00.000Z'
+                }
+            } | Should -Throw -ExpectedMessage '*1.0.0*references*'
+
+            $manifestAfter = Get-Content -LiteralPath (Join-Path $oldStoreRoot 'manifest.json') -Raw | ConvertFrom-Json
+            $manifestAfter.PSObject.Properties.Name -contains 'references' | Should -BeFalse
+        } finally {
+            Remove-Item -LiteralPath $oldStoreRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -1445,7 +1642,8 @@ Describe 'Set-PulseExpansionEntry (Task 2.1)' {
         InModuleScope TenantPulse -ArgumentList $script:store, $gaps {
             param($store, $gaps)
             Set-PulseExpansionEntry -Store $store -Name 'settingsWalk' -Status 'Partial' `
-                -Path 'expanded/settingsWalk.jsonl' -PolicyCount 781 -RowCount 4100 -Gaps $gaps
+                -Path 'expanded/settingsWalk.jsonl' -SchemaVersion '1.0.0' -Sha256 'def456' `
+                -PolicyCount 781 -RowCount 4100 -Gaps $gaps
         }
 
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
@@ -1461,8 +1659,174 @@ Describe 'Set-PulseExpansionEntry (Task 2.1)' {
         {
             InModuleScope TenantPulse -ArgumentList $script:store {
                 param($store)
-                Set-PulseExpansionEntry -Store $store -Name '../manifest' -Status 'Expanded'
+                Set-PulseExpansionEntry -Store $store -Name '../manifest' -Status 'Expanded' `
+                    -Path 'expanded/x.jsonl' -SchemaVersion '1.0.0' -Sha256 'abc123' -PolicyCount 1 -RowCount 1
             }
         } | Should -Throw -ExpectedMessage '*../manifest*'
+    }
+
+    # omp finding #5: status-dependent field invariants, symmetric with Set-PulseReferenceEntry.
+
+    It 'throws naming the missing fields when -Status Expanded omits them' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Set-PulseExpansionEntry -Store $store -Name 'settingsWalk' -Status 'Expanded'
+            }
+        } | Should -Throw -ExpectedMessage '*Path*SchemaVersion*Sha256*PolicyCount*RowCount*'
+    }
+
+    It 'throws when -Status Partial is written with empty -Gaps (contradiction)' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Set-PulseExpansionEntry -Store $store -Name 'settingsWalk' -Status 'Partial' `
+                    -Path 'expanded/settingsWalk.jsonl' -SchemaVersion '1.0.0' -Sha256 'def456' `
+                    -PolicyCount 781 -RowCount 4200
+            }
+        } | Should -Throw -ExpectedMessage '*Gaps*'
+    }
+
+    It 'throws when -Status NotExpanded omits -Reason' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Set-PulseExpansionEntry -Store $store -Name 'settingsWalk' -Status 'NotExpanded'
+            }
+        } | Should -Throw -ExpectedMessage '*Reason*'
+    }
+
+    # omp finding #4: a schema 1.0.0 store must reject an expansion write, not auto-vivify.
+
+    It 'throws when writing an expansion entry to a schema 1.0.0 store (no auto-vivify)' {
+        $oldStoreRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        New-Item -Path $oldStoreRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $oldStoreRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{}}' -NoNewline
+
+        try {
+            $oldStore = InModuleScope TenantPulse -ArgumentList $oldStoreRoot {
+                param($oldStoreRoot)
+                Get-PulseSnapshotStore -Path $oldStoreRoot
+            }
+
+            {
+                InModuleScope TenantPulse -ArgumentList $oldStore {
+                    param($oldStore)
+                    Set-PulseExpansionEntry -Store $oldStore -Name 'settingsWalk' -Status 'NotExpanded' -Reason 'definitions corpus unavailable'
+                }
+            } | Should -Throw -ExpectedMessage '*1.0.0*expansions*'
+        } finally {
+            Remove-Item -LiteralPath $oldStoreRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe 'Set-PulseReferenceEntry atomic file-publish-then-manifest-update (Task 2.1, omp finding #1)' {
+    BeforeEach {
+        $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'renames the staged temp file to its final reference path and records the entry in one call' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            $tempPath = Join-Path $store.ReferencePath 'settingDefinitions.deadbeef.tmp'
+            Set-Content -LiteralPath $tempPath -Value '[{"id":"def-a"}]' -NoNewline -Encoding utf8NoBOM
+
+            Set-PulseReferenceEntry -Store $store -Name 'settingDefinitions' -Status 'Captured' `
+                -Path 'reference/settingDefinitions.json' -SchemaVersion '1.0.0' -Sha256 'abc123' `
+                -ItemCount 1 -RetrievedUtc '2026-08-16T12:00:00.000Z' -PublishFromTempPath $tempPath
+        }
+
+        $finalPath = Join-Path $script:store.ReferencePath 'settingDefinitions.json'
+        Test-Path -LiteralPath $finalPath -PathType Leaf | Should -BeTrue
+        (Get-Content -LiteralPath $finalPath -Raw) | Should -Be '[{"id":"def-a"}]'
+
+        $tempPathOnDisk = Join-Path $script:store.ReferencePath 'settingDefinitions.deadbeef.tmp'
+        Test-Path -LiteralPath $tempPathOnDisk -PathType Leaf | Should -BeFalse
+    }
+
+    It 'two runspaces racing the same reference name never leave a manifest entry describing the wrong file (no split-brain)' {
+        $storeRoot = $script:storeRoot
+
+        # Resolve the built module path once on the main thread so each runspace can import
+        # it independently (a runspace does not inherit the caller's already-imported module).
+        $repoRoot = $script:repoRoot
+        $built = Get-ChildItem (Join-Path $repoRoot 'output/module/TenantPulse') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+        $modulePath = Join-Path $built.FullName 'TenantPulse.psd1'
+
+        $writer = {
+            param($modulePath, $storeRoot, $payload)
+            Import-Module $modulePath -Force
+            $store = & (Get-Module TenantPulse) { param($storeRoot) Get-PulseSnapshotStore -Path $storeRoot } $storeRoot
+
+            & (Get-Module TenantPulse) {
+                param($store, $payload)
+
+                $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $payload
+                $tempPath = Join-Path $store.ReferencePath "settingDefinitions.$([guid]::NewGuid().ToString('N')).tmp"
+                Set-Content -LiteralPath $tempPath -Value $canonicalJson -NoNewline -Encoding utf8NoBOM
+
+                $bytes = [System.Text.Encoding]::UTF8.GetBytes($canonicalJson)
+                $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
+                $sha256 = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+
+                for ($attempt = 0; $attempt -lt 50; $attempt++) {
+                    try {
+                        Set-PulseReferenceEntry -Store $store -Name 'settingDefinitions' -Status 'Captured' `
+                            -Path 'reference/settingDefinitions.json' -SchemaVersion '1.0.0' -Sha256 $sha256 `
+                            -ItemCount @($payload).Count -RetrievedUtc '2026-08-16T12:00:00.000Z' -PublishFromTempPath $tempPath
+                        break
+                    } catch {
+                        Start-Sleep -Milliseconds 20
+                    }
+                }
+            } $store $payload
+        }
+
+        $payloadA = @([pscustomobject]@{ id = 'writer-a-only' })
+        $payloadB = @([pscustomobject]@{ id = 'writer-b-only-with-more-content-so-the-two-files-differ-in-length' })
+
+        $runspaceA = [powershell]::Create()
+        [void] $runspaceA.AddScript($writer).AddArgument($modulePath).AddArgument($storeRoot).AddArgument($payloadA)
+        $runspaceB = [powershell]::Create()
+        [void] $runspaceB.AddScript($writer).AddArgument($modulePath).AddArgument($storeRoot).AddArgument($payloadB)
+
+        $handleA = $runspaceA.BeginInvoke()
+        $handleB = $runspaceB.BeginInvoke()
+        $runspaceA.EndInvoke($handleA)
+        $runspaceB.EndInvoke($handleB)
+
+        $errorsA = @($runspaceA.Streams.Error)
+        $errorsB = @($runspaceB.Streams.Error)
+        $runspaceA.Dispose()
+        $runspaceB.Dispose()
+
+        $errorsA | Should -BeNullOrEmpty
+        $errorsB | Should -BeNullOrEmpty
+
+        # THE PROPERTY: whichever writer's manifest entry ends up recorded, its sha256 MUST
+        # match the ACTUAL bytes of the file on disk at that same moment - never the other
+        # writer's file under this writer's hash (split-brain).
+        $finalManifest = Get-Content -LiteralPath (Join-Path $storeRoot 'manifest.json') -Raw | ConvertFrom-Json
+        $entry = $finalManifest.references.settingDefinitions
+        $finalFile = Join-Path $storeRoot 'reference/settingDefinitions.json'
+        $actualBytes = [System.IO.File]::ReadAllBytes($finalFile)
+        $actualHashBytes = [System.Security.Cryptography.SHA256]::HashData($actualBytes)
+        $actualSha256 = ([System.BitConverter]::ToString($actualHashBytes) -replace '-', '').ToLowerInvariant()
+
+        $entry.sha256 | Should -Be $actualSha256
+
+        # No orphaned temp files left behind by either writer.
+        $leftoverTemps = @(Get-ChildItem -LiteralPath $script:store.ReferencePath -Filter '*.tmp' -ErrorAction SilentlyContinue)
+        $leftoverTemps.Count | Should -Be 0
     }
 }

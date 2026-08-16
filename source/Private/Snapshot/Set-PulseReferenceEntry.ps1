@@ -9,14 +9,27 @@
     fixing the value here means a caller cannot accidentally record a format the reader
     (Get-PulseReferenceData) does not actually know how to parse.
 
-    -Status 'Captured' is the normal, successful outcome - -Path/-SchemaVersion/-Sha256/
-    -ItemCount/-RetrievedUtc are all expected to be supplied together in that case.
-    -Status 'Failed' records only -Reason (a capture-time exception message, already
-    caller-redacted where the caller has the means to redact) - no file was written, so
-    -Path/-Sha256/etc. are left absent, exactly like Write-PulseDataset's own Failed/Skipped
-    path for datasets. This is the entry a downstream expansion reader inspects to decide
-    whether the definitions corpus is even available before attempting a join against it -
-    see Save-PulseSettingDefinitionCorpus's own docstring for the capture-failure contract.
+    STATUS-DEPENDENT FIELD INVARIANTS (post-review fix, omp finding #5): -Status 'Captured'
+    now REQUIRES -Path/-SchemaVersion/-Sha256/-ItemCount/-RetrievedUtc all be supplied
+    (non-null, non-empty) - a caller cannot write a "Captured" entry missing the very fields
+    a reader needs to trust and locate the data, which is exactly the shape
+    Get-PulseReferenceData's own new status/structural checks assume it can rely on. -Status
+    'Failed' REQUIRES -Reason (a caller cannot write a Failed entry with no explanation).
+    Violating either throws here, at write time, naming the missing field(s) - not
+    discovered later by a reader working from an incomplete entry.
+
+    -PublishFromTempPath (post-review fix, omp finding #1): when supplied together with
+    -Status 'Captured', the caller has already staged the reference FILE at this temp path
+    (same directory as the final reference/<name>.json, so the rename stays same-volume/
+    atomic) and this function computes the final on-disk path
+    (reference/<name>.json under Store.ReferencePath) and forwards BOTH to
+    Set-PulseManifestEntry's -ReferencePublishTempPath/-ReferencePublishFinalPath, so the
+    file rename and the manifest entry that describes it happen inside that function's
+    single mutex hold - see its own docstring for why this closes the split-brain window a
+    two-runspace test reproduced when the file write and the manifest write were two
+    independently-locked operations. Omitting -PublishFromTempPath (e.g. for a -Status
+    'Failed' entry, where no file was ever written) skips the rename step entirely -
+    Set-PulseManifestEntry only renames when a temp path is actually supplied.
 #>
 
 function Set-PulseReferenceEntry {
@@ -58,11 +71,41 @@ function Set-PulseReferenceEntry {
 
         [Parameter()]
         [AllowNull()]
-        $Reason
+        $Reason,
+
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $PublishFromTempPath
     )
+
+    if ($Status -eq 'Captured') {
+        $missing = [System.Collections.Generic.List[string]]::new()
+        if ([string]::IsNullOrEmpty($Path)) { $missing.Add('Path') }
+        if ([string]::IsNullOrEmpty($SchemaVersion)) { $missing.Add('SchemaVersion') }
+        if ([string]::IsNullOrEmpty($Sha256)) { $missing.Add('Sha256') }
+        if ($null -eq $ItemCount) { $missing.Add('ItemCount') }
+        if ([string]::IsNullOrEmpty($RetrievedUtc)) { $missing.Add('RetrievedUtc') }
+        if ($missing.Count -gt 0) {
+            throw "Set-PulseReferenceEntry: -Status 'Captured' for reference '$Name' requires $($missing -join ', ') to be supplied - a Captured entry missing any of these cannot be trusted or located by a reader."
+        }
+    } elseif ($Status -eq 'Failed') {
+        if ([string]::IsNullOrEmpty([string] $Reason)) {
+            throw "Set-PulseReferenceEntry: -Status 'Failed' for reference '$Name' requires -Reason - a Failed entry with no explanation is not actionable."
+        }
+    }
+
+    $publishParams = @{}
+    if (-not [string]::IsNullOrEmpty($PublishFromTempPath)) {
+        $finalPath = Join-Path $Store.ReferencePath "$Name.json"
+        $publishParams = @{
+            ReferencePublishTempPath  = $PublishFromTempPath
+            ReferencePublishFinalPath = $finalPath
+        }
+    }
 
     Set-PulseManifestEntry -Store $Store -ReferenceName $Name -ReferenceStatus $Status `
         -ReferencePath $Path -ReferenceFormat 'json' -ReferenceSchemaVersion $SchemaVersion `
         -ReferenceSha256 $Sha256 -ReferenceItemCount $ItemCount -ReferenceRetrievedUtc $RetrievedUtc `
-        -ReferenceReason $Reason
+        -ReferenceReason $Reason @publishParams
 }

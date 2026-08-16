@@ -548,7 +548,17 @@ jobs:
           # (index compactness, IsSecretCapable mapping, Save-PulseSettingDefinitionCorpus
           # capture/failure contract) plus dynamically-generated per-file QA assertions for
           # the 5 new source files.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 791 -AllowedSkips 0 -AllowNotRun 1
+          # 791 -> 814 (Task 2.1 fix round, omp findings #1-#9): +23 tests - schema-version-
+          # conditional references/expansions requiredness (finding #3), reject-not-vivify on
+          # a 1.0.0 store (finding #4), status-dependent field invariants on
+          # Set-PulseReferenceEntry/Set-PulseExpansionEntry plus Get-PulseReferenceData's
+          # Captured-status/structural-completeness gate (finding #5), UTF-16 re-encode
+          # hash-bypass regression tests for Read-PulseDataset and Get-PulseReferenceData
+          # (finding #2), the two-runspace atomic file-publish-then-manifest-update no-
+          # split-brain test (finding #1), and Save-PulseSettingDefinitionCorpus's
+          # Should-Invoke/-Context-forwarding and planted-raw-id Protect-PulseReason
+          # redaction tests (findings #6, #8).
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 814 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
