@@ -3,13 +3,27 @@
     (Task 1.8's Invoke-PulseAssessment).
 
     Unlike New-PulseSnapshotStore, this function creates NOTHING on disk - it is a pure
-    read/open operation. It validates that -Path actually looks like a snapshot root (a
-    manifest.json directly under it, parseable as JSON, with a non-empty schemaVersion
-    property - the same "is this a snapshot root" check Get-PulseOperatorKey's own guard
-    performs inline) and throws a clear, actionable error naming the path if not. This is
-    the guard that lets Invoke-PulseAssessment -FromSnapshot skip collection entirely and
-    still be confident it is about to evaluate something real, rather than an arbitrary or
-    empty directory.
+    read/open operation. It validates that -Path actually looks like a snapshot root this
+    module's own writer produced, and throws a clear, actionable error naming both the
+    path and the offending field if not. This is the guard that lets
+    Invoke-PulseAssessment -FromSnapshot skip collection entirely and still be confident
+    it is about to evaluate something real, rather than an arbitrary, empty, or
+    foreign-schema directory.
+
+    SCHEMA VERSION GUARD (post-review fix - closes a real silent-gap hole): the original
+    guard only checked that a schemaVersion property existed and was non-empty - ANY
+    string satisfied it, including one this module never wrote (reproduced:
+    {"schemaVersion":"9999.0.0"} opened cleanly and re-evaluated into a confident-looking,
+    entirely NotApplicable scored report with a null tenant and null generatedUtc - the
+    exact silent-gap failure this module forbids everywhere else). schemaVersion must now
+    equal $script:PulseSnapshotSchemaVersion EXACTLY (kept as one module-level constant,
+    matching the literal '1.0.0' New-PulseSnapshotStore itself writes - if that literal
+    ever changes, this is the only other place that has to change with it). createdUtc,
+    producer and datasets must also be present as real members - the same four fields
+    Invoke-PulseEvaluation actually reads off the manifest later - so a structurally
+    foreign or hand-edited manifest.json is rejected here, at open time, with a specific
+    field name, rather than surfacing later as null/missing data quietly baked into a
+    "successful" scored report.
 
     The returned handle has the exact same shape New-PulseSnapshotStore returns (Root/
     DatasetsPath/ReferencePath/ExpandedPath/ManifestPath), so every downstream consumer
@@ -21,6 +35,11 @@
     something actually tries to read from it (Read-PulseDataset etc.), rather than being
     pre-emptively (and possibly wrongly) rejected here.
 #>
+
+# The one schemaVersion this module's writer (New-PulseSnapshotStore) actually produces -
+# see that function's own literal. Kept as a single named constant so Get-PulseSnapshotStore
+# never has to duplicate (and risk drifting from) the literal string.
+$script:PulseSnapshotSchemaVersion = '1.0.0'
 
 function Get-PulseSnapshotStore {
     [CmdletBinding()]
@@ -51,6 +70,21 @@ function Get-PulseSnapshotStore {
     if ($manifestContent.PSObject.Properties.Name -notcontains 'schemaVersion' -or
         [string]::IsNullOrEmpty([string] $manifestContent.schemaVersion)) {
         throw "Get-PulseSnapshotStore: '$manifestPath' has no non-empty schemaVersion property - '$resolvedRoot' is not a valid snapshot root."
+    }
+
+    $actualSchemaVersion = [string] $manifestContent.schemaVersion
+    if (-not [string]::Equals($actualSchemaVersion, $script:PulseSnapshotSchemaVersion, [System.StringComparison]::Ordinal)) {
+        throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '$actualSchemaVersion', but this module only supports '$script:PulseSnapshotSchemaVersion' - '$resolvedRoot' is not a snapshot root this version of TenantPulse can safely re-evaluate."
+    }
+
+    foreach ($requiredMember in @('createdUtc', 'producer', 'datasets')) {
+        if ($manifestContent.PSObject.Properties.Name -notcontains $requiredMember) {
+            throw "Get-PulseSnapshotStore: '$manifestPath' is missing required member '$requiredMember' - '$resolvedRoot' is not a valid snapshot root."
+        }
+    }
+
+    if ([string]::IsNullOrEmpty([string] $manifestContent.createdUtc)) {
+        throw "Get-PulseSnapshotStore: '$manifestPath' has a null or empty createdUtc - '$resolvedRoot' is not a valid snapshot root."
     }
 
     return [pscustomobject]@{

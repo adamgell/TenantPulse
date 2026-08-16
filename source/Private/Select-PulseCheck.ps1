@@ -42,7 +42,42 @@
 
     An empty/unbound filter parameter on any axis means "do not filter on this axis"
     (matches everything) - identical to Get-PulseTenantSnapshot's pre-Task-1.8 behavior.
+
+    ELEMENT-LEVEL VALIDATION (post-review fix): every token array is checked for a
+    null/empty/whitespace-only ELEMENT and throws naming the offending parameter if one is
+    found - a blank element is never silently ignored or treated as "no filter". This
+    closes a real bug: `if ($IncludeCategory -and $IncludeCategory.Count -gt 0)` looks like
+    a safe not-empty check, but PowerShell collapses a SINGLE-element array used in a
+    boolean context to that one element's own truthiness rather than the array's Count -
+    `-IncludeCategory @('')` produced an `if (@('') -and ...)` that evaluated to $false
+    (an empty string is falsy) even though the array's Count was 1, silently skipping the
+    whole IncludeCategory filter and returning the full, unfiltered catalog. Every
+    not-empty check in this file now tests `$null -ne $Array -and $Array.Count -gt 0`
+    instead, which cannot collapse this way, and the new blank-element guard means an
+    accidental `@('')` is a loud error instead of a silent "select everything".
 #>
+
+function Assert-PulseSelectionTokensNotBlank {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $ParameterName,
+
+        [Parameter()]
+        [AllowNull()]
+        [string[]] $Tokens
+    )
+
+    if ($null -eq $Tokens) {
+        return
+    }
+
+    foreach ($token in $Tokens) {
+        if ([string]::IsNullOrWhiteSpace($token)) {
+            throw "Select-PulseCheck: -$ParameterName contains a null, empty or whitespace-only element - every selection token must be a real, non-blank value."
+        }
+    }
+}
 
 function Test-PulseCategoryPrefixMatch {
     [CmdletBinding()]
@@ -134,24 +169,35 @@ function Select-PulseCheck {
         [string[]] $Exclude
     )
 
+    Assert-PulseSelectionTokensNotBlank -ParameterName 'IncludeCategory' -Tokens $IncludeCategory
+    Assert-PulseSelectionTokensNotBlank -ParameterName 'ExcludeCategory' -Tokens $ExcludeCategory
+    Assert-PulseSelectionTokensNotBlank -ParameterName 'IncludeCheck' -Tokens $IncludeCheck
+    Assert-PulseSelectionTokensNotBlank -ParameterName 'ExcludeCheck' -Tokens $ExcludeCheck
+    Assert-PulseSelectionTokensNotBlank -ParameterName 'Include' -Tokens $Include
+    Assert-PulseSelectionTokensNotBlank -ParameterName 'Exclude' -Tokens $Exclude
+
     $result = @($Checks)
 
-    if ($IncludeCategory -and $IncludeCategory.Count -gt 0) {
+    # Every not-empty check below tests `$null -ne $Array -and $Array.Count -gt 0` rather
+    # than the more natural-looking `$Array -and $Array.Count -gt 0` - see this file's own
+    # ELEMENT-LEVEL VALIDATION docstring note for why the latter is a real bug (a
+    # single-element array collapses to its element's truthiness in a boolean context).
+    if ($null -ne $IncludeCategory -and $IncludeCategory.Count -gt 0) {
         $result = @($result | Where-Object { Test-PulseCategoryPrefixMatch -Category ([string] $_.Category) -Tokens $IncludeCategory })
     }
-    if ($ExcludeCategory -and $ExcludeCategory.Count -gt 0) {
+    if ($null -ne $ExcludeCategory -and $ExcludeCategory.Count -gt 0) {
         $result = @($result | Where-Object { -not (Test-PulseCategoryPrefixMatch -Category ([string] $_.Category) -Tokens $ExcludeCategory) })
     }
-    if ($IncludeCheck -and $IncludeCheck.Count -gt 0) {
+    if ($null -ne $IncludeCheck -and $IncludeCheck.Count -gt 0) {
         $result = @($result | Where-Object { Test-PulseIdExactMatch -Id ([string] $_.Id) -Tokens $IncludeCheck })
     }
-    if ($ExcludeCheck -and $ExcludeCheck.Count -gt 0) {
+    if ($null -ne $ExcludeCheck -and $ExcludeCheck.Count -gt 0) {
         $result = @($result | Where-Object { -not (Test-PulseIdExactMatch -Id ([string] $_.Id) -Tokens $ExcludeCheck) })
     }
-    if ($Include -and $Include.Count -gt 0) {
+    if ($null -ne $Include -and $Include.Count -gt 0) {
         $result = @($result | Where-Object { Test-PulseProfileTokenMatch -Check $_ -Tokens $Include })
     }
-    if ($Exclude -and $Exclude.Count -gt 0) {
+    if ($null -ne $Exclude -and $Exclude.Count -gt 0) {
         $result = @($result | Where-Object { -not (Test-PulseProfileTokenMatch -Check $_ -Tokens $Exclude) })
     }
 

@@ -668,4 +668,68 @@ Describe 'Get-PulseSnapshotStore' {
             }
         } | Should -Throw
     }
+
+    # Post-review regression coverage - reproduced case: an unsupported schemaVersion used
+    # to open CLEANLY (only existence/non-empty was checked), silently producing a
+    # confident-looking, entirely NotApplicable scored report with a null tenant/
+    # generatedUtc downstream - the exact silent-gap failure this module forbids.
+    It 'throws for a manifest.json declaring an unsupported schemaVersion (reproduced silent-gap case)' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"9999.0.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*schemaVersion*9999.0.0*'
+    }
+
+    It 'throws for a manifest.json missing createdUtc' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","tenant":"tp-abc123","producer":{},"datasets":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*createdUtc*'
+    }
+
+    It 'throws for a manifest.json missing producer' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","datasets":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*producer*'
+    }
+
+    It 'throws for a manifest.json missing datasets' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*datasets*'
+    }
+
+    It 'opens successfully for a well-formed manifest.json declaring the supported schemaVersion' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{}}' -NoNewline
+
+        $opened = InModuleScope TenantPulse -ArgumentList $script:openRoot {
+            param($openRoot)
+            Get-PulseSnapshotStore -Path $openRoot
+        }
+
+        $opened.Root | Should -Not -BeNullOrEmpty
+    }
 }

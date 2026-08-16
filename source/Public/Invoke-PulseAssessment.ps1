@@ -11,36 +11,55 @@
         psd1 file - the two names never blur, even though both commonly get shortened to
         "profile" in conversation.
 
+        TWO PARAMETER SETS, mutually exclusive (post-review fix): 'Collect' requires
+        -ProfileId and forbids -FromSnapshot; 'FromSnapshot' requires -FromSnapshot and
+        forbids -ProfileId. Earlier, -ProfileId was unconditionally mandatory even on the
+        -FromSnapshot path, where it is never actually used for anything (redaction
+        determinism depends only on the local operator key, not on -ProfileId) - that
+        forced a caller to supply a meaningless dummy value, and a -FromSnapshot bound to
+        an empty/whitespace string silently fell through to a full live Graph collection
+        instead of failing loudly. PowerShell's own parameter-set binding now rejects both
+        mistakes before this function's body ever runs.
+
         SELECTION IS RESOLVED EXACTLY ONCE. The full check catalog is loaded and narrowed
         through Select-PulseCheck (folding in -AssessmentProfile's Include/Exclude arrays
-        for any axis not explicitly bound on the command line, exactly like Get-
-        PulseTenantSnapshot's own profile handling) before collection ever starts. The
-        resulting check Id list is what actually drives collection scope (passed to
-        Get-PulseTenantSnapshot as -IncludeCheck, so only the datasets those exact checks
-        need are ever fetched) AND is the same check set handed to Invoke-PulseEvaluation -
-        there is exactly one place selection can happen, so collection and evaluation can
-        never see two different check sets from the same run.
+        for any axis not explicitly bound on the command line - see the shared
+        Resolve-PulseSelectionParams helper, also used by Get-PulseTenantSnapshot) before
+        collection ever starts. The resulting check Id list is what actually drives
+        collection scope (passed to Get-PulseTenantSnapshot as -IncludeCheck, so only the
+        datasets those exact checks need are ever fetched) AND is the same check set
+        handed to Invoke-PulseEvaluation - there is exactly one place selection can
+        happen, so collection and evaluation can never see two different check sets from
+        the same run.
 
-        OUTPUT LAYOUT: when collecting fresh (no -FromSnapshot), the snapshot store is
-        written to <OutputPath>/snapshot/ and the scored findings JSON report to
+        OUTPUT LAYOUT: when collecting fresh (Collect parameter set), the snapshot store
+        is written to <OutputPath>/snapshot/ and the scored findings JSON report to
         <OutputPath>/tenantpulse-findings.json - kept in separate locations so the report
         file and the snapshot's own manifest.json/datasets never collide in the same
         directory listing.
 
         -FromSnapshot <dir> skips collection entirely: the directory is opened as an
         existing store via the private Get-PulseSnapshotStore helper (which validates it
-        really is a snapshot root before anything else happens) and re-evaluated from
-        there - this path makes NO Graph call and touches no GraphKit descriptor at all,
-        because nothing in it ever calls Get-PulseTenantSnapshot.
+        really is a snapshot root, including its schemaVersion, before anything else
+        happens) and re-evaluated from there - this path makes NO Graph call and touches
+        no GraphKit descriptor at all, because nothing in it ever calls
+        Get-PulseTenantSnapshot.
 
         -Redact applies the evaluation's in-memory redaction map (built fresh by THIS
         call's own Invoke-PulseEvaluation - see that function and Export-PulseJsonReport's
         docstrings for why the map is never persisted or passed as anything but a same-call
-        in-memory value) to every evidence identity in the rendered JSON, substituting each
-        with its 'tp-...' pseudonym. Re-evaluating the same snapshot with -Redact is still
-        byte-identical across runs, because the pseudonym HMAC is keyed and stable
-        (Get-PulsePseudonym, Task 1.3) - "fresh redaction map" does not mean "different
-        output" for the same input snapshot and operator key.
+        in-memory value) to every evidence identity (and, where it defaults to a raw
+        identity, evidence sortKey - see Export-PulseJsonReport) in the rendered JSON,
+        substituting each with its 'tp-...' pseudonym. Re-evaluating the same snapshot with
+        -Redact is still byte-identical across runs, because the pseudonym HMAC is keyed
+        and stable (Get-PulsePseudonym, Task 1.3) - "fresh redaction map" does not mean
+        "different output" for the same input snapshot and operator key. HONEST RESIDUAL:
+        -Redact substitutes evidence identities (and identity-defaulted sortKeys) only - a
+        rule-authored Reason or an engine Error reason is capped (Protect-PulseReason) but
+        never identity-substituted, so a raw identifier that leaks into free-text exception
+        or reason text (e.g. a UPN embedded in a caught error message) can still survive a
+        redacted report. Full reason/detail-text identity substitution is future work, not
+        part of this task.
 
         Returns a summary object: { SnapshotPath; FindingsPath; ReportPaths; Scores;
         Coverage }. SnapshotPath is the store's root directory. FindingsPath is the
@@ -58,22 +77,28 @@
         tenantpulse-findings.json to ./out.
 
     .EXAMPLE
-        Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out' -FromSnapshot './out/snapshot' -Redact
+        Invoke-PulseAssessment -OutputPath './out' -FromSnapshot './out/snapshot' -Redact
 
-        Re-evaluates an already-collected snapshot (no Graph call at all) and writes a
-        redacted report, with every evidence identity replaced by its pseudonym.
+        Re-evaluates an already-collected snapshot (no Graph call at all, no -ProfileId
+        needed) and writes a redacted report, with every evidence identity replaced by its
+        pseudonym.
 
     .PARAMETER ProfileId
         The GraphKit tenant profile identifier used to collect a fresh snapshot. Always the
-        GraphKit tenant profile, never the TenantPulse selection profile - see -AssessmentProfile.
+        GraphKit tenant profile, never the TenantPulse selection profile - see
+        -AssessmentProfile. Mandatory on the 'Collect' parameter set; not accepted at all
+        on the 'FromSnapshot' set (see -FromSnapshot), since re-evaluating an existing
+        snapshot never talks to GraphKit or needs a tenant profile.
 
     .PARAMETER OutputPath
-        Directory this run writes into: a fresh snapshot subdirectory (unless -FromSnapshot
-        is given) plus the rendered findings report. Created if it does not already exist.
+        Directory this run writes into: a fresh snapshot subdirectory (Collect set only)
+        plus the rendered findings report. Created if it does not already exist.
 
     .PARAMETER FromSnapshot
         Path to an already-collected snapshot directory to re-evaluate instead of
-        collecting fresh. Skips Get-PulseTenantSnapshot entirely - no GraphKit call is made.
+        collecting fresh. Skips Get-PulseTenantSnapshot entirely - no GraphKit call is
+        made. Mandatory on the 'FromSnapshot' parameter set; not accepted at all on the
+        'Collect' set (see -ProfileId).
 
     .PARAMETER AssessmentProfile
         Path to a TenantPulse selection-profile .psd1 file supplying default Include/
@@ -105,10 +130,10 @@
         render-only path never has an evaluation-time redaction map to draw from.
 #>
 function Invoke-PulseAssessment {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'Collect')]
     [OutputType([pscustomobject])]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory, ParameterSetName = 'Collect')]
         [ValidateNotNullOrEmpty()]
         [string] $ProfileId,
 
@@ -116,7 +141,8 @@ function Invoke-PulseAssessment {
         [ValidateNotNullOrEmpty()]
         [string] $OutputPath,
 
-        [Parameter()]
+        [Parameter(Mandatory, ParameterSetName = 'FromSnapshot')]
+        [ValidateNotNullOrEmpty()]
         [string] $FromSnapshot,
 
         [Parameter()]
@@ -147,47 +173,21 @@ function Invoke-PulseAssessment {
     }
     $resolvedOutputPath = (Resolve-Path -LiteralPath $OutputPath).ProviderPath
 
-    # -AssessmentProfile: Include/Exclude fold into Select-PulseCheck's own profile
-    # vocabulary; BreakGlassAccounts/ServiceAccounts fold into -Context for
-    # Invoke-PulseEvaluation. ThresholdOverrides is loaded (for shape validation only) but
-    # RESERVED - nothing in Phase 1 consumes it; it is deliberately never wired into
-    # -Context or anywhere else.
-    $profileInclude = $null
-    $profileExclude = $null
-    $evaluationContext = $null
-    if ($PSBoundParameters.ContainsKey('AssessmentProfile') -and -not [string]::IsNullOrWhiteSpace($AssessmentProfile)) {
-        $profileData = Import-PowerShellDataFile -LiteralPath $AssessmentProfile -ErrorAction Stop
-
-        if ($profileData.ContainsKey('Include')) { $profileInclude = @($profileData.Include) }
-        if ($profileData.ContainsKey('Exclude')) { $profileExclude = @($profileData.Exclude) }
-
-        $breakGlassAccounts = if ($profileData.ContainsKey('BreakGlassAccounts')) { @($profileData.BreakGlassAccounts) } else { @() }
-        $serviceAccounts = if ($profileData.ContainsKey('ServiceAccounts')) { @($profileData.ServiceAccounts) } else { @() }
-        $evaluationContext = @{
-            BreakGlassAccounts = $breakGlassAccounts
-            ServiceAccounts    = $serviceAccounts
-        }
-    }
-
     # Selection is resolved exactly once, against the FULL catalog, before collection ever
     # starts - see the docstring's SELECTION IS RESOLVED EXACTLY ONCE section.
     $fullCatalog = @(Import-PulseCheckCatalog)
 
-    $includeBoundOnCli = $PSBoundParameters.ContainsKey('IncludeCategory') -or $PSBoundParameters.ContainsKey('IncludeCheck')
-    $excludeBoundOnCli = $PSBoundParameters.ContainsKey('ExcludeCategory') -or $PSBoundParameters.ContainsKey('ExcludeCheck')
-
-    $selectParams = @{ Checks = $fullCatalog }
-    if ($PSBoundParameters.ContainsKey('IncludeCategory')) { $selectParams.IncludeCategory = $IncludeCategory }
-    if ($PSBoundParameters.ContainsKey('ExcludeCategory')) { $selectParams.ExcludeCategory = $ExcludeCategory }
-    if ($PSBoundParameters.ContainsKey('IncludeCheck')) { $selectParams.IncludeCheck = $IncludeCheck }
-    if ($PSBoundParameters.ContainsKey('ExcludeCheck')) { $selectParams.ExcludeCheck = $ExcludeCheck }
-    if (-not $includeBoundOnCli -and $null -ne $profileInclude) { $selectParams.Include = $profileInclude }
-    if (-not $excludeBoundOnCli -and $null -ne $profileExclude) { $selectParams.Exclude = $profileExclude }
+    $resolvedSelection = Resolve-PulseSelectionParams -BoundParameters $PSBoundParameters `
+        -IncludeCategory $IncludeCategory -ExcludeCategory $ExcludeCategory `
+        -IncludeCheck $IncludeCheck -ExcludeCheck $ExcludeCheck -AssessmentProfile $AssessmentProfile
+    $selectParams = $resolvedSelection.SelectParams
+    $selectParams.Checks = $fullCatalog
+    $evaluationContext = $resolvedSelection.Context
 
     $selectedChecks = @(Select-PulseCheck @selectParams)
     $selectedIds = [string[]] @($selectedChecks | ForEach-Object { [string] $_.Id })
 
-    if ($PSBoundParameters.ContainsKey('FromSnapshot') -and -not [string]::IsNullOrWhiteSpace($FromSnapshot)) {
+    if ($PSCmdlet.ParameterSetName -eq 'FromSnapshot') {
         $store = Get-PulseSnapshotStore -Path $FromSnapshot
     } else {
         $snapshotPath = Join-Path $resolvedOutputPath 'snapshot'
@@ -234,7 +234,9 @@ function Invoke-PulseAssessment {
 
     # Dispatches on -Format even though ValidateSet allows only 'Json' today - kept
     # explicit (rather than always calling the Json renderer unconditionally) so a future
-    # renderer is additive here, not a rewrite of this dispatch.
+    # renderer is additive here, not a rewrite of this dispatch. The 'default' arm is
+    # unreachable while ValidateSet allows only 'Json' - documented scaffolding for a
+    # future format, kept deliberately rather than removed.
     $reportPath = switch ($Format) {
         'Json' { Export-PulseJsonReport -Document $scoredDocument -OutputPath $resolvedOutputPath -RedactionMap $redactionMapToApply }
         default { throw "Invoke-PulseAssessment: unsupported -Format '$Format'." }

@@ -146,7 +146,7 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
         Mock Get-GraphOperation -ModuleName TenantPulse { throw 'Get-GraphOperation must not be called on the -FromSnapshot path.' }
         Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must not be called on the -FromSnapshot path.' }
 
-        $run = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot; FromSnapshot = $preBuiltStoreRoot }
+        $run = Invoke-TestPulseAssessment -Params @{ OutputPath = $script:outputRoot; FromSnapshot = $preBuiltStoreRoot }
 
         Should -Invoke Get-GraphContext -ModuleName TenantPulse -Times 0 -Exactly
         Should -Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
@@ -174,7 +174,7 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
         # redaction map every call does not mean different output for the same input.
         $secondRoot = New-TestOutputRoot
         try {
-            $secondRun = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $secondRoot; FromSnapshot = $firstRun.SnapshotPath; Redact = $true }
+            $secondRun = Invoke-TestPulseAssessment -Params @{ OutputPath = $secondRoot; FromSnapshot = $firstRun.SnapshotPath; Redact = $true }
 
             $firstRaw = Get-Content -LiteralPath $firstRun.FindingsPath -Raw
             $secondRaw = Get-Content -LiteralPath $secondRun.FindingsPath -Raw
@@ -212,6 +212,78 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
         # substring search over the whole file, which would false-positive on that field.
         $doc.findings[0].evidence[0].identity | Should -Be 'admin@contoso.onmicrosoft.com'
         $doc.findings[0].evidence[0].identity | Should -Not -Match '^tp-'
+    }
+}
+
+Describe 'Export-PulseJsonReport (private) - choke-point guard and sortKey redaction' {
+    BeforeEach {
+        $script:outputRoot = New-TestOutputRoot
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:outputRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'throws if -Document is the Invoke-PulseEvaluation wrapper (has a top-level RedactionMap property) instead of its .Document member' {
+        $wrapper = [pscustomobject]@{
+            Document     = [pscustomobject]@{ schemaVersion = '1.0'; findings = @() }
+            RedactionMap = @{ 'admin@contoso.onmicrosoft.com' = 'tp-deadbeef' }
+        }
+
+        {
+            InModuleScope TenantPulse -ArgumentList $wrapper, $script:outputRoot {
+                param($wrapper, $outputRoot)
+                Export-PulseJsonReport -Document $wrapper -OutputPath $outputRoot
+            }
+        } | Should -Throw -ExpectedMessage '*RedactionMap*'
+    }
+
+    It 'redacts a sortKey that equals its evidence''s raw identity to the SAME pseudonym' {
+        $document = [pscustomobject]@{
+            schemaVersion = '1.0'
+            findings      = @(
+                [pscustomobject]@{
+                    id       = 'TP.ENT.9001'
+                    evidence = @(
+                        [pscustomobject]@{ identity = 'admin@contoso.onmicrosoft.com'; detail = 'x'; sortKey = 'admin@contoso.onmicrosoft.com' }
+                    )
+                }
+            )
+        }
+        $redactionMap = @{ 'admin@contoso.onmicrosoft.com' = 'tp-deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef' }
+
+        $reportPath = InModuleScope TenantPulse -ArgumentList $document, $script:outputRoot, $redactionMap {
+            param($document, $outputRoot, $redactionMap)
+            Export-PulseJsonReport -Document $document -OutputPath $outputRoot -RedactionMap $redactionMap
+        }
+
+        $rendered = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+        $rendered.findings[0].evidence[0].identity | Should -Be $redactionMap['admin@contoso.onmicrosoft.com']
+        $rendered.findings[0].evidence[0].sortKey | Should -Be $redactionMap['admin@contoso.onmicrosoft.com']
+    }
+
+    It 'leaves a custom, non-identity sortKey untouched by redaction' {
+        $document = [pscustomobject]@{
+            schemaVersion = '1.0'
+            findings      = @(
+                [pscustomobject]@{
+                    id       = 'TP.ENT.9001'
+                    evidence = @(
+                        [pscustomobject]@{ identity = 'admin@contoso.onmicrosoft.com'; detail = 'x'; sortKey = '000-custom-sort-key' }
+                    )
+                }
+            )
+        }
+        $redactionMap = @{ 'admin@contoso.onmicrosoft.com' = 'tp-deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef' }
+
+        $reportPath = InModuleScope TenantPulse -ArgumentList $document, $script:outputRoot, $redactionMap {
+            param($document, $outputRoot, $redactionMap)
+            Export-PulseJsonReport -Document $document -OutputPath $outputRoot -RedactionMap $redactionMap
+        }
+
+        $rendered = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+        $rendered.findings[0].evidence[0].identity | Should -Be $redactionMap['admin@contoso.onmicrosoft.com']
+        $rendered.findings[0].evidence[0].sortKey | Should -Be '000-custom-sort-key'
     }
 }
 

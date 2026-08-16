@@ -35,8 +35,41 @@ BeforeAll {
                 return New-PulseFinding -Status Pass -Evidence @(@{ Identity = 'policy-1' })
             }
 
+            # Reads $Context.BreakGlassAccounts - used to prove -AssessmentProfile
+            # actually reaches a rule through Invoke-PulseCheck's forwarding, not just
+            # through Invoke-PulseAssessment directly.
+            function Test-PulseFixtureInvokeCheckContextRule {
+                param($Datasets, $Context)
+                $status = if ($Context.BreakGlassAccounts -contains 'breakglass@contoso.onmicrosoft.com') { 'Pass' } else { 'Fail' }
+                return New-PulseFinding -Status $status
+            }
+
             Invoke-PulseCheck @Params
         }
+    }
+
+    function script:New-TestInvokeCheckContextCatalog {
+        @(
+            [pscustomobject]@{
+                PSTypeName = 'TenantPulse.CheckDescriptor'
+                Id         = 'TP.ENT.9003'
+                Title      = 'Fixture context-aware check'
+                Category   = 'Entra.ConditionalAccess'
+                Severity   = 'Medium'
+                Effort     = 'Low'
+                Impact     = 'Medium'
+                Data       = [pscustomobject]@{ Datasets = @('conditionalAccessPolicies'); Gates = @() }
+                Rule       = [pscustomobject]@{ Type = 'Function'; Function = 'Test-PulseFixtureInvokeCheckContextRule' }
+                Consulting = [pscustomobject]@{
+                    WhatItMeans  = 'What it means.'
+                    WhyItMatters = 'Why it matters.'
+                    Remediation  = @('Fix it.')
+                    PortalLinks  = @('https://example.com/portal')
+                }
+                References = [pscustomobject]@{ Research = 'docs/research/fixture.md'; Authorities = @('MS.FIXTURE.1') }
+                Origin     = $null
+            }
+        )
     }
 
     function script:New-TestInvokeCheckCatalog {
@@ -100,6 +133,37 @@ Describe 'Invoke-PulseCheck' {
 
     It 'throws when -Id is supplied as an empty array' {
         { Invoke-PulseCheck -Id @() -ProfileId 'contoso-tenant-id' -OutputPath $script:outputRoot } | Should -Throw
+    }
+
+    # Post-review regression coverage: mirrors Invoke-PulseAssessment's own 'Collect' vs
+    # 'FromSnapshot' mutually exclusive parameter sets.
+    It 'throws when both -ProfileId and -FromSnapshot are supplied together' {
+        {
+            Invoke-PulseCheck -Id 'TP.ENT.9001' -ProfileId 'contoso-tenant-id' -OutputPath $script:outputRoot -FromSnapshot (Join-Path $script:outputRoot 'snapshot')
+        } | Should -Throw
+    }
+
+    It 'throws when neither -ProfileId nor -FromSnapshot is supplied' {
+        { Invoke-PulseCheck -Id 'TP.ENT.9001' -OutputPath $script:outputRoot } | Should -Throw
+    }
+
+    It 'throws (rather than silently collecting) for a whitespace-only -FromSnapshot' {
+        { Invoke-PulseCheck -Id 'TP.ENT.9001' -OutputPath $script:outputRoot -FromSnapshot '   ' } | Should -Throw
+    }
+
+    It '-AssessmentProfile is forwarded to Invoke-PulseAssessment, so BreakGlassAccounts context reaches a rule' {
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestInvokeCheckContextCatalog }
+        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
+        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+
+        $profilePath = Join-Path $script:outputRoot 'profile.psd1'
+        Set-Content -LiteralPath $profilePath -Value "@{ Include = @(); Exclude = @(); BreakGlassAccounts = @('breakglass@contoso.onmicrosoft.com'); ServiceAccounts = @() }" -NoNewline
+
+        $summary = Invoke-TestPulseCheck -Params @{ Id = @('TP.ENT.9003'); ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot; AssessmentProfile = $profilePath }
+
+        $doc = Get-Content -LiteralPath $summary.FindingsPath -Raw | ConvertFrom-Json
+        $doc.findings[0].status | Should -Be 'Pass'
     }
 
     It 'scopes collection and evaluation to just the named -Id' {

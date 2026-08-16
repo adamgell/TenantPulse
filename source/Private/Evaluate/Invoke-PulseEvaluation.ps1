@@ -108,12 +108,17 @@
           every EXISTING rule-function-shaped test double that declares only a -Datasets
           param (PowerShell throws "a parameter cannot be found that matches parameter
           name 'Context'" for a function that never declares it). -Context is therefore
-          OPT-IN on this path: it is passed to the rule function only when (a) -Context was
-          actually supplied to Invoke-PulseEvaluation itself AND (b) the target function's
-          own parameter set actually declares a -Context parameter (checked via
-          `(Get-Command $ruleFunction).Parameters.ContainsKey('Context')`). This keeps
-          every pre-Task-1.8 rule function working completely unchanged while giving a
-          Task 1.9+ check an opt-in $Context the moment it declares the parameter.
+          OPT-IN on this path, gated on exactly ONE condition: does the target function's
+          own parameter set declare a -Context parameter (checked via
+          `(Get-Command $ruleFunction).Parameters.ContainsKey('Context')`)? (Post-review
+          note: an earlier draft of this gate ALSO checked whether -Context had been
+          bound on Invoke-PulseCheckEvaluation's own $PSBoundParameters - that condition
+          is dead code and was removed, because Invoke-PulseEvaluation's loop below always
+          calls Invoke-PulseCheckEvaluation with -Context $Context regardless of whether
+          ITS OWN caller supplied one, since -Context defaults to @{} - so that bound-ness
+          check was always true and never actually decided anything.) This keeps every
+          pre-Task-1.8 rule function working completely unchanged while giving a Task 1.9+
+          check an opt-in $Context the moment it declares the parameter.
     Omitting -Context entirely (the default, an empty hashtable) behaves exactly as before
     this parameter existed - both paths still receive a (now merely empty, rather than
     absent) $Context, which is indistinguishable from "no context" for any rule that reads
@@ -391,7 +396,14 @@ function Invoke-PulseCheckEvaluation {
             $ruleCommand = Get-Command -Name $ruleFunction -ErrorAction SilentlyContinue
             $ruleAcceptsContext = ($null -ne $ruleCommand) -and $ruleCommand.Parameters.ContainsKey('Context')
 
-            $rawOutputs = if ($PSBoundParameters.ContainsKey('Context') -and $ruleAcceptsContext) {
+            # $PSBoundParameters.ContainsKey('Context') is NOT checked here (post-review
+            # fix - a dead condition removed): Invoke-PulseEvaluation's own -Context
+            # parameter defaults to @{} and its loop above always calls this function with
+            # -Context $Context regardless of whether ITS caller supplied one, so
+            # -Context is unconditionally bound on THIS function's own $PSBoundParameters
+            # every time - only $ruleAcceptsContext (does the target function declare the
+            # parameter at all) actually decides anything.
+            $rawOutputs = if ($ruleAcceptsContext) {
                 @(& $ruleFunction -Datasets $clonedDatasets -Context $Context 2>&1)
             } else {
                 @(& $ruleFunction -Datasets $clonedDatasets 2>&1)

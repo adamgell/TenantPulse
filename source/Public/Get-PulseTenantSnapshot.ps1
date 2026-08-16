@@ -62,12 +62,15 @@
         to New-PulseSnapshotStore.
 
     .PARAMETER IncludeCategory
-        Only load checks whose Category is one of these values. Combines with
-        -ExcludeCategory, -IncludeCheck and -ExcludeCheck; every supplied filter narrows
-        the set further.
+        Only load checks whose Category dotted-path prefix-matches one of these values
+        (e.g. 'Entra' matches 'Entra.ConditionalAccess', 'Entra.Identity', ... but never
+        'EntraFoo' - see Select-PulseCheck's own docstring for the exact matching rule).
+        Combines with -ExcludeCategory, -IncludeCheck and -ExcludeCheck; every supplied
+        filter narrows the set further.
 
     .PARAMETER ExcludeCategory
-        Drop checks whose Category is one of these values.
+        Drop checks whose Category dotted-path prefix-matches one of these values. Always
+        wins over an Include match for the same check, on any axis.
 
     .PARAMETER IncludeCheck
         Only load checks whose Id is one of these values.
@@ -119,45 +122,18 @@ function Get-PulseTenantSnapshot {
         $PSScriptRoot
     }
 
-    # -AssessmentProfile only ever supplies DEFAULTS: an explicitly-bound CLI filter
-    # parameter always wins over the profile file's Include/Exclude, even an empty array.
-    # The profile's Include/Exclude arrays are folded into Select-PulseCheck's own
-    # -Include/-Exclude params (not -IncludeCategory/-IncludeCheck) - see
-    # Select-PulseCheck's docstring for why that is a deliberately separate vocabulary.
-    $profileInclude = $null
-    $profileExclude = $null
-    if ($PSBoundParameters.ContainsKey('AssessmentProfile') -and -not [string]::IsNullOrWhiteSpace($AssessmentProfile)) {
-        $profileData = Import-PowerShellDataFile -LiteralPath $AssessmentProfile -ErrorAction Stop
-
-        if ($profileData.ContainsKey('Include')) {
-            $profileInclude = @($profileData.Include)
-        }
-        if ($profileData.ContainsKey('Exclude')) {
-            $profileExclude = @($profileData.Exclude)
-        }
-    }
-
     $datasetMapPath = Join-Path $moduleBase 'Data/DatasetMap.psd1'
     $datasetMap = Import-PowerShellDataFile -LiteralPath $datasetMapPath -ErrorAction Stop
 
     $checks = @(Import-PulseCheckCatalog -DatasetMapPath $datasetMapPath)
 
-    # A CLI param on EITHER axis-specific include parameter counts as "the same axis" as
-    # the profile's single, axis-ambiguous Include array - if the caller explicitly bound
-    # -IncludeCategory or -IncludeCheck (even to an empty array), that wins outright and
-    # the profile's Include is not folded in at all. Same rule for Exclude.
-    $includeBoundOnCli = $PSBoundParameters.ContainsKey('IncludeCategory') -or $PSBoundParameters.ContainsKey('IncludeCheck')
-    $excludeBoundOnCli = $PSBoundParameters.ContainsKey('ExcludeCategory') -or $PSBoundParameters.ContainsKey('ExcludeCheck')
-
-    $selectParams = @{
-        Checks = $checks
-    }
-    if ($PSBoundParameters.ContainsKey('IncludeCategory')) { $selectParams.IncludeCategory = $IncludeCategory }
-    if ($PSBoundParameters.ContainsKey('ExcludeCategory')) { $selectParams.ExcludeCategory = $ExcludeCategory }
-    if ($PSBoundParameters.ContainsKey('IncludeCheck')) { $selectParams.IncludeCheck = $IncludeCheck }
-    if ($PSBoundParameters.ContainsKey('ExcludeCheck')) { $selectParams.ExcludeCheck = $ExcludeCheck }
-    if (-not $includeBoundOnCli -and $null -ne $profileInclude) { $selectParams.Include = $profileInclude }
-    if (-not $excludeBoundOnCli -and $null -ne $profileExclude) { $selectParams.Exclude = $profileExclude }
+    # -AssessmentProfile loading and CLI-precedence folding is shared with
+    # Invoke-PulseAssessment via this one helper - see its own docstring.
+    $resolvedSelection = Resolve-PulseSelectionParams -BoundParameters $PSBoundParameters `
+        -IncludeCategory $IncludeCategory -ExcludeCategory $ExcludeCategory `
+        -IncludeCheck $IncludeCheck -ExcludeCheck $ExcludeCheck -AssessmentProfile $AssessmentProfile
+    $selectParams = $resolvedSelection.SelectParams
+    $selectParams.Checks = $checks
 
     $checks = @(Select-PulseCheck @selectParams)
 

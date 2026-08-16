@@ -138,6 +138,78 @@ Describe 'Select-PulseCheck' {
 
         @($result.Id) | Should -Be @('TP.ENT.0002')
     }
+
+    # Post-review regression coverage: a single-element array collapses to that element's
+    # own truthiness in a PowerShell boolean context, so a naive `if ($Array -and ...)`
+    # not-empty check would treat `@('')` as falsy (Count 1, but the lone element is an
+    # empty string) and silently skip the whole filter axis - returning the FULL,
+    # unfiltered catalog instead of either throwing or matching nothing. Every one of
+    # these must now throw instead.
+    It 'throws for a blank element in -IncludeCategory rather than silently matching the full catalog' {
+        $catalog = @($script:caCheck, $script:identityCheck)
+
+        {
+            InModuleScope TenantPulse -ArgumentList (, $catalog) {
+                param($catalog)
+                Select-PulseCheck -Checks $catalog -IncludeCategory @('')
+            }
+        } | Should -Throw -ExpectedMessage '*IncludeCategory*'
+    }
+
+    It 'throws for a blank element in -ExcludeCategory' {
+        $catalog = @($script:caCheck, $script:identityCheck)
+
+        {
+            InModuleScope TenantPulse -ArgumentList (, $catalog) {
+                param($catalog)
+                Select-PulseCheck -Checks $catalog -ExcludeCategory @('')
+            }
+        } | Should -Throw -ExpectedMessage '*ExcludeCategory*'
+    }
+
+    It 'throws for a blank element in -IncludeCheck' {
+        $catalog = @($script:caCheck, $script:identityCheck)
+
+        {
+            InModuleScope TenantPulse -ArgumentList (, $catalog) {
+                param($catalog)
+                Select-PulseCheck -Checks $catalog -IncludeCheck @('   ')
+            }
+        } | Should -Throw -ExpectedMessage '*IncludeCheck*'
+    }
+
+    It 'throws for a blank element in -ExcludeCheck' {
+        $catalog = @($script:caCheck, $script:identityCheck)
+
+        {
+            InModuleScope TenantPulse -ArgumentList (, $catalog) {
+                param($catalog)
+                Select-PulseCheck -Checks $catalog -ExcludeCheck @($null)
+            }
+        } | Should -Throw -ExpectedMessage '*ExcludeCheck*'
+    }
+
+    It 'throws for a blank element in the profile -Include vocabulary' {
+        $catalog = @($script:caCheck, $script:identityCheck)
+
+        {
+            InModuleScope TenantPulse -ArgumentList (, $catalog) {
+                param($catalog)
+                Select-PulseCheck -Checks $catalog -Include @('')
+            }
+        } | Should -Throw -ExpectedMessage '*Include*'
+    }
+
+    It 'throws for a blank element in the profile -Exclude vocabulary' {
+        $catalog = @($script:caCheck, $script:identityCheck)
+
+        {
+            InModuleScope TenantPulse -ArgumentList (, $catalog) {
+                param($catalog)
+                Select-PulseCheck -Checks $catalog -Exclude @('')
+            }
+        } | Should -Throw -ExpectedMessage '*Exclude*'
+    }
 }
 
 Describe 'Get-PulseTenantSnapshot -AssessmentProfile precedence' {

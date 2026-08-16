@@ -26,6 +26,8 @@
     happen for a map built from the SAME evaluation run this document came from, but this
     function is defensive rather than assuming that invariant) is left unredacted rather
     than thrown on - this function cannot tell an intentional absence from a real gap, and
+    "no silent gaps" is about dataset/check degradation reasons, not a mandate to invent a
+    placeholder pseudonym here.
 
     evidence[].sortKey is redacted through the SAME map lookup, using the sortKey value
     itself as the key: New-PulseFinding defaults an evidence entry's sortKey to its raw
@@ -34,8 +36,15 @@
     identity field would be. A sortKey that is genuinely a custom, non-identity value is
     never a key in -RedactionMap (the map is built only from evidence Identity values) and
     is therefore left untouched, correctly.
-    "no silent gaps" is about dataset/check degradation reasons, not a mandate to invent a
-    placeholder pseudonym here.
+
+    CHOKE-POINT GUARD (post-review fix): -Document is rejected outright, before anything
+    else, if its own top-level properties include a member literally named 'RedactionMap'
+    - reproduced proof that handing this function the T1.6 wrapper object directly (instead
+    of its .Document member) serializes the raw redaction map straight into the report.
+    This is the last line of defense for the "never serialize the wrapper" rule described
+    above: every current caller already destructures .Document/.RedactionMap correctly, but
+    a future caller that forgets to now fails loudly at this function's own boundary
+    instead of silently leaking raw evidence identities into a file on disk.
 
     Returns the full path to the file written.
 #>
@@ -55,6 +64,10 @@ function Export-PulseJsonReport {
         [AllowNull()]
         [hashtable] $RedactionMap
     )
+
+    if ($Document.PSObject.Properties.Name -contains 'RedactionMap') {
+        throw 'Export-PulseJsonReport: -Document has a top-level RedactionMap property - this looks like the Invoke-PulseEvaluation wrapper {Document;RedactionMap} was passed directly instead of its .Document member. Pass -Document $evaluation.Document and -RedactionMap $evaluation.RedactionMap separately; never serialize the wrapper itself.'
+    }
 
     if (-not (Test-Path -LiteralPath $OutputPath -PathType Container)) {
         New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null

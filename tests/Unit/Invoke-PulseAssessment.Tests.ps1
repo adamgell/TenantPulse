@@ -92,6 +92,30 @@ Describe 'Invoke-PulseAssessment' {
         { Invoke-PulseAssessment -ProfileId 'contoso-tenant-id' -OutputPath $script:outputRoot -Format 'Xml' } | Should -Throw
     }
 
+    # Post-review regression coverage: -ProfileId and -FromSnapshot are now mutually
+    # exclusive parameter sets ('Collect' vs 'FromSnapshot') - -ProfileId has no meaning
+    # at all on a -FromSnapshot re-evaluation (redaction determinism depends only on the
+    # local operator key), and the two used to be freely combinable, which let a
+    # -FromSnapshot call demand a dummy -ProfileId that was silently ignored.
+    It 'throws when both -ProfileId and -FromSnapshot are supplied together' {
+        {
+            Invoke-PulseAssessment -ProfileId 'contoso-tenant-id' -OutputPath $script:outputRoot -FromSnapshot (Join-Path $script:outputRoot 'snapshot')
+        } | Should -Throw
+    }
+
+    It 'throws when neither -ProfileId nor -FromSnapshot is supplied' {
+        { Invoke-PulseAssessment -OutputPath $script:outputRoot } | Should -Throw
+    }
+
+    # Post-review regression coverage: -FromSnapshot now carries [ValidateNotNullOrEmpty()]
+    # on its own parameter-set-scoped mandatory declaration - a whitespace-only value must
+    # fail parameter binding outright, never silently fall through to a full live Graph
+    # collection the way the old `-not [string]::IsNullOrWhiteSpace($FromSnapshot)` runtime
+    # check allowed.
+    It 'throws (rather than silently collecting) for a whitespace-only -FromSnapshot' {
+        { Invoke-PulseAssessment -OutputPath $script:outputRoot -FromSnapshot '   ' } | Should -Throw
+    }
+
     It 'only collects the datasets the selected checks need, driven by the SAME selection used for evaluation' {
         $inScope = (New-TestAssessmentCatalog -Id 'TP.ENT.9001' -Category 'Entra.ConditionalAccess' -Datasets @('conditionalAccessPolicies'))[0]
         $outOfScope = (New-TestAssessmentCatalog -Id 'TP.INT.9002' -Category 'Intune.Compliance' -Datasets @('deviceCompliancePolicies'))[0]

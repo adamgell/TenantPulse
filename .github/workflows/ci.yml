@@ -329,4 +329,54 @@ jobs:
           # and carries no -Redact parameter at all. This minimum must keep ratcheting up
           # as check/function test suites are added in later tasks - see docs/superpowers/sdd
           # for the phase plan.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 254 -AllowedSkips 0 -AllowNotRun 0
+          #
+          # Task 1.8 review-fix round (same task, second pass): six review findings closed.
+          # (1) Invoke-PulseAssessment/Invoke-PulseCheck split into mutually exclusive
+          # 'Collect' (-ProfileId mandatory, no -FromSnapshot) and 'FromSnapshot'
+          # (-FromSnapshot mandatory + ValidateNotNullOrEmpty, no -ProfileId) parameter
+          # sets - closes a reproduced bug where -FromSnapshot demanded a meaningless
+          # dummy -ProfileId and a whitespace -FromSnapshot silently fell through to a
+          # full live Graph collection instead of failing loudly. (2) Get-PulseSnapshotStore
+          # now rejects any schemaVersion other than the exact one this module's own
+          # writer produces, and requires createdUtc/producer/datasets members - closes a
+          # reproduced silent-gap hole where {"schemaVersion":"9999.0.0"} opened cleanly
+          # and re-evaluated into a confident-looking, entirely NotApplicable scored
+          # report with a null tenant/generatedUtc. (3) Export-PulseJsonReport gained a
+          # choke-point guard: throws if -Document itself carries a top-level
+          # RedactionMap property (the T1.6 wrapper handed in directly instead of its
+          # .Document member) instead of silently serializing raw evidence identities.
+          # (4) Invoke-PulseCheck gained -AssessmentProfile and forwards it to
+          # Invoke-PulseAssessment - its "identical guarantees" docstring claim was false
+          # for context-dependent checks (BreakGlassAccounts/ServiceAccounts never reached
+          # rules through the wrapper) until this landed. (5) The near-verbatim
+          # -AssessmentProfile-load + CLI-precedence block duplicated between
+          # Invoke-PulseAssessment and Get-PulseTenantSnapshot is now the single shared
+          # source/Private/Resolve-PulseSelectionParams.ps1 helper both call. (6) Minors:
+          # Select-PulseCheck now rejects a null/empty/whitespace element in ANY selection
+          # array (closes a real bug - `if ($Array -and $Array.Count -gt 0)` collapses a
+          # single-element array to that element's own truthiness in a boolean context, so
+          # `-IncludeCategory @('')` silently disabled the whole filter and matched the
+          # full catalog instead of throwing or matching nothing); docstring drift fixed
+          # (Get-PulseTenantSnapshot's -IncludeCategory/-ExcludeCategory now documented as
+          # dotted-prefix match, not exact match; "ThresholdOverrides shape validation"
+          # reworded to accurately say no shape validation is performed; Invoke-
+          # PulseEvaluation's dead -Context opt-in condition (a) removed from both the code
+          # and its docstring - only whether the target rule function declares -Context is
+          # load-bearing); -Redact's help text now documents its honest residual (reason/
+          # detail text is capped but never identity-substituted); two new sortKey
+          # redaction tests added (a sortKey that defaults to its raw identity is redacted
+          # to the SAME pseudonym; a genuinely custom, non-identity sortKey survives
+          # untouched). The unreachable -Format 'default' switch arms in
+          # Invoke-PulseAssessment/Export-PulseReport are left as-is (documented
+          # scaffolding for a future non-Json renderer, accepted). 21 new tests
+          # (254 -> 275): 6 Select-PulseCheck blank-element rejection tests
+          # (Selection.Tests.ps1), 4 Get-PulseSnapshotStore schema/member validation tests
+          # including the reproduced 9999.0.0 case (Snapshot.Tests.ps1), 3 Invoke-
+          # PulseAssessment parameter-set tests (Invoke-PulseAssessment.Tests.ps1), 4
+          # Invoke-PulseCheck parameter-set + -AssessmentProfile-forwarding tests
+          # (Invoke-PulseCheck.Tests.ps1), and 3 Export-PulseJsonReport tests - the
+          # RedactionMap choke-point guard plus the two sortKey redaction cases
+          # (PublicSurface.Tests.ps1). This minimum must keep ratcheting up as check/
+          # function test suites are added in later tasks - see docs/superpowers/sdd for
+          # the phase plan.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 275 -AllowedSkips 0 -AllowNotRun 0
