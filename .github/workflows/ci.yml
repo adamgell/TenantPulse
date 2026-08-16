@@ -387,4 +387,46 @@ jobs:
           # GUID contract/misc (TP.ENT.*), MDM authority citation/platform allowlist/stale-
           # device determinism (TP.INT.*), and the dependency-pending-vs-unavailable
           # distinction (collector).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 369 -AllowedSkips 0 -AllowNotRun 0
+          # Raised to 578 by Task 1.10 (enforcement gates): three new tests/QA/ gate files,
+          # each proving its own logic against synthetic/fixture inputs before running once
+          # more against the real repo - ReadOnly.tests.ps1 (18: per-dataset live-catalog
+          # Read/Safe assertions for every non-Pending DatasetMap.psd1 entry via the real
+          # installed GraphKit 0.1.0, per-dataset ExpectedThrottleClass/ExpectedReplayPolicy
+          # assertions for every Pending entry, the whole-map walker agreeing with the real
+          # map, and a mutation-check fixture proving the walker itself rejects a Write-class
+          # op), FixtureProvenance.tests.ps1 (15: parser unit tests, six
+          # Get-PulseFixtureProvenanceViolations unit tests against synthetic inputs, then
+          # the real tests/Fixtures/ tree asserted clean against the real PROVENANCE.md), and
+          # SecretScan.tests.ps1 (176: unit tests proving each of the four content-pattern
+          # detectors and the control-byte detector fire on synthetic input and stay silent
+          # on clean input and on the dotted-identifier/allowlisted-GUID false-positive
+          # classes, then every text file under source/ and tests/ - excluding tests/QA/
+          # itself, which necessarily contains the detection patterns as literal text -
+          # scanned for real, plus every source/ file byte-scanned for a raw NUL/control
+          # byte, the Task 1.8 regression class). This same commit fixed a real drift the
+          # read-only gate caught while being written: DatasetMap.psd1's
+          # deviceManagementSettings entry declared Type 'DeviceManagementSettings', which
+          # does not exist in the released GraphKit catalog at all - the correct Type is
+          # 'ManagedDeviceSetting'. This minimum must keep ratcheting up as check/function
+          # test suites are added in later tasks - see docs/superpowers/sdd for the phase
+          # plan.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 578 -AllowedSkips 0 -AllowNotRun 0
+
+  secret-scan:
+    name: Secret/PII scan (gitleaks)
+    runs-on: ubuntu-latest
+    # Complements tests/QA/SecretScan.tests.ps1 (which runs offline, in every `test` job
+    # above, on every developer machine) with gitleaks' much larger, actively-maintained
+    # rule set. Public-repo gitleaks-action needs no license key/secret - just the
+    # already-available GITHUB_TOKEN - so this stays fork-safe like the rest of this
+    # workflow.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
