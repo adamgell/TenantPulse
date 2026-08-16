@@ -14,10 +14,10 @@
 
     InvokeBuild                 = 'latest'
     PSScriptAnalyzer            = 'latest'
-    Pester                      = 'latest'
+    Pester                      = '6.1.0'
     ModuleBuilder               = 'latest'
     ChangelogManagement         = 'latest'
-    Sampler                     = 'latest'
+    Sampler                     = '0.120.1'
 
     # NOTE: GraphKit is a runtime dependency (see source/TenantPulse.psd1 RequiredModules)
     # but is intentionally NOT listed here. GraphKit is not yet published to PSGallery, so

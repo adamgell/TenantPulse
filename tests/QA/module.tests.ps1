@@ -60,16 +60,22 @@ Describe 'Changelog Management' -Tag 'Changelog' {
         { Get-ChangelogData -Path (Join-Path $ProjectPath 'CHANGELOG.md') -ErrorAction Stop } | Should -Not -Throw
     }
 
-    It 'Changelog should have an Unreleased header' -Skip:$skipTest {
+    It 'Changelog should have an Unreleased header' {
             (Get-ChangelogData -Path (Join-Path -Path $ProjectPath -ChildPath 'CHANGELOG.md') -ErrorAction Stop).Unreleased | Should -Not -BeNullOrEmpty
     }
 }
 
 Describe 'General module control' -Tags 'FunctionalQuality' {
     It 'Should import without errors' {
-        { Import-Module -Name $script:moduleName -Force -ErrorAction Stop } | Should -Not -Throw
+        # -ErrorAction Stop only catches terminating errors: a bare 'Should -Not -Throw'
+        # here would pass even if the import emitted non-terminating errors (a format file
+        # that fails to register, a bad type entry) as long as nothing terminated the call.
+        # -ErrorVariable captures both terminating and non-terminating errors from this one
+        # invocation into a fresh, scoped variable, so either kind fails the test.
+        { Import-Module -Name $script:moduleName -Force -ErrorAction Stop -ErrorVariable importErrors } | Should -Not -Throw
 
         Get-Module -Name $script:moduleName | Should -Not -BeNullOrEmpty
+        $importErrors | Should -BeNullOrEmpty -Because 'Import-Module must not emit any error, terminating or not'
     }
 
     It 'Should remove without error' {

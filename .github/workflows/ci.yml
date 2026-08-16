@@ -98,4 +98,9 @@ jobs:
           # minimum reflects the current fixed-count QA describe blocks (module control +
           # changelog) and must be raised as check/function test suites are added in later
           # tasks - see docs/superpowers/sdd for the phase plan.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 4 -AllowedSkips 0
+          #
+          # -AllowNotRun 6 covers the "Quality for module" (2 It) and "Help for module"
+          # (4 It) Describe blocks, which have zero leaf tests with no functions yet to
+          # drive their -ForEach. This must drop to 0 the moment the first function lands
+          # and those blocks start actually running.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 4 -AllowedSkips 0 -AllowNotRun 6

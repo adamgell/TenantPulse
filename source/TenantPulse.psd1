@@ -27,7 +27,7 @@ Author = 'Adam Gell'
 CompanyName = 'Adam Gell'
 
 # Copyright statement for this module
-Copyright = '(c) Adam Gell. All rights reserved.'
+Copyright = '(c) 2026 Adam Gell. Licensed under MIT.'
 
 # Description of the functionality provided by this module
 Description = 'Read-only tenant health engine that evaluates Microsoft Intune and Entra configuration against a versioned set of checks, producing a deterministic, pseudonymized, scored snapshot.'

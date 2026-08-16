@@ -1,15 +1,16 @@
 # Third-Party Notices
 
 TenantPulse depends on third-party software. This file lists those dependencies and their
-licenses. It is a stub: no runtime dependencies have shipped code embedded in this
-repository yet, so there are no entries below beyond the modules TenantPulse requires at
-install/import time.
+licenses.
+
+This is a stub: no third-party content has been ported into this repository yet, so there
+are no entries below. Entries land here alongside the first ported content that requires
+one (a dependency embedded in the build, or code adapted from another project).
 
 ## Runtime dependencies
 
 | Component | License | Notes |
 |-----------|---------|-------|
-| [GraphKit](https://github.com/AdamGell/GraphKit) | MIT | Required module; provides Graph read access. |
 
 ## Build/test-only dependencies
 
