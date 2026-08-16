@@ -125,4 +125,46 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings' {
 
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Type -eq 'ConfigurationPolicy' }
     }
+
+    # P0-1 review fix (reproduced defect): Get-PulseTenantSnapshot -ExpandSettings used to
+    # return TWO objects on its output pipeline (the snapshot $store from its own `return`,
+    # plus Invoke-PulseSettingsCatalogExpansionPipeline's own uncaptured summary object
+    # leaking through) - which silently turned `$store = Get-PulseTenantSnapshot @params`
+    # into a two-element array in Invoke-PulseAssessment, breaking `$store.Root` downstream.
+    It 'ON-STATE (P0-1): -ExpandSettings still returns EXACTLY ONE object from the pipeline' {
+        InModuleScope TenantPulse {
+            function Get-GraphContext { param() }
+            function Get-GraphObject { param() }
+        }
+        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ TenantId = 'tenant-guid-p0-1'; ProfileId = 'contoso-p0-1' } }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse { @() }
+
+        $results = @(InModuleScope TenantPulse -ArgumentList $script:outputRoot {
+                param($outputRoot)
+                Get-PulseTenantSnapshot -ProfileId 'contoso-p0-1' -OutputPath $outputRoot -IncludeCheck 'TP.ENT.0001' -ExpandSettings
+            })
+
+        $results.Count | Should -Be 1
+        $results[0].Root | Should -Not -BeNullOrEmpty
+
+        # Belt-and-suspenders: the pipeline function itself, called directly, also emits
+        # nothing on the output pipeline.
+        $store2Root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $store2 = InModuleScope TenantPulse -ArgumentList $store2Root {
+            param($storeRoot)
+            New-PulseSnapshotStore -Path $storeRoot
+        }
+        try {
+            $context = [pscustomobject]@{ TenantId = 'tenant-guid-p0-1-direct'; ProfileId = 'contoso-p0-1-direct' }
+            $directResults = @(InModuleScope TenantPulse -ArgumentList $store2, $context {
+                    param($store2, $context)
+                    Invoke-PulseSettingsCatalogExpansionPipeline -Store $store2 -Context $context -ProfileId 'contoso-p0-1-direct' -TenantPseudonym 'tp-direct'
+                })
+            $directResults.Count | Should -Be 0
+        } finally {
+            Remove-Item -LiteralPath $store2Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }

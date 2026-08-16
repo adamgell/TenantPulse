@@ -241,7 +241,10 @@ function Get-PulseTenantSnapshot {
     Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
 
     if ($ExpandSettings) {
-        Invoke-PulseSettingsCatalogExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
+        # P0-1 review fix: explicitly discarded - see Invoke-PulseSettingsCatalogExpansionPipeline's
+        # own VOID RETURN docstring section for why an uncaptured call here previously made
+        # this function return TWO objects instead of one.
+        $null = Invoke-PulseSettingsCatalogExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
     }
 
     return $store

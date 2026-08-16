@@ -206,6 +206,11 @@ function Invoke-PulseAssessment {
 
     if ($PSCmdlet.ParameterSetName -eq 'FromSnapshot') {
         $store = Get-PulseSnapshotStore -Path $FromSnapshot
+        # P1-11 review fix: if this snapshot was collected with -ExpandSettings, verify its
+        # settingsCatalog expansion is still hash-valid, or re-derive it from the captured
+        # payloads already on disk - never Graph. See that function's own docstring; a
+        # snapshot that never used -ExpandSettings is a fast, immediate no-op here.
+        Resolve-PulseSettingsCatalogSnapshotExpansion -Store $store
     } else {
         $snapshotPath = Join-Path $resolvedOutputPath 'snapshot'
         $collectParams = @{
