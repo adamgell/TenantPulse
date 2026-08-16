@@ -589,7 +589,12 @@ jobs:
           # 991 -> 1011 (task-2.3-review C1 round 2) and 1011 -> 1063 (Task 2.6, conflict
           # detection - artifact only) - see .build/AssertGateResult.tasks.ps1's own
           # accounting for both, which must be bumped together with this value.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1063 -AllowedSkips 0 -AllowNotRun 1
+          # 1063 -> 1092 (Phase 4 Task 4.1, Entra normalization layer + shared exclusion
+          # context: ConvertTo-PulseCaPolicyView + ConvertTo-PulseAuthMethodView new-file
+          # tests plus Get-PulseCaExclusionContext rework additions) - 29 new tests, see
+          # .build/AssertGateResult.tasks.ps1's own accounting, which must be bumped
+          # together with this value.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1092 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

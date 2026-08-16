@@ -107,4 +107,106 @@ Describe 'Get-PulseCaExclusionContext' {
         $result.ExcludedIdentifiers[0] | Should -Be 'alpha@contoso.com'
         $result.ExcludedIdentifiers[1] | Should -Be 'zeta@contoso.com'
     }
+
+    # ---- Task 4.1: GUID contract on declared accounts (classify, don't filter) ----
+
+    It 'MalformedDeclaredAccounts is empty and ExcludedIdentifiers still contains a GUID-shaped declared account' {
+        $context = @{ BreakGlassAccounts = @('11111111-1111-1111-1111-111111111111') }
+
+        $result = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseCaExclusionContext -Context $context
+        }
+
+        @($result.MalformedDeclaredAccounts).Count | Should -Be 0
+        $result.ExcludedIdentifiers | Should -Contain '11111111-1111-1111-1111-111111111111'
+    }
+
+    It 'flags a non-GUID BreakGlassAccounts entry as malformed but still carries it through ExcludedIdentifiers unchanged (Task 1.9 contract preserved)' {
+        $context = @{ BreakGlassAccounts = @('breakglass@contoso.onmicrosoft.com') }
+
+        $result = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseCaExclusionContext -Context $context
+        }
+
+        $result.MalformedDeclaredAccounts | Should -Contain 'breakglass@contoso.onmicrosoft.com'
+        $result.ExcludedIdentifiers | Should -Contain 'breakglass@contoso.onmicrosoft.com'
+    }
+
+    It 'flags a non-GUID ServiceAccounts entry as malformed too (not only BreakGlassAccounts)' {
+        $context = @{ ServiceAccounts = @('svc-not-a-guid') }
+
+        $result = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseCaExclusionContext -Context $context
+        }
+
+        $result.MalformedDeclaredAccounts | Should -Contain 'svc-not-a-guid'
+    }
+
+    It 'de-duplicates the same malformed identifier declared as both BreakGlassAccounts and ServiceAccounts' {
+        $context = @{ BreakGlassAccounts = @('dup-not-a-guid'); ServiceAccounts = @('dup-not-a-guid') }
+
+        $result = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseCaExclusionContext -Context $context
+        }
+
+        @($result.MalformedDeclaredAccounts | Where-Object { $_ -eq 'dup-not-a-guid' }).Count | Should -Be 1
+    }
+
+    # ---- Task 4.1: resolved group exclusions (honest limitation, not silent) ----
+
+    It 'GroupExclusionsResolved is $false and GroupExclusionNote is non-null when no groupMembers dataset was collected' {
+        $result = InModuleScope TenantPulse {
+            Get-PulseCaExclusionContext
+        }
+
+        $result.GroupExclusionsResolved | Should -BeFalse
+        $result.GroupExclusionNote | Should -Not -BeNullOrEmpty
+        @($result.ResolvedGroupExclusions).Count | Should -Be 0
+    }
+
+    It 'resolves group exclusions into ExcludedIdentifiers when a groupMembers dataset is present' {
+        $datasets = @{
+            conditionalAccessPolicies = @(
+                [pscustomobject]@{
+                    state      = 'enabled'
+                    conditions = [pscustomobject]@{ users = [pscustomobject]@{ excludeGroups = @('grp-1') } }
+                }
+            )
+            groupMembers              = @{ 'grp-1' = @('member-guid-1', 'member-guid-2') }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $datasets {
+            param($datasets)
+            Get-PulseCaExclusionContext -Datasets $datasets
+        }
+
+        $result.GroupExclusionsResolved | Should -BeTrue
+        $result.GroupExclusionNote | Should -BeNullOrEmpty
+        $result.ResolvedGroupExclusions | Should -Contain 'member-guid-1'
+        $result.ResolvedGroupExclusions | Should -Contain 'member-guid-2'
+        $result.ExcludedIdentifiers | Should -Contain 'member-guid-1'
+    }
+
+    It 'ignores excludeGroups on a disabled policy when resolving group exclusions' {
+        $datasets = @{
+            conditionalAccessPolicies = @(
+                [pscustomobject]@{
+                    state      = 'disabled'
+                    conditions = [pscustomobject]@{ users = [pscustomobject]@{ excludeGroups = @('grp-1') } }
+                }
+            )
+            groupMembers              = @{ 'grp-1' = @('member-guid-1') }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $datasets {
+            param($datasets)
+            Get-PulseCaExclusionContext -Datasets $datasets
+        }
+
+        @($result.ResolvedGroupExclusions).Count | Should -Be 0
+    }
 }

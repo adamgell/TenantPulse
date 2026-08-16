@@ -108,7 +108,18 @@
 # across two independent stores, the redaction-sentinel-never-reaches-disk regression),
 # and Invoke-PulseConflictDetection/Resolve-PulseConflictSnapshotExpansion's own
 # per-family-availability-vs-corruption-gap and -FromSnapshot verify-or-rederive coverage.
-$script:tenantPulseGateMinimumTests = 1063
+# 1063 -> 1092 (Phase 4 Task 4.1, Entra normalization layer + shared exclusion context):
+# +29 - the two new normalization-layer views (ConvertTo-PulseCaPolicyView: state-mapping
+# incl. absent/unrecognized-state throw, conditions/grants/session flattening, dual
+# hashtable/PSObject shape neutrality, -Context authenticationStrength displayName
+# fallback, pipeline array input - 14 It cases; ConvertTo-PulseAuthMethodView: methodId/
+# state normalization incl. absent/unrecognized-state throw, generic -settings fold,
+# includeTargets/excludeTargets normalization, dual shape neutrality, pipeline array input
+# - 8 It cases) plus the Get-PulseCaExclusionContext rework's own additive fields
+# (MalformedDeclaredAccounts GUID-contract classification, GroupExclusionsResolved/
+# ResolvedGroupExclusions/GroupExclusionNote forward-compatible group-exclusion shape - 7
+# It cases). TP.ENT.0003/0004/0005's own existing tests were left green, unmodified.
+$script:tenantPulseGateMinimumTests = 1092
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
