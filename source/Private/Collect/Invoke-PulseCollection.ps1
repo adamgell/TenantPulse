@@ -48,7 +48,14 @@
     with reason 'dependency-unavailable: <dependency dataset name>' and NO Graph call is
     attempted for it - there is no id to call with. Otherwise @(items)[0].id is passed as
     -Parameters @{ id = <id> } on the Get-GraphObject call below; every other classification
-    path (permission-denied, auth-failure, generic failure) is unchanged.
+    path (permission-denied, auth-failure, generic failure) is unchanged. A dependency that
+    is unavailable because ITS OWN dataset is still Pending (post-review, L6) is reported
+    with a DIFFERENT, more specific reason - 'dependency-pending: <name> (descriptor not yet
+    in released GraphKit)' - than a dependency that genuinely failed to collect
+    ('dependency-unavailable: <name>'): the first is an expected, temporary state (nothing
+    is broken, the collector is just waiting on a GraphKit release) and the second is a real
+    collection failure (permission, throttling, a 500) worth investigating. Conflating them
+    under one generic reason would make a routine Pending wait look like an incident.
 
     Every reason string handed to Write-PulseDataset or Set-PulseManifestEntry -
     unconditionally, even a fixed non-exception-derived string - is routed through
@@ -92,10 +99,16 @@ function Invoke-PulseCollection {
     # signal a dependent entry needs.
     $collectedRows = @{}
 
+    # Tracks every dataset name written Skipped for being Pending this run - the only extra
+    # bookkeeping the L6 dependency-pending-vs-failed distinction below needs (see this
+    # file's own docstring).
+    $pendingDatasets = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
     for ($i = 0; $i -lt $Manifest.Count; $i++) {
         $entry = $Manifest[$i]
 
         if ($entry.Pending) {
+            $pendingDatasets.Add($entry.Dataset) | Out-Null
             $reason = Protect-PulseReason -Message 'descriptor-pending: awaiting GraphKit release' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
             Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Skipped' -Reason $reason
             continue
@@ -113,7 +126,12 @@ function Invoke-PulseCollection {
             }
 
             if (-not $dependencyId) {
-                $reason = Protect-PulseReason -Message "dependency-unavailable: $($entry.IdFromDataset)" -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                $message = if ($pendingDatasets.Contains($entry.IdFromDataset)) {
+                    "dependency-pending: $($entry.IdFromDataset) (descriptor not yet in released GraphKit)"
+                } else {
+                    "dependency-unavailable: $($entry.IdFromDataset)"
+                }
+                $reason = Protect-PulseReason -Message $message -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                 Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' -Reason $reason
                 continue
             }

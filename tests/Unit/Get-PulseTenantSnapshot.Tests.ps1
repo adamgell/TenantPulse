@@ -639,6 +639,34 @@ Describe 'Invoke-PulseCollection' {
 
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } -Times 0 -Exactly
     }
+
+    It 'IdFromDataset (L6): distinguishes dependency-pending from a genuine dependency-unavailable failure' {
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { throw 'Get-GraphObject must not be called when the dependency is Pending.' }
+
+        # The dependency ('organization') is itself Pending - never attempted, never
+        # collected - which is a materially different situation from the dependency having
+        # been attempted and genuinely failed/returned nothing (the sibling test above).
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; IdFromDataset = $null }
+            [pscustomobject]@{ Dataset = 'organizationMdmAuthority'; Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = 'organization' }
+        )
+        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
+            param($store, $manifest, $context)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'contoso' -TenantPseudonym 'tp-abc123'
+        }
+
+        $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $result.datasets.organization.status | Should -Be 'Skipped'
+        $result.datasets.organization.reason | Should -Be 'descriptor-pending: awaiting GraphKit release'
+
+        $result.datasets.organizationMdmAuthority.status | Should -Be 'Failed'
+        $result.datasets.organizationMdmAuthority.reason | Should -Be 'dependency-pending: organization (descriptor not yet in released GraphKit)'
+
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } -Times 0 -Exactly
+    }
 }
 
 Describe 'Get-PulseTenantSnapshot' {
