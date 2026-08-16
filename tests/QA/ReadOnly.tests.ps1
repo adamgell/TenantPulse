@@ -68,6 +68,18 @@ BeforeDiscovery {
                 }
             }
     )
+
+    # Discovery-time vacuum guard, mirroring SecretScan.tests.ps1's: if BOTH case lists are
+    # empty, every -ForEach block below silently produces zero leaf tests - a
+    # DatasetMap.psd1 that failed to parse into any entries (or a Where-Object filter that
+    # quietly stopped matching anything) would leave this whole gate green while asserting
+    # nothing, indistinguishable from a real pass by looking at the NUnit result alone. Not
+    # leaning on Assert-GateResult.ps1's suite-wide -MinimumTests floor to catch this for
+    # THIS file specifically - that floor only notices a large-enough drop in the TOTAL
+    # count, not this one file quietly going empty while other files keep growing.
+    if ($script:releasedDatasetCases.Count -eq 0 -and $script:pendingDatasetCases.Count -eq 0) {
+        throw 'Static read-only gate: discovered zero DatasetMap.psd1 entries (both released and Pending) - the map failed to parse or the read/filter logic is broken.'
+    }
 }
 
 BeforeAll {

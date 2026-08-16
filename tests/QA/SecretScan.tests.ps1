@@ -4,17 +4,24 @@
     on every developer machine via `./build.ps1 -Tasks test`, with no network access and no
     third-party binary required.
 
-    Scans source/ and tests/ for:
+    Scans source/ and tests/ (text-shaped files: .ps1/.psm1/.psd1/.psc1/.pssc/.md/.txt/
+    .json/.csv/.xml) for:
         1. a GUID-looking id sitting near a real-looking (non-Microsoft/GitHub) domain -
            the classic "leaked real tenant id + tenant domain" shape.
         2. a bearer-token-shaped JWT ('eyJ...' header/payload pair).
         3. a PEM private-key or certificate header.
         4. connection-string patterns (Azure Storage AccountKey=/SharedAccessSignature=,
-           SQL-style Server=...Password=..., or a URL with embedded userinfo credentials).
-    Plus, scoped to source/ only:
-        5. a raw NUL or other C0 control byte - the exact class of mistake Task 1.8
+           SQL-style Server=/Data Source=...Password=... in EITHER key order, or a URL
+           with embedded userinfo credentials).
+        5. a Shared Access Signature (SAS) token query parameter ([?&]sig=/[?&]se=...).
+    Plus, scoped to BOTH source/ and tests/:
+        6. a raw NUL or other C0 control byte - the exact class of mistake Task 1.8
            introduced and then fixed (a literal NUL byte typed into a .ps1 comment instead
-           of the [char]0 spelling); this is a permanent regression guard for it.
+           of the [char]0 spelling); this is a permanent regression guard for it. Scanning
+           tests/ too is safe: every legitimate use of an actual NUL character in this
+           repo (e.g. Invoke-PulseEvaluation.ps1's evidence-uniqueness tuple separator)
+           already goes through the `[char]0` spelling, never a literal byte, in test
+           files exactly as in source.
 
     Get-PulseSecretScanViolations and Get-PulseControlByteViolations are unit-tested first
     against small synthetic strings/byte arrays (proving each pattern actually fires, and
@@ -26,6 +33,32 @@
     QA gates) necessarily contains the detection patterns as literal text - matching
     against itself would be a self-inflicted false positive, not a real finding. QA code is
     reviewed by hand, not by this scanner.
+
+    ACCEPTED RESIDUALS - this is a repo-local, offline, regex-shaped gate, not a general
+    secret scanner; gitleaks (wired into CI, see .github/workflows/ci.yml) is the real
+    defense-in-depth backstop for everything below:
+        - Non-canonical JWTs: the bearer-token check requires the literal 'eyJ' header
+          prefix (the base64url encoding of '{"'); a JWT with an atypical header, or one
+          re-encoded/wrapped in a way that breaks that literal prefix, is not caught here.
+        - Homoglyph/punycode domains: the GUID-near-domain check matches ASCII
+          letters/digits/hyphens only - a domain using Unicode confusables or raw punycode
+          ('xn--...') is not caught here.
+        - Split or encoded tokens: any secret broken across a line boundary, string
+          concatenation, or a non-base64/hex encoding (e.g. wrapped in an extra layer of
+          encoding) will not match these single-line, single-encoding regexes. Entropy-
+          based detection (gitleaks' real strength) is the only backstop for this class.
+        - Self-allowlist-editing: every allowlist/deny-list here (allowedGuids,
+          safeDomainSuffixes, denyListedDomains) lives in this same repo, editable by
+          whoever can edit this file - a repo-local gate cannot stop a bad actor with
+          write access from allowlisting their own leak. This is an inherent property of
+          any repo-local gate, not specific to this one; PR review and gitleaks (a
+          separately-maintained, non-repo-local rule set) are the actual backstops.
+        - onmicrosoft.com is deliberately IN the safe-domain-suffix opposite - i.e. it is
+          NOT added to $safeDomainSuffixes and is left to over-detect: a real
+          '<tenant>.onmicrosoft.com' next to a real GUID is exactly the "leaked real
+          tenant" shape this check exists to catch, so it fails loud (a false positive
+          costs a moment's review; a false negative here would defeat the check's entire
+          purpose) rather than being suppressed for convenience.
 #>
 
 BeforeAll {
@@ -104,19 +137,33 @@ BeforeAll {
         # 1. GUID-looking id within 200 characters of a real-looking (non-allowlisted)
         # domain - the "leaked real tenant id + tenant domain" shape.
         #
-        # The domain match additionally requires its final label to be a recognized TLD
-        # (below) - without that, this dotted-identifier-heavy codebase (check ids like
-        # 'TP.ENT.0003', property paths like '$Datasets.organizationMdmAuthority') produces
-        # constant false "domains" out of ordinary PowerShell/naming syntax that merely
-        # happens to contain dots and letters.
+        # The domain match is deliberately GENERAL - any dotted run of labels ending in a
+        # 2+ letter final label - rather than gated by a fixed TLD allowlist. A TLD
+        # allowlist cannot scale (contoso.technology, contoso.agency, contoso.ltd, and
+        # every other new gTLD would silently slip through undetected); a small,
+        # BY-VALUE deny-list of the specific code-shaped strings that actually false-
+        # positive is the inverted, maintainable version of the same idea. Because the
+        # domain check only ever runs inside a 200-character window around an actual
+        # (non-allowlisted) GUID match - not against the whole file - the practical
+        # false-positive surface turns out to be tiny: running this general pattern
+        # against the real repo (every text file under source/ and tests/, excluding
+        # tests/QA/) surfaced exactly one class of false positive, seeded below.
         $guidPattern = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
         $domainPattern = '\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
-        $knownTlds = [System.Collections.Generic.HashSet[string]]::new(
+
+        # Deny-list of specific, lowercase, code-shaped "domains" the general pattern
+        # above matches but which are never a real domain - each seeded by actually
+        # running the general (un-gated) pattern over the whole repo and confirming what
+        # fired near a real GUID.
+        $denyListedDomains = [System.Collections.Generic.HashSet[string]]::new(
             [string[]] @(
-                'com', 'net', 'org', 'io', 'co', 'gov', 'edu', 'mil', 'info', 'biz', 'name',
-                'pro', 'app', 'dev', 'ai', 'cloud', 'me', 'tv', 'us', 'uk', 'ca', 'de', 'fr',
-                'nl', 'au', 'nz', 'jp', 'in', 'br', 'es', 'it', 'ch', 'se', 'no', 'dk', 'fi',
-                'pl', 'ru', 'cn', 'onmicrosoft'
+                # TenantPulse's own check-id family prefixes (e.g. 'TP.ENT.0003',
+                # 'TP.INT.0001') - two-letter-ish dotted labels that are structurally
+                # domain-shaped but are check ids, never a domain. Fires in
+                # TP.ENT.0003.Tests.ps1 next to its synthetic break-glass placeholder
+                # GUIDs (11111111-.../22222222-...).
+                'tp.ent'
+                'tp.int'
             ),
             [System.StringComparer]::OrdinalIgnoreCase
         )
@@ -132,10 +179,20 @@ BeforeAll {
             $window = $Content.Substring($windowStart, $windowEnd - $windowStart)
 
             foreach ($domainMatch in [regex]::Matches($window, $domainPattern)) {
-                $domain = $domainMatch.Value.ToLowerInvariant()
-                $finalLabel = $domain.Substring($domain.LastIndexOf('.') + 1)
+                # A match immediately preceded by '$' is a PowerShell variable-rooted
+                # property-access chain ('$Datasets.organizationMdmAuthority',
+                # '$check.category', ...), never a domain - this is the general,
+                # structural counterpart to the by-value deny-list above, covering the
+                # unbounded space of property/method names without having to enumerate
+                # each one.
+                $precedingChar = if ($domainMatch.Index -gt 0) { $window.Substring($domainMatch.Index - 1, 1) } else { '' }
+                if ($precedingChar -eq '$') {
+                    continue
+                }
 
-                if (-not $knownTlds.Contains($finalLabel)) {
+                $domain = $domainMatch.Value.ToLowerInvariant()
+
+                if ($denyListedDomains.Contains($domain)) {
                     continue
                 }
 
@@ -168,11 +225,23 @@ BeforeAll {
         if ($Content -match '(?i)\b(AccountKey|SharedAccessSignature)\s*=') {
             $violations.Add("$RelativePath : Azure Storage connection-string pattern found (AccountKey=/SharedAccessSignature=).")
         }
+        # SQL-style Server=/Data Source=...Password=... - checked BOTH orderings, since a
+        # connection string is a semicolon-delimited bag of key=value pairs with no fixed
+        # key order (Password=...;Server=... is exactly as real as Server=...;Password=...).
         if ($Content -match '(?i)\b(Server|Data Source)\s*=[^;\r\n]+;[^\r\n]*Password\s*=') {
             $violations.Add("$RelativePath : SQL-style connection-string pattern found (...Password=...).")
         }
+        if ($Content -match '(?i)\bPassword\s*=[^;\r\n]+;[^\r\n]*(Server|Data Source)\s*=') {
+            $violations.Add("$RelativePath : SQL-style connection-string pattern found (Password=...;...Server=/Data Source=...).")
+        }
         if ($Content -match '://[^/\s:@]+:[^/\s@]+@') {
             $violations.Add("$RelativePath : URL with embedded userinfo credentials found.")
+        }
+        # 5. Shared Access Signature (SAS) token query parameters - '?sig=...' / '&se=...'
+        # followed by a long base64url-ish run, the shape Azure Storage/Service Bus SAS
+        # URLs use regardless of which resource they were minted for.
+        if ($Content -match '(?i)[?&](sig|se)=[A-Za-z0-9%._~+/=-]{16,}') {
+            $violations.Add("$RelativePath : SAS-token-shaped query parameter found ([?&]sig=/[?&]se=...).")
         }
 
         return $violations.ToArray()
@@ -181,7 +250,8 @@ BeforeAll {
     <#
         Scans raw file BYTES for a NUL byte or any other C0 control byte outside tab/LF/CR
         - the regression class from Task 1.8 (a literal NUL byte typed into a .ps1 comment).
-        Returns every violation as a string; empty array means clean.
+        Item 6 in this file's own docstring. Returns every violation as a string; empty
+        array means clean.
     #>
     function Get-PulseControlByteViolations {
         [CmdletBinding()]
@@ -244,14 +314,38 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
             $violations | Should -BeNullOrEmpty
         }
 
-        It 'does NOT flag a GUID near a dotted PowerShell identifier that merely looks domain-shaped (no real TLD)' {
-            # The exact false-positive class this codebase would otherwise trip constantly:
-            # check ids like 'TP.ENT.0003' and property paths like
-            # '$Datasets.organizationMdmAuthority' are dotted, letters-and-dots text but
-            # never a real domain - neither 'ent' nor 'organizationmdmauthority' is a
-            # recognized TLD.
+        It 'catches a GUID near a small-gTLD real-looking domain a fixed TLD allowlist would have missed' {
+            # The exact hole this deny-list inversion exists to close: '.technology' is a
+            # real, registrable gTLD that a small fixed TLD allowlist would never contain -
+            # a fixed-allowlist detector lets contoso.technology (or .agency, .ltd, and
+            # every other newer gTLD) through undetected.
             $violations = @(Get-PulseSecretScanViolations `
-                -Content "TP.ENT.0003 references f47ac10b-58cc-4372-a567-0e02b2c3d479 via `$Datasets.organizationMdmAuthority" `
+                -Content "tenantId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479' for contoso.technology" `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes)
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'looks like a real tenant id/domain pair'
+        }
+
+        It 'does NOT flag a GUID near the TP.ENT/TP.INT check-id family prefix (deny-listed, not TLD-gated)' {
+            # The false-positive class this codebase would otherwise trip constantly: check
+            # ids like 'TP.ENT.0003' are dotted, letters-and-dots text that the now-general
+            # (un-gated) domain pattern DOES match - 'tp.ent' - but it is deny-listed by
+            # value because it is never a real domain, not because it lacks a "real" TLD.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "TP.ENT.0003 references f47ac10b-58cc-4372-a567-0e02b2c3d479 in the same file as TP.INT.0001" `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes)
+
+            $violations | Should -BeNullOrEmpty
+        }
+
+        It 'does NOT flag a GUID near an ordinary dotted PowerShell property-path expression' {
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "id = f47ac10b-58cc-4372-a567-0e02b2c3d479; see `$Datasets.organizationMdmAuthority.foo" `
                 -RelativePath 'source/Fake.ps1' `
                 -AllowedGuid @() `
                 -SafeDomainSuffix $script:safeDomainSuffixes)
@@ -313,7 +407,7 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
             $violations[0] | Should -Match 'Azure Storage connection-string pattern'
         }
 
-        It 'flags a SQL-style connection string with an embedded password' {
+        It 'flags a SQL-style connection string with Server= before Password=' {
             $violations = @(Get-PulseSecretScanViolations `
                 -Content 'Server=tcp:fake.database.windows.net;Database=fake;User Id=fake;Password=hunter2;' `
                 -RelativePath 'source/Fake.ps1' `
@@ -322,6 +416,32 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
 
             $violations.Count | Should -Be 1
             $violations[0] | Should -Match 'SQL-style connection-string pattern'
+        }
+
+        It 'flags a SQL-style connection string with Password= BEFORE Server= (key order independence)' {
+            # Connection strings are an unordered semicolon-delimited bag of key=value
+            # pairs - Password=...;Server=... is exactly as real a shape as
+            # Server=...;Password=..., and a detector that only checks one ordering has a
+            # hole a rearranged (or hand-written) connection string walks straight through.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content 'Password=hunter2;Database=fake;User Id=fake;Server=tcp:fake.database.windows.net;' `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'SQL-style connection-string pattern'
+        }
+
+        It 'flags a SAS-token-shaped query parameter' {
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content 'https://fake.blob.core.windows.net/container/blob?sv=2023-01-01&se=2026-12-31T00%3A00%3A00Z&sig=AbCdEf1234567890%2FGhIjKl%3D' `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'SAS-token-shaped'
         }
 
         It 'flags a URL with embedded userinfo credentials' {
@@ -376,7 +496,7 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
 
     BeforeDiscovery {
         $projectPath = "$($PSScriptRoot)\..\.." | Convert-Path
-        $textExtensions = @('.ps1', '.psm1', '.psd1', '.md', '.txt')
+        $textExtensions = @('.ps1', '.psm1', '.psd1', '.psc1', '.pssc', '.md', '.txt', '.json', '.csv', '.xml')
 
         $scanFiles = @(
             Get-ChildItem -Path (Join-Path $projectPath 'source'), (Join-Path $projectPath 'tests') -Recurse -File |
@@ -390,9 +510,18 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
             @{ FullPath = $_.FullName; RelativePath = (($_.FullName.Substring($projectPath.Length + 1)) -replace '\\', '/') }
         })
 
-        $sourceFiles = @(Get-ChildItem -Path (Join-Path $projectPath 'source') -Recurse -File)
+        # Control-byte scan now covers tests/ too (not just source/) - excluding tests/QA/
+        # itself for the same self-inflicted-false-positive reason the secret scan above
+        # excludes it: this file's own control-byte unit test fixtures below construct
+        # literal control bytes in-memory as [byte[]] arrays, never on disk, so there is
+        # nothing to exclude there in practice, but the exclusion keeps the same "QA code
+        # is reviewed by hand, not by this scanner" rule consistent across both scans.
+        $controlByteFiles = @(
+            Get-ChildItem -Path (Join-Path $projectPath 'source'), (Join-Path $projectPath 'tests') -Recurse -File |
+                Where-Object { ($_.FullName -replace '\\', '/') -notmatch '/tests/QA/' }
+        )
 
-        $controlByteCases = @($sourceFiles | ForEach-Object {
+        $controlByteCases = @($controlByteFiles | ForEach-Object {
             @{ FullPath = $_.FullName; RelativePath = (($_.FullName.Substring($projectPath.Length + 1)) -replace '\\', '/') }
         })
 
@@ -406,7 +535,7 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
             throw 'Secret/PII scan gate: discovered zero files under source/ or tests/ to scan - the file discovery itself is broken.'
         }
         if ($controlByteCases.Count -eq 0) {
-            throw 'Secret/PII scan gate: discovered zero files under source/ to control-byte-scan - the file discovery itself is broken.'
+            throw 'Secret/PII scan gate: discovered zero files under source/ or tests/ to control-byte-scan - the file discovery itself is broken.'
         }
     }
 

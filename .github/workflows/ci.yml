@@ -407,10 +407,40 @@ jobs:
           # read-only gate caught while being written: DatasetMap.psd1's
           # deviceManagementSettings entry declared Type 'DeviceManagementSettings', which
           # does not exist in the released GraphKit catalog at all - the correct Type is
-          # 'ManagedDeviceSetting'. This minimum must keep ratcheting up as check/function
-          # test suites are added in later tasks - see docs/superpowers/sdd for the phase
-          # plan.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 578 -AllowedSkips 0 -AllowNotRun 0
+          # 'ManagedDeviceSetting'.
+          # Raised to 638 by the Task 1.10 review-fix pass (two independent reviews; the
+          # read-only gate survived every constructed attack unchanged). SecretScan's GUID-
+          # near-domain detector was INVERTED: the ~41-entry fixed TLD allowlist (a hole -
+          # contoso.technology/.agency/.ltd and every other newer gTLD slipped through
+          # undetected) was replaced with a general, un-gated domain pattern plus a tiny,
+          # by-value deny-list of the specific code-shaped strings ('tp.ent'/'tp.int', this
+          # codebase's own check-id family prefixes) proven to false-positive by actually
+          # running the general pattern over the whole repo, plus a structural rule
+          # excluding any match immediately preceded by '$' (a PowerShell variable-rooted
+          # property-access chain, never a domain). Also added: SAS-token-shaped query
+          # parameter detection ([?&]sig=/[?&]se=...), SQL-connection-string key-order
+          # independence (Password=...;...Server=/Data Source=... now flagged, not just the
+          # reverse order), five more scanned extensions (.json/.csv/.xml/.psc1/.pssc), the
+          # control-byte scan extended from source/-only to source/+tests/, a
+          # ReadOnly.tests.ps1 discovery-time vacuum guard (throws if both the released and
+          # Pending DatasetMap.psd1 case lists come back empty, mirroring SecretScan's
+          # existing guard), and FixtureProvenance hardening (ordinal/case-sensitive path
+          # comparison in both directions via an explicit HashSet[string], duplicate
+          # PROVENANCE.md path entries now throw instead of silently letting the later line
+          # win, -Force on the real-repo fixture walk so a hidden fixture file cannot go
+          # uncounted, and 'sanitized(<source>)' now rejects a whitespace-only <source> via
+          # a lookahead, not just an empty one). 60 new tests (578 -> 638): SecretScan
+          # gained 6 (contoso.technology now caught, TP.ENT/TP.INT deny-listed clean,
+          # ordinary $-rooted property-path chains still clean, SAS token detection,
+          # Password-before-Server SQL ordering, one more real-repo file case from the two
+          # new extensions actually present in the tree) net of the one removed TLD-gate
+          # test; ReadOnly gained 0 (the vacuum guard is a discovery-time throw, not a new
+          # leaf test, by design - see its own comment); FixtureProvenance gained 5
+          # (duplicate-path throw, case-differing-paths-are-distinct, case-differing-path
+          # real-violation coverage, sanitized() empty, sanitized(   ) whitespace-only).
+          # This minimum must keep ratcheting up as check/function test suites are added in
+          # later tasks - see docs/superpowers/sdd for the phase plan.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 638 -AllowedSkips 0 -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
