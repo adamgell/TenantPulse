@@ -44,6 +44,22 @@
     driver records is a small, closed {category[:reason]} token - never a raw caught
     exception's .Message text (which could echo response-body fragments back into a
     persisted manifest). The raw exception only ever reaches Write-Verbose.
+
+    RAW ASSIGNMENT PERSISTENCE + -FromCapturedPayloads (P1-11 sibling fix, T2.3): every
+    successfully-fetched raw assignment payload is ALSO persisted as its own hash-verified
+    dataset (`<PolicyType>Assignments-<policyId>`, via Write-PulseDataset - the exact same
+    "collected raw payload gets the same durable/verifiable contract as everything else"
+    pattern T2.2's own configurationPolicySettings-<policyId> write uses) BEFORE the walk
+    runs. This is what makes -FromSnapshot re-expansion possible at all for this task:
+    unlike T2.2's settingsCatalog rows (assignments:null, deferred), this task's rows carry
+    REAL assignment data, so "never Graph" on re-expansion requires that data to already be
+    durable on disk. -FromCapturedPayloads (default $false) switches the assignment step
+    from Get-GraphObject to Read-PulseDataset against that same persisted name - no
+    Assert-PulseReadOnlyDescriptor call either (mirrors T2.2's own -FromCapturedPayloads
+    skip: that path makes no Graph call at all, so there is no descriptor to assert
+    against). A missing/unreadable captured payload gaps that ONE policy
+    (AssignmentPayloadMissing/AssignmentPayloadUnreadable), exactly like a live fetch
+    failure would, rather than aborting the whole re-expansion.
 #>
 
 function Invoke-PulseTypedPolicyExpansion {
@@ -75,6 +91,12 @@ function Invoke-PulseTypedPolicyExpansion {
         [string] $Name,
 
         [Parameter()]
+        [bool] $FromCapturedPayloads = $false,
+
+        [Parameter()]
+        [string] $RawDatasetPrefix,
+
+        [Parameter()]
         [string] $ProfileId = '',
 
         [Parameter()]
@@ -86,6 +108,7 @@ function Invoke-PulseTypedPolicyExpansion {
     )
 
     if ([string]::IsNullOrEmpty($Name)) { $Name = $PolicyType }
+    if ([string]::IsNullOrEmpty($RawDatasetPrefix)) { $RawDatasetPrefix = "${PolicyType}Assignments-" }
 
     function New-PulseTypedGapReason {
         param([string] $Category, [System.Nullable[int]] $StatusCode = $null)
@@ -93,15 +116,17 @@ function Invoke-PulseTypedPolicyExpansion {
         return "category:$Category"
     }
 
-    try {
-        Assert-PulseReadOnlyDescriptor -Type $AssignmentType -Operation 'List' -ApiVersion 'v1.0'
-    } catch {
-        if ($_.Exception.Message -match 'descriptor-version-drift') {
-            $reason = Protect-PulseReason -Message $_.Exception.Message -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
-            Set-PulseExpansionEntry -Store $Store -Name $Name -Status 'NotExpanded' -Reason $reason
-            return [pscustomobject]@{ Status = 'NotExpanded'; PolicyCount = 0; RowCount = 0; UnresolvedNameCount = 0; RedactedSecretCount = 0; Gaps = @() }
+    if (-not $FromCapturedPayloads) {
+        try {
+            Assert-PulseReadOnlyDescriptor -Type $AssignmentType -Operation 'List' -ApiVersion 'v1.0'
+        } catch {
+            if ($_.Exception.Message -match 'descriptor-version-drift') {
+                $reason = Protect-PulseReason -Message $_.Exception.Message -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+                Set-PulseExpansionEntry -Store $Store -Name $Name -Status 'NotExpanded' -Reason $reason
+                return [pscustomobject]@{ Status = 'NotExpanded'; PolicyCount = 0; RowCount = 0; UnresolvedNameCount = 0; RedactedSecretCount = 0; Gaps = @() }
+            }
+            throw
         }
-        throw
     }
 
     $policyList = @($Policies)
@@ -143,17 +168,46 @@ function Invoke-PulseTypedPolicyExpansion {
         # read-only descriptor is already asserted once, up front, before this loop starts
         # (this driver is sequential-only - see this file's own docstring for why the
         # T2.2 parallel-path's SECOND, per-worker assertion point does not apply here).
-        try {
-            $rawAssignments = @(Get-GraphObject -Context $Context -Type $AssignmentType -Operation 'List' -Parameters @{ id = $policyId } -ErrorAction Stop)
-        } catch {
-            Write-Verbose "Invoke-PulseTypedPolicyExpansion: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
-            $failureClass = Get-PulseFailureClass -ErrorRecord $_
-            $category = switch ($failureClass) {
-                'PermissionDenied' { 'AssignmentPermissionDenied' }
-                'AuthFailure' { 'AssignmentAuthFailure' }
-                default { 'AssignmentFetchFailed' }
+        $rawDatasetName = "$RawDatasetPrefix$policyId"
+        $rawAssignments = $null
+        $assignmentGap = $null
+
+        if ($FromCapturedPayloads) {
+            try {
+                # NO extra @() wrap around Read-PulseDataset (ARRAY-RETURN UNROLLING TRAP,
+                # see Get-PulseSettingsCatalogValueProperty's own docstring for the general
+                # shape of this trap): Read-PulseDataset already returns its result as ONE
+                # array object via `return , [object[]] @($parsed)` - re-wrapping that
+                # single pipeline object with @() here would wrap the already-correct array
+                # INSIDE a new one-element array, corrupting every element's shape. Every
+                # other caller in this module (e.g. Invoke-PulseSettingsCatalogPolicy.ps1's
+                # own -FromCapturedPayloads branch) assigns its result directly for the
+                # identical reason.
+                $rawAssignments = Read-PulseDataset -Store $Store -Name $rawDatasetName
+            } catch {
+                Write-Verbose "Invoke-PulseTypedPolicyExpansion: captured assignment payload for '$policyId' unreadable: $($_.Exception.Message)"
+                $category = if ($_.Exception.Message -match '(?i)no manifest entry|missing from the snapshot') { 'AssignmentPayloadMissing' } else { 'AssignmentPayloadUnreadable' }
+                $assignmentGap = New-PulseTypedGapReason -Category $category
             }
-            $gapEntries.Add([pscustomobject]@{ policyId = $policyId; reason = (New-PulseTypedGapReason -Category $category) }) | Out-Null
+        } else {
+            try {
+                $rawAssignments = @(Get-GraphObject -Context $Context -Type $AssignmentType -Operation 'List' -Parameters @{ id = $policyId } -ErrorAction Stop)
+                Write-PulseDataset -Store $Store -Name $rawDatasetName -Data $rawAssignments -ApiVersion 'v1.0' -Status 'Collected' `
+                    -TenantId $TenantId -Pseudonym $Pseudonym
+            } catch {
+                Write-Verbose "Invoke-PulseTypedPolicyExpansion: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
+                $failureClass = Get-PulseFailureClass -ErrorRecord $_
+                $category = switch ($failureClass) {
+                    'PermissionDenied' { 'AssignmentPermissionDenied' }
+                    'AuthFailure' { 'AssignmentAuthFailure' }
+                    default { 'AssignmentFetchFailed' }
+                }
+                $assignmentGap = New-PulseTypedGapReason -Category $category
+            }
+        }
+
+        if ($assignmentGap) {
+            $gapEntries.Add([pscustomobject]@{ policyId = $policyId; reason = $assignmentGap }) | Out-Null
             continue
         }
 

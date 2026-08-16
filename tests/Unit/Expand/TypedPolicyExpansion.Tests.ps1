@@ -169,4 +169,57 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         $summary.RowCount | Should -Be 0
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
+
+    It 'persists the raw fetched assignment payload as its own hash-verified dataset (complianceAssignments-<policyId>)' {
+        $policy = New-TestCompliancePolicy -Id 'p1'
+        $assignmentResponse = New-TestAssignmentResponse -GroupId 'g1'
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' -and $Parameters.id -eq 'p1' } { $assignmentResponse }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.datasets.'complianceAssignments-p1'.status | Should -Be 'Collected'
+        Test-Path -LiteralPath (Join-Path $script:store.DatasetsPath 'complianceAssignments-p1.json') -PathType Leaf | Should -BeTrue
+    }
+
+    It '-FromCapturedPayloads re-expands from the already-persisted raw assignment dataset, makes NO Graph call at all' {
+        $policy = New-TestCompliancePolicy -Id 'p1'
+        $assignmentResponse = New-TestAssignmentResponse -GroupId 'g1'
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $assignmentResponse {
+            param($store, $assignmentResponse)
+            Write-PulseDataset -Store $store -Name 'complianceAssignments-p1' -Data $assignmentResponse -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $null -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance' -FromCapturedPayloads $true
+        }
+
+        $summary.Status | Should -Be 'Expanded'
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store -Name 'compliance'
+        $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
+        $rows[0].assignments[0].groupId | Should -Be 'g1'
+
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
+    It '-FromCapturedPayloads with no persisted assignment dataset gaps that ONE policy (AssignmentPayloadMissing), makes NO Graph call' {
+        $policy = New-TestCompliancePolicy -Id 'p1'
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $null -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance' -FromCapturedPayloads $true
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.Gaps[0].reason | Should -Match 'category:AssignmentPayloadMissing'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
 }

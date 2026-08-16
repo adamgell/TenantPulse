@@ -211,6 +211,10 @@ function Invoke-PulseAssessment {
         # payloads already on disk - never Graph. See that function's own docstring; a
         # snapshot that never used -ExpandSettings is a fast, immediate no-op here.
         Resolve-PulseSettingsCatalogSnapshotExpansion -Store $store
+        # Task 2.3 sibling: the same verify-or-rederive-from-captured-payloads decision,
+        # for the compliance/deviceConfiguration typed-policy expansions - see that
+        # function's own docstring.
+        Resolve-PulseTypedPolicySnapshotExpansion -Store $store
     } else {
         $snapshotPath = Join-Path $resolvedOutputPath 'snapshot'
         $collectParams = @{
