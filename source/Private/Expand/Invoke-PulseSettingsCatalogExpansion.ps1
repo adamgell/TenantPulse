@@ -560,7 +560,23 @@ function Invoke-PulseSettingsCatalogExpansion {
     # PulseExpansionRows's own -Reason parameter carries it; the ALL-POLICIES-FAILED ->
     # NotExpanded rule (task-review omp-Medium fix) is also unchanged, just owned by the
     # shared helper now instead of being re-implemented here.
-    return Publish-PulseExpansionRows -Store $Store -Name $Name -Rows $sortedRows -Gaps $sortedGaps `
+    # RAW-TENANT-ID-IN-ROW-CONTENT (T2.7 live-gate finding, reproduced live on Ivy24 -
+    # a real Settings Catalog policy's own configured VALUE, a OneDrive Known-Folder-Move
+    # opt-in setting, legitimately carries the tenant's own GUID as admin-entered
+    # configuration data - not a secret, not a GraphKit provenance stamp, but still the raw
+    # tenant identifier reaching an artifact outside its 'tp-...' pseudonym, which T1.11's
+    # own live-gate contract treats as a leak regardless of source). Protect-
+    # PulseGraphRowTenantId already walks every string value in a row tree and redacts an
+    # exact match of the raw tenant id to its pseudonym (built for T1.11's raw-dataset
+    # writes); this expansion pipeline serializes independently via Publish-
+    # PulseExpansionRows/ConvertTo-PulseCanonicalJsonLine and never went through it. Applied
+    # here, once, over the final merged+sorted row set, immediately before publication -
+    # same fail-closed contract as the T1.11 call site (a redaction failure throws, caught
+    # by this function's own OUTER FAILURE BOUNDARY caller, never publishes an unredacted
+    # artifact). A $null/empty -TenantId (the function's own contract) is a safe no-op.
+    $redactedRows = Protect-PulseGraphRowTenantId -Data $sortedRows -TenantId $TenantId -Pseudonym $Pseudonym
+
+    return Publish-PulseExpansionRows -Store $Store -Name $Name -Rows $redactedRows -Gaps $sortedGaps `
         -PolicyCount $policyList.Count -Reason $assignmentsDeferredReason `
         -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
 }

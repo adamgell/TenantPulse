@@ -77,6 +77,30 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' }
     }
 
+    It 'T2.7 LIVE-GATE REGRESSION: a raw tenant id appearing as an ordinary (non-sensitive) typed-policy property VALUE is redacted to its pseudonym in the published jsonl' {
+        # Same class of live finding as the Settings Catalog fix (Ivy24, T2.7): the raw
+        # tenant id can legitimately appear as ADMIN-ENTERED CONFIGURATION DATA in an
+        # ordinary, non-Sensitive property - not just in the Settings Catalog family.
+        # Protect-PulseGraphRowTenantId is now wired into this pipeline too.
+        $tenantId = 'tenant-guid'
+        $pseudonym = 'tp-deadbeefdeadbeef'
+        $policy = New-TestCompliancePolicy -Id 'policy-tenant-id-value'
+        Add-Member -InputObject $policy -NotePropertyName 'osMinimumVersion' -NotePropertyValue $tenantId -Force
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'policy-tenant-id-value' } { New-TestAssignmentResponse }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance, $tenantId, $pseudonym {
+            param($store, $context, $policy, $typeMap, $tenantId, $pseudonym)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance' `
+                -TenantId $tenantId -Pseudonym $pseudonym
+        }
+
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store -Name 'compliance'
+        $jsonlContent = Get-Content -LiteralPath $jsonlPath -Raw
+        $jsonlContent | Should -Not -Match ([regex]::Escape($tenantId))
+        $jsonlContent | Should -Match ([regex]::Escape($pseudonym))
+    }
+
     It 'an unmapped @odata.type is gapped with "collected, not setting-expanded: no property map for <type>", never fetches assignments for it, other policies still expand (Partial)' {
         $mapped = New-TestCompliancePolicy -Id 'mapped-1'
         $unmapped = [pscustomobject]@{ id = 'unmapped-1'; displayName = 'Legacy'; version = 1 }

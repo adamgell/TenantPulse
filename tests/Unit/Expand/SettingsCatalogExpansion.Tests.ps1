@@ -193,6 +193,41 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $manifestContent | Should -Not -Match ([regex]::Escape($plantedSecret))
     }
 
+    It 'T2.7 LIVE-GATE REGRESSION: a raw tenant id appearing as an ordinary (non-secret) admin-configured setting VALUE is redacted to its pseudonym in the published jsonl' {
+        # Reproduced live on Ivy24: a real Settings Catalog policy's own OneDrive
+        # Known-Folder-Move opt-in value legitimately carries the tenant's own GUID as
+        # admin-entered configuration data - not a secret-typed value at all, so the
+        # secret-contract redaction path never touches it, yet the raw tenant id still
+        # reached the published jsonl before this fix (Protect-PulseGraphRowTenantId was
+        # never wired into this pipeline - only into T1.11's raw-dataset writes).
+        $policy = New-TestPolicy -Id 'policy-tenant-id-value'
+        $index = New-TestDefinitionIndex
+        $tenantId = 'tenant-guid'
+        $pseudonym = 'tp-deadbeefdeadbeef'
+        $settingsResponse = @(
+            [pscustomobject]@{
+                id              = '0'
+                settingInstance = [pscustomobject]@{
+                    '@odata.type'       = '#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance'
+                    settingDefinitionId = 'device_vendor_msft_policy_config_onedrivengsc_kfmoptinnowizard'
+                    simpleSettingValue  = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.deviceManagementConfigurationStringSettingValue'; value = $tenantId }
+                }
+            }
+        )
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index, $tenantId, $pseudonym {
+            param($store, $context, $policy, $index, $tenantId, $pseudonym)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential `
+                -TenantId $tenantId -Pseudonym $pseudonym
+        }
+
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
+        $jsonlContent = Get-Content -LiteralPath $jsonlPath -Raw
+        $jsonlContent | Should -Not -Match ([regex]::Escape($tenantId))
+        $jsonlContent | Should -Match ([regex]::Escape($pseudonym))
+    }
+
     It 'SECRET-MARKER-LOSS: a no-discriminator (dictionary-shaped) settingValue still redacts fail-closed and never leaks the planted plaintext' {
         $policy = New-TestPolicy -Id 'policy-no-discriminator'
         $index = New-TestDefinitionIndex

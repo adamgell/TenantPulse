@@ -250,6 +250,18 @@ function Invoke-PulseTypedPolicyExpansion {
     }
     [System.Array]::Sort($sortedGaps, $gapComparison)
 
-    return Publish-PulseExpansionRows -Store $Store -Name $Name -Rows $allRows.ToArray() -Gaps $sortedGaps `
+    # RAW-TENANT-ID-IN-ROW-CONTENT (T2.7 live-gate finding): Protect-PulseGraphRowTenantId
+    # already walks every string value in a row tree and redacts an exact match of the raw
+    # tenant id to its pseudonym - built for T1.11's raw-dataset writes (Organization.id,
+    # DirectoryRoleAssignment.principalOrganizationId), but never wired into this T2.3
+    # expansion row pipeline, which serializes independently via Publish-PulseExpansionRows/
+    # ConvertTo-PulseCanonicalJsonLine. Applied here, once, over the whole row set,
+    # immediately before publication - same fail-closed contract as the T1.11 call site (a
+    # redaction failure throws and this whole family's expansion is caught by this
+    # function's own outer boundary and recorded Failed, never publishes an unredacted
+    # artifact). A $null/empty -TenantId (function's own contract) is a safe no-op.
+    $redactedRows = Protect-PulseGraphRowTenantId -Data $allRows.ToArray() -TenantId $TenantId -Pseudonym $Pseudonym
+
+    return Publish-PulseExpansionRows -Store $Store -Name $Name -Rows $redactedRows -Gaps $sortedGaps `
         -PolicyCount $policyList.Count -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
 }
