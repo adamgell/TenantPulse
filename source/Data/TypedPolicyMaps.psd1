@@ -50,7 +50,18 @@
     iosCompliancePolicy - property lists below are the REAL, exhaustive property sets
     observed in that dataset, not guessed) carry an actual credential-bearing property -
     every property they expose is a policy TOGGLE/THRESHOLD (bitLockerEnabled,
-    passwordMinimumLength, ...), never a secret VALUE. windows10CustomConfiguration is
+    passwordMinimumLength, ...), never a secret VALUE.
+
+    ADJUDICATED DESIGN NOTE (post-review): `Sensitive` here redacts by direct map-flag
+    lookup in ConvertTo-PulseTypedPolicyRows, NOT by calling
+    Resolve-PulseSettingsCatalogValueClassification - that classifier is reserved for
+    discriminating an ANONYMOUS node's shape (an `{@odata.type;value;valueState}`-wrapped
+    Settings Catalog value with no author-declared intent, where "is this secret" must be
+    inferred structurally); a typed-map property already carries an explicit, author-
+    declared `Sensitive` flag here, so there is nothing left to discriminate - reusing the
+    classifier would mean asking it to re-derive an answer this map already states.
+
+    windows10CustomConfiguration is
     different: `omaSettings` is an ARBITRARY, unstructured OMA-URI/CSP push channel real
     tenants use to deliver credential-bearing CSPs (WiFi pre-shared keys, VPN secrets,
     enrollment certificates) - Graph's own polymorphic omaSetting subtypes (omaSettingString,

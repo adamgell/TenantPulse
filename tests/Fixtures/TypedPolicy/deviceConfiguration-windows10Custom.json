@@ -1,0 +1,18 @@
+{
+  "@odata.type": "#microsoft.graph.windows10CustomConfiguration",
+  "createdDateTime": "2026-01-01T00:00:00.000Z",
+  "description": "Sanitized fixture description.",
+  "displayName": "Sanitized fixture display name",
+  "id": "22222222-0000-4000-8000-000000000001",
+  "lastModifiedDateTime": "2026-01-01T00:00:00.000Z",
+  "omaSettings": [
+    {
+      "@odata.type": "#microsoft.graph.omaSettingBoolean",
+      "description": null,
+      "displayName": "ExcludeSecurityDevicesTMP12",
+      "omaUri": "./Device/Vendor/MSFT/PassportForWork/{TenantId}/Policies/ExcludeSecurityDevices/TPM12",
+      "value": true
+    }
+  ],
+  "version": 1
+}

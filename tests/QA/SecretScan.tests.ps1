@@ -14,17 +14,34 @@
            SQL-style Server=/Data Source=...Password=... in EITHER key order, or a URL
            with embedded userinfo credentials).
         5. a Shared Access Signature (SAS) token query parameter ([?&]sig=/[?&]se=...).
-        7. an EXACT-MATCH banned identifier: the Ivy24 lab tenant's real Entra tenant GUID
-           (leaked into tests/Unit/Snapshot.Tests.ps1 and
+        7. a DIGEST-BASED banned-identifier check: the Ivy24 lab tenant's real Entra tenant
+           GUID (leaked into tests/Unit/Snapshot.Tests.ps1 and
            tests/Unit/Get-PulseTenantSnapshot.Tests.ps1 by Task 1.11's live-gate work,
-           scrubbed to a synthetic placeholder in the same task that added this check).
-           Bare-value, zero-heuristic: item 1's GUID-near-domain check is deliberately
-           narrow (requires a real-looking domain in a 200-char window) and a lone tenant
-           GUID sitting in a PowerShell test variable with no domain nearby - exactly the
-           shape that leaked - walks straight through it. This one specific known-real
-           value gets an unconditional "never again, anywhere, in any context" rule
-           instead. See Get-PulseSecretScanViolations' own comment for why this file never
-           spells the value out as one literal string.
+           scrubbed to a synthetic placeholder in the same task that added this check) is
+           banned by comparing a SHA-256 DIGEST of every candidate token against a table of
+           known-banned digests, never a literal or reversibly-encoded copy of the value
+           itself. Bare-value, zero-heuristic on WHERE it can appear: item 1's
+           GUID-near-domain check is deliberately narrow (requires a real-looking domain
+           nearby) and a lone tenant GUID sitting in a PowerShell test variable with no
+           domain nearby - exactly the shape that leaked - walks straight through it. This
+           one specific known-real value gets an unconditional "never again, anywhere, in
+           any context" rule instead.
+
+           DIGEST, NOT REVERSAL (hygiene-rule rework, post-review): an EARLIER version of
+           this check stored the real GUID as its own character-reversal
+           ('a1b372de4293-5a2b-31b4-7dba-760d2bd8' reversed back to the real value at scan
+           time) so this tracked file never contained the value as ONE literal, greppable
+           string. That was a genuine defect, not a mitigation: character reversal is a
+           trivially invertible transform any reader of this PUBLIC repo can undo by eye -
+           the reversed string, sitting at HEAD in a tracked file, WAS the disclosure, in a
+           form immune to any later history rewrite (the value is recoverable from the
+           CURRENT tree, not just from history). A cryptographic digest has no such
+           inverse: SHA-256 is a one-way function, so this table can be read by anyone with
+           repository access without recovering the banned value from it. See
+           Get-PulseBannedIdentifierDigests/Get-PulseTokenDigest below for the mechanism,
+           and this file's own mutation-test Describe block for proof the real value
+           (recovered at TEST-RUN TIME from git history, never typed into any tracked file)
+           still trips this check.
     Plus, scoped to BOTH source/ and tests/:
         6. a raw NUL or other C0 control byte - the exact class of mistake Task 1.8
            introduced and then fixed (a literal NUL byte typed into a .ps1 comment instead
@@ -101,6 +118,24 @@ BeforeAll {
         # TenantPulse's own module manifest GUID (source/TenantPulse.psd1) - a public
         # package identifier, never a tenant id.
         'a2f6d0f0-6d0c-4a6b-9f7e-9c9e6f6c7c2f' # TenantPulse module GUID
+        # Task 2.3 typed-policy fixture synthetic ids (tests/Fixtures/TypedPolicy/*.json,
+        # scripted-sanitized-real captures off Ivy24's own deviceCompliancePolicies/
+        # deviceConfigurations - see tests/Fixtures/PROVENANCE.md). Deliberately
+        # allowlisted BY VALUE here, the same stable mechanism every other constant GUID
+        # above uses, rather than relying on the domain-denylist/safe-pattern heuristics
+        # below - those fixtures' own "#microsoft.graph.<TypeName>" OData type-
+        # discriminator VALUES (public schema, kept verbatim, cannot be scrubbed) sit
+        # within the 200-character window of these ids in a short file, and an exact-
+        # value allowlist entry is immune to how that general heuristic's own matching
+        # happens to behave for any given input, unlike a by-value domain-text deny-list
+        # entry which is brittle to exactly which substring the general regex captures.
+        '11111111-0000-4000-8000-000000000001' # TypedPolicy fixture: compliance-windows10
+        '11111111-0000-4000-8000-000000000002' # TypedPolicy fixture: compliance-androidWorkProfile
+        '11111111-0000-4000-8000-000000000003' # TypedPolicy fixture: compliance-macOS
+        '11111111-0000-4000-8000-000000000004' # TypedPolicy fixture: compliance-ios
+        '22222222-0000-4000-8000-000000000001' # TypedPolicy fixture: deviceConfiguration-windows10Custom
+        '22222222-0000-4000-8000-000000000002' # TypedPolicy fixture: deviceConfiguration-windowsUpdateForBusiness
+        '22222222-0000-4000-8000-000000000003' # TypedPolicy fixture: deviceConfiguration-sharedPC
     )
 
     # Reference/documentation domains that appear throughout Consulting.PortalLinks and
@@ -137,28 +172,73 @@ BeforeAll {
     # every real @odata.type value is exactly 'microsoft.graph.<PascalCaseIdentifier>'
     # with no additional dotted labels, so a legitimate value still matches while
     # 'microsoft.graph.attacker-exfil.io' (three additional labels after 'graph') does not.
+    #
+    # BARE 'microsoft.graph' ALSO safe, no trailing type name required (task-2.3-review
+    # fix, reproduced against a real fixture): the shared $domainPattern's own final label
+    # is letters-ONLY ('[a-zA-Z]{2,}', no digits) - a real @odata.type whose type name
+    # itself starts with a digit-bearing token, e.g.
+    # '#microsoft.graph.windows10CustomConfiguration' (TypedPolicyMaps.psd1 covers several:
+    # windows10CustomConfiguration, windows10CompliancePolicy, windows10GeneralConfiguration,
+    # windows10EndpointProtectionConfiguration - 'windows10' is not letters-only), can NEVER
+    # be captured as one whole 'microsoft.graph.<TypeName>' domain match at all: the regex
+    # engine stops the match at the last all-letters label it can find, which is just
+    # 'graph' - producing a BARE two-label 'microsoft.graph' match, distinct from (and not
+    # covered by) the three-label pattern above. This is not a window-truncation artifact
+    # (see Get-PulseSecretScanViolations' own item-1 comment for that separate, already-
+    # fixed bug) - it is the domain regex's OWN tokenization boundary, reproducible against
+    # the full, untruncated content. 'microsoft.graph' alone is exactly as safe as
+    # 'microsoft.graph.<TypeName>' - it is the fixed, well-known Graph OData namespace root,
+    # never a real registrable domain ('.graph' is not a TLD) - so the optional trailing
+    # '(\.[A-Za-z0-9]+)?' group admits both shapes under the same StartsWith-bypass-proof
+    # full-token anchoring as before.
     $script:safeDomainExactPatterns = @(
-        '^microsoft\.graph\.[A-Za-z0-9]+$'
+        '^microsoft\.graph(\.[A-Za-z0-9]+)?$'
     )
 
     <#
-        Single source of truth for the item-7 banned-identifier check: the Ivy24 lab
-        tenant's real Entra tenant GUID, stored here as its own character-reversal so the
-        value never appears as one literal, greppable string anywhere in this tracked
-        file (see the item-7 comment inside Get-PulseSecretScanViolations for why that
-        matters). Both the production check and its own unit test below call this
-        function rather than each carrying a separate copy of the reversed literal, so
-        there is exactly one place that needs to change if this value is ever revisited.
+        DIGEST TABLE for the item-7 banned-identifier check (hygiene-rule rework - see
+        this file's own DIGEST, NOT REVERSAL docstring section for why a reversible
+        transform of a real secret, sitting in a tracked file in a public repo, is itself
+        the disclosure it claims to prevent). Each entry maps a lowercase, 32-hex-character
+        digest -> a human-readable LABEL - never the banned value. The digest is computed
+        by Get-PulseTokenDigest below (SHA-256 of the lowercased candidate token, first 32
+        hex characters / 16 bytes) - the SAME function both the production check and this
+        file's own tests use, so there is exactly one place the computation is defined.
+
+        Findings report the LABEL, never the value that matched (this table's own values
+        are never echoed back into a violation string) - see Get-PulseSecretScanViolations'
+        item-7 block below.
+
+        '6ca05670c4afd49e806f7cddbab83b00' = the Ivy24 lab tenant's real Entra tenant GUID.
+        This digest was computed OFFLINE, once, from the real value recovered from git
+        history (commit 477ce2d, before it was scrubbed) - the real GUID itself is not, and
+        must never be, written into this file.
     #>
-    function Get-PulseBannedTenantGuid {
+    $script:PulseBannedIdentifierDigests = @{
+        '6ca05670c4afd49e806f7cddbab83b00' = 'lab tenant id'
+    }
+
+    <#
+        Computes the banned-identifier digest for one candidate token: SHA-256 of the
+        lowercase-invariant token text, truncated to its first 32 hex characters (16
+        bytes) - a deliberate truncation (not the full 64-char digest) since this is a
+        deny-list membership check, not a content-integrity hash; 128 bits of collision
+        resistance is far more than this closed, small table needs, and a shorter digest
+        keeps $script:PulseBannedIdentifierDigests's own entries compact and readable.
+    #>
+    function Get-PulseTokenDigest {
         [CmdletBinding()]
         [OutputType([string])]
-        param()
+        param(
+            [Parameter(Mandatory)]
+            [AllowEmptyString()]
+            [string] $Token
+        )
 
-        $reversed = 'a1b372de4293-5a2b-31b4-7dba-760d2bd8'
-        $chars = $reversed.ToCharArray()
-        [array]::Reverse($chars)
-        return -join $chars
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Token.ToLowerInvariant())
+        $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
+        $hex = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+        return $hex.Substring(0, 32)
     }
 
     <#
@@ -234,9 +314,37 @@ BeforeAll {
                 # settingInstanceTemplateId/settingValueTemplateId GUIDs sitting a few
                 # lines from a "@odata.type": "#microsoft.graph...Instance" key.
                 'odata.type'
+                # The '#microsoft.graph.<TypeName>' OData type-discriminator VALUE
+                # itself (not just the '@odata.type' key above) - domain-shaped
+                # ('microsoft' + '.' + 'graph', a 2+ letter final label) but Microsoft
+                # Graph's own public type-discriminator prefix, never a domain, and
+                # identical across every tenant. Fires in
+                # tests/Fixtures/TypedPolicy/deviceConfiguration-windows10Custom.json,
+                # a short sanitized fixture where the whole file sits inside the
+                # 200-character window around its own synthetic 'id' GUID, so BOTH the
+                # top-level "#microsoft.graph.windows10CustomConfiguration" type and the
+                # nested omaSettings[0] "#microsoft.graph.omaSettingBoolean" type land in
+                # that window - two related domain-shaped matches from the SAME harmless
+                # prefix, not two independent findings.
+                'ft.graph'
+                'microsoft.graph.omasettingboolean'
             ),
             [System.StringComparer]::OrdinalIgnoreCase
         )
+
+        # Domain matches are computed ONCE against the FULL, untruncated $Content - never a
+        # windowed substring (bug found while extending this file's own golden-fixture
+        # coverage, task-2.3-review C1/I1 round: a real 'omaSettings' fixture placed
+        # '"@odata.type": "#microsoft.graph.windows10CustomConfiguration"' close enough to
+        # the fixture's own remapped `id` GUID that the OLD per-GUID `$Content.Substring(...)`
+        # window sliced the 200-char boundary mid-token, truncating the safe, allowlisted
+        # 'microsoft.graph.windows10CustomConfiguration' token down to a mangled 'ft.graph'
+        # - which no longer matched $SafeDomainExactPattern's 'microsoft\.graph\....' prefix
+        # and false-positived as a real tenant-id/domain pair. Matching against the whole,
+        # never-truncated file up front and then testing each match's SPAN for overlap with
+        # the per-GUID window (below) gets the identical "only look near this GUID" behavior
+        # with no risk of ever slicing a token in half.
+        $allDomainMatches = [regex]::Matches($Content, $domainPattern)
 
         foreach ($guidMatch in [regex]::Matches($Content, $guidPattern)) {
             $guid = $guidMatch.Value.ToLowerInvariant()
@@ -246,16 +354,24 @@ BeforeAll {
 
             $windowStart = [Math]::Max(0, $guidMatch.Index - 200)
             $windowEnd = [Math]::Min($Content.Length, $guidMatch.Index + $guidMatch.Length + 200)
-            $window = $Content.Substring($windowStart, $windowEnd - $windowStart)
 
-            foreach ($domainMatch in [regex]::Matches($window, $domainPattern)) {
+            foreach ($domainMatch in $allDomainMatches) {
+                # Overlap test against the (untruncated-token) window, not containment of a
+                # substring - a domain match that starts before the window but still ends
+                # inside it (or vice versa) is still "near" the GUID in the sense this check
+                # cares about.
+                if ($domainMatch.Index + $domainMatch.Length -le $windowStart -or $domainMatch.Index -ge $windowEnd) {
+                    continue
+                }
+
                 # A match immediately preceded by '$' is a PowerShell variable-rooted
                 # property-access chain ('$Datasets.organizationMdmAuthority',
                 # '$check.category', ...), never a domain - this is the general,
                 # structural counterpart to the by-value deny-list above, covering the
                 # unbounded space of property/method names without having to enumerate
-                # each one.
-                $precedingChar = if ($domainMatch.Index -gt 0) { $window.Substring($domainMatch.Index - 1, 1) } else { '' }
+                # each one. Checked against $Content directly now (matches are full-content
+                # matches, not window-relative ones).
+                $precedingChar = if ($domainMatch.Index -gt 0) { $Content.Substring($domainMatch.Index - 1, 1) } else { '' }
                 if ($precedingChar -eq '$') {
                     continue
                 }
@@ -328,28 +444,35 @@ BeforeAll {
             $violations.Add("$RelativePath : SAS-token-shaped query parameter found ([?&]sig=/[?&]se=...).")
         }
 
-        # 7. EXACT-MATCH banned identifier: the Ivy24 lab tenant's real Entra tenant GUID.
-        # Deliberately a bare substring check, not a heuristic - item 1's GUID-near-domain
-        # check requires a real-looking domain within 200 characters, and this exact value
-        # leaked in a shape that has NO domain nearby (a bare GUID assigned to a
-        # PowerShell test variable, e.g. `$tenantId = '<guid>'`), which evades that
-        # heuristic by design. A single known-real value gets its own unconditional rule:
-        # never appear in a tracked file, in any context, no allowlist, no window.
+        # 7. DIGEST-BASED banned identifier (hygiene-rule rework - see this file's own
+        # DIGEST, NOT REVERSAL docstring section for why an earlier exact-match-on-
+        # reversed-string version of this check was itself a disclosure, not a
+        # mitigation). Deliberately zero-heuristic on WHERE a match can appear - item 1's
+        # GUID-near-domain check requires a real-looking domain within 200 characters, and
+        # the real value this rule exists to catch leaked in a shape with NO domain nearby
+        # (a bare GUID assigned to a PowerShell test variable, e.g. `$tenantId = '<guid>'`),
+        # which evades that heuristic by design.
         #
-        # This file's own docstring explains why tests/QA/ is excluded from the real-repo
-        # scan below (this file necessarily contains the detection patterns as literal
-        # text) - but that exclusion is exactly why the banned value is NEVER written here
-        # as one literal string: this file is itself a tracked file, and spelling the real
-        # GUID out here, even inside a comment, would reintroduce the exact leak this check
-        # exists to prevent (and would defeat `git log -S` / `grep` sweeps for it, since
-        # the string search would report a hit for the "safe" line that stored it). Instead
-        # the value is reassembled at scan time from its own character-reversal, which
-        # contains none of the original substring runs a naive `grep '<guid-prefix>'` would
-        # key off - see Get-PulseBannedTenantGuid below for the single source of truth both
-        # this check and its own unit test share.
-        $bannedTenantGuid = Get-PulseBannedTenantGuid
-        if ($Content.ToLowerInvariant().Contains($bannedTenantGuid)) {
-            $violations.Add("$RelativePath : banned identifier found (Ivy24 lab tenant GUID) - this exact value must never appear in a tracked file in any context; see Get-PulseSecretScanViolations' own comment for why this is an exact-match rule rather than the GUID-near-domain heuristic.")
+        # TOKENIZE, DIGEST, COMPARE: every substring matching the candidate-token pattern
+        # (an alnum start, 3+ more alnum-or-hyphen characters - broad enough to catch a
+        # bare GUID, a hyphenated slug, or any other "word" shape a banned identifier might
+        # take) is hashed via Get-PulseTokenDigest and checked against
+        # $script:PulseBannedIdentifierDigests. SHA-256 is one-way: this table (and this
+        # whole check) can be read by anyone with repo access without recovering the
+        # banned value from it - unlike the character-reversal this replaces, which was
+        # trivially invertible by eye. A match is deduplicated by LABEL within one file (at
+        # most one violation per banned identifier per file) and the violation message
+        # names ONLY the label, never the matched token text - so even the FINDING itself
+        # (which could land in a public CI log) never echoes the value back.
+        $foundLabels = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($tokenMatch in [regex]::Matches($Content, '[A-Za-z0-9][A-Za-z0-9-]{3,}')) {
+            $digest = Get-PulseTokenDigest -Token $tokenMatch.Value
+            if ($script:PulseBannedIdentifierDigests.ContainsKey($digest)) {
+                $label = $script:PulseBannedIdentifierDigests[$digest]
+                if ($foundLabels.Add($label)) {
+                    $violations.Add("$RelativePath : banned identifier found (label: '$label') - this value must never appear in a tracked file in any context; see Get-PulseSecretScanViolations' own item-7 comment for the digest-based mechanism.")
+                }
+            }
         }
 
         return $violations.ToArray()
@@ -503,6 +626,44 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
             $violations[0] | Should -Match ([regex]::Escape('microsoft.graph.attacker-exfil.io'))
         }
 
+        It 'does NOT flag a GUID near a digit-bearing @odata.type value ("#microsoft.graph.windows10CustomConfiguration") - the domain regex''s own letters-only-final-label boundary reproduced' {
+            # Reproduced against a real fixture (tests/Fixtures/TypedPolicy/
+            # deviceConfiguration-windows10Custom.json, task-2.3-review C1/I1 round): the
+            # shared $domainPattern's own final label is letters-ONLY - a type name whose
+            # own text contains a digit ('windows10...') can never be captured as one whole
+            # 'microsoft.graph.<TypeName>' three-label match at all; the regex engine stops
+            # at the last all-letters label it finds, producing a BARE two-label
+            # 'microsoft.graph' match instead - a DIFFERENT shape than the three-label
+            # pattern the pre-fix $safeDomainExactPatterns only covered, and therefore
+            # falsely flagged. Not the window-truncation bug (see the item-1 comment for
+            # that separate fix) - reproducible here against a short, un-windowed string.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content '"@odata.type": "#microsoft.graph.windows10CustomConfiguration", "id": "11111111-2222-4333-8444-555555555555"' `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes `
+                -SafeDomainExactPattern $script:safeDomainExactPatterns)
+
+            $violations | Should -BeNullOrEmpty
+        }
+
+        It 'still flags a GUID near a BARE "microsoft.graph" that is genuinely part of a longer, attacker-controlled domain (bare-form does not reopen the StartsWith-bypass hole)' {
+            # The bare-form allowlist entry ('^microsoft\.graph(\.[A-Za-z0-9]+)?$') must
+            # stay just as StartsWith-bypass-proof as the three-label form - a domain that
+            # merely STARTS with 'microsoft.graph' but has MORE dotted labels after it
+            # (attacker-controlled) is still rejected, whether or not the "type name"
+            # portion happens to contain a digit.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "tenantId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479' for microsoft.graph.attacker-exfil2.io" `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes `
+                -SafeDomainExactPattern $script:safeDomainExactPatterns)
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'looks like a real tenant id/domain pair'
+        }
+
         It 'does NOT flag a GUID near the literal "@odata.type" JSON property key (deny-listed, not TLD-gated)' {
             # The Settings Catalog fixture class: every sanitized policy/settings JSON
             # payload under tests/Fixtures/SettingsCatalog/ has a real settingInstanceTemplateId
@@ -620,19 +781,21 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
             $violations[0] | Should -Match 'SAS-token-shaped'
         }
 
-        It 'flags the banned Ivy24 lab tenant GUID via exact-match, with no domain anywhere nearby (proving this is NOT gated by item 1''s GUID-near-domain heuristic)' {
-            $bannedGuid = Get-PulseBannedTenantGuid
-            $violations = @(Get-PulseSecretScanViolations `
-                -Content "`$tenantId = '$bannedGuid'" `
-                -RelativePath 'tests/Fake.Tests.ps1' `
-                -AllowedGuid @() `
-                -SafeDomainSuffix @())
-
-            $violations.Count | Should -Be 1
-            $violations[0] | Should -Match 'banned identifier'
+        It 'Get-PulseTokenDigest is deterministic and matches an independently-computed SHA-256[0:32] for a non-secret example token' {
+            # Not a secret - any known string works to prove the MECHANISM
+            # (tokenize -> lowercase -> SHA-256 -> first-32-hex) is wired correctly. The
+            # expected digest below was computed independently (Python hashlib), not
+            # copied from the production code path under test.
+            (Get-PulseTokenDigest -Token 'hello-world') | Should -Be 'afa27b44d43b02a9fea41d13cedc2e40'
+            # Case-insensitive input (lowercased before hashing).
+            (Get-PulseTokenDigest -Token 'HELLO-WORLD') | Should -Be 'afa27b44d43b02a9fea41d13cedc2e40'
         }
 
-        It 'does NOT flag an ordinary synthetic placeholder GUID as the banned Ivy24 tenant GUID' {
+        It 'does NOT flag an ordinary synthetic placeholder GUID as a banned identifier' {
+            # Mutation-test direction 1/2: a value that is NOT in
+            # $script:PulseBannedIdentifierDigests must never fire, however GUID-shaped it
+            # is - proves the digest comparison is a real membership test, not an
+            # accidental always-match.
             $violations = @(Get-PulseSecretScanViolations `
                 -Content "`$tenantId = '00000000-1111-2222-3333-444444444444'" `
                 -RelativePath 'tests/Fake.Tests.ps1' `
@@ -640,6 +803,60 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
                 -SafeDomainSuffix @())
 
             $violations | Should -BeNullOrEmpty
+        }
+
+        It 'flags the REAL Ivy24 lab tenant GUID via digest match, recovered from git history at TEST-RUN TIME - reports only the LABEL, never the value' {
+            # Mutation-test direction 2/2 (the "plant the real value, assert red" half).
+            # The real GUID is recovered from git history HERE, in memory, at test-run
+            # time - it is NEVER typed into this or any other tracked file (that would be
+            # exactly the disclosure item 7 exists to prevent). Commit 477ce2d is the
+            # last revision (before the Task 2.3-review scrub) whose tracked
+            # tests/Unit/Snapshot.Tests.ps1 still carried the real value.
+            $historicalContent = git -C $projectPath show '477ce2d:tests/Unit/Snapshot.Tests.ps1' 2>$null
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($historicalContent)) {
+                throw 'Could not recover the historical fixture content from git history (477ce2d:tests/Unit/Snapshot.Tests.ps1) - this repo must have full git history for this mutation test to run; a shallow clone would silently skip real coverage here, so this fails loudly instead.'
+            }
+            $recoveredGuid = [regex]::Match($historicalContent, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}').Value
+            $recoveredGuid | Should -Not -BeNullOrEmpty -Because 'the historical revision is expected to contain a GUID-shaped literal to recover'
+            (Get-PulseTokenDigest -Token $recoveredGuid) | Should -Be '6ca05670c4afd49e806f7cddbab83b00' -Because 'the recovered value must be the SAME real GUID the digest table was built from, or this test proves nothing'
+
+            # Fed to the scan function directly (-Content), never written to any file on
+            # disk (gitignored temp path or otherwise) - Get-PulseSecretScanViolations
+            # takes content by value, so this exercises the identical production code
+            # path a real tracked-file scan would, with no extra I/O needed to prove it.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "`$tenantId = '$recoveredGuid'" `
+                -RelativePath 'tests/Fake.Tests.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match "label: 'lab tenant id'"
+            # The finding itself must never echo the matched value back (public-CI-log
+            # safety, per the hygiene-rule rework) - even though THIS test file now holds
+            # the real value in a variable, transiently, at run time, the violation
+            # STRING this production function returns must not.
+            $violations[0] | Should -Not -Match ([regex]::Escape($recoveredGuid))
+        }
+
+        It 'item 1''s GUID-near-domain check does NOT truncate a safe "microsoft.graph.<Type>" token at its 200-character window boundary (reproduced false positive, task-2.3-review fix)' {
+            # Reproduces the exact shape tests/Fixtures/TypedPolicy/deviceConfiguration-
+            # windows10Custom.json tripped: a safe, allowlisted-by-pattern
+            # '#microsoft.graph.<Type>' @odata.type value sitting close enough to a
+            # DIFFERENT (non-allowlisted) GUID that the OLD per-GUID windowing sliced the
+            # token mid-word ('ft.graph' instead of 'microsoft.graph.windows10CustomConfiguration'),
+            # which no longer matched $SafeDomainExactPattern and false-positived.
+            $filler = '.' * 180
+            $content = "`"@odata.type`": `"#microsoft.graph.windows10CustomConfiguration`",$filler`"id`": `"11111111-2222-4333-8444-555555555555`""
+
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content $content `
+                -RelativePath 'tests/Fake.Tests.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes `
+                -SafeDomainExactPattern $script:safeDomainExactPatterns)
+
+            $violations | Should -BeNullOrEmpty -Because ($violations -join "`n")
         }
 
         It 'flags a URL with embedded userinfo credentials' {

@@ -1,0 +1,26 @@
+{
+  "@odata.type": "#microsoft.graph.sharedPCConfiguration",
+  "accountManagerPolicy": {
+    "accountDeletionPolicy": "diskSpaceThresholdOrInactiveThreshold",
+    "cacheAccountsAboveDiskFreePercentage": 75,
+    "inactiveThresholdDays": 14,
+    "removeAccountsBelowDiskFreePercentage": 50
+  },
+  "allowLocalStorage": true,
+  "allowedAccounts": "notConfigured",
+  "createdDateTime": "2026-01-01T00:00:00.000Z",
+  "description": "Sanitized fixture description.",
+  "disableAccountManager": false,
+  "disableEduPolicies": false,
+  "disablePowerPolicies": false,
+  "disableSignInOnResume": false,
+  "displayName": "Sanitized fixture display name",
+  "enabled": true,
+  "id": "22222222-0000-4000-8000-000000000003",
+  "idleTimeBeforeSleepInSeconds": null,
+  "kioskAppDisplayName": null,
+  "kioskAppUserModelId": null,
+  "lastModifiedDateTime": "2026-01-01T00:00:00.000Z",
+  "maintenanceStartTime": null,
+  "version": 1
+}

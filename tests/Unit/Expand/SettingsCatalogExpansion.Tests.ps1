@@ -674,13 +674,15 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
         }
     }
 
-    It 'an endpoint security policy that is template-bearing but NOT a baseline family walks with isBaseline:false' {
-        $policy = New-TestPolicy -Id 'policy-endpointsec' -TemplateFamily 'endpointSecurityAntivirus' -TemplateId 'tpl-av-1'
-        $index = New-TestDefinitionIndex
-        $settingsResponse = New-TestSettingsResponse
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+    It 'GOLDEN (real fixture): an endpointSecurityAccountProtection policy (choicecollection-01, real Ivy24 templateFamily) walks with isBaseline:false' {
+        $fixturesPath = Join-Path $script:repoRoot 'tests/Fixtures/SettingsCatalog'
+        $fixture = Get-Content -LiteralPath (Join-Path $fixturesPath 'choicecollection-01.json') -Raw | ConvertFrom-Json -Depth 64
+        $fixture.Policy.templateReference.templateFamily | Should -Be 'endpointSecurityAccountProtection'
 
-        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
+        $index = New-TestDefinitionIndex
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { @($fixture.Settings) }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $fixture.Policy, $index {
             param($store, $context, $policy, $index)
             Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
         }
@@ -689,7 +691,29 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
         $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
         $rows.Count | Should -BeGreaterThan 0
         $rows | ForEach-Object {
-            $_.templateFamily | Should -Be 'endpointSecurityAntivirus'
+            $_.templateFamily | Should -Be 'endpointSecurityAccountProtection'
+            $_.isBaseline | Should -BeFalse
+        }
+    }
+
+    It 'GOLDEN (real fixture): an endpointSecurityAttackSurfaceReduction policy (choicecollection-02, real Ivy24 templateFamily) walks with isBaseline:false' {
+        $fixturesPath = Join-Path $script:repoRoot 'tests/Fixtures/SettingsCatalog'
+        $fixture = Get-Content -LiteralPath (Join-Path $fixturesPath 'choicecollection-02.json') -Raw | ConvertFrom-Json -Depth 64
+        $fixture.Policy.templateReference.templateFamily | Should -Be 'endpointSecurityAttackSurfaceReduction'
+
+        $index = New-TestDefinitionIndex
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { @($fixture.Settings) }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $fixture.Policy, $index {
+            param($store, $context, $policy, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+        }
+
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
+        $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
+        $rows.Count | Should -BeGreaterThan 0
+        $rows | ForEach-Object {
+            $_.templateFamily | Should -Be 'endpointSecurityAttackSurfaceReduction'
             $_.isBaseline | Should -BeFalse
         }
     }

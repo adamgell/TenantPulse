@@ -1,0 +1,23 @@
+{
+  "@odata.type": "#microsoft.graph.iosCompliancePolicy",
+  "createdDateTime": "2026-01-01T00:00:00.000Z",
+  "description": "Sanitized fixture description.",
+  "deviceThreatProtectionEnabled": false,
+  "deviceThreatProtectionRequiredSecurityLevel": "unavailable",
+  "displayName": "Sanitized fixture display name",
+  "id": "11111111-0000-4000-8000-000000000004",
+  "lastModifiedDateTime": "2026-01-01T00:00:00.000Z",
+  "managedEmailProfileRequired": true,
+  "osMaximumVersion": null,
+  "osMinimumVersion": null,
+  "passcodeBlockSimple": true,
+  "passcodeExpirationDays": 30,
+  "passcodeMinimumCharacterSetCount": 1,
+  "passcodeMinimumLength": 6,
+  "passcodeMinutesOfInactivityBeforeLock": 0,
+  "passcodePreviousPasscodeBlockCount": 3,
+  "passcodeRequired": true,
+  "passcodeRequiredType": "alphanumeric",
+  "securityBlockJailbrokenDevices": true,
+  "version": 1
+}
