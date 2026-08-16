@@ -379,4 +379,7 @@ jobs:
           # (PublicSurface.Tests.ps1). This minimum must keep ratcheting up as check/
           # function test suites are added in later tasks - see docs/superpowers/sdd for
           # the phase plan.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 275 -AllowedSkips 0 -AllowNotRun 0
+          # Raised to 346 by Task 1.9 (ten seed checks): infra tests (DatasetMap/
+          # IdFromDataset collector extension/Get-PulseCaExclusionContext) plus 10 per-check
+          # Pester files under tests/Unit/Checks/.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 346 -AllowedSkips 0 -AllowNotRun 0

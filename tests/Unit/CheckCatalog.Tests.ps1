@@ -63,12 +63,21 @@ Describe 'Import-PulseCheckCatalog' {
         @($result).Count | Should -Be 0
     }
 
-    It 'yields zero descriptors for the module''s own default catalog path (source/Data/Checks is empty for now)' {
+    It 'loads and validates the module''s own default catalog path cleanly (Task 1.9 seed checks, self-check)' {
         $result = InModuleScope TenantPulse {
             Import-PulseCheckCatalog
         }
 
-        @($result).Count | Should -Be 0
+        @($result).Count | Should -Be 10
+        $ids = @($result | ForEach-Object { $_.Id })
+        $ids | Should -Contain 'TP.ENT.0001'
+        $ids | Should -Contain 'TP.INT.0005'
+
+        # Ordinal-sorted by Id regardless of on-disk filename order (same contract the
+        # 'valid' fixture test above already exercises).
+        $sortedIds = [string[]] $ids
+        [System.Array]::Sort($sortedIds, [System.StringComparer]::Ordinal)
+        $ids | Should -Be $sortedIds
     }
 
     It 'throws naming the file, Id, property and "duplicate" for a duplicate Id' {
