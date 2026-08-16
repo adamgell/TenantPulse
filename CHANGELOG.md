@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Get-PulseSnapshotManifest`, `Set-PulseManifestEntry`, and the canonical serialization
   primitive `ConvertTo-PulseCanonicalJson`, with a hashed, reason-carrying manifest that
   every later collector/evaluator/renderer component builds on.
+- Operator key + pseudonymization: `Get-PulseOperatorKey` auto-creates a 32-byte key
+  (0600-equivalent permissions on non-Windows) at `~/.tenantpulse/operator.key` on first
+  call and refuses to create or read one inside a snapshot root; `Get-PulsePseudonym`
+  turns any value into a stable `tp-`-prefixed HMAC-SHA256 pseudonym under that key, so
+  raw tenant IDs never need to appear in snapshots or reports.
 
 ### Changed
 
