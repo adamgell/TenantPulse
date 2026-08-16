@@ -598,7 +598,19 @@ jobs:
           # consolidated shape-neutrality tests, ordinal settings sort) - 20 new tests, see
           # .build/AssertGateResult.tasks.ps1's own accounting, which must be bumped
           # together with this value.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1112 -AllowedSkips 0 -AllowNotRun 1
+          # 1112 -> 1126 -> 1140 -> 1154 -> 1169 -> 1181 -> 1193 (Task 4.2, EIDSCA port
+          # wave 1 - TP.ENT.0006/0008/0012/0013/0015/0016, one step per cluster commit) -
+          # see .build/AssertGateResult.tasks.ps1's own per-cluster accounting for the full
+          # breakdown of each step. POST-REVIEW FIX: this line was missed across all six of
+          # that wave's commits and stayed at 1112 while the other three tracking locations
+          # (the gate task above, scripts/Publish-TenantPulsePackage.ps1, and
+          # tests/QA/PublishTenantPulsePackage.tests.ps1's fabricated-fixture total) were
+          # correctly bumped each time - CI was silently tolerating an 81-test regression
+          # window until this fix. The tracking-location set is FOUR files whenever this
+          # value moves: this gate step, .build/AssertGateResult.tasks.ps1, the publish
+          # script, and its own test's fabricated fixture total - bump all four together,
+          # every time.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1193 -AllowedSkips 0 -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

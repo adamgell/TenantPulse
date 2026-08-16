@@ -144,6 +144,36 @@
 # tests/Unit/Checks/TP.ENT.0008.Tests.ps1's 8 new It cases plus real suite growth already
 # present before this commit's own measurement (same "1126 is measured, not merely
 # additive" note as above).
+# 1140 -> 1154 (Task 4.2, TP.ENT.0012 - EIDSCA AP01/AP04-AP10/AP14 default authorization
+# policy settings cluster): +14 - 7 new It cases in tests/Unit/Checks/TP.ENT.0012.Tests.ps1
+# (catalog self-check, Pass x2 shapes, Fail-default, Fail-single-property, Error/field-
+# absence, descriptor-pending NotApplicable), +1 new tests/QA/ReadOnly.tests.ps1 Pending-
+# dataset -ForEach case (source/Data/DatasetMap.psd1's new authorizationPolicy entry, first
+# Pending entry since GraphKit 0.1.1 dropped the previous six), and per-file
+# tests/QA/SecretScan.tests.ps1 -ForEach growth for the new/changed source+test files this
+# commit touched (TP.ENT.0012.psd1, Test-PulseAuthorizationPolicyDefaults.ps1,
+# TP.ENT.0012.Tests.ps1).
+# 1154 -> 1169 (Task 4.2, TP.ENT.0013 - EIDSCA CP01 group/team owner consent restriction):
+# +15 - 6 new It cases in tests/Unit/Checks/TP.ENT.0013.Tests.ps1, +1 new
+# ReadOnly.tests.ps1 Pending-dataset -ForEach case (directorySettings, this commit's new
+# DatasetMap.psd1 entry), the new shared Get-PulseDirectorySettingValue.ps1 helper's own
+# SecretScan.tests.ps1 per-file case, and per-file SecretScan growth for the remaining
+# new/changed files this commit touched.
+# 1169 -> 1181 (Task 4.2, TP.ENT.0015 - EIDSCA PR01 Password Protection mode): +12 - 6 new
+# It cases in tests/Unit/Checks/TP.ENT.0015.Tests.ps1 (reuses the directorySettings dataset
+# added with TP.ENT.0013, so no new ReadOnly.tests.ps1 -ForEach case here) plus per-file
+# SecretScan.tests.ps1 growth for the new/changed files this commit touched.
+# 1181 -> 1193 (Task 4.2, TP.ENT.0016 - EIDSCA ST08 guest group ownership restriction,
+# completes wave 1): +12 - 6 new It cases in tests/Unit/Checks/TP.ENT.0016.Tests.ps1 (also
+# reuses directorySettings, no new ReadOnly.tests.ps1 case) plus per-file
+# SecretScan.tests.ps1 growth for the new/changed files this commit touched. 1193 is the
+# real, measured ./build.ps1 -Tasks test total for the full T4.2 wave-1 diff, matching
+# .github/workflows/ci.yml's own -MinimumTests (POST-REVIEW FIX: ci.yml was missed across
+# all six of this wave's commits and still read 1112 - see the T4.2 report's corrected
+# test-summary section - it is bumped together with this value from this commit onward,
+# alongside scripts/Publish-TenantPulsePackage.ps1 and
+# tests/QA/PublishTenantPulsePackage.tests.ps1's fabricated-fixture total: FOUR tracking
+# locations total, not two, whenever this value moves).
 $script:tenantPulseGateMinimumTests = 1193
 
 task Record_Tested_Module_Digest {
