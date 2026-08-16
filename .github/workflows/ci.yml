@@ -440,7 +440,14 @@ jobs:
           # real-violation coverage, sanitized() empty, sanitized(   ) whitespace-only).
           # This minimum must keep ratcheting up as check/function test suites are added in
           # later tasks - see docs/superpowers/sdd for the phase plan.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 638 -AllowedSkips 0 -AllowNotRun 0
+          # 638 -> 657 (Task 1.11, live gate + publish prep): +12 for Get-PulseFailureClass's
+          # new -SupplementalStatusCode signal and the new Get-PulseGraphFailureStatusCode
+          # helper (recovering the real GraphKit failure shape confirmed live against the
+          # Ivy24 lab tenant - Get-GraphObject's own throw carries no structured status or
+          # '403'/'forbidden' text) plus +1 collector regression test pinning that real
+          # shape end-to-end; +7 for scripts/Publish-TenantPulsePackage.ps1's pack-first-
+          # then-verify digest-comparison tests (tests/QA/PublishTenantPulsePackage.tests.ps1).
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 657 -AllowedSkips 0 -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
