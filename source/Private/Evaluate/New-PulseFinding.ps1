@@ -3,10 +3,26 @@
 
     This is the rule-result contract every Function rule (Test-Pulse* -Datasets <hashtable>)
     must return, and the ONLY way a rule can produce Warn or evidence - an Expression rule
-    can only ever resolve to Pass/Fail with no evidence (see Invoke-PulseEvaluation). The
-    engine never constructs NotApplicable or Error results this way: those two statuses are
-    engine-assigned (missing/degraded dataset, unsatisfied gate, or a thrown rule), never
-    something a rule function returns.
+    can only ever resolve to Pass/Fail with no evidence (see Invoke-PulseEvaluation).
+
+    NOT APPLICABLE (post-review, adjudicated): a rule MAY now also return Status
+    'NotApplicable' - not only the engine (missing/degraded dataset, unsatisfied gate). This
+    closes a real gap: a check whose condition genuinely does not apply given what the rule
+    itself observed in $Datasets (e.g. TP.ENT.0001 once Conditional Access supersedes
+    Security Defaults as the control that matters) has no honest way to say so under a
+    Pass/Warn/Fail-only contract - Pass-with-a-caveat-Reason silently inflates the tenant's
+    score with unearned credit, since Add-PulseScores treats every Pass as fully earned
+    regardless of Reason text. Rule-returned NotApplicable is threaded through
+    Invoke-PulseEvaluation into the exact same status string as engine-assigned
+    NotApplicable, so it lands in the identical scoring-exclusion bucket (Add-PulseScores
+    keys off the finding's `status` string alone - it has no notion of who assigned it).
+    `Reason` is MANDATORY when Status is 'NotApplicable' (enforced below) - unlike
+    engine-assigned NotApplicable, whose reason is a manifest dataset/gate reason that
+    always exists by construction, a rule choosing NotApplicable must always explain why, or
+    the finding is meaningless to a reader.
+
+    Error remains engine-assigned only (a thrown rule, or a shape the engine could not
+    interpret) - no rule function or expression can ever construct an Error result.
 
     -Evidence accepts loosely-shaped input (hashtables or objects with Identity/Detail/
     SortKey members, matched case-insensitively) and normalizes every entry to a plain
@@ -32,7 +48,7 @@ function New-PulseFinding {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('Pass', 'Warn', 'Fail')]
+        [ValidateSet('Pass', 'Warn', 'Fail', 'NotApplicable')]
         [string] $Status,
 
         [Parameter()]
@@ -44,6 +60,10 @@ function New-PulseFinding {
         [AllowEmptyString()]
         [string] $Reason
     )
+
+    if ($Status -eq 'NotApplicable' -and [string]::IsNullOrEmpty($Reason)) {
+        throw "New-PulseFinding: -Reason is mandatory when -Status is 'NotApplicable' - a rule declaring its own check inapplicable must always say why."
+    }
 
     $normalized = ConvertTo-PulseNormalizedEvidence -Evidence $Evidence
 

@@ -161,6 +161,28 @@ function Invoke-PulseEvaluation {
     $manifest = Get-PulseSnapshotManifest -Store $Store
     $operatorKey = Get-PulseOperatorKey -KeyPath $OperatorKeyPath
 
+    # WALL-CLOCK DETERMINISM (post-review, H2 adjudicated): a rule that needs "how long ago
+    # was this" (e.g. TP.INT.0005's 90-day staleness cutoff) must never call
+    # [datetime]::UtcNow itself - that would make re-evaluating the same snapshot twice
+    # produce two different findings depending on wall-clock time, breaking the
+    # "re-evaluating the same snapshot is byte-identical" guarantee this whole engine is
+    # built on (see generatedUtc above). The snapshot manifest's own createdUtc is the
+    # correct, deterministic stand-in - collection happened once, at one instant, and every
+    # re-evaluation of that same snapshot should reason about time relative to THAT instant,
+    # not whenever evaluation happens to run. Populated into $Context UNCONDITIONALLY (never
+    # gated on the caller having supplied -Context at all) under both names a rule might
+    # reasonably look for - 'SnapshotCreatedUtc' (matches the manifest field name a rule
+    # author would find in Get-PulseSnapshotManifest's own output) and 'EvaluationCutoffBase'
+    # (names the ROLE the value plays for a staleness-style rule) - both point at the exact
+    # same string. A caller-supplied $Context is never mutated in place (it may be reused by
+    # the caller across multiple Invoke-PulseEvaluation calls) - a shallow copy is built here
+    # instead and threaded through everywhere $Context is used below.
+    $effectiveContext = @{}
+    foreach ($key in $Context.Keys) { $effectiveContext[$key] = $Context[$key] }
+    $effectiveContext.SnapshotCreatedUtc = $manifest.createdUtc
+    $effectiveContext.EvaluationCutoffBase = $manifest.createdUtc
+    $Context = $effectiveContext
+
     # Used only to satisfy Protect-PulseReason's mandatory -Pseudonym parameter (see the
     # REASON REDACTION note above) - -ProfileId is always empty here, so -Pseudonym is
     # never actually substituted into anything; it exists so a future caller that DOES
@@ -443,11 +465,24 @@ function Invoke-PulseCheckEvaluation {
             }
 
             $status = [string] $ruleOutput.Status
-            if ($status -notin @('Pass', 'Warn', 'Fail')) {
+            if ($status -notin @('Pass', 'Warn', 'Fail', 'NotApplicable')) {
                 return @{
                     Status   = 'Error'
                     Evidence = @()
                     Reason   = "rule function '$ruleFunction' returned an invalid Status '$status'."
+                }
+            }
+
+            # Rule-returned NotApplicable (post-review, adjudicated - see New-PulseFinding's
+            # own docstring): Reason is mandatory here too, re-checked independently of
+            # New-PulseFinding's own guard because a rule is not obligated to build its
+            # result through that function (same "duck-typed RuleResult" trust boundary the
+            # H2 fix below already applies to Evidence).
+            if ($status -eq 'NotApplicable' -and [string]::IsNullOrEmpty([string] $ruleOutput.Reason)) {
+                return @{
+                    Status   = 'Error'
+                    Evidence = @()
+                    Reason   = "rule function '$ruleFunction' returned Status 'NotApplicable' with no Reason - a rule declaring its own check inapplicable must always say why."
                 }
             }
 

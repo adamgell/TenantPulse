@@ -95,23 +95,29 @@ document as-is.
 | `Pass`         | rule            | The check's condition holds. |
 | `Warn`         | rule (Function only) | The check needs attention but isn't a hard failure. Only a Function rule can produce this - an Expression rule can only resolve to Pass/Fail. |
 | `Fail`         | rule            | The check's condition does not hold. |
-| `NotApplicable`| engine          | A declared dataset is missing from the manifest, or recorded `Failed`/`Skipped`; or a declared gate is unsatisfied. The rule is never invoked. |
-| `Error`        | engine          | The rule threw, returned a shape the engine could not interpret (a Function rule not returning a `TenantPulse.RuleResult`-shaped object with a valid `Status`, or an Expression rule not resolving to `[bool]`), or declared an unrecognized `Rule.Type`. Evaluation of every OTHER check still continues - one bad rule never hides the rest of the run ("no silent gaps"). |
+| `NotApplicable`| engine, OR rule (Function only, with mandatory `Reason`) | Engine-assigned: a declared dataset is missing from the manifest, or recorded `Failed`/`Skipped`; or a declared gate is unsatisfied - the rule is never invoked. Rule-assigned (post-review, adjudicated): a Function rule may itself return `NotApplicable` when its own condition genuinely does not apply given what it observed in `$Datasets` (e.g. TP.ENT.0001 once Conditional Access supersedes Security Defaults) - `New-PulseFinding -Status NotApplicable` REQUIRES `-Reason` (throws without it), because unlike the engine's case there is no manifest reason to fall back on. Both paths land in the identical `status: "NotApplicable"` string, so `Add-PulseScores` (which keys off that string alone) excludes both from its scoring denominator identically - "who assigned it" is not a distinction the rest of the pipeline ever needs to make. |
+| `Error`        | engine          | The rule threw, returned a shape the engine could not interpret (a Function rule not returning a `TenantPulse.RuleResult`-shaped object with a valid `Status`, or an Expression rule not resolving to `[bool]`), a Function rule returning `NotApplicable` with no `Reason`, or declared an unrecognized `Rule.Type`. Evaluation of every OTHER check still continues - one bad rule never hides the rest of the run ("no silent gaps"). |
 
-`NotApplicable` and `Error` are **engine-assigned only** - no rule function or expression can
-ever produce them directly. `New-PulseFinding` (the only way a rule builds a result) enforces
-`Status` to be `Pass`/`Warn`/`Fail` via `[ValidateSet]`.
+`Error` is **engine-assigned only** - no rule function or expression can ever produce it
+directly. `NotApplicable` may be engine- or rule-assigned (see above). `New-PulseFinding`
+(the only way a rule builds a result through the documented path) enforces `Status` to be
+one of `Pass`/`Warn`/`Fail`/`NotApplicable` via `[ValidateSet]`, with a mandatory,
+non-empty `Reason` whenever `Status` is `NotApplicable`.
 
 ## Reason semantics
 
 - `Pass`/`Fail`: `reason` is whatever the rule set (`New-PulseFinding -Reason`, or `null` for
   an Expression rule, which never carries a reason).
 - `Warn`: `reason` should explain what needs attention (Function rules only).
-- `NotApplicable`: `reason` **quotes the snapshot manifest's own dataset reason verbatim**
-  (already redacted upstream by Task 1.5's `Protect-PulseReason` - the evaluator does not
-  redact it again) when the dataset was recorded `Failed`/`Skipped` with a reason. A dataset
-  entirely missing from the manifest, or recorded `Failed`/`Skipped` with no reason on file,
-  gets an engine-synthesized reason naming the dataset and its status instead.
+- `NotApplicable`: for an ENGINE-assigned NotApplicable, `reason` **quotes the snapshot
+  manifest's own dataset reason verbatim** (already redacted upstream by Task 1.5's
+  `Protect-PulseReason` - the evaluator does not redact it again) when the dataset was
+  recorded `Failed`/`Skipped` with a reason. A dataset entirely missing from the manifest,
+  or recorded `Failed`/`Skipped` with no reason on file, gets an engine-synthesized reason
+  naming the dataset and its status instead. For a RULE-assigned NotApplicable, `reason` is
+  whatever the rule passed to `New-PulseFinding -Reason` (mandatory for this status) -
+  likewise quoted verbatim, never re-capped by `Protect-PulseReason` (the evaluator's
+  redaction step is skipped for every NotApplicable finding regardless of who assigned it).
 - `Error`: `reason` is the caught exception's message (for a throw), or an engine-authored
   sentence naming what was wrong with the rule's output shape.
 
@@ -134,6 +140,15 @@ For each check, in order:
    checks commonly share a dataset) and handed to the rule as `$Datasets` (a
    `dataset-name -> object[]` hashtable) - a `Function` rule receives it via
    `-Datasets <hashtable>`; an `Expression` rule sees it bound as the `$Datasets` variable.
+
+`$Context` (optional, threaded from `Invoke-PulseEvaluation -Context`) always carries two
+engine-populated keys, unconditionally, regardless of whether the caller supplied its own
+`-Context` at all: `SnapshotCreatedUtc` and `EvaluationCutoffBase` (both the same value -
+the snapshot manifest's own `createdUtc`). A rule that needs "how long ago was this"
+(e.g. a staleness threshold) MUST derive its cutoff from one of these, never from
+`[datetime]::UtcNow` - the manifest's `createdUtc` is what makes re-evaluating the same
+snapshot twice byte-identical regardless of when evaluation actually runs; wall-clock time
+inside a rule breaks that guarantee.
 
 ## Ordering guarantees
 

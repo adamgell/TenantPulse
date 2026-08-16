@@ -90,6 +90,29 @@ BeforeAll {
                 return New-PulseFinding -Status Fail -Reason 'policy missing' -Evidence @(@{ Identity = 'obj-fail-1' })
             }
 
+            function Test-PulseFixtureRuleReturnedNotApplicableRule {
+                param($Datasets)
+                return New-PulseFinding -Status NotApplicable -Reason 'superseded by a broader control - not evaluated standalone'
+            }
+
+            function Test-PulseFixtureDuckTypedNotApplicableNoReasonRule {
+                param($Datasets)
+                # Deliberately NOT built via New-PulseFinding - a hand-shaped duck-typed
+                # RuleResult with Status NotApplicable and no Reason (H2-style regression
+                # fixture for the independent engine-side guard).
+                return [pscustomobject]@{
+                    PSTypeName = 'TenantPulse.RuleResult'
+                    Status     = 'NotApplicable'
+                    Evidence   = @()
+                    Reason     = $null
+                }
+            }
+
+            function Test-PulseFixtureCutoffBaseRule {
+                param($Datasets, $Context)
+                return New-PulseFinding -Status Pass -Reason "cutoff=$($Context.SnapshotCreatedUtc)|$($Context.EvaluationCutoffBase)"
+            }
+
             function Test-PulseFixtureThrowingRule {
                 param($Datasets)
                 throw 'boom: rule blew up unexpectedly'
@@ -201,6 +224,31 @@ Describe 'New-PulseFinding' {
         $result.Status | Should -Be 'Pass'
         $result.Reason | Should -Be 'all good'
         $result.Evidence.Count | Should -Be 0
+    }
+
+    It 'accepts Status NotApplicable with a Reason' {
+        $result = InModuleScope TenantPulse {
+            New-PulseFinding -Status NotApplicable -Reason 'superseded by a broader control'
+        }
+
+        $result.Status | Should -Be 'NotApplicable'
+        $result.Reason | Should -Be 'superseded by a broader control'
+    }
+
+    It 'throws when Status is NotApplicable and -Reason is omitted' {
+        {
+            InModuleScope TenantPulse {
+                New-PulseFinding -Status NotApplicable
+            }
+        } | Should -Throw -ExpectedMessage '*Reason*mandatory*'
+    }
+
+    It 'throws when Status is NotApplicable and -Reason is an empty string' {
+        {
+            InModuleScope TenantPulse {
+                New-PulseFinding -Status NotApplicable -Reason ''
+            }
+        } | Should -Throw -ExpectedMessage '*Reason*mandatory*'
     }
 }
 
@@ -349,6 +397,82 @@ Describe 'Invoke-PulseEvaluation' {
         $finding = $evaluation.Document.findings[0]
         $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Match 'datasetNeverCollected'
+    }
+
+    # ---- post-review: rule-returned NotApplicable (adjudicated engine fix) ----
+
+    It 'accepts a Function rule returning Status NotApplicable with a Reason, unchanged from what the rule set' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureRuleReturnedNotApplicableRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Be 'superseded by a broader control - not evaluated standalone'
+    }
+
+    It 'degrades to Error when a duck-typed Function rule returns NotApplicable with no Reason' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuckTypedNotApplicableNoReasonRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'NotApplicable'
+        $finding.reason | Should -Match 'Reason'
+    }
+
+    It 'excludes a rule-returned NotApplicable from Add-PulseScores'' denominator exactly like an engine-assigned one' {
+        $ruleNa = New-PulseFixtureCheck -Id 'TP.INT.0001' -Severity 'Critical' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureRuleReturnedNotApplicableRule' }
+        $passing = New-PulseFixtureCheck -Id 'TP.INT.0002' -Severity 'Critical' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixturePassRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($ruleNa, $passing)
+
+        $scored = InModuleScope TenantPulse -ArgumentList $evaluation.Document {
+            param($doc)
+            Add-PulseScores -Findings $doc
+        }
+
+        # Only the Pass check's weight counts - the rule-returned NA check contributes to
+        # neither earned nor possible, same as an engine-assigned NA would.
+        $scored.scores.overall.possible | Should -Be 10.0
+        $scored.scores.overall.earned | Should -Be 10.0
+        $scored.coverage.overall.applicable | Should -Be 2
+        $scored.coverage.overall.assessed | Should -Be 1
+    }
+
+    # ---- post-review: wall-clock determinism (H2 adjudicated) ----
+
+    It 'threads SnapshotCreatedUtc and EvaluationCutoffBase into $Context unconditionally, from the manifest, even when the caller supplied no -Context at all' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureCutoffBaseRule' }
+
+        $manifestCreatedUtc = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            (Get-PulseSnapshotManifest -Store $store).createdUtc
+        }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].reason | Should -Be "cutoff=$manifestCreatedUtc|$manifestCreatedUtc"
+    }
+
+    It 'produces byte-identical documents across two independent evaluations of the same snapshot for a Context-consuming rule (wall-clock determinism)' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureCutoffBaseRule' }
+
+        $firstRun = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+        Start-Sleep -Milliseconds 50
+        $secondRun = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $jsonFirst = InModuleScope TenantPulse -ArgumentList $firstRun.Document {
+            param($doc)
+            ConvertTo-PulseCanonicalJson -InputObject $doc
+        }
+        $jsonSecond = InModuleScope TenantPulse -ArgumentList $secondRun.Document {
+            param($doc)
+            ConvertTo-PulseCanonicalJson -InputObject $doc
+        }
+
+        [System.Text.Encoding]::UTF8.GetBytes($jsonFirst) | Should -Be ([System.Text.Encoding]::UTF8.GetBytes($jsonSecond))
     }
 
     It 'runs the check normally when it declares a gate (Unknown never degrades in Phase 1)' {
