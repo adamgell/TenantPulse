@@ -68,14 +68,15 @@ Describe 'Import-PulseCheckCatalog' {
             Import-PulseCheckCatalog
         }
 
-        # 10 Phase 1 seed checks + 4 Task 4.2 EIDSCA wave-1 clusters so far (TP.ENT.0006,
-        # 0008, 0012, 0013) = 14.
-        @($result).Count | Should -Be 14
+        # 10 Phase 1 seed checks + 5 Task 4.2 EIDSCA wave-1 clusters so far (TP.ENT.0006,
+        # 0008, 0012, 0013, 0015) = 15.
+        @($result).Count | Should -Be 15
         $ids = @($result | ForEach-Object { $_.Id })
         $ids | Should -Contain 'TP.ENT.0001'
         $ids | Should -Contain 'TP.INT.0005'
         $ids | Should -Contain 'TP.ENT.0012'
         $ids | Should -Contain 'TP.ENT.0013'
+        $ids | Should -Contain 'TP.ENT.0015'
         $ids | Should -Contain 'TP.ENT.0006'
         $ids | Should -Contain 'TP.ENT.0008'
 

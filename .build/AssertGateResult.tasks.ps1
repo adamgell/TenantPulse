@@ -144,7 +144,7 @@
 # tests/Unit/Checks/TP.ENT.0008.Tests.ps1's 8 new It cases plus real suite growth already
 # present before this commit's own measurement (same "1126 is measured, not merely
 # additive" note as above).
-$script:tenantPulseGateMinimumTests = 1169
+$script:tenantPulseGateMinimumTests = 1181
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
