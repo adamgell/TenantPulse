@@ -131,7 +131,15 @@
 # ordinally before insertion, independent of raw response property order - 1 new It case).
 # TP.ENT.0003 source+tests remain byte-identical (verified via `git diff` against the
 # reviewed commit) - merge-order condition still satisfied.
-$script:tenantPulseGateMinimumTests = 1112
+# 1112 (declared floor) -> 1126 (Task 4.2, TP.ENT.0006 - EIDSCA AF01-AF06 FIDO2 method
+# configuration cluster, first of Phase 4's wave-1 EIDSCA port): 8 new It cases in
+# tests/Unit/Checks/TP.ENT.0006.Tests.ps1 (catalog self-check + Pass x2 shapes + Fail x4 +
+# gate-degraded). This cluster adds no new dataset (reuses the already-released
+# authenticationMethodsPolicy dataset), so ReadOnly.tests.ps1/SecretScan.tests.ps1's own
+# -ForEach-driven case counts do not grow here. 1126 is the real, measured
+# ./build.ps1 -Tasks test total at this commit, not merely 1112+8 - the declared floor was
+# already below the suite's actual size before this change.
+$script:tenantPulseGateMinimumTests = 1126
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

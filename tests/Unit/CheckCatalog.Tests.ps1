@@ -68,10 +68,12 @@ Describe 'Import-PulseCheckCatalog' {
             Import-PulseCheckCatalog
         }
 
-        @($result).Count | Should -Be 10
+        # 10 Phase 1 seed checks + 1 Task 4.2 EIDSCA wave-1 cluster so far (TP.ENT.0006) = 11.
+        @($result).Count | Should -Be 11
         $ids = @($result | ForEach-Object { $_.Id })
         $ids | Should -Contain 'TP.ENT.0001'
         $ids | Should -Contain 'TP.INT.0005'
+        $ids | Should -Contain 'TP.ENT.0006'
 
         # Ordinal-sorted by Id regardless of on-disk filename order (same contract the
         # 'valid' fixture test above already exercises).
