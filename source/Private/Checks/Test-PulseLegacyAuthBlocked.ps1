@@ -33,6 +33,32 @@
     Get-PulseCaExclusionContext itself (field-absence, not a failure) rather than by adding
     a new required dataset that would degrade this check to NotApplicable in any tenant
     collection that never gathered directoryRoleAssignments.
+
+    COMPLETENESS FOLD-IN (dual review, fix round): the first cut of this wiring silently
+    dropped two of Get-PulseCaExclusionContext's own "never silently dropped" fields -
+    MalformedDeclaredAccounts (a declared identifier that can never match ANY policy's
+    excludeUsers, GUID-shape mismatch) and GroupExclusionNote (set whenever
+    GroupExclusionsResolved is $false) were never read, so a malformed declared account left
+    zero evidence trace here even though the shared context function's own contract says it
+    is always enumerated for a caller that cares. Fixed: every malformed declared account
+    gets its own evidence entry UNCONDITIONALLY when the list is non-empty (independent of
+    whether any legacy-auth-block-shaped policy exists at all - a malformed identifier can
+    never match one regardless), and a single group-exclusion-resolution note entry is added
+    whenever GroupExclusionsResolved is $false AND the operator declared some exclusion-
+    relevant context at all (a resolvable ExcludedIdentifier or a malformed account) - gating
+    on "declared something" keeps the zero-Context call shape (most existing tests, and any
+    caller that never opts into -Context) producing byte-identical evidence to before this
+    fix, since telling an operator who declared nothing that "group exclusions aren't
+    resolved" has no action to attach to.
+
+    MISREADING-RISK FOLD-IN (dual review, fix round): an identity excluded ONLY from a
+    report-only-shaped policy (never from any enforced one) now carries an explicit
+    reportOnlyProtectionWarning message on its evidence entry, mirroring
+    Get-PulseCaExclusionContext's own ENFORCED VS. REPORT-ONLY docstring warning - a
+    skimming operator who sees "excludedFromReportOnlyBlockPolicies: [...]" without reading
+    the field name closely could otherwise misread "excluded" as "safe." The warning is
+    omitted when the identity is ALSO excluded from at least one enforced policy (genuinely
+    honored there already, nothing to warn about).
 #>
 
 function Test-PulseLegacyAuthBlocked {
@@ -64,18 +90,58 @@ function Test-PulseLegacyAuthBlocked {
     $exclusionEvidence = @()
     $exclusionContext = Get-PulseCaExclusionContext -Context $Context -Datasets $Datasets
     $excludedIdentifiers = @($exclusionContext.ExcludedIdentifiers)
+    $malformedAccounts = @($exclusionContext.MalformedDeclaredAccounts)
+    # "Declared something" gate (fix-round addition): true when the operator's -Context
+    # contributed EITHER a resolvable ExcludedIdentifier or a malformed one - used below to
+    # decide whether the malformed-account and group-exclusion-note entries are worth
+    # surfacing at all. See this file's own COMPLETENESS FOLD-IN docstring note.
+    $hasDeclaredExclusionContext = ($excludedIdentifiers.Count -gt 0) -or ($malformedAccounts.Count -gt 0)
+
     if ($excludedIdentifiers.Count -gt 0 -and ($enforcedBlockPolicies.Count -gt 0 -or $reportOnlyBlockPolicies.Count -gt 0)) {
         foreach ($identifier in $excludedIdentifiers) {
             $enforcedNames = @($enforcedBlockPolicies | Where-Object { @($_.conditions.users.excludeUsers) -contains $identifier } | ForEach-Object { [string] $_.displayName })
             $reportOnlyNames = @($reportOnlyBlockPolicies | Where-Object { @($_.conditions.users.excludeUsers) -contains $identifier } | ForEach-Object { [string] $_.displayName })
             if ($enforcedNames.Count -eq 0 -and $reportOnlyNames.Count -eq 0) { continue }
+            $detail = @{
+                excludedFromEnforcedBlockPolicies   = $enforcedNames
+                excludedFromReportOnlyBlockPolicies = $reportOnlyNames
+            }
+            # MISREADING-RISK FOLD-IN: report-only-ONLY exclusion (never also excluded from
+            # an enforced policy) gets an explicit warning - see this file's own docstring.
+            if ($reportOnlyNames.Count -gt 0 -and $enforcedNames.Count -eq 0) {
+                $detail.reportOnlyProtectionWarning = 'Report-only policies do not protect this account - nothing is actually enforced, so this identity is NOT locked out of legacy authentication by these polic' + $(if ($reportOnlyNames.Count -eq 1) { 'y' } else { 'ies' }) + ' today.'
+            }
             $exclusionEvidence += @{
                 Identity = $identifier
                 SortKey  = "exclusion:$identifier"
-                Detail   = @{
-                    excludedFromEnforcedBlockPolicies   = $enforcedNames
-                    excludedFromReportOnlyBlockPolicies = $reportOnlyNames
-                }
+                Detail   = $detail
+            }
+        }
+    }
+
+    # COMPLETENESS FOLD-IN: malformed declared accounts can never match ANY policy's
+    # excludeUsers (not GUID-shaped), so they are surfaced unconditionally - independent of
+    # whether any legacy-auth-block-shaped policy exists at all.
+    foreach ($malformed in $malformedAccounts) {
+        $exclusionEvidence += @{
+            Identity = $malformed
+            SortKey  = "malformed:$malformed"
+            Detail   = @{
+                issue = 'not GUID-shaped - Conditional Access excludeUsers holds GUID principal ids, so this declared exclusion can never match any policy and cannot be honored, enforced or report-only.'
+            }
+        }
+    }
+
+    # COMPLETENESS FOLD-IN: surfaces "group-based exclusion cannot be verified" whenever the
+    # operator declared some exclusion-relevant context at all - see the "declared
+    # something" gate comment above and this file's own docstring for why an empty -Context
+    # call does not get this entry (nothing declared, nothing actionable to warn about).
+    if ($hasDeclaredExclusionContext -and -not $exclusionContext.GroupExclusionsResolved) {
+        $exclusionEvidence += @{
+            Identity = 'group-exclusion-resolution'
+            SortKey  = 'group-exclusion-resolution'
+            Detail   = @{
+                note = $exclusionContext.GroupExclusionNote
             }
         }
     }

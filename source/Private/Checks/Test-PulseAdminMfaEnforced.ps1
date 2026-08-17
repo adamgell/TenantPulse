@@ -48,6 +48,19 @@
     and ActiveGlobalAdmins is always empty - read defensively by Get-PulseCaExclusionContext
     itself rather than added as a new required dataset (same field-absence rationale as
     TP.ENT.0004's wiring note).
+
+    COMPLETENESS FOLD-IN (dual review, fix round): same fix as TP.ENT.0004's own wiring -
+    MalformedDeclaredAccounts (surfaced unconditionally when non-empty, since a non-GUID
+    declared identifier can never match ANY policy's excludeUsers regardless of whether a
+    matching MFA policy exists) and GroupExclusionNote (surfaced once, whenever
+    GroupExclusionsResolved is $false AND the operator declared some exclusion-relevant
+    context at all) are now both read - see TP.ENT.0004's own docstring for the full
+    rationale, identical here.
+
+    MISREADING-RISK FOLD-IN (dual review, fix round): an admin identity excluded ONLY from a
+    report-only-shaped MFA policy (never from any enabled one) now carries an explicit
+    reportOnlyProtectionWarning on its evidence entry - same fix, same rationale as
+    TP.ENT.0004's own docstring note.
 #>
 
 function Test-PulseAdminMfaEnforced {
@@ -113,18 +126,55 @@ function Test-PulseAdminMfaEnforced {
     $exclusionEvidence = @()
     $exclusionContext = Get-PulseCaExclusionContext -Context $Context -Datasets $Datasets
     $excludedIdentifiers = @($exclusionContext.ExcludedIdentifiers)
+    $malformedAccounts = @($exclusionContext.MalformedDeclaredAccounts)
+    # "Declared something" gate (fix-round addition) - see TP.ENT.0004's own identical
+    # comment for the full rationale.
+    $hasDeclaredExclusionContext = ($excludedIdentifiers.Count -gt 0) -or ($malformedAccounts.Count -gt 0)
+
     if ($excludedIdentifiers.Count -gt 0 -and ($enabledMfaPolicies.Count -gt 0 -or $reportOnlyMfaPolicies.Count -gt 0)) {
         foreach ($identifier in $excludedIdentifiers) {
             $enforcedNames = @($enabledMfaPolicies | Where-Object { @($_.conditions.users.excludeUsers) -contains $identifier } | ForEach-Object { [string] $_.displayName })
             $reportOnlyNames = @($reportOnlyMfaPolicies | Where-Object { @($_.conditions.users.excludeUsers) -contains $identifier } | ForEach-Object { [string] $_.displayName })
             if ($enforcedNames.Count -eq 0 -and $reportOnlyNames.Count -eq 0) { continue }
+            $detail = @{
+                excludedFromEnforcedMfaPolicies   = $enforcedNames
+                excludedFromReportOnlyMfaPolicies = $reportOnlyNames
+            }
+            # MISREADING-RISK FOLD-IN: report-only-ONLY exclusion (never also excluded from
+            # an enabled policy) gets an explicit warning - see this file's own docstring.
+            if ($reportOnlyNames.Count -gt 0 -and $enforcedNames.Count -eq 0) {
+                $detail.reportOnlyProtectionWarning = 'Report-only policies do not protect this account - nothing is actually enforced, so this identity''s admin role is NOT actually forced through MFA by these polic' + $(if ($reportOnlyNames.Count -eq 1) { 'y' } else { 'ies' }) + ' today.'
+            }
             $exclusionEvidence += @{
                 Identity = $identifier
                 SortKey  = "exclusion:$identifier"
-                Detail   = @{
-                    excludedFromEnforcedMfaPolicies   = $enforcedNames
-                    excludedFromReportOnlyMfaPolicies = $reportOnlyNames
-                }
+                Detail   = $detail
+            }
+        }
+    }
+
+    # COMPLETENESS FOLD-IN: malformed declared accounts can never match ANY policy's
+    # excludeUsers - surfaced unconditionally when non-empty.
+    foreach ($malformed in $malformedAccounts) {
+        $exclusionEvidence += @{
+            Identity = $malformed
+            SortKey  = "malformed:$malformed"
+            Detail   = @{
+                issue = 'not GUID-shaped - Conditional Access excludeUsers holds GUID principal ids, so this declared exclusion can never match any policy and cannot be honored, enforced or report-only.'
+            }
+        }
+    }
+
+    # COMPLETENESS FOLD-IN: surfaces "group-based exclusion cannot be verified" whenever the
+    # operator declared some exclusion-relevant context at all - see this file's own
+    # docstring and TP.ENT.0004's identical rationale for why an empty -Context call does
+    # not get this entry.
+    if ($hasDeclaredExclusionContext -and -not $exclusionContext.GroupExclusionsResolved) {
+        $exclusionEvidence += @{
+            Identity = 'group-exclusion-resolution'
+            SortKey  = 'group-exclusion-resolution'
+            Detail   = @{
+                note = $exclusionContext.GroupExclusionNote
             }
         }
     }

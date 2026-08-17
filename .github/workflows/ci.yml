@@ -687,7 +687,12 @@ jobs:
           # exclusion evidence Its in TP.ENT.0004.Tests.ps1 (4) and TP.ENT.0005.Tests.ps1
           # (3), plus contract-direction Its in Get-PulseCaExclusionContext.Tests.ps1 (2).
           # See .build/AssertGateResult.tasks.ps1's own accounting.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1921 -AllowedSkips $allowedSkips -AllowNotRun 1
+          #
+          # 1921 -> 1929 (T3.5 dual-review fix round: MalformedDeclaredAccounts/
+          # GroupExclusionNote completeness fold-in + report-only misreading-risk warning):
+          # +8 - 4 new Its each in TP.ENT.0004.Tests.ps1 and TP.ENT.0005.Tests.ps1. See
+          # .build/AssertGateResult.tasks.ps1's own accounting.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1929 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

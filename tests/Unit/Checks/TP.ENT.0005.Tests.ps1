@@ -189,6 +189,8 @@ Describe 'TP.ENT.0005 - MFA is required for admin roles by an enforced Condition
         $exclusionEntry | Should -Not -BeNullOrEmpty
         $exclusionEntry.detail.excludedFromEnforcedMfaPolicies | Should -Contain 'MFA For Admins'
         @($exclusionEntry.detail.excludedFromReportOnlyMfaPolicies).Count | Should -Be 0
+        # fully enforced-honored - no misreading-risk warning needed
+        $exclusionEntry.detail.PSObject.Properties.Name | Should -Not -Contain 'reportOnlyProtectionWarning'
     }
 
     It 'report-only exclusion is surfaced but distinguished from enforced honoring - never counted as protection' {
@@ -201,5 +203,83 @@ Describe 'TP.ENT.0005 - MFA is required for admin roles by an enforced Condition
         $exclusionEntry | Should -Not -BeNullOrEmpty
         @($exclusionEntry.detail.excludedFromEnforcedMfaPolicies).Count | Should -Be 0
         $exclusionEntry.detail.excludedFromReportOnlyMfaPolicies | Should -Contain 'MFA For Admins'
+        # misreading-risk fold-in: report-only-ONLY exclusion carries an explicit warning
+        $exclusionEntry.detail.reportOnlyProtectionWarning | Should -Match 'do not protect'
+    }
+
+    # ---- dual-review fix round: completeness fold-in hostile cases ----
+
+    It 'a malformed (non-GUID) declared account is surfaced in evidence even though it can never match any policy' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseMfaPolicy -IncludeRoles $script:allNineRoles) }
+        ) -Context @{ BreakGlassAccounts = @('not-a-guid@contoso.com') }
+
+        $finding.status | Should -Be 'Pass'
+        $malformedEntry = $finding.evidence | Where-Object { $_.identity -eq 'not-a-guid@contoso.com' }
+        $malformedEntry | Should -Not -BeNullOrEmpty
+        $malformedEntry.detail.issue | Should -Match 'not GUID-shaped'
+    }
+
+    It 'a group-exclusion-resolution note is surfaced when the operator declared something and group exclusions are unresolved' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseMfaPolicy -IncludeRoles $script:allNineRoles -ExcludeUsers @($script:adminGuid)) }
+        ) -Context @{ BreakGlassAccounts = @($script:adminGuid) }
+
+        $finding.status | Should -Be 'Pass'
+        $noteEntry = $finding.evidence | Where-Object { $_.identity -eq 'group-exclusion-resolution' }
+        $noteEntry | Should -Not -BeNullOrEmpty
+        $noteEntry.detail.note | Should -Match 'Group-based exclusion'
+    }
+
+    It 'no group-exclusion-resolution note when -Context declares nothing at all (backward-compat, no noise)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseMfaPolicy -IncludeRoles $script:allNineRoles) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $finding.evidence.Count | Should -Be 1
+        ($finding.evidence | Where-Object { $_.identity -eq 'group-exclusion-resolution' }) | Should -BeNullOrEmpty
+    }
+
+    It 'multiple declared identifiers straddling enforced/report-only/no-match/malformed all resolve independently in one evaluation' {
+        $enforcedGuid = '77777777-7777-7777-7777-777777777777'
+        $reportOnlyGuid = '88888888-8888-8888-8888-888888888888'
+        $noMatchGuid = '99999999-9999-9999-9999-999999999999'
+        $malformed = 'still-not-a-guid'
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                (New-PulseMfaPolicy -DisplayName 'Enforced MFA' -IncludeRoles $script:allNineRoles -ExcludeUsers @($enforcedGuid))
+                (New-PulseMfaPolicy -DisplayName 'Report-Only MFA' -State 'enabledForReportingButNotEnforced' -IncludeRoles $script:allNineRoles -ExcludeUsers @($reportOnlyGuid))
+            ) }
+        ) -Context @{ BreakGlassAccounts = @($enforcedGuid, $reportOnlyGuid, $noMatchGuid, $malformed) }
+
+        # The enforced policy alone covers all 9 roles, so this is Pass.
+        $finding.status | Should -Be 'Pass'
+
+        $enforcedEntry = $finding.evidence | Where-Object { $_.identity -eq $enforcedGuid }
+        $enforcedEntry | Should -Not -BeNullOrEmpty
+        $enforcedEntry.detail.excludedFromEnforcedMfaPolicies | Should -Contain 'Enforced MFA'
+        $enforcedEntry.detail.PSObject.Properties.Name | Should -Not -Contain 'reportOnlyProtectionWarning'
+
+        $reportOnlyEntry = $finding.evidence | Where-Object { $_.identity -eq $reportOnlyGuid }
+        $reportOnlyEntry | Should -Not -BeNullOrEmpty
+        @($reportOnlyEntry.detail.excludedFromEnforcedMfaPolicies).Count | Should -Be 0
+        $reportOnlyEntry.detail.excludedFromReportOnlyMfaPolicies | Should -Contain 'Report-Only MFA'
+        $reportOnlyEntry.detail.reportOnlyProtectionWarning | Should -Match 'do not protect'
+
+        # No-match identifier gets no evidence entry at all (unchanged prior behavior).
+        ($finding.evidence | Where-Object { $_.identity -eq $noMatchGuid }) | Should -BeNullOrEmpty
+
+        $malformedEntry = $finding.evidence | Where-Object { $_.identity -eq $malformed }
+        $malformedEntry | Should -Not -BeNullOrEmpty
+        $malformedEntry.detail.issue | Should -Match 'not GUID-shaped'
+
+        $noteEntry = $finding.evidence | Where-Object { $_.identity -eq 'group-exclusion-resolution' }
+        $noteEntry | Should -Not -BeNullOrEmpty
+
+        # Pass-branch policy evidence includes the ENFORCED covering policy (1) + enforced-
+        # exclusion, report-only-exclusion, malformed, and note entries (4) = 5.
+        $finding.evidence.Count | Should -Be 5
     }
 }
