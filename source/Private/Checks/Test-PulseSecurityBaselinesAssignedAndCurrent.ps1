@@ -41,6 +41,22 @@
     (this composite shape is defined by this codebase, not raw Graph, so there is no
     narrow-exception case the way TP.INT.0026/0028's raw `assignments` relationship has).
 
+    STRICT TYPING, NOT [bool]-COERCION (post-review fix, MEDIUM finding): the FIRST version
+    of this rule read `[bool] $row.hasAssignment` directly - PowerShell's `[bool]` cast on a
+    non-empty STRING (e.g. the string `'false'`, which is exactly what a JSON/JSON-ish
+    composite descriptor could plausibly emit for a boolean-looking field before this
+    check's own composite descriptor ships) coerces to `$true` regardless of the string's
+    apparent meaning, because `[bool]` only treats an EMPTY string as falsy. That silently
+    inverted an unassigned baseline (`hasAssignment = 'false'`) into a Pass - latent while
+    the dataset is Pending (no live data can reach this path today), but a real, live bug
+    the day GraphKit ships the composite descriptor if it (or an intermediate hop) ever
+    emits a string rather than a native boolean. This rule now requires `hasAssignment` and
+    `isDeprecated` to actually BE `[bool]` (PowerShell's own `-is [bool]` type check, which
+    a string - even `'true'`/`'false'` - never satisfies) - any other type, including a
+    boolean-LOOKING string, throws rather than being silently coerced one way or the other,
+    the same field-absence-lens philosophy this codebase applies to outright-missing
+    fields extended to wrongly-typed-but-present ones.
+
     RULE: zero rows = NotApplicable (no security baseline of any tracked family is in use -
     a legitimate, if security-notable, tenant state this check does not itself flag; that
     absence is better caught by a future "no baseline deployed at all" check, out of scope
@@ -71,6 +87,9 @@ function Test-PulseSecurityBaselinesAssignedAndCurrent {
         foreach ($prop in @('hasAssignment', 'isDeprecated')) {
             if (-not (Test-PulseRowPropertyPresent -Row $row -PropertyName $prop) -or $null -eq $row.$prop) {
                 throw "Test-PulseSecurityBaselinesAssignedAndCurrent: a securityBaselinesAssignedAndCurrent row is missing '$prop'."
+            }
+            if ($row.$prop -isnot [bool]) {
+                throw "Test-PulseSecurityBaselinesAssignedAndCurrent: a securityBaselinesAssignedAndCurrent row's '$prop' is present but not a native boolean (got '$($row.$prop.GetType().Name)') - refusing to [bool]-coerce a non-boolean value (e.g. the STRING 'false' coerces to `$true under PowerShell's own [bool] cast, which would silently invert the meaning)."
             }
         }
 

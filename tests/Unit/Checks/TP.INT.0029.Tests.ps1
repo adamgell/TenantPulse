@@ -104,4 +104,23 @@ Describe 'TP.INT.0029 - Security baselines assigned and not on a deprecated vers
         )
         $finding.status | Should -Be 'Error'
     }
+
+    It 'HOSTILE (post-review MEDIUM fix): hasAssignment as the STRING ''false'' errors instead of [bool]-coercing to $true (an unassigned baseline must never silently Pass)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0029' -Datasets @(
+            @{ Name = 'securityBaselinesAssignedAndCurrent'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'b1'; name = 'Windows 10/11 baseline'; templateFamily = 'baseline'; hasAssignment = 'false'; isDeprecated = $false }
+            ) }
+        )
+        $finding.status | Should -Be 'Error'
+        $finding.status | Should -Not -Be 'Pass'
+    }
+
+    It 'HOSTILE: isDeprecated as the STRING ''false'' also errors instead of coercing (same trap on the second boolean field)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0029' -Datasets @(
+            @{ Name = 'securityBaselinesAssignedAndCurrent'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'b1'; name = 'Windows 10/11 baseline'; templateFamily = 'baseline'; hasAssignment = $true; isDeprecated = 'false' }
+            ) }
+        )
+        $finding.status | Should -Be 'Error'
+    }
 }
