@@ -61,6 +61,9 @@ Describe 'TP.INT.0028 - Enrollment Status Page configured with blocking failure 
             ) }
         )
         $finding.status | Should -Be 'Pass'
+        # M1 (Phase 3 whole-phase review): Pass now carries corroborating evidence too.
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'esp1'
     }
 
     It 'Fail: assigned but blocking disabled' {

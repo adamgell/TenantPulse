@@ -35,6 +35,11 @@
     is either unassigned or has blocking disabled. This check asserts only the top-level
     blocking toggle, deliberately not the fuller ESP sub-timeout/app-blocklist depth (per
     the research entry's own scoping note).
+
+    PASS EVIDENCE (Phase 3 whole-phase review, catalog-coherence finding M1): the Pass
+    path now attaches a corroborating per-row evidence summary too, matching
+    Test-PulseStaleDevices.ps1's own precedent of never leaving a Pass evidence-empty when
+    real per-row data already exists to corroborate it with.
 #>
 
 function Test-PulseEnrollmentStatusPageBlocking {
@@ -96,7 +101,11 @@ function Test-PulseEnrollmentStatusPageBlocking {
     }
 
     if ($hasBlockingAssigned) {
-        return New-PulseFinding -Status Pass -Reason "At least one assigned Enrollment Status Page (ESP) profile blocks device use until all required apps and profiles are installed."
+        # M1 (Phase 3 whole-phase review): Pass now carries a corroborating per-profile
+        # evidence row too, consistent with Test-PulseStaleDevices.ps1's own precedent of
+        # never leaving a Pass evidence-empty when real per-row data already exists to
+        # corroborate it with.
+        return New-PulseFinding -Status Pass -Reason "At least one assigned Enrollment Status Page (ESP) profile blocks device use until all required apps and profiles are installed." -Evidence $rows.ToArray()
     }
 
     $reason = "None of the $($espRows.Count) Enrollment Status Page (ESP) profile(s) configured for this tenant are BOTH assigned AND set to block device use on install failure - users can bypass an incomplete or failed provisioning run and start working on an under-configured, potentially noncompliant device."

@@ -60,6 +60,9 @@ Describe 'TP.INT.0021 - Apple Volume Purchase Program tokens valid and syncing' 
             @{ Name = 'vppTokens'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'vpp1'; organizationName = 'Contoso'; expirationDateTime = '2028-01-01T00:00:00Z'; lastSyncDateTime = $recent }) }
         )
         $finding.status | Should -Be 'Pass'
+        # M1 (Phase 3 whole-phase review): Pass now carries corroborating evidence too.
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'vpp1'
     }
 
     It 'Fail: token has already expired' {

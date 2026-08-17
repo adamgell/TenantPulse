@@ -69,6 +69,9 @@ Describe 'TP.INT.0020 - Apple Automated Device Enrollment tokens valid and synci
             @{ Name = 'depOnboardingSettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'tok1'; appleIdentifier = 'redacted@example.com'; tokenName = 'Primary'; tokenExpirationDateTime = '2028-01-01T00:00:00Z'; lastSuccessfulSyncDateTime = $today }) }
         )
         $finding.status | Should -Be 'Pass'
+        # M1 (Phase 3 whole-phase review): Pass now carries corroborating evidence too.
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'tok1'
     }
 
     It 'Fail: token has already expired' {

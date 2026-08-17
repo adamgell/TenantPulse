@@ -33,6 +33,11 @@
     "offending" if expired, OR expires within 30 days, OR its last sync was more than 1 day
     before the cutoff. Fail if any token is expired or sync-stale, Warn if the only issue
     is approaching (not yet expired) expiry, Pass otherwise.
+
+    PASS EVIDENCE (Phase 3 whole-phase review, catalog-coherence finding M1): the Pass
+    path now attaches a corroborating per-row evidence summary too, matching
+    Test-PulseStaleDevices.ps1's own precedent of never leaving a Pass evidence-empty when
+    real per-row data already exists to corroborate it with.
 #>
 
 function Test-PulseAppleVppTokensValid {
@@ -68,6 +73,7 @@ function Test-PulseAppleVppTokensValid {
 
     $expiredOrStale = [System.Collections.Generic.List[object]]::new()
     $approachingOnly = [System.Collections.Generic.List[object]]::new()
+    $allRows = [System.Collections.Generic.List[object]]::new()
 
     for ($index = 0; $index -lt $tokens.Count; $index++) {
         $token = $tokens[$index]
@@ -106,6 +112,7 @@ function Test-PulseAppleVppTokensValid {
             }
             SortKey  = $identity
         }
+        $allRows.Add($row)
 
         if ($isExpired -or $isSyncStale) {
             $expiredOrStale.Add($row)
@@ -123,5 +130,8 @@ function Test-PulseAppleVppTokensValid {
         return New-PulseFinding -Status Warn -Reason "$($approachingOnly.Count) of $($tokens.Count) Apple VPP token(s) expire within 30 days - renew now to avoid an unplanned app-licensing outage." -Evidence $approachingOnly.ToArray()
     }
 
-    return New-PulseFinding -Status Pass -Reason "All $($tokens.Count) Apple VPP token(s) have more than 30 days remaining before expiration and synced within the last day."
+    # M1 (Phase 3 whole-phase review): Pass now carries a corroborating per-token evidence
+    # row too, consistent with Test-PulseStaleDevices.ps1's own precedent of never leaving
+    # a Pass evidence-empty when real per-row data already exists to corroborate it with.
+    return New-PulseFinding -Status Pass -Reason "All $($tokens.Count) Apple VPP token(s) have more than 30 days remaining before expiration and synced within the last day." -Evidence $allRows.ToArray()
 }
