@@ -24,11 +24,32 @@
     `usersAndGroups`/`applications` include/exclude structure per Microsoft's documented
     crossTenantAccessPolicyConfigurationDefault shape. This check evaluates the
     RESTRICTIVENESS SIGNAL Microsoft's own defaults doc names as the permissive-by-default
-    case: `usersAndGroups.accessType` (or, on the older/simpler shape, a bare
-    `isServiceDefault`/allow-all flag) equal to 'allowed' with no target restriction at all
+    case: `usersAndGroups.accessType` equal to 'allowed' with no target restriction at all
     is the "wide open" state this check flags for inbound; outbound uses the identical
     shape/logic, evaluated independently (an org may deliberately restrict one direction but
     not the other - report both, never collapse to one bullet).
+
+    THREE-WAY CLASSIFICATION, BEHAVIOR MATCHES THE CLAIM (post-review, Low fix): an earlier
+    draft's docstring already claimed an unrecognized accessType value was a distinct
+    "cannot classify" case, but the CODE folded any value not literally equal to 'allowed'
+    (including a genuinely unrecognized/regressed string) into "restricted" - an optimistic
+    Pass on a sparse or regressed shape this check has never actually seen. Each direction
+    now classifies to exactly one of three outcomes:
+        'unrestricted'   - accessType is literally 'allowed' (or the whole direction block
+                            is absent - see CONSERVATIVE ON ABSENCE below).
+        'restricted'      - accessType is literally 'blocked'.
+        'unclassifiable'  - accessType is present but neither 'allowed' nor 'blocked' - an
+                            unrecognized/regressed value this check has never seen.
+    ONLY 'restricted' counts toward the overall Pass; both 'unrestricted' AND
+    'unclassifiable' degrade the finding to Warn and are surfaced in evidence with their
+    own distinct classification and (for 'unclassifiable') the raw observed value - an
+    unrecognized shape must never silently read as compliant.
+
+    CONSERVATIVE ON ABSENCE: an absent b2bCollaborationInbound/Outbound block is classified
+    'unrestricted' (flagged), never silently assumed compliant - this codebase's
+    field-absence lens applied here means "cannot verify restriction" and "confirmed
+    unrestricted" produce the identical, safer outward Warn rather than a false Pass a
+    genuinely sparse/regressed response shape could otherwise earn.
 #>
 
 function Test-PulseCrossTenantAccessDefaultRestricted {
@@ -45,39 +66,57 @@ function Test-PulseCrossTenantAccessDefaultRestricted {
     }
     $policy = $rows[0]
 
-    function Test-PulseDirectionUnrestricted {
+    function Get-PulseDirectionClassification {
         param($DirectionNode)
-        # CONSERVATIVE ON ABSENCE: an absent b2bCollaborationInbound/Outbound block is
-        # treated as UNRESTRICTED (flagged), never silently assumed compliant - this
-        # codebase's field-absence lens applied here means "cannot verify restriction" and
-        # "confirmed unrestricted" produce the identical, safer outward Warn rather than a
-        # false Pass a genuinely sparse/regressed response shape could otherwise earn.
-        if ($null -eq $DirectionNode) { return $true }
+        if ($null -eq $DirectionNode) { return @{ Classification = 'unrestricted'; RawAccessType = $null } }
         $usersAndGroups = Get-PulseSettingsCatalogValueProperty -Node $DirectionNode -PropertyName 'usersAndGroups'
         $accessType = Get-PulseSettingsCatalogValueProperty -Node $usersAndGroups -PropertyName 'accessType'
-        # 'allowed' with no target list is Microsoft's own permissive-by-default shape;
-        # anything else (e.g. 'blocked', or an accessType this check does not recognize) is
-        # treated as at least a deliberate departure from the wide-open default, not
-        # unrestricted - a genuinely unrecognized value is a shape this check has not seen,
-        # which is a different, honest "cannot classify" case (see the field-absence lens
-        # this codebase applies elsewhere), not silently folded into "restricted".
-        return ([string] $accessType -eq 'allowed')
+        $accessTypeString = if ($null -ne $accessType) { [string] $accessType } else { $null }
+
+        $classification = switch ($accessTypeString) {
+            'allowed' { 'unrestricted' }
+            'blocked' { 'restricted' }
+            default { 'unclassifiable' }
+        }
+
+        return @{ Classification = $classification; RawAccessType = $accessTypeString }
     }
 
     $inbound = Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'b2bCollaborationInbound'
     $outbound = Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'b2bCollaborationOutbound'
 
-    $inboundUnrestricted = Test-PulseDirectionUnrestricted -DirectionNode $inbound
-    $outboundUnrestricted = Test-PulseDirectionUnrestricted -DirectionNode $outbound
+    $inboundResult = Get-PulseDirectionClassification -DirectionNode $inbound
+    $outboundResult = Get-PulseDirectionClassification -DirectionNode $outbound
 
-    $findings = @()
-    if ($inboundUnrestricted) { $findings += 'inbound' }
-    if ($outboundUnrestricted) { $findings += 'outbound' }
+    $flagged = @()
+    if ($inboundResult.Classification -ne 'restricted') { $flagged += @{ Direction = 'inbound'; Result = $inboundResult } }
+    if ($outboundResult.Classification -ne 'restricted') { $flagged += @{ Direction = 'outbound'; Result = $outboundResult } }
 
-    if ($findings.Count -eq 0) {
+    if ($flagged.Count -eq 0) {
         return New-PulseFinding -Status Pass -Reason 'The tenant''s default cross-tenant access policy restricts both inbound and outbound B2B collaboration away from Microsoft''s wide-open default.'
     }
 
-    $evidence = @($findings | ForEach-Object { @{ Identity = "crossTenantAccessPolicyDefault:$_"; Detail = @{ direction = $_; accessType = 'allowed' } } })
-    return New-PulseFinding -Status Warn -Reason "The tenant's default cross-tenant access policy allows unrestricted B2B collaboration ($($findings -join ' and ')) from every external tenant - Microsoft's out-of-the-box default, not necessarily a deliberate choice. No dedicated ScuBA SHALL/SHOULD control anchors this specific object; verify this permissive default is intentional for this tenant's collaboration needs, not merely unreviewed." -Evidence $evidence
+    $evidence = @($flagged | ForEach-Object {
+        @{
+            Identity = "crossTenantAccessPolicyDefault:$($_.Direction)"
+            Detail   = @{
+                direction      = $_.Direction
+                classification = $_.Result.Classification
+                accessType     = $_.Result.RawAccessType
+            }
+        }
+    })
+
+    $unclassifiableDirections = @($flagged | Where-Object { $_.Result.Classification -eq 'unclassifiable' } | ForEach-Object { $_.Direction })
+    $unrestrictedDirections = @($flagged | Where-Object { $_.Result.Classification -eq 'unrestricted' } | ForEach-Object { $_.Direction })
+
+    $reasonParts = @()
+    if ($unrestrictedDirections.Count -gt 0) {
+        $reasonParts += "allows unrestricted B2B collaboration ($($unrestrictedDirections -join ' and ')) from every external tenant - Microsoft's out-of-the-box default, not necessarily a deliberate choice"
+    }
+    if ($unclassifiableDirections.Count -gt 0) {
+        $reasonParts += "has an unrecognized/unclassifiable accessType value on $($unclassifiableDirections -join ' and ') - cannot confirm restriction, not counted as a Pass"
+    }
+
+    return New-PulseFinding -Status Warn -Reason "The tenant's default cross-tenant access policy $($reasonParts -join '; '). No dedicated ScuBA SHALL/SHOULD control anchors this specific object; verify this posture is intentional for this tenant's collaboration needs, not merely unreviewed." -Evidence $evidence
 }

@@ -76,7 +76,7 @@ Describe 'TP.ENT.0023 - Cross-tenant access default settings restrict inbound/ou
         $finding.status | Should -Be 'Pass'
     }
 
-    It 'Warn: default wide-open inbound and outbound (Microsoft''s own default, PSObject shape)' {
+    It 'Warn: default wide-open inbound and outbound (Microsoft''s own default; value round-trips through a PSObject before Write-PulseDataset - the fixture harness always re-materializes to hashtable before the rule runs, see ConvertTo-PulseCaPolicyView.Tests.ps1 for genuine shape-neutrality coverage at the view layer)' {
         $policy = ConvertTo-PSObjectShape -Value (New-PulseCrossTenantPolicy)
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0023' -Datasets @(
             @{ Name = 'crossTenantAccessPolicyDefault'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($policy) }
@@ -84,6 +84,7 @@ Describe 'TP.ENT.0023 - Cross-tenant access default settings restrict inbound/ou
         $finding.status | Should -Be 'Warn'
         $finding.reason | Should -Match 'inbound and outbound'
         $finding.evidence.Count | Should -Be 2
+        $finding.evidence[0].detail.classification | Should -Be 'unrestricted'
     }
 
     It 'Warn: only inbound wide-open, outbound restricted - both directions evaluated independently' {
@@ -110,5 +111,44 @@ Describe 'TP.ENT.0023 - Cross-tenant access default settings restrict inbound/ou
         )
         $finding.status | Should -Be 'Warn'
         $finding.evidence.Count | Should -Be 2
+        $finding.evidence[0].detail.classification | Should -Be 'unrestricted'
+    }
+
+    It 'Warn (post-review, F5 - behavior now matches the honest claim): an unrecognized accessType value is never folded into restricted, and is surfaced as unclassifiable' {
+        $policy = New-PulseCrossTenantPolicy -InboundAccessType 'someFutureGraphValue' -OutboundAccessType 'blocked'
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0023' -Datasets @(
+            @{ Name = 'crossTenantAccessPolicyDefault'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Warn'
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].detail.direction | Should -Be 'inbound'
+        $finding.evidence[0].detail.classification | Should -Be 'unclassifiable'
+        $finding.evidence[0].detail.accessType | Should -Be 'someFutureGraphValue'
+        $finding.reason | Should -Match 'unclassifiable'
+        $finding.reason | Should -Not -Match 'not counted as a Pass.*restrict'
+    }
+
+    It 'Warn: an unclassifiable direction alongside a genuinely unrestricted one reports both, distinctly classified' {
+        $policy = New-PulseCrossTenantPolicy -InboundAccessType 'allowed' -OutboundAccessType 'weirdValue'
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0023' -Datasets @(
+            @{ Name = 'crossTenantAccessPolicyDefault'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Warn'
+        $finding.evidence.Count | Should -Be 2
+        ($finding.evidence | Where-Object { $_.detail.direction -eq 'inbound' }).detail.classification | Should -Be 'unrestricted'
+        ($finding.evidence | Where-Object { $_.detail.direction -eq 'outbound' }).detail.classification | Should -Be 'unclassifiable'
+        $finding.reason | Should -Match 'unrestricted B2B collaboration \(inbound\)'
+        $finding.reason | Should -Match 'unclassifiable.*outbound'
+    }
+
+    It 'descriptor-pending: NotApplicable when crossTenantAccessPolicyDefault was skipped (no released GraphKit descriptor)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0023' -Datasets @(
+            @{ Name = 'crossTenantAccessPolicyDefault'; ApiVersion = 'v1.0'; Status = 'Skipped'; Reason = 'descriptor-pending: awaiting GraphKit release' }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Be 'descriptor-pending: awaiting GraphKit release'
     }
 }
