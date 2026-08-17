@@ -182,23 +182,37 @@ function Invoke-PulseEvaluation {
     $effectiveContext.SnapshotCreatedUtc = $manifest.createdUtc
     $effectiveContext.EvaluationCutoffBase = $manifest.createdUtc
 
-    # STORE ACCESS FOR ARTIFACT-READING RULES (Task 3.1): a Function rule only ever
-    # receives $Datasets (Data.Datasets-declared raw collections) - the standing
-    # "checks consume datasets/compact artifacts only" contract never gave a rule any
-    # way to reach a COMPACT, WHOLE-DOCUMENT expansion artifact (e.g. expanded/
-    # conflicts.json, T2.6) that is not itself a DatasetMap-registered Graph collection.
-    # TP.INT.0006 is the first check that needs this - it reads the conflicts artifact
-    # via a manifest.expansions lookup, not manifest.datasets. Rather than invent a new
-    # per-artifact plumbing mechanism, $Store is threaded through $Context exactly like
-    # SnapshotCreatedUtc/EvaluationCutoffBase above: unconditional here, but OPT-IN at
-    # the rule-function call site (Invoke-PulseCheckEvaluation only passes -Context to a
-    # rule function that itself declares a -Context parameter), so every pre-existing
-    # rule function keeps working completely unchanged. A rule that reads
-    # $Context.Store must still only ever call read-only reader functions
-    # (Get-PulseSnapshotManifest, Get-PulseConflictArtifact, Get-PulseReferenceData,
-    # Read-PulseDataset) against it - nothing about this handoff grants write access
-    # rules did not already have some other way to reach.
-    $effectiveContext.Store = $Store
+    # ARTIFACT ACCESS FOR ARTIFACT-READING RULES (Task 3.1, review-fix round): a Function
+    # rule only ever received $Datasets (Data.Datasets-declared raw collections) before
+    # this task - the standing "checks consume datasets/compact artifacts only" contract
+    # never gave a rule any way to reach a COMPACT, WHOLE-DOCUMENT expansion artifact (e.g.
+    # expanded/conflicts.json, T2.6) that is not itself a DatasetMap-registered Graph
+    # collection. TP.INT.0006 is the first check that needs this.
+    #
+    # NOT a raw $Store handle (a review round correctly rejected the original design's
+    # $Context.Store, which handed a rule the ENTIRE live snapshot-store surface - every
+    # path, every dataset, every reference/expansion file - for what only ever needed to
+    # be "read the conflicts artifact"). $Context.ArtifactReader is instead a narrow,
+    # READ-ONLY accessor (New-PulseArtifactReader, source/Private/Expand/) built fresh
+    # from -Store here: a PSCustomObject exposing exactly one ScriptMethod
+    # (GetConflictArtifact()), closed over FROZEN COPIES of -Store's Root/ManifestPath
+    # strings rather than the live -Store object itself - see that function's own
+    # docstring for why that closure construction means nothing reachable through the
+    # reader can mutate, or gain broader access to, the real store. OPT-IN at the
+    # rule-function call site exactly like SnapshotCreatedUtc/EvaluationCutoffBase (only
+    # passed to a rule function that itself declares a -Context parameter), so every
+    # pre-existing rule function keeps working completely unchanged.
+    #
+    # EXPRESSION RULES NEVER RECEIVE THIS (documented, deliberate): $effectiveContext here
+    # is the FUNCTION-RULE-ONLY context. Invoke-PulseCheckEvaluation's Expression-rule
+    # branch builds its OWN, separate Context clone for the sandboxed runspace that
+    # explicitly excludes ArtifactReader before it is ever handed to
+    # Invoke-PulseSandboxedExpression's -Context - see that branch's own comment. An
+    # Expression rule cannot read $Context.ArtifactReader (or any prior $Context.Store);
+    # it is simply absent from the sandbox's own $Context variable, same "not hidden, not
+    # there" guarantee Invoke-PulseSandboxedExpression's own docstring already establishes
+    # for the host filesystem/network.
+    $effectiveContext.ArtifactReader = New-PulseArtifactReader -Store $Store
     $Context = $effectiveContext
 
     # Used only to satisfy Protect-PulseReason's mandatory -Pseudonym parameter (see the
@@ -451,8 +465,26 @@ function Invoke-PulseCheckEvaluation {
             # -Context is unconditionally bound on THIS function's own $PSBoundParameters
             # every time - only $ruleAcceptsContext (does the target function declare the
             # parameter at all) actually decides anything.
+            #
+            # PER-CALL SHALLOW CLONE (Task 3.1 review-fix round): $Context here is the
+            # SAME hashtable object Invoke-PulseEvaluation's loop reuses across every
+            # check in this run - without a clone, a rule function that mutates its own
+            # received $Context in place (adds/removes/reassigns a key) would corrupt
+            # what every LATER check in the same run sees, an engine-state leak no rule is
+            # supposed to be able to cause. A plain shallow clone (new hashtable, same
+            # top-level values) is sufficient here and does not need to be a deep clone
+            # the way -Datasets does (ConvertTo-PulseClonedDatasets): every value this
+            # hashtable can hold today is either an immutable [string]
+            # (SnapshotCreatedUtc/EvaluationCutoffBase) or the ArtifactReader accessor,
+            # which is itself read-only by construction (New-PulseArtifactReader's own
+            # docstring) - there is no mutable nested structure a shallow clone would fail
+            # to protect. A rule reassigning $Context['Foo'] = ... only ever mutates ITS
+            # OWN clone's top-level slot, never the shared original.
+            $ruleContext = @{}
+            foreach ($key in $Context.Keys) { $ruleContext[$key] = $Context[$key] }
+
             $rawOutputs = if ($ruleAcceptsContext) {
-                @(& $ruleFunction -Datasets $clonedDatasets -Context $Context 2>&1)
+                @(& $ruleFunction -Datasets $clonedDatasets -Context $ruleContext 2>&1)
             } else {
                 @(& $ruleFunction -Datasets $clonedDatasets 2>&1)
             }
@@ -538,7 +570,26 @@ function Invoke-PulseCheckEvaluation {
             # rationale and its honestly documented residual. -Context is always threaded
             # through (see this file's own CONTEXT docstring section) - no opt-in gating
             # needed here, unlike the Function-rule path above.
-            $sandboxResult = Invoke-PulseSandboxedExpression -Expression $Check.Rule.Expression -Datasets $clonedDatasets -Context $Context
+            #
+            # ARTIFACTREADER STRIPPED, NEVER SANDBOXED (Task 3.1 review-fix round): an
+            # Expression rule has no legitimate need to read an expansion artifact (its
+            # whole contract is "resolve to a single [bool] over $Datasets") and, more to
+            # the point, no way to be trusted with a live method call the way a reviewed
+            # Function rule body is - SetVariable hands the sandbox runspace a REFERENCE
+            # to whatever hashtable it is given (ConstrainedLanguage does not clone it),
+            # so passing the same $Context that carries ArtifactReader through unmodified
+            # would let an Expression rule invoke .ArtifactReader.GetConflictArtifact()
+            # from inside the sandbox. This builds a SEPARATE, purpose-built clone that
+            # copies every key from $Context EXCEPT ArtifactReader - the sandbox's own
+            # $Context variable simply does not have the key at all ("not hidden, not
+            # there", the same guarantee Invoke-PulseSandboxedExpression's own docstring
+            # already establishes for the host filesystem/network/caller variables).
+            $sandboxContext = @{}
+            foreach ($key in $Context.Keys) {
+                if ($key -eq 'ArtifactReader') { continue }
+                $sandboxContext[$key] = $Context[$key]
+            }
+            $sandboxResult = Invoke-PulseSandboxedExpression -Expression $Check.Rule.Expression -Datasets $clonedDatasets -Context $sandboxContext
             return @{ Status = $sandboxResult.Status; Evidence = @(); Reason = $sandboxResult.Reason }
         }
 

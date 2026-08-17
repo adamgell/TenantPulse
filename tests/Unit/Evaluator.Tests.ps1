@@ -1124,6 +1124,80 @@ Describe 'Invoke-PulseEvaluation -Context' {
 
         $evaluation.Document.findings[0].status | Should -Be 'Pass'
     }
+
+    # ---- Task 3.1 review-fix round: ArtifactReader must never reach an Expression rule ----
+
+    It 'an Expression rule never sees $Context.ArtifactReader, even though Invoke-PulseEvaluation always populates it for Function rules' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$null -eq $Context.ArtifactReader' }
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:contextStoreRoot, $script:contextKeyPath, @($check) {
+            param($storeRoot, $keyPath, $checks)
+
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            Write-PulseDataset -Store $store -Name 'datasetA' -Data @([pscustomobject]@{ id = 'a-1' }) -ApiVersion 'v1.0' -Status 'Collected'
+
+            Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath
+        }
+
+        # 'Pass' here means the expression's own `$null -eq $Context.ArtifactReader`
+        # evaluated $true INSIDE the sandbox - i.e. the key is genuinely absent from the
+        # $Context variable the sandboxed runspace was given, not merely inaccessible.
+        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+    }
+
+    It 'an Expression rule never sees a $Context.Store key either (the pre-review-fix design this task replaced)' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$null -eq $Context.Store' }
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:contextStoreRoot, $script:contextKeyPath, @($check) {
+            param($storeRoot, $keyPath, $checks)
+
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            Write-PulseDataset -Store $store -Name 'datasetA' -Data @([pscustomobject]@{ id = 'a-1' }) -ApiVersion 'v1.0' -Status 'Collected'
+
+            Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath
+        }
+
+        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+    }
+
+    It 'a Function rule mutating its own received $Context never corrupts what a LATER check in the same run sees' {
+        $mutatingCheck = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureContextMutatingRule' }
+        $probeCheck = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureContextProbeRule' }
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:contextStoreRoot, $script:contextKeyPath, @($mutatingCheck, $probeCheck) {
+            param($storeRoot, $keyPath, $checks)
+
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            Write-PulseDataset -Store $store -Name 'datasetA' -Data @([pscustomobject]@{ id = 'a-1' }) -ApiVersion 'v1.0' -Status 'Collected'
+
+            # First check: mutates its OWN received $Context in place - adds a new key,
+            # reassigns ArtifactReader to $null - exactly the class of in-place mutation a
+            # shared (unclonded) $Context hashtable would let leak into every later check.
+            function Test-PulseFixtureContextMutatingRule {
+                param($Datasets, $Context)
+                $Context.Injected = 'mutated'
+                $Context.ArtifactReader = $null
+                $Context.Remove('EvaluationCutoffBase')
+                return New-PulseFinding -Status Pass
+            }
+
+            # Second check: probes for a PRISTINE $Context - no 'Injected' key, a real
+            # (non-null) ArtifactReader, and EvaluationCutoffBase still present - proving
+            # the first check's in-place mutation never reached the engine's own shared
+            # Context state.
+            function Test-PulseFixtureContextProbeRule {
+                param($Datasets, $Context)
+                $pristine = (-not $Context.ContainsKey('Injected')) -and ($null -ne $Context.ArtifactReader) -and $Context.ContainsKey('EvaluationCutoffBase')
+                return New-PulseFinding -Status $(if ($pristine) { 'Pass' } else { 'Fail' }) -Reason $(if (-not $pristine) { "Injected=$($Context.ContainsKey('Injected')) ArtifactReader=$($null -ne $Context.ArtifactReader) CutoffBase=$($Context.ContainsKey('EvaluationCutoffBase'))" } else { $null })
+            }
+
+            Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath
+        }
+
+        ($evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0001' }).status | Should -Be 'Pass'
+        $probeFinding = $evaluation.Document.findings | Where-Object { $_.id -eq 'TP.INT.0002' }
+        $probeFinding.status | Should -Be 'Pass' -Because $probeFinding.reason
+    }
 }
 
 Describe 'Invoke-PulseSandboxedExpression -Context' {

@@ -159,7 +159,16 @@
 # that enumerate every shipped source file (module.tests.ps1/SecretScan.tests.ps1) and the
 # CheckCatalog.Tests.ps1 self-check bump from 10 to 11 seed+T3.1 checks. Set to the REAL
 # total (1131), matching the module's own post-fix Pester run.
-$script:tenantPulseGateMinimumTests = 1131
+# 1131 -> 1142 (Task 3.1 review-fix round, both reviews' Critical/High items): +11 -
+# New-PulseArtifactReader's own dedicated suite (4 tests: no data properties, matches
+# Get-PulseConflictArtifact, resolves correctly when called outside the module's own
+# scope, reflects live artifact state not a construction-time snapshot) plus the
+# Context-boundary regression coverage in Evaluator.Tests.ps1 (4 tests: an Expression
+# rule never sees $Context.ArtifactReader or the prior $Context.Store, a Function rule's
+# in-place $Context mutation never corrupts a later check's own view) plus discovery
+# picking up the remainder via the structural QA suites. Set to the REAL total (1142),
+# matching the module's own post-fix Pester run.
+$script:tenantPulseGateMinimumTests = 1142
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
