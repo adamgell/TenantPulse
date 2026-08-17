@@ -456,7 +456,23 @@
 # `./build.ps1 -Tasks build,test` total for this commit (Task 3.6: +6 from
 # tests/QA/LicenseAttributionAudit.tests.ps1); both tracking locations bumped
 # together in the same commit as these test changes, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1935
+#
+# Phase 3 whole-phase review, round A (task-3.6-report.md fix round, this catalog-
+# coherence + security-walk dual-review fix wave): +20 - TP.INT.0016.Tests.ps1 (+2: the
+# zero-satisfied redaction-Warn hostile case for I1, plus the per-rule Pass-evidence
+# assertion for I4), TP.INT.0020/0021/0023/0026/0028.Tests.ps1 (+1 each, +5: one
+# id-less-collision hostile fixture per file for I2), TP.INT.0020/0021/0028.Tests.ps1
+# (+1 each, +3: Pass-path evidence assertions for M1 - 0023/0026 already carried Pass
+# evidence, updated in place with no new It), TP.INT.0031.Tests.ps1 (+0 net: Pass-evidence
+# assertion folded into the existing Pass It for I4), ProtectTypedPolicySensitivePayload.
+# Tests.ps1 (+4: the new UNMAPPED @odata.type structural-fallback Describe for security
+# walk finding 7 - deep-secret redacted, end-to-end redacted, no-string-leaf-passes-
+# through, and the still-original-reference no-op case), plus discovery-time
+# SecretScan.tests.ps1 per-file growth for every changed file this wave touched (+6, the
+# five new root files added to $explicitRootFiles for finding 8 plus the README.md change
+# for finding 9). 1955 is the real, measured `./build.ps1 -Tasks build,test` total for
+# this wave; both tracking locations bumped together, per the ratchet's own rule.
+$script:tenantPulseGateMinimumTests = 1955
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

@@ -695,7 +695,13 @@ jobs:
           #
           # 1929 -> 1935 (Task 3.6: tests/QA/LicenseAttributionAudit.tests.ps1, the scripted
           # license/attribution audit - 6 new Its, permanent suite member).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1935 -AllowedSkips $allowedSkips -AllowNotRun 1
+          #
+          # 1935 -> 1955 (Phase 3 whole-phase review, round A fix wave - task-3.6-report.md):
+          # +20. See .build/AssertGateResult.tasks.ps1's own accounting for the full
+          # per-file breakdown (I1/I2/I4 hostile+evidence Its, M1 Pass-evidence assertions,
+          # the new unmapped-@odata.type structural-fallback Describe for security walk
+          # finding 7, and SecretScan.tests.ps1 discovery growth).
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1955 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
