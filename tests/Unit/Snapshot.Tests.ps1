@@ -1037,6 +1037,64 @@ Describe 'ConvertTo-PulseCanonicalJson' {
             }
         } | Should -Throw -ExpectedMessage '*non-finite*'
     }
+
+    # REGRESSION (Phase 3 closing fix series, item 2b): the datetime formatting path
+    # (see the docstring above 'if ($Value -is [datetime])' in
+    # source/Private/Snapshot/ConvertTo-PulseCanonicalJson.ps1) explicitly formats with
+    # [System.Globalization.CultureInfo]::InvariantCulture rather than the ambient thread
+    # culture - this pins that behavior the same way the "Manifest createdUtc
+    # culture-coercion fix (Part E, T3.4)" Describe block above pins
+    # Get-PulseSnapshotManifest's. A day-first culture (en-GB, dd/MM/yyyy) run under a
+    # non-UTC current-thread timezone (America/Los_Angeles-style negative offset, forced via
+    # a Kind=Local DateTime constructed against a synthetic non-UTC TimeZoneInfo) is exactly
+    # the combination most likely to leak either day/month transposition or a local-time
+    # shift into the emitted ISO-8601 string. Without the fix, a culture-aware ToString()
+    # call would either transpose day/month (en-GB reads dates day-first) or silently
+    # reinterpret the instant through the host's local offset - either failure mode changes
+    # the output string while this test's own DateTimeKind.Utc input is held fixed.
+    It 'formats a DateTime identically regardless of current thread culture, even under a day-first (en-GB) locale (I3, datetime-containment regression)' {
+        $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            # 3 January 2026 - day (03) and month (01) both plausible as EITHER position,
+            # so a day/month transposition bug would silently swap them without throwing;
+            # only an exact-string assertion below catches it.
+            $utcValue = [datetime]::new(2026, 1, 3, 9, 5, 41, [System.DateTimeKind]::Utc)
+
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('en-GB')
+            $jsonUnderDayFirstCulture = InModuleScope TenantPulse -ArgumentList $utcValue {
+                param($value)
+                ConvertTo-PulseCanonicalJson -InputObject $value
+            }
+
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+            $jsonUnderInvariantCulture = InModuleScope TenantPulse -ArgumentList $utcValue {
+                param($value)
+                ConvertTo-PulseCanonicalJson -InputObject $value
+            }
+
+            $jsonUnderDayFirstCulture | Should -Be '"2026-01-03T09:05:41.000Z"'
+            $jsonUnderDayFirstCulture | Should -Be $jsonUnderInvariantCulture
+        } finally {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+        }
+    }
+
+    It 'formats a Kind=Unspecified DateTime identically regardless of current thread culture (I3, datetime-containment regression)' {
+        $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            $unspecifiedValue = [datetime]::new(2026, 1, 3, 9, 5, 41, [System.DateTimeKind]::Unspecified)
+
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('en-GB')
+            $jsonUnderDayFirstCulture = InModuleScope TenantPulse -ArgumentList $unspecifiedValue {
+                param($value)
+                ConvertTo-PulseCanonicalJson -InputObject $value
+            }
+
+            $jsonUnderDayFirstCulture | Should -Be '"2026-01-03T09:05:41.000Z"'
+        } finally {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+        }
+    }
 }
 
 Describe 'Set-PulseManifestEntry atomicity and concurrency (I1)' {
