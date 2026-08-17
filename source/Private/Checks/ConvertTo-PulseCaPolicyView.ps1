@@ -132,6 +132,7 @@ function ConvertTo-PulseCaPolicyView {
             $includeUsers = ConvertTo-StringArray (Get-PulseSettingsCatalogValueProperty -Node $users -PropertyName 'includeUsers')
 
             $apps = Get-PulseSettingsCatalogValueProperty -Node $conditions -PropertyName 'applications'
+            $clientApps = Get-PulseSettingsCatalogValueProperty -Node $conditions -PropertyName 'clientApplications'
             $locations = Get-PulseSettingsCatalogValueProperty -Node $conditions -PropertyName 'locations'
             $platforms = Get-PulseSettingsCatalogValueProperty -Node $conditions -PropertyName 'platforms'
             $signInRiskLevels = ConvertTo-StringArray (Get-PulseSettingsCatalogValueProperty -Node $conditions -PropertyName 'signInRiskLevels')
@@ -171,6 +172,19 @@ function ConvertTo-PulseCaPolicyView {
                         includeApplications = ConvertTo-StringArray (Get-PulseSettingsCatalogValueProperty -Node $apps -PropertyName 'includeApplications')
                         excludeApplications = ConvertTo-StringArray (Get-PulseSettingsCatalogValueProperty -Node $apps -PropertyName 'excludeApplications')
                         includeUserActions  = ConvertTo-StringArray (Get-PulseSettingsCatalogValueProperty -Node $apps -PropertyName 'includeUserActions')
+                    }
+                    # clientApplications (Task 4.4, TP.ENT.0024): a DISTINCT conditions
+                    # node from `apps`/`applications` above - Graph's workload-identity CA
+                    # targeting block (conditions.clientApplications.includeApplications),
+                    # not the ordinary interactive-sign-in app-targeting block. Absent on
+                    # every non-workload-identity policy (the overwhelming majority) - a
+                    # $null clientApps node cascades to two real, empty [string[]] fields
+                    # here, same OPTIONAL PARENT NODES NEVER THROW convention this
+                    # function's own docstring documents for conditions/grantControls/
+                    # sessionControls.
+                    clientApplications = [pscustomobject]@{
+                        includeApplications = ConvertTo-StringArray (Get-PulseSettingsCatalogValueProperty -Node $clientApps -PropertyName 'includeApplications')
+                        excludeApplications = ConvertTo-StringArray (Get-PulseSettingsCatalogValueProperty -Node $clientApps -PropertyName 'excludeApplications')
                     }
                     clientAppTypes  = ConvertTo-StringArray (Get-PulseSettingsCatalogValueProperty -Node $conditions -PropertyName 'clientAppTypes')
                     platforms       = [pscustomobject]@{

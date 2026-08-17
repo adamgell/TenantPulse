@@ -306,6 +306,36 @@ Describe 'ConvertTo-PulseCaPolicyView' {
         $result.session.signInFrequency | Should -Not -BeNullOrEmpty
     }
 
+    It 'flattens conditions.clientApplications (Task 4.4, TP.ENT.0024) into includeApplications/excludeApplications, distinct from conditions.apps' {
+        $raw = @{
+            id          = 'policy-workload'
+            displayName = 'Workload Identity CA'
+            state       = 'enabled'
+            conditions  = @{
+                clientApplications = @{ includeApplications = @('11111111-1111-1111-1111-111111111111'); excludeApplications = @('22222222-2222-2222-2222-222222222222') }
+            }
+        }
+        $result = InModuleScope TenantPulse -ArgumentList $raw {
+            param($raw)
+            ConvertTo-PulseCaPolicyView -Policies $raw
+        }
+
+        $result.conditions.clientApplications.includeApplications | Should -Be @('11111111-1111-1111-1111-111111111111')
+        $result.conditions.clientApplications.excludeApplications | Should -Be @('22222222-2222-2222-2222-222222222222')
+        $result.conditions.apps.includeApplications.Count | Should -Be 0
+    }
+
+    It 'clientApplications null/empty-normalizes (never throws) when conditions.clientApplications is absent, in both shapes' {
+        foreach ($raw in @($script:minimalPolicyHashtable, (ConvertTo-PSObjectShape -Value $script:minimalPolicyHashtable))) {
+            $result = InModuleScope TenantPulse -ArgumentList $raw {
+                param($raw)
+                ConvertTo-PulseCaPolicyView -Policies $raw
+            }
+            ($null -eq $result.conditions.clientApplications.includeApplications) | Should -Be $false -Because 'the field itself must be a real (never-null) empty array, not $null'
+            @($result.conditions.clientApplications.includeApplications).Count | Should -Be 0
+        }
+    }
+
     # ---- Task 4.1 post-review, Finding 1 (Critical): optional parent nodes never throw,
     # and never silently collapse an array-typed field to $null/a bare scalar ----
 
