@@ -27,7 +27,7 @@
     References = @{
         Research    = 'docs/research/iha-v2/2026-08-16-phase3-intune-check-entries.md#tpint0008--intune-multi-admin-approval-policy-configured'
         Authorities = @(
-            'https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/multi-admin-approval'
+            'https://learn.microsoft.com/en-us/intune/fundamentals/role-based-access-control/multi-admin-approval'
         )
     }
     Origin     = @{ Project = 'Maester'; Id = 'MT.1096'; License = 'MIT' }
