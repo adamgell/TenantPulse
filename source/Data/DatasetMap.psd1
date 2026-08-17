@@ -173,4 +173,44 @@
     # resolved to {policyId, policyName, backsUpToEntra, hasSufficientComplexity,
     # hasSufficientLength, hasPostAuthAction}.
     endpointSecurityLapsPolicies = @{ Type = 'EndpointSecurityLapsPolicyWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 3.3 LIVE entries: confirmed via a live Get-GraphOperation -List enumeration of
+    # the installed GraphKit 0.1.1 catalog against source/Data/Checks/TP.INT.00{20,21,23,25,27,28}.psd1
+    # - these ARE released descriptors, contrary to this task's own briefing note that
+    # assumed the whole connector/token family needed Pending (that note was accurate for
+    # applePushNotificationCertificate/androidManagedStoreAccountEnterpriseSettings/
+    # mobileThreatDefenseConnectors/windowsAutopilotDeploymentProfiles below, but NOT for
+    # AppleEnrollmentProgramToken/AppleVppToken/CertificateConnector/DeviceEnrollmentConfiguration/
+    # AutopilotDevice, all of which the installed 0.1.1 catalog already carries).
+    depOnboardingSettings = @{ Type = 'AppleEnrollmentProgramToken'; Operation = 'List'; ApiVersion = 'beta' }
+    vppTokens = @{ Type = 'AppleVppToken'; Operation = 'List'; ApiVersion = 'beta' }
+    ndesConnectors = @{ Type = 'CertificateConnector'; Operation = 'List'; ApiVersion = 'beta' }
+
+    # Task 3.3 (TP.INT.0025/0028): shared raw list - deviceEnrollmentConfigurations is a
+    # MIXED collection (platform-restriction configs, ESP configs, device-limit configs,
+    # ...) distinguished per-row by `@odata.type`; both checks read this one dataset and
+    # filter client-side to the derived type they each care about.
+    deviceEnrollmentConfigurations = @{ Type = 'DeviceEnrollmentConfiguration'; Operation = 'List'; ApiVersion = 'v1.0' }
+
+    # Task 3.3 (TP.INT.0027): the beta windowsAutopilotDeviceIdentity shape carries its own
+    # deploymentProfileAssignmentStatus/deploymentProfileAssignmentDetailedStatus/
+    # deploymentProfileAssignedDateTime properties directly (live-confirmed against
+    # https://learn.microsoft.com/en-us/graph/api/resources/intune-enrollment-windowsautopilotdeviceidentity?view=graph-rest-beta)
+    # - "orphaned" (deploymentProfileAssignmentStatus == 'notAssigned') is therefore
+    # single-dataset-decidable and does NOT need the Pending windowsAutopilotDeploymentProfiles
+    # dataset below at all, a deliberate deviation for the better from the original research
+    # entry's two-dataset composite design - see Test-PulseNoOrphanedAutopilotIdentities.ps1's
+    # own docstring.
+    windowsAutopilotDeviceIdentities = @{ Type = 'AutopilotDevice'; Operation = 'List'; ApiVersion = 'beta' }
+
+    # Task 3.3 PENDING entries (TP.INT.0019/0022/0024/0026/0029): none of these five Graph
+    # resources have a released GraphKit 0.1.1 descriptor - confirmed against the same live
+    # Get-GraphOperation -List enumeration above (no matching Type for any of them). Each
+    # check still ships with real rule logic tested via fixture data; on a live tenant each
+    # resolves NotApplicable until GraphKit ships the descriptor.
+    applePushNotificationCertificate = @{ Type = 'ApplePushNotificationCertificate'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    androidManagedStoreAccountEnterpriseSettings = @{ Type = 'AndroidManagedStoreAccountEnterpriseSettings'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    mobileThreatDefenseConnectors = @{ Type = 'MobileThreatDefenseConnector'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    windowsAutopilotDeploymentProfiles = @{ Type = 'WindowsAutopilotDeploymentProfile'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    securityBaselinesAssignedAndCurrent = @{ Type = 'SecurityBaselineAssignedAndCurrentWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }

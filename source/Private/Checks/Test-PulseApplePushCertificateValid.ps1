@@ -1,0 +1,92 @@
+<#
+    Private: TP.INT.0019 rule function - Apple MDM Push (APNs) certificate valid for more
+    than 30 days (Task 3.3, Maester port MT.1092 - Test-MtApplePushNotificationCertificate,
+    MIT).
+
+    PENDING DATASET (honest NA): applePushNotificationCertificate has no released GraphKit
+    0.1.1 descriptor (confirmed via a live Get-GraphOperation -List enumeration against the
+    installed catalog) - DatasetMap.psd1 marks it Pending=$true. On a live tenant this
+    resolves NotApplicable until GraphKit ships the descriptor.
+
+    CLAIM (live-verified against
+    https://learn.microsoft.com/en-us/intune/device-enrollment/apple/create-mdm-push-certificate,
+    fetched for this check - the original research entry's own Authority URL
+    (.../intune-service/enrollment/apple-mdm-push-certificate-get) 404s; this is the
+    correct, canonical URL): "The Apple MDM push certificate is valid for 365 days... Once
+    the certificate expires, there is a 30-day grace period to renew it" and it "must" be
+    renewed "with the same Apple account you used to create it." A lapsed renewal forces
+    devices through re-enrollment. 30-day threshold matches Maester's own hardcoded warning
+    window.
+
+    DETERMINISM: compares expirationDateTime against $Context.EvaluationCutoffBase (falling
+    back to SnapshotCreatedUtc), exactly like Test-PulseFeatureUpdatePolicyAvoidsEos.ps1's
+    own established pattern - never Get-Date/::Now/::UtcNow.
+
+    FIELD-ABSENCE LENS: expirationDateTime absent on an existing certificate row is
+    genuinely undecidable (the row exists but this rule cannot tell if it is fine, expiring,
+    or expired) - throws, per the standing "absent expiry field -> throw" rule, rather than
+    silently treating it as Pass or Fail.
+
+    RULE: zero rows returned = NotApplicable ("no APNs certificate configured at all" - this
+    is Microsoft's own documented 404-when-unconfigured shape, distinct from "expiring
+    soon" - see the research entry's own Notes). One row: Fail if expirationDateTime is on
+    or before the cutoff (already expired); Warn if it is after the cutoff but within 30
+    days of it (approaching-expiry threshold, matching Maester's own 30-day framing); Pass
+    otherwise.
+#>
+
+function Test-PulseApplePushCertificateValid {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable] $Datasets,
+
+        [Parameter()]
+        [hashtable] $Context = @{}
+    )
+
+    $rows = @($Datasets.applePushNotificationCertificate)
+    if ($rows.Count -eq 0) {
+        return New-PulseFinding -Status NotApplicable -Reason 'No Apple Push Notification Service (APNs) certificate is configured for this tenant - Apple device (iOS/iPadOS/macOS) management has never been set up, so there is nothing for this check to evaluate.'
+    }
+
+    $cutoffBaseText = $null
+    if ($Context -and $Context.ContainsKey('EvaluationCutoffBase') -and $Context.EvaluationCutoffBase) {
+        $cutoffBaseText = [string] $Context.EvaluationCutoffBase
+    } elseif ($Context -and $Context.ContainsKey('SnapshotCreatedUtc') -and $Context.SnapshotCreatedUtc) {
+        $cutoffBaseText = [string] $Context.SnapshotCreatedUtc
+    }
+
+    if ([string]::IsNullOrWhiteSpace($cutoffBaseText)) {
+        throw 'Test-PulseApplePushCertificateValid: no $Context.EvaluationCutoffBase/SnapshotCreatedUtc was supplied - this rule cannot determine "as of when" to compare expirationDateTime without it.'
+    }
+
+    $cutoff = [datetime]::Parse($cutoffBaseText, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal)
+    $warnThreshold = $cutoff.AddDays(30)
+
+    $cert = $rows[0]
+    if (-not (Test-PulseRowPropertyPresent -Row $cert -PropertyName 'expirationDateTime') -or $null -eq $cert.expirationDateTime) {
+        throw 'Test-PulseApplePushCertificateValid: the applePushNotificationCertificate row is missing expirationDateTime - cannot determine expiry status for a certificate that otherwise exists.'
+    }
+
+    $expiry = [datetime]::Parse([string] $cert.expirationDateTime, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal)
+
+    $evidence = @(
+        @{
+            Identity = if (Test-PulseRowPropertyPresent -Row $cert -PropertyName 'id') { [string] $cert.id } else { 'applePushNotificationCertificate' }
+            Detail   = @{ appleIdentifier = $cert.appleIdentifier; expirationDateTime = $cert.expirationDateTime }
+            SortKey  = 'applePushNotificationCertificate'
+        }
+    )
+
+    if ($expiry -le $cutoff) {
+        return New-PulseFinding -Status Fail -Reason 'The Apple Push Notification Service (APNs) certificate has already expired - ALL Apple (iOS/iPadOS/macOS) device management is broken until it is renewed, and a lapse can force affected devices through full re-enrollment.' -Evidence $evidence
+    }
+
+    if ($expiry -le $warnThreshold) {
+        return New-PulseFinding -Status Warn -Reason 'The Apple Push Notification Service (APNs) certificate expires within 30 days - renew it now, using the SAME Apple ID that created it, to avoid an unplanned management outage across every Apple device in the tenant.' -Evidence $evidence
+    }
+
+    return New-PulseFinding -Status Pass -Reason 'The Apple Push Notification Service (APNs) certificate has more than 30 days remaining before expiration.' -Evidence $evidence
+}

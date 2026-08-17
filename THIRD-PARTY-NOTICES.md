@@ -49,6 +49,24 @@ naming exactly this).
   - `source/Data/Checks/TP.INT.0015.psd1` ("LAPS configuration policy meets minimum
     security bar", Task 3.2) - adapts the check logic behind Maester's `MT.1177`
     (`Test-MtIntuneLAPSConfiguration`).
+  - `source/Data/Checks/TP.INT.0019.psd1` ("Apple MDM Push (APNs) certificate valid for
+    more than 30 days", Task 3.3) - adapts the check logic behind Maester's `MT.1092`
+    (`Test-MtApplePushNotificationCertificate`).
+  - `source/Data/Checks/TP.INT.0020.psd1` ("Apple Automated Device Enrollment tokens valid
+    and syncing", Task 3.3) - adapts the check logic behind Maester's `MT.1093`
+    (`Test-MtAppleAutomatedDeviceEnrollmentToken`).
+  - `source/Data/Checks/TP.INT.0021.psd1` ("Apple Volume Purchase Program tokens valid and
+    syncing", Task 3.3) - adapts the check logic behind Maester's `MT.1094`
+    (`Test-MtAppleVolumePurchaseProgramToken`).
+  - `source/Data/Checks/TP.INT.0022.psd1` ("Android Enterprise connection bound, validated,
+    and syncing", Task 3.3) - adapts the check logic behind Maester's `MT.1095`
+    (`Test-MtAndroidEnterpriseConnection`).
+  - `source/Data/Checks/TP.INT.0023.psd1` ("Intune Certificate Connectors healthy and on a
+    supported version", Task 3.3) - adapts the check logic behind Maester's `MT.1097`
+    (`Test-MtCertificateConnectors`).
+  - `source/Data/Checks/TP.INT.0024.psd1` ("Mobile Threat Defense connectors enabled and
+    syncing", Task 3.3) - adapts the check logic behind Maester's `MT.1098`
+    (`Test-MtMobileThreatDefenseConnectors`).
 
   Each descriptor's own `Origin` field (`Project`/`Id`/`License`) records this at the point
   of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as
