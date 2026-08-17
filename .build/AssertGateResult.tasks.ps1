@@ -472,7 +472,7 @@
 # five new root files added to $explicitRootFiles for finding 8 plus the README.md change
 # for finding 9). 1955 is the real, measured `./build.ps1 -Tasks build,test` total for
 # this wave; both tracking locations bumped together, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1955
+$script:tenantPulseGateMinimumTests = 1956
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

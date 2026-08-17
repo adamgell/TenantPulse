@@ -20,7 +20,7 @@
            already sitting in this repo - see docs/spike/2026-08-16-settings-catalog-
            spike.md's own git history for the redaction): a single-capital-INITIAL glued
            directly onto a Capitalized surname-shaped word (two adjacent capital letters,
-           e.g. 'WL' in 'REDACTED-ADMIN-NAME', 'JS' in 'JSmith'), followed by one of a small,
+           e.g. 'JD' in 'JDoeAdmin', 'JS' in 'JSmith'), followed by one of a small,
            deliberately narrow set of device/role/account suffix words (Admin, Laptop,
            Desktop, PC, Workstation, User, Account, Device), glued directly or via a
            hyphen - the exact "<Initial><Surname><Role>" / "<Initial><Surname>-<Device>"
@@ -54,9 +54,12 @@
            inverse: SHA-256 is a one-way function, so this table can be read by anyone with
            repository access without recovering the banned value from it. See
            Get-PulseBannedIdentifierDigests/Get-PulseTokenDigest below for the mechanism,
-           and this file's own mutation-test Describe block for proof the real value
-           (recovered at TEST-RUN TIME from git history, never typed into any tracked file)
-           still trips this check.
+           and this file's own mutation-test Describe block for proof the digest path
+           fires end to end (fixture-fed with a SYNTHETIC token whose digest is injected
+           for the test's duration - the real value is no longer recoverable from this
+           repository at all, by design: the 2026-08-17 history rewrite removed it from
+           every historical blob and commit message, so a run-time recovery probe is
+           impossible and would itself defeat the rewrite's purpose).
     Plus, scoped to BOTH source/ and tests/:
         6. a raw NUL or other C0 control byte - the exact class of mistake Task 1.8
            introduced and then fixed (a literal NUL byte typed into a .ps1 comment instead
@@ -247,9 +250,12 @@ BeforeAll {
         item-7 block below.
 
         '6ca05670c4afd49e806f7cddbab83b00' = the Ivy24 lab tenant's real Entra tenant GUID.
-        This digest was computed OFFLINE, once, from the real value recovered from git
-        history (commit 477ce2d, before it was scrubbed) - the real GUID itself is not, and
-        must never be, written into this file.
+        This digest was computed OFFLINE, once, from the real value while it was still
+        recoverable from git history - the 2026-08-17 history rewrite has since removed
+        the value from every historical blob and commit message, so it is no longer
+        recoverable from this repository AT ALL. The digest entry deliberately outlives
+        the value: it keeps banning any future reintroduction. The real GUID itself is
+        not, and must never be, written into this file.
     #>
     $script:PulseBannedIdentifierDigests = @{
         '6ca05670c4afd49e806f7cddbab83b00' = 'lab tenant id'
@@ -485,12 +491,12 @@ BeforeAll {
         # exact shape a real leak already took in this repo (a spike doc under docs/ - not
         # scanned at all before this same fix round - carried a real tenant's actual
         # local-admin account name, a single-CAPITAL-INITIAL-glued-to-a-Capitalized-
-        # surname token ending in a device/account/role word, e.g. the 'REDACTED-ADMIN-NAME'-class
+        # surname token ending in a device/account/role word, e.g. the 'JDoeAdmin'-class
         # shape). The pattern requires TWO adjacent capital letters (the initial glued
-        # directly onto the start of a Capitalized word - 'WL' in 'REDACTED-ADMIN-NAME', 'JS' in
+        # directly onto the start of a Capitalized word - 'JD' in 'JDoeAdmin', 'JS' in
         # 'JSmith') followed by 2+ lowercase letters, then one of a small, deliberately
         # narrow set of device/role/account suffix words, with an optional hyphen before
-        # the suffix ('JSmith-Laptop' vs 'REDACTED-ADMIN-NAME' glued). This is DELIBERATELY narrower
+        # the suffix ('JSmith-Laptop' vs 'JDoeAdmin' glued). This is DELIBERATELY narrower
         # than a general PascalCase/CamelCase detector: an ordinary two-capital
         # abbreviation-led identifier this codebase uses constantly (e.g. 'Global-Admin', a
         # genuine Entra ROLE name, not a person) does not match, because 'Global' has only
@@ -966,38 +972,47 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
             $violations | Should -BeNullOrEmpty
         }
 
-        It 'flags the REAL Ivy24 lab tenant GUID via digest match, recovered from git history at TEST-RUN TIME - reports only the LABEL, never the value' {
-            # Mutation-test direction 2/2 (the "plant the real value, assert red" half).
-            # The real GUID is recovered from git history HERE, in memory, at test-run
-            # time - it is NEVER typed into this or any other tracked file (that would be
-            # exactly the disclosure item 7 exists to prevent). Commit 477ce2d is the
-            # last revision (before the Task 2.3-review scrub) whose tracked
-            # tests/Unit/Snapshot.Tests.ps1 still carried the real value.
-            $historicalContent = git -C $projectPath show '477ce2d:tests/Unit/Snapshot.Tests.ps1' 2>$null
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($historicalContent)) {
-                throw 'Could not recover the historical fixture content from git history (477ce2d:tests/Unit/Snapshot.Tests.ps1) - this repo must have full git history for this mutation test to run; a shallow clone would silently skip real coverage here, so this fails loudly instead.'
+        It 'flags a banned-digest GUID end to end via a SYNTHETIC fixture token injected into the digest table - reports only the LABEL, never the value' {
+            # Mutation-test direction 2/2 (the "plant a banned value, assert red" half),
+            # fixture-fed since the 2026-08-17 history rewrite: the REAL banned value is
+            # no longer recoverable from this repository at all (that irrecoverability is
+            # the rewrite's entire point), so this test proves the digest-match mechanism
+            # with a synthetic GUID whose digest is injected into the script-scoped table
+            # for exactly this test's duration. The production entry ('lab tenant id') is
+            # separately pinned below so the real ban can never silently vanish.
+            $syntheticGuid = 'aaaabbbb-cccc-4ddd-8eee-ffff00001111'
+            $syntheticDigest = Get-PulseTokenDigest -Token $syntheticGuid
+            $script:PulseBannedIdentifierDigests.ContainsKey($syntheticDigest) |
+                Should -BeFalse -Because 'the synthetic fixture GUID must not collide with a real table entry'
+
+            $script:PulseBannedIdentifierDigests[$syntheticDigest] = 'synthetic fixture id (test-injected)'
+            try {
+                # Fed to the scan function directly (-Content) - Get-PulseSecretScanViolations
+                # takes content by value, so this exercises the identical production code
+                # path (token extraction -> Get-PulseTokenDigest -> table lookup -> label-only
+                # violation) a real tracked-file scan would.
+                $violations = @(Get-PulseSecretScanViolations `
+                    -Content "`$tenantId = '$syntheticGuid'" `
+                    -RelativePath 'tests/Fake.Tests.ps1' `
+                    -AllowedGuid @() `
+                    -SafeDomainSuffix @())
+
+                $violations.Count | Should -Be 1
+                $violations[0] | Should -Match "label: 'synthetic fixture id \(test-injected\)'"
+                # The finding must never echo the matched value back (public-CI-log
+                # safety, per the hygiene-rule rework) - label only, even for a synthetic.
+                $violations[0] | Should -Not -Match ([regex]::Escape($syntheticGuid))
+            } finally {
+                $script:PulseBannedIdentifierDigests.Remove($syntheticDigest)
             }
-            $recoveredGuid = [regex]::Match($historicalContent, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}').Value
-            $recoveredGuid | Should -Not -BeNullOrEmpty -Because 'the historical revision is expected to contain a GUID-shaped literal to recover'
-            (Get-PulseTokenDigest -Token $recoveredGuid) | Should -Be '6ca05670c4afd49e806f7cddbab83b00' -Because 'the recovered value must be the SAME real GUID the digest table was built from, or this test proves nothing'
+        }
 
-            # Fed to the scan function directly (-Content), never written to any file on
-            # disk (gitignored temp path or otherwise) - Get-PulseSecretScanViolations
-            # takes content by value, so this exercises the identical production code
-            # path a real tracked-file scan would, with no extra I/O needed to prove it.
-            $violations = @(Get-PulseSecretScanViolations `
-                -Content "`$tenantId = '$recoveredGuid'" `
-                -RelativePath 'tests/Fake.Tests.ps1' `
-                -AllowedGuid @() `
-                -SafeDomainSuffix @())
-
-            $violations.Count | Should -Be 1
-            $violations[0] | Should -Match "label: 'lab tenant id'"
-            # The finding itself must never echo the matched value back (public-CI-log
-            # safety, per the hygiene-rule rework) - even though THIS test file now holds
-            # the real value in a variable, transiently, at run time, the violation
-            # STRING this production function returns must not.
-            $violations[0] | Should -Not -Match ([regex]::Escape($recoveredGuid))
+        It 'the REAL lab-tenant digest ban is still pinned in the production table (the entry must outlive the 2026-08-17 history rewrite)' {
+            # The rewrite removed the VALUE from history; the digest BAN stays forever so
+            # any future reintroduction of the value is caught. This pin fails if anyone
+            # "cleans up" the table entry on the grounds that the value is gone.
+            $script:PulseBannedIdentifierDigests['6ca05670c4afd49e806f7cddbab83b00'] |
+                Should -Be 'lab tenant id'
         }
 
         It 'item 1''s GUID-near-domain check does NOT truncate a safe "microsoft.graph.<Type>" token at its 200-character window boundary (reproduced false positive, task-2.3-review fix)' {
@@ -1041,19 +1056,19 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
             $violations.Count | Should -Be 2
         }
 
-        It 'flags a "REDACTED-ADMIN-NAME"-class person-name-style device/account name (glued initial+surname+role, no hyphen)' {
+        It 'flags a "JDoeAdmin"-class person-name-style device/account name (glued initial+surname+role, no hyphen)' {
             # The exact real-leak shape this item exists to catch - see this same fix
             # round's redaction of docs/spike/2026-08-16-settings-catalog-spike.md, which
             # carried this tenant's actual local-admin account name in this shape.
             $violations = @(Get-PulseSecretScanViolations `
-                -Content 'the LocalUsersAndGroups value was REDACTED-ADMIN-NAME in the raw fixture' `
+                -Content 'the LocalUsersAndGroups value was JDoeAdmin in the raw fixture' `
                 -RelativePath 'docs/Fake.md' `
                 -AllowedGuid @() `
                 -SafeDomainSuffix @())
 
             $violations.Count | Should -Be 1
             $violations[0] | Should -Match 'person-name-style device/account name'
-            $violations[0] | Should -Match 'REDACTED-ADMIN-NAME'
+            $violations[0] | Should -Match 'JDoeAdmin'
         }
 
         It 'flags a "JSmith-Laptop"-class person-name-style device name (initial+surname, hyphenated device suffix)' {
@@ -1081,7 +1096,7 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
             $violations | Should -BeNullOrEmpty
         }
 
-        It 'planted-pattern self-test: a "REDACTED-ADMIN-NAME"/"JSmith-Laptop"-class name written to a REAL temp file under docs/ (a scanned root) is caught end to end via the real file-read path' {
+        It 'planted-pattern self-test: a "JDoeAdmin"/"JSmith-Laptop"-class name written to a REAL temp file under docs/ (a scanned root) is caught end to end via the real file-read path' {
             # Not a -Content unit test like the ones above - this proves the file
             # actually has to live under a SCANNED root and be read off disk exactly the
             # way the real gate below does (Get-Content -Raw), not just that the
@@ -1097,7 +1112,7 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
                 Set-Content -LiteralPath $tempFilePath -Value @(
                     '# Planted PII fixture (deleted immediately by the test that wrote it)'
                     ''
-                    'Local admin account: REDACTED-ADMIN-NAME'
+                    'Local admin account: JDoeAdmin'
                     'Device name: JSmith-Laptop'
                 ) -Encoding UTF8
 
@@ -1109,7 +1124,7 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
                     -SafeDomainSuffix @())
 
                 $violations.Count | Should -Be 2 -Because ($violations -join "`n")
-                ($violations -join "`n") | Should -Match 'REDACTED-ADMIN-NAME'
+                ($violations -join "`n") | Should -Match 'JDoeAdmin'
                 ($violations -join "`n") | Should -Match 'JSmith-Laptop'
             } finally {
                 Remove-Item -LiteralPath $tempFilePath -Force -ErrorAction SilentlyContinue
