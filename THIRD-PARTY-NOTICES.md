@@ -19,6 +19,13 @@ naming exactly this).
   - `source/Data/Checks/TP.INT.0003.psd1` ("default enrollment restrictions are configured
     to block unmanaged platforms" - see that file for its exact title) - adapts the check
     logic behind Maester's `MT.1054`.
+  - `source/Data/Checks/TP.INT.0007.psd1` ("Intune device clean-up rule configured",
+    Task 3.2) - adapts the check logic behind Maester's `MT.1053`
+    (`Test-MtManagedDeviceCleanupSettings`), against the `managedDeviceCleanupSettings`
+    singleton GraphKit actually exposes rather than Maester's own
+    `managedDeviceCleanupRules` collection call - see
+    `source/Private/Checks/Test-PulseDeviceCleanupRuleConfigured.ps1`'s own docstring for
+    that divergence.
 
   Each descriptor's own `Origin` field (`Project`/`Id`/`License`) records this at the point
   of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as

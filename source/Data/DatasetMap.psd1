@@ -129,4 +129,14 @@
     # section for why T2.3's assignment fan-out is real, not deferred.
     deviceCompliancePolicyAssignments = @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
     deviceConfigurationAssignments    = @{ Type = 'DeviceConfigurationAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+
+    # Task 3.2 (TP.INT.0007, Maester MT.1053 port): the tenant-wide clean-up SETTINGS
+    # singleton, not the newer per-platform managedDeviceCleanupRules collection Maester's
+    # own function queries (that collection resource is not in GraphKit's released
+    # catalog) - see Test-PulseDeviceCleanupRuleConfigured.ps1's own docstring for the
+    # live-verified divergence. Already released in GraphKit 0.1.1 (Type
+    # 'DeviceCleanupRule', Operation 'Get', PathTemplate
+    # /deviceManagement/managedDeviceCleanupSettings) - confirmed via a live
+    # Get-GraphOperation lookup, not Pending.
+    managedDeviceCleanupSettings = @{ Type = 'DeviceCleanupRule'; Operation = 'Get'; ApiVersion = 'beta' }
 }
