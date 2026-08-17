@@ -475,9 +475,22 @@ than 30 days remaining before expiration and completed a successful sync today.
 - Origin: Maester MT.1093 (`Test-MtAppleAutomatedDeviceEnrollmentToken`, MIT, port)
 - Data: `beta/deviceManagement/depOnboardingSettings`; descriptor:
   `DeviceManagement.DepOnboardingSettings.List` (beta)
-- Severity rationale: Critical - an expired ADE token stops new Apple devices from
+- Severity rationale: High, Impact Medium (RESOLVED, Phase 3 whole-phase review,
+  catalog-coherence finding I3 - originally shipped as Critical/High, corrected here
+  and in the descriptor). The original rationale below overstated the blast radius
+  ("drops previously-enrolled device visibility until renewed") - the shipped
+  descriptor's own WhyItMatters text says the opposite and is the accurate account: ADE
+  token renewal changing the Apple ID does NOT force already-enrolled devices to
+  re-enroll (unlike the APNs certificate), so an expired/non-syncing token only blocks
+  NEW device auto-enrollment - already-managed devices keep working. That narrower,
+  new-enrollment-only blast radius matches the High/Medium bar TP.INT.0021 (Apple VPP,
+  same two-condition shape) and TP.INT.0023 (Certificate Connectors) already carry, not
+  the wider fleet-wide-management-loss bar Critical is reserved for elsewhere in this
+  catalog (e.g. TP.INT.0022's Android Enterprise connection, which blocks the WHOLE
+  Android fleet, not just new enrollments). Original rationale (superseded): "Critical -
+  an expired ADE token stops new Apple devices from
   auto-enrolling via zero-touch, and drops previously-enrolled device visibility until
-  renewed.
+  renewed."
 - Notes: two independent pass/fail conditions per token - expiry (>30 days) AND sync
   recency (last successful sync = today, stricter than the ADE cert's own rule
   elsewhere). Don't collapse the two reasons into one evidence line. Zero tokens found is

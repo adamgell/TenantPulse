@@ -2,9 +2,9 @@
     Id         = 'TP.INT.0020'
     Title      = 'Apple Automated Device Enrollment tokens valid and syncing'
     Category   = 'Intune.Connectors'
-    Severity   = 'Critical'
+    Severity   = 'High'
     Effort     = 'Low'
-    Impact     = 'High'
+    Impact     = 'Medium'
     Data       = @{
         Datasets = @('depOnboardingSettings')
         Gates    = @('Intune')
@@ -15,7 +15,7 @@
     }
     Consulting = @{
         WhatItMeans  = 'An Apple ADE (Automated Device Enrollment, formerly Device Enrollment Program/DEP) token creates the trust relationship that lets Intune sync device information and enrollment policies from Apple Business/School Manager, and enables zero-touch enrollment for corporate-owned Apple devices. Each token is renewed roughly annually. This check Fails a token that is already expired or whose most recent successful sync did not happen today (the same calendar day as the snapshot), Warns a token within 30 days of expiry, and treats zero configured tokens as a legitimate skip rather than a failure.'
-        WhyItMatters = 'An expired or non-syncing ADE token stops NEW Apple devices from auto-enrolling via zero-touch provisioning - a purchasing team can buy devices that appear correctly in Apple Business Manager and still never show up for Intune to manage, because the sync that would surface them is broken. Because ADE token renewal changing the Apple ID does not force existing enrolled devices to re-enroll (unlike the APNs certificate), this failure mode is easy to miss until someone notices new hardware silently isn''t enrolling.'
+        WhyItMatters = 'An expired or non-syncing ADE token stops NEW Apple devices from auto-enrolling via zero-touch provisioning - a purchasing team can buy devices that appear correctly in Apple Business Manager and still never show up for Intune to manage, because the sync that would surface them is broken. Because ADE token renewal changing the Apple ID does not force existing enrolled devices to re-enroll (unlike the APNs certificate), this failure mode is easy to miss until someone notices new hardware silently isn''t enrolling. Severity is High, not Critical (RESOLVED, Phase 3 whole-phase review, catalog-coherence finding I3): the blast radius described above is scoped to NEW enrollments only - already-enrolled devices keep working - matching the High/Medium bar this module applies to TP.INT.0021/0023''s comparable connector-health checks, not the wider fleet-wide-management-loss bar Critical is reserved for elsewhere in this catalog.'
         Remediation  = @(
             'Intune admin center > Devices > Device onboarding > Enrollment > Apple mobile > Bulk Enrollment Methods > Enrollment program tokens - select the offending token and choose Renew token, using the same Apple ID that created it.'
             'Also renew the token if the Apple ID''s password changed, or if the person who originally set it up has left the organization - both situations can silently break sync even before the token''s own expiration date arrives.'
