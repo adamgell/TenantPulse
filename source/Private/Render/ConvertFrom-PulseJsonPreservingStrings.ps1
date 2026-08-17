@@ -91,12 +91,25 @@ function ConvertFrom-PulseJsonElement {
 
     switch ($Element.ValueKind) {
         ([System.Text.Json.JsonValueKind]::Object) {
+            if ($AsHashtable) {
+                # [System.Management.Automation.OrderedHashtable], NOT [ordered]@{}
+                # (System.Collections.Specialized.OrderedDictionary): OrderedDictionary
+                # has no ContainsKey method on PowerShell 7.4's runtime, and this tree
+                # flows into dozens of .ContainsKey call sites (manifest reads, the
+                # evaluator, artifact readers) - CI's 7.4 legs failed ~500 tests on it.
+                # OrderedHashtable is the EXACT type ConvertFrom-Json -AsHashtable
+                # itself returns (which this switch documents itself as mimicking):
+                # insertion-ordered enumeration, derives from Hashtable, so ContainsKey,
+                # Contains and case-insensitive keys all behave identically on 7.4/7.6.
+                $map = [System.Management.Automation.OrderedHashtable]::new()
+                foreach ($property in $Element.EnumerateObject()) {
+                    $map[$property.Name] = ConvertFrom-PulseJsonElement -Element $property.Value -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth -AsHashtable:$AsHashtable
+                }
+                return $map
+            }
             $ordered = [ordered] @{}
             foreach ($property in $Element.EnumerateObject()) {
                 $ordered[$property.Name] = ConvertFrom-PulseJsonElement -Element $property.Value -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth -AsHashtable:$AsHashtable
-            }
-            if ($AsHashtable) {
-                return $ordered
             }
             return [pscustomobject] $ordered
         }
