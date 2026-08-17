@@ -346,6 +346,16 @@ Describe 'Import-PulseCheckCatalog' {
             } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0027*References.Cis`[0`]*does not match the required ID-only format*'
         }
 
+        It 'throws "does not match the required ID-only format" for a fully-lowercase CIS-shaped References.Cis element (merge-review Minor - the format check is case-sensitive by construction, so -notmatch''s case-insensitivity cannot silently readmit prose-cased strings)' {
+            {
+                InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/lowercase-cis') {
+                    param($path)
+                    function Test-PulseFixtureRule { $true }
+                    Import-PulseCheckCatalog -Path $path
+                }
+            } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0028*References.Cis`[0`]*does not match the required ID-only format*'
+        }
+
         It 'throws "is required" for a missing Rule.Expression when Rule.Type is Expression' {
             {
                 InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/missing-expression') {

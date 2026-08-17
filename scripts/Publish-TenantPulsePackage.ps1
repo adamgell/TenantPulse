@@ -170,9 +170,9 @@ else {
     # stay in sync with that one - see the Task 4.2 note this comment replaces for
     # the earlier drift-and-correction this file already went through once).
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
-    & pwsh -NoProfile -File $gate -ResultPath $TestResultPath -MinimumTests 1399 -AllowedSkips 0 -AllowNotRun 1 | Write-Verbose
+    & pwsh -NoProfile -File $gate -ResultPath $TestResultPath -MinimumTests 1402 -AllowedSkips 0 -AllowNotRun 1 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {
-        throw "The supplied test result did not pass the whole-result gate, so this package must not be published. Run: pwsh -File tests/QA/Assert-GateResult.ps1 -ResultPath '$TestResultPath' -MinimumTests 1399"
+        throw "The supplied test result did not pass the whole-result gate, so this package must not be published. Run: pwsh -File tests/QA/Assert-GateResult.ps1 -ResultPath '$TestResultPath' -MinimumTests 1402"
     }
 
     # The result must belong to this version, or it proves nothing about these bits.

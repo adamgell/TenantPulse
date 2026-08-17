@@ -291,7 +291,10 @@ function Test-PulseCheckDescriptor {
                 $cisValues = @($rawCisValues)
                 $cisPattern = '^CIS [A-Za-z0-9 ]+ Benchmark v\d+\.\d+\.\d+, Rec\. \d+(\.\d+)+ \(E[35] Level [12]\)$'
                 for ($i = 0; $i -lt $cisValues.Count; $i++) {
-                    if ($cisValues[$i] -notmatch $cisPattern) {
+                    # -cnotmatch, not -notmatch: PowerShell's -notmatch is case-INsensitive, which
+                    # would let a fully-lowercase CIS-shaped string satisfy the literal-case tokens
+                    # ('CIS', 'Benchmark', 'Rec.', 'E3'/'E5', 'Level') the format requires.
+                    if ($cisValues[$i] -cnotmatch $cisPattern) {
                         $errors.Add("${Label}: References.Cis[$i]: '$($cisValues[$i])' does not match the required ID-only format 'CIS <Benchmark name> Benchmark v<version>, Rec. <id> (<E3|E5> Level <1|2>)' - see docs/licensing/cis-cite-only.md.")
                     }
                 }

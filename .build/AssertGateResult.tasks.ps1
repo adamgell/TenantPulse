@@ -272,11 +272,18 @@
 # +3 net new Its - CheckCatalog.Tests.ps1's new prose-References.Cis
 # rejection It (the new ID-only regex enforcement) plus the discovery-time
 # per-file test cases the new tests/Fixtures/Checks/invalid/prose-cis/
-# bad.psd1 fixture and PROVENANCE.md entry add. 1399 is the real, measured
-# `./build.ps1 -Tasks test` total for this commit; all four tracking
+# bad.psd1 fixture and PROVENANCE.md entry add. 1399 was the real, measured
+# `./build.ps1 -Tasks test` total for that commit; all four tracking
 # locations bumped together in the SAME commit as these test changes, per
 # the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1399
+# 1399 -> 1402 (merge-review Minor - CIS format check made case-sensitive):
+# the -notmatch at Test-PulseCheckDescriptor.ps1's References.Cis format
+# check was case-INsensitive, so a fully-lowercase CIS-shaped string passed;
+# now -cnotmatch. +3: CheckCatalog.Tests.ps1's lowercase-bypass rejection It
+# plus the discovery-time per-file cases the new invalid/lowercase-cis/
+# bad.psd1 fixture and PROVENANCE.md entry add. 1402 is the real, measured
+# `./build.ps1 -Tasks test` total for this commit.
+$script:tenantPulseGateMinimumTests = 1402
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
