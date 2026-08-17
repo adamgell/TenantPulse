@@ -96,6 +96,30 @@ default (overridable) - back it up if you need pseudonyms to stay stable across 
 and protect it the same way you would protect any key material: the same key that produced
 a pseudonym is required to reproduce it.
 
+## Sharing a findings artifact
+
+`-Redact` pseudonymizes evidence *identities* only (the `evidence[].identity`/`sortKey`
+values a finding is keyed on) - it does **not** touch `evidence[].detail`, where most of a
+finding's real, free-text tenant data actually lives (device/policy display names, role
+names, setting values, and similar). A `-Redact` render is safe to share with someone who
+needs to see *which* checks passed or failed and roughly why, but is **not** on its own
+safe to post somewhere public or hand to someone outside the tenant's own trust boundary -
+`detail` can still carry real names.
+
+For a findings JSON you actually intend to publish or share outside that boundary (e.g. a
+committed `docs/gates/*.json` reference artifact), run it through
+`scripts/Protect-PulseGateArtifact.ps1` first - an exhaustive scrub that replaces every
+string leaf inside every finding's `evidence[].detail` with a stable pseudonym, no
+per-field-name allowlist (see that script's own docstring for why a field-name allowlist is
+exactly the failure mode it exists to avoid). That is the actual "safe to share" bar; a
+`-Redact` render alone is not.
+
+The raw **snapshot store** (`./out/snapshot/` - see **Snapshot data is sensitive at rest**
+above) is local-only and never safe to share in any form - it is the raw, unredacted Graph
+data itself, not a findings report. Neither `-Redact` nor `Protect-PulseGateArtifact.ps1`
+touch it; there is no supported way to scrub a snapshot store for sharing, only to delete
+it when you are done.
+
 ## CIS compliance disclaimer
 
 TenantPulse's checks are informed by Microsoft's own official guidance, CISA's SCuBA/ScubaGear
