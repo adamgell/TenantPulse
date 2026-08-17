@@ -31,6 +31,13 @@
     TP.INT.0014/Maester's own zero-policies-is-Fail behavior, not a skip). Evidence lists
     every matching policy with its four resolved booleans, so a reader can see exactly
     which criterion each near-miss policy fails, not just that it failed.
+
+    FIELD-ABSENCE LENS (POST-REVIEW FIX): all four boolean criteria used to coerce an
+    absent value to $false via `-eq $true` inside the single compliance Where-Object
+    filter - a policy with a criterion that was never resolved read identically to one
+    that genuinely fails that criterion. Every policy row's four criteria are now checked
+    for presence up front and throw on any absent one, before compliance is evaluated at
+    all.
 #>
 
 function Test-PulseLapsConfigurationMeetsBar {
@@ -45,6 +52,15 @@ function Test-PulseLapsConfigurationMeetsBar {
     )
 
     $policies = @($Datasets.endpointSecurityLapsPolicies)
+
+    $criteriaFields = @('backsUpToEntra', 'hasSufficientComplexity', 'hasSufficientLength', 'hasPostAuthAction')
+    foreach ($policy in $policies) {
+        foreach ($fieldName in $criteriaFields) {
+            if ($null -eq $policy.$fieldName) {
+                throw "Test-PulseLapsConfigurationMeetsBar: LAPS policy '$($policy.policyName)' has no $fieldName value - an absent criterion is not decidable as 'does not meet the bar', it means this rule cannot tell whether the resolved boolean was ever produced for this policy."
+            }
+        }
+    }
 
     $compliant = @($policies | Where-Object {
             ($_.backsUpToEntra -eq $true) -and

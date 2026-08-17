@@ -9,23 +9,29 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
+    # [object]-typed (not [bool]) so a caller can pass $null to mean "omit this property
+    # entirely" - a [bool]-typed param cannot ever be $null, which made the absent-field
+    # case this check's own field-absence lens needs to test unbuildable. $null means
+    # "leave the property off the row" (absent); $true/$false mean "include it with this
+    # value" (present, decidable either way).
     function script:New-PulseLapsPolicyFixture {
         param(
             [string] $PolicyId,
             [string] $PolicyName,
-            [bool] $BacksUpToEntra = $true,
-            [bool] $HasSufficientComplexity = $true,
-            [bool] $HasSufficientLength = $true,
-            [bool] $HasPostAuthAction = $true
+            [object] $BacksUpToEntra = $true,
+            [object] $HasSufficientComplexity = $true,
+            [object] $HasSufficientLength = $true,
+            [object] $HasPostAuthAction = $true
         )
-        [pscustomobject]@{
-            policyId                = $PolicyId
-            policyName               = $PolicyName
-            backsUpToEntra           = $BacksUpToEntra
-            hasSufficientComplexity = $HasSufficientComplexity
-            hasSufficientLength      = $HasSufficientLength
-            hasPostAuthAction        = $HasPostAuthAction
+        $row = [ordered]@{
+            policyId   = $PolicyId
+            policyName = $PolicyName
         }
+        if ($null -ne $BacksUpToEntra) { $row.backsUpToEntra = $BacksUpToEntra }
+        if ($null -ne $HasSufficientComplexity) { $row.hasSufficientComplexity = $HasSufficientComplexity }
+        if ($null -ne $HasSufficientLength) { $row.hasSufficientLength = $HasSufficientLength }
+        if ($null -ne $HasPostAuthAction) { $row.hasPostAuthAction = $HasPostAuthAction }
+        [pscustomobject] $row
     }
 
     function script:Invoke-PulseCheckFixture {
@@ -122,6 +128,50 @@ Describe 'TP.INT.0015 - LAPS configuration policy meets minimum security bar' {
 
         $finding.status | Should -Be 'Pass'
         @($finding.evidence).Count | Should -Be 2
+    }
+
+    It 'Error: a policy has no backsUpToEntra value - absent must never read as does-not-meet-the-bar' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseLapsPolicyFixture -PolicyId 'p1' -PolicyName 'Unresolved' -BacksUpToEntra $null)) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'backsUpToEntra'
+    }
+
+    It 'Error: a policy has no hasSufficientComplexity value - absent must never read as does-not-meet-the-bar' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseLapsPolicyFixture -PolicyId 'p1' -PolicyName 'Unresolved' -HasSufficientComplexity $null)) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'hasSufficientComplexity'
+    }
+
+    It 'Error: a policy has no hasSufficientLength value - absent must never read as does-not-meet-the-bar' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseLapsPolicyFixture -PolicyId 'p1' -PolicyName 'Unresolved' -HasSufficientLength $null)) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'hasSufficientLength'
+    }
+
+    It 'Error: a policy has no hasPostAuthAction value - absent must never read as does-not-meet-the-bar' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseLapsPolicyFixture -PolicyId 'p1' -PolicyName 'Unresolved' -HasPostAuthAction $null)) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'hasPostAuthAction'
+    }
+
+    It 'Fail still holds: all four criteria present-$false is decidable and correctly Fails (not an Error)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseLapsPolicyFixture -PolicyId 'p1' -PolicyName 'Non-compliant' -BacksUpToEntra $false -HasSufficientComplexity $false -HasSufficientLength $false -HasPostAuthAction $false)) }
+        )
+
+        $finding.status | Should -Be 'Fail'
     }
 
     It 'gate-degraded: NotApplicable when the dataset is Pending on a live tenant' {
