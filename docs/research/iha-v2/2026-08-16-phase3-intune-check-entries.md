@@ -10,6 +10,21 @@ further backfilled on 2026-08-16 by merging in the full original research record
 authority, origin, data, severity rationale, and operational notes for each entry), so it
 now stands as the authoritative combined record for TP.INT.0006-0015.
 
+**TP.INT.0016-0030 import (2026-08-16, Task 3.3):** the entries below were imported
+verbatim-in-substance from the original Phase 3 research record (sections A and B of that
+record) to backfill coverage for the remainder of the Maester Intune port
+(TP.INT.0016-0024) and the research-matrix checks with no Maester origin
+(TP.INT.0025-0030). Per this task's standing rules, **every citation in these imported
+entries is treated as unverified regardless of any flag present in the source record** -
+the source record's own flags are known to undercount. Live-fetch verification happens at
+per-check authoring time (see each check's own `Test-Pulse*.ps1` docstring for the
+resolution, or a `RESOLVED (date):` callout appended below when a citation needed
+correction). TP.INT.0016-0018 (ASR Standard Protection, App Control enforce-mode, Managed
+Installer pairing) are imported here for record-completeness but were **not** implemented
+in Task 3.3 - see the T3.3 report for the scoping rationale (they are a template-family
+continuation of the TP.INT.0014/0015 Endpoint Security batch, not part of the
+connector/token-expiry + research-matrix set T3.3 actually scoped).
+
 ## TP.INT.0006 — Conflicting security-setting values across policies
 
 Conflicting Settings Catalog / configuration policy values across two or more policies.
@@ -282,3 +297,261 @@ re-verified against a live tenant from inside this task ("the research entry's o
 'template ID trap' note"). Whoever builds the composite `endpointSecurityLapsPolicies`
 descriptor must re-confirm this GUID against Ivy24 before this check's Pending dataset
 flag is dropped.
+
+## TP.INT.0016 — Attack Surface Reduction "Standard Protection" baseline rules configured
+
+The union of all ASR-templated Endpoint Security policies sets Microsoft's three
+"Standard Protection" ASR rules (block abuse of vulnerable signed drivers, block LSASS
+credential theft, block WMI-event-subscription persistence) to Block or Audit, not
+Warn/Disabled/unconfigured.
+
+- Authority: Maester https://maester.dev/docs/tests/MT.1178 ; https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference
+- Origin: Maester MT.1178 (`Test-MtIntuneASRRules`, MIT, port)
+- Data: same `configurationPolicies` pattern as TP.INT.0014/0015, `templateFamily eq 'endpointSecurityAttackSurfaceReduction'`; descriptor: `DeviceManagement.EndpointSecurityPolicies.ByTemplateFamily` (shared)
+- Severity rationale: High - LSASS credential-theft and WMI persistence are top ransomware
+  precursor techniques; "Standard Protection" is Microsoft's own minimum-recommended ASR
+  set.
+- Notes: evaluates as a union across every ASR policy in the tenant, not per-policy - a
+  rule set entirely by policy A and another entirely by policy B still counts as a
+  combined pass. Only 3 of Defender's ~19 ASR rules are checked (the "Standard
+  Protection" subset); this is intentionally a floor, not full ASR coverage.
+- Task 3.3 scoping note: imported for record-completeness, not implemented in T3.3 - see
+  the T3.3 report.
+
+## TP.INT.0017 — App Control for Business policy enforcing (not audit-only)
+
+At least one App Control for Business (WDAC) policy is in Enforce mode with either
+built-in controls selected or a non-empty uploaded XML payload.
+
+- Authority: Maester https://maester.dev/docs/tests/MT.1179 ; https://learn.microsoft.com/en-us/intune/intune-service/protect/endpoint-security-app-control-policy
+- Origin: Maester MT.1179 (`Test-MtIntuneAppControl`, MIT, port)
+- Data: same `configurationPolicies` pattern, `templateFamily eq 'endpointSecurityApplicationControl'`; descriptor: `DeviceManagement.EndpointSecurityPolicies.ByTemplateFamily` (shared)
+- Severity rationale: High - application allowlisting is one of the strongest single
+  controls against unknown/novel malware, but only when enforced, not audited.
+- Notes: audit-vs-enforce trap - a tenant can have App Control policies and still fail
+  this check correctly, because audit-only policies provide zero real-world blocking.
+  Empty-XML-upload is a second silent-failure mode.
+- Task 3.3 scoping note: imported for record-completeness, not implemented in T3.3.
+
+## TP.INT.0018 — Managed Installer rules paired with an enforcing App Control policy
+
+A Managed Installer configuration is enabled AND is backed by an App Control policy that
+is itself in Enforce mode with an active control.
+
+- Authority: Maester https://maester.dev/docs/tests/MT.1180 ; https://learn.microsoft.com/en-us/intune/intune-service/protect/endpoint-security-app-control-policy#managed-installer
+- Origin: Maester MT.1180 (`Test-MtIntuneManagedInstallerRules`, MIT, port)
+- Data: same `configurationPolicies` pattern (same fetch as TP.INT.0017, different
+  evaluation); descriptor: `DeviceManagement.EndpointSecurityPolicies.ByTemplateFamily` (shared)
+- Severity rationale: High - Managed Installer without an enforcing base policy is a false
+  sense of protection.
+- Notes: dependency trap - this check can only meaningfully pass if TP.INT.0017 also
+  passes.
+- Task 3.3 scoping note: imported for record-completeness, not implemented in T3.3.
+
+## TP.INT.0019 — Apple MDM Push (APNs) certificate valid for more than 30 days
+
+The tenant's Apple Push Notification service certificate (required for all
+iOS/iPadOS/macOS MDM management) has more than 30 days remaining before expiration.
+
+- Authority: Maester https://maester.dev/docs/tests/MT.1092 ; https://learn.microsoft.com/en-us/intune/intune-service/enrollment/apple-mdm-push-certificate-get
+- Origin: Maester MT.1092 (`Test-MtApplePushNotificationCertificate`, MIT, port)
+- Data: `beta/deviceManagement/applePushNotificationCertificate`; descriptor:
+  `DeviceManagement.ApplePushNotificationCertificate.Get` (beta)
+- Severity rationale: Critical - an expired APNs cert makes ALL Apple devices
+  unmanageable instantly and irreversibly (renewal must use the same Apple ID, and a
+  lapse can force full re-enrollment of the entire Apple fleet); 30-day threshold matches
+  Microsoft's own 30-day grace-period framing.
+- Notes: 404 on this endpoint means no cert configured at all (distinct from "expiring
+  soon") - render as a separate finding, not folded into the expiry message. Threshold
+  (30) is hardcoded in Maester; keep it configurable rather than baking it in.
+
+## TP.INT.0020 — Apple Automated Device Enrollment tokens valid and syncing
+
+Every configured Apple ADE (Automated Device Enrollment, formerly DEP) token has more
+than 30 days remaining before expiration and completed a successful sync today.
+
+- Authority: Maester https://maester.dev/docs/tests/MT.1093 ; https://learn.microsoft.com/en-us/intune/intune-service/enrollment/automated-device-enrollment
+- Origin: Maester MT.1093 (`Test-MtAppleAutomatedDeviceEnrollmentToken`, MIT, port)
+- Data: `beta/deviceManagement/depOnboardingSettings`; descriptor:
+  `DeviceManagement.DepOnboardingSettings.List` (beta)
+- Severity rationale: Critical - an expired ADE token stops new Apple devices from
+  auto-enrolling via zero-touch, and drops previously-enrolled device visibility until
+  renewed.
+- Notes: two independent pass/fail conditions per token - expiry (>30 days) AND sync
+  recency (last successful sync = today, stricter than the ADE cert's own rule
+  elsewhere). Don't collapse the two reasons into one evidence line. Zero tokens found is
+  a skip, not a fail.
+
+## TP.INT.0021 — Apple Volume Purchase Program tokens valid and syncing
+
+Every configured Apple VPP (Volume Purchase Program, app licensing) token has more than
+30 days remaining before expiration and synced within the last day.
+
+- Authority: Maester https://maester.dev/docs/tests/MT.1094 ; https://learn.microsoft.com/en-us/intune/intune-service/apps/vpp-apps-ios
+- Origin: Maester MT.1094 (`Test-MtAppleVolumePurchaseProgramToken`, MIT, port)
+- Data: `beta/deviceAppManagement/vppTokens`; descriptor: `DeviceAppManagement.VppTokens.List` (beta)
+- Severity rationale: High - expired VPP tokens stop licensed-app deployment/revocation
+  to Apple devices; one severity step below APNs/ADE because it affects app delivery, not
+  device management enrollment itself.
+- Notes: same two-condition shape as TP.INT.0020 but with a looser sync window (≤1 day,
+  not same-day) - don't copy TP.INT.0020's stricter threshold by mistake. Zero tokens =
+  skip, not a fail.
+
+## TP.INT.0022 — Android Enterprise connection bound, validated, and syncing
+
+The tenant's Android Enterprise (managed Google Play) connection is bound and validated
+(`bindStatus == boundAndValidated`), and its last app catalog sync succeeded within the
+last day.
+
+- Authority: Maester https://maester.dev/docs/tests/MT.1095 ; https://learn.microsoft.com/en-us/intune/intune-service/enrollment/connect-intune-android-enterprise
+- Origin: Maester MT.1095 (`Test-MtAndroidEnterpriseConnection`, MIT, port)
+- Data: `beta/deviceManagement/androidManagedStoreAccountEnterpriseSettings`; descriptor:
+  `DeviceManagement.AndroidManagedStoreAccountEnterpriseSettings.Get` (beta)
+- Severity rationale: Critical - an unbound or stale Android Enterprise connection blocks
+  Android device management wholesale for the whole Android fleet.
+- Notes: `notBound` status is treated by Maester as a skip (tenant not using Android
+  Enterprise), not a fail - only a previously-bound-then-broken connection should fail.
+  Three-way AND condition (bind status, sync status, sync recency) - surface which leg
+  failed in evidence.
+
+## TP.INT.0023 — Intune Certificate Connectors healthy and on a supported version
+
+Every registered Intune Certificate Connector (NDES/SCEP/PKCS bridge) is in an `active`
+state, running at least version `6.2406.0.1001`, and has connected within the last hour.
+
+- Authority: Maester https://maester.dev/docs/tests/MT.1097 ; https://learn.microsoft.com/en-us/intune/intune-service/protect/certificate-connector-linux-installation
+- Origin: Maester MT.1097 (`Test-MtCertificateConnectors`, MIT, port)
+- Data: `beta/deviceManagement/ndesConnectors`; descriptor: `DeviceManagement.NdesConnectors.List` (beta)
+- Severity rationale: High - a stale/unhealthy certificate connector silently breaks
+  certificate-based Wi-Fi/VPN/authentication profile delivery to new and renewing
+  devices.
+- Notes: hardcoded version floor trap - `6.2406.0.1001` will go stale as Microsoft ships
+  connector updates; treat it as a "known good as of this research date" floor to
+  verify/refresh at implementation time. Zero connectors found is a skip, not a fail.
+
+## TP.INT.0024 — Mobile Threat Defense connectors enabled and syncing
+
+Every configured Mobile Threat Defense (MTD) connector (Defender for Endpoint or a
+third-party MTD partner) has `partnerState == enabled` and a heartbeat within the last
+day.
+
+- Authority: Maester https://maester.dev/docs/tests/MT.1098 ; https://learn.microsoft.com/en-us/intune/intune-service/protect/mtd-connector-configure
+- Origin: Maester MT.1098 (`Test-MtMobileThreatDefenseConnectors`, MIT, port)
+- Data: `beta/deviceManagement/mobileThreatDefenseConnectors`; descriptor:
+  `DeviceManagement.MobileThreatDefenseConnectors.List` (beta)
+- Severity rationale: High - a broken MTD connector silently stops device-risk signals
+  from reaching compliance policies that key off them, so noncompliant/compromised
+  devices can pass compliance unnoticed.
+- Notes: zero connectors = skip (MTD not in use) - do not fail tenants without MTD
+  configured.
+
+## TP.INT.0025 — Personally-owned Windows device enrollment blocked
+
+The Windows platform restriction in device-enrollment configuration blocks
+personally-owned device enrollment, limiting Windows enrollment to corporate-authorized
+paths (Autopilot, co-management, bulk provisioning, DEM).
+
+- Authority: https://learn.microsoft.com/en-us/intune/device-enrollment/restrictions
+- Origin: none (practitioner judgment from Microsoft's own enrollment-restrictions
+  guidance - not a named Maester/ScuBA check)
+- Data: `v1.0/deviceManagement/deviceEnrollmentConfigurations` filtered to
+  `#microsoft.graph.deviceEnrollmentPlatformRestrictionsConfiguration`, property
+  `windowsRestriction.personalDeviceEnrollmentBlocked`; descriptor:
+  `DeviceManagement.EnrollmentConfigurations.PlatformRestrictions` (v1.0)
+- Severity rationale: Medium - personal-device enrollment without restriction expands the
+  unmanaged-endpoint attack surface, but is a deliberate BYOD choice for some orgs.
+- Notes: restriction applies to user-driven enrollment only - Autopilot/co-management/bulk
+  paths bypass it by design; don't fail this if the tenant's actual strategy is
+  corporate-owned-only via Autopilot (cross-reference TP.INT.0026).
+
+## TP.INT.0026 — Windows Autopilot deployment profile exists and is assigned
+
+At least one Windows Autopilot deployment profile exists and has a non-empty assignment
+(targets a group), so registered Autopilot devices actually receive an out-of-box
+experience.
+
+- Authority: https://learn.microsoft.com/en-us/autopilot/ ; https://learn.microsoft.com/en-us/intune/fundamentals/platform-guide-windows
+- Origin: none (practitioner judgment)
+- Data: `beta/deviceManagement/windowsAutopilotDeploymentProfiles?$expand=assignments`;
+  descriptor: `DeviceManagement.WindowsAutopilotDeploymentProfiles.List` (beta)
+- Severity rationale: Medium - no assigned profile means registered Autopilot devices
+  don't get the intended zero-touch provisioning experience.
+- Notes: Microsoft is actively transitioning classic Autopilot toward "device
+  preparation" policies - a tenant fully migrated to device-preparation could
+  legitimately show zero classic profiles; check device-preparation policy presence as an
+  alternate pass path before implementation ships.
+
+## TP.INT.0027 — No orphaned Windows Autopilot device identities
+
+Every registered Windows Autopilot device identity is covered by at least one assigned
+deployment profile.
+
+- Authority: https://learn.microsoft.com/en-us/graph/api/resources/intune-enrollment-windowsautopilotdeviceidentity?view=graph-rest-1.0
+- Origin: none (practitioner judgment)
+- Data: `v1.0/deviceManagement/windowsAutopilotDeviceIdentities` cross-referenced against
+  assigned-profile coverage from TP.INT.0026's dataset; descriptor:
+  `DeviceManagement.WindowsAutopilotDeviceIdentities.List` (v1.0)
+- Severity rationale: Low - an operational/logistics gap rather than a security control
+  failure; evidence value is high for deployment planning even at low severity.
+- Notes: composite check - needs both datasets (device identities AND deployment-profile
+  assignments) reconciled; make the descriptor pairing explicit in `Data.Datasets`.
+
+## TP.INT.0028 — Enrollment Status Page configured with blocking failure behavior
+
+A Windows Autopilot Enrollment Status Page (ESP) profile is configured and assigned with
+blocking behavior enabled (`allowDeviceUseOnInstallFailure = false` or install-failure
+blocking equivalent).
+
+- Authority: https://learn.microsoft.com/en-us/autopilot/enrollment-status ; https://learn.microsoft.com/en-us/intune/fundamentals/platform-guide-windows
+- Origin: none (practitioner judgment)
+- Data: `beta/deviceManagement/deviceEnrollmentConfigurations` filtered to
+  `#microsoft.graph.windows10EnrollmentCompletionPageConfiguration`; descriptor:
+  `DeviceManagement.EnrollmentConfigurations.ESP` (beta - no v1.0 equivalent as of this
+  research date)
+- Severity rationale: Medium - without ESP blocking, users can bypass an
+  incomplete/failed provisioning run and start working on an under-configured,
+  potentially noncompliant device.
+- Notes: beta-only endpoint, no v1.0 fallback exists today. ESP has multiple
+  sub-timeouts and app/profile block-lists; this check asserts the top-level blocking
+  toggle only, not full ESP depth-of-config assessment.
+
+## TP.INT.0029 — Security baselines assigned and not on a deprecated version
+
+For each Intune security baseline family in use (Windows, Defender for Endpoint,
+Microsoft Edge, Windows 365), at least one instance exists, carries assignments, and its
+`templateReference` points to a template that is not flagged deprecated.
+
+- Authority: https://learn.microsoft.com/en-us/intune/device-security/security-baselines/overview ; deprecation context: https://techcommunity.microsoft.com/blog/intunecustomersuccess/updates-to-beta-apis-for-windows-endpoint-security-and-administrative-templates/4357002
+- Origin: none (practitioner judgment, drawn directly from Microsoft's baseline-versioning
+  guidance)
+- Data: `beta/deviceManagement/configurationPolicies?$expand=assignments`, matched on
+  `templateReference.templateFamily in (baseline, baselineDefenderForEndpoint,
+  baselineMicrosoftEdge, baselineWindows365)`; descriptor:
+  `DeviceManagement.SecurityBaselines.AssignedAndCurrent` (beta, composite)
+- Severity rationale: Medium - a deprecated-version baseline still enforces its settings
+  (not a hard failure) but misses newer hardening additions; unassigned baseline
+  instances are the more urgent half of this check.
+- Notes: API-transition trap - per the March 2025 deprecation, `deviceManagement/intents`
+  / `deviceManagement/templates` no longer support creating/managing baselines; only
+  `configurationPolicies` with `templateReference` is current for v1 of this check.
+  Per-setting drift vs. baseline default is explicitly out of scope for v1
+  (assigned-and-current only) - deferred to Phase 5 baseline-diffing.
+
+## TP.INT.0030 — Fleet compliance rate below acceptable threshold
+
+The proportion of managed devices in a noncompliant state exceeds a configurable
+threshold (default staged-rollout guidance target: <5% noncompliant before layering CA
+enforcement on top).
+
+- Authority: https://learn.microsoft.com/en-us/intune/device-security/compliance/overview (staged-rollout <5% noncompliance target)
+- Origin: none (practitioner judgment; the <5% figure is Microsoft's own staged-rollout
+  recommendation, not a formal SHALL/SHOULD baseline)
+- Data: `v1.0/deviceManagement/managedDevices?$select=complianceState` (paged fleet scan)
+  or the pre-aggregated `v1.0/deviceManagement/deviceCompliancePolicyDeviceStateSummary`
+  per policy; descriptor: `DeviceManagement.ComplianceRate.Summary` (v1.0; prefer the
+  summary endpoint over paging the full device list for large fleets)
+- Severity rationale: Medium - this is a telemetry/trend check, not a binary control gap;
+  severity should scale with how far above threshold the tenant sits.
+- Notes: for v1, expressed as strict pass/fail against the threshold (graduated/scored
+  scale deferred to Phase 5 rule-type-3/thresholded rules per the evaluator's current
+  Phase 1 rule-type contract) - confirm this framing holds at implementation time.
