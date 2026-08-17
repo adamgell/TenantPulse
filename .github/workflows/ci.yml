@@ -675,7 +675,14 @@ jobs:
           # CheckCatalog.Tests.ps1 catalog-count bump, plus 14 discovery-time
           # SecretScan.tests.ps1 per-file cases (7 new files x 2 checks each). See
           # .build/AssertGateResult.tasks.ps1's own accounting.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1900 -AllowedSkips $allowedSkips -AllowNotRun 1
+          #
+          # 1900 -> 1912 (T3.4 whole-task dual review, fix round 1): +12 - corpus-verified
+          # ASR/BitLocker definitionId regression Its, the new
+          # SettingDefinitionCorpusCrossCheck.tests.ps1 gate (4 Its), the new depth-3
+          # recursive-redaction Describe in ProtectTypedPolicySensitivePayload.Tests.ps1
+          # (4 Its), plus discovery-time SecretScan cases for 2 new files. See
+          # .build/AssertGateResult.tasks.ps1's own accounting.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1912 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

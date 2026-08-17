@@ -372,15 +372,20 @@ function Invoke-PulseSettingsCatalogExpansion {
     #      (that path makes no Graph call at all, so there is no descriptor to assert against
     #      and GraphKit need not even be loaded).
     #   2. ALSO inside Invoke-PulseSettingsCatalogPolicy itself, once per policy, immediately
-    #      before ITS OWN Get-GraphObject call - required, not redundant, on the PARALLEL
-    #      path: each worker runs in its own RunspacePool runspace and does not inherit
-    #      anything this function checked in the parent runspace, so a worker that skipped
-    #      its own assertion would have no read-only guard at all. The per-policy check is
-    #      the one that actually backs the "never a write-shaped descriptor" guarantee for
-    #      every dispatched Graph call; this function's own upfront check is an
-    #      early-exit optimization on top of it, not a replacement for it - a broken
-    #      descriptor is still caught (as a per-policy gap) by (2) even if some other future
-    #      change ever bypassed (1).
+    #      before ITS OWN Get-GraphObject call - STILL NOT REDUNDANT (T3.4 Part D fix
+    #      round, MINOR finding: this comment used to justify (2) by the now-deleted
+    #      parallel path - "each worker runs in its own RunspacePool runspace and does not
+    #      inherit..." - stale present tense for machinery that no longer exists; the
+    #      RunspacePool path was deleted outright in Part D, sequential is the only path
+    #      left. The real, still-current reason (2) is not redundant with (1): this
+    #      function's own upfront check is a fast-fail/early-exit optimization for the
+    #      COMMON case (catch a broken descriptor before dispatching ANY policy), not a
+    #      substitute for per-call verification - Invoke-PulseSettingsCatalogPolicy is a
+    #      standalone, independently-callable function (also used directly by its own test
+    #      suite and, in principle, any future caller), and its own read-only guarantee
+    #      must hold on its own, not depend on every caller having already checked once
+    #      upstream). A broken descriptor is still caught (as a per-policy gap) by (2) even
+    #      if some other future change ever bypassed (1).
     # A genuine read-only-predicate violation is fatal at both points (module-authoring bug,
     # matches Assert-PulseReadOnlyDescriptor's own contract - see Invoke-PulseCollection's
     # identical pattern); a 'descriptor-version-drift' message downgrades to NotExpanded here

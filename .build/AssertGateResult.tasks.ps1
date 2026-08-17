@@ -426,7 +426,23 @@
 # TP.INT.0031.psd1, TP.INT.0016.psd1, and the two new test files). 1900 is the real,
 # measured `./build.ps1 -Tasks build,test` total for this commit; both tracking locations
 # bumped together in the same commit as these test changes, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1900
+# 1900 -> 1912 (T3.4 whole-task dual review, fix round 1): +12 - corpus-verified
+# definitionId/itemId rewrites in TP.INT.0016.Tests.ps1 (+1 net: an exact-itemId-match
+# regression It, "a value that merely CONTAINS the definitionId... never satisfies") and
+# TP.INT.0031.Tests.ps1 (+2 net: "Allow user to choose" child-default-fails and the
+# ADJUDICATION PROOF "parent toggle alone never satisfies" It), the new
+# tests/QA/SettingDefinitionCorpusCrossCheck.tests.ps1 gate (4 Its: the self-check-against-
+# synthetic-input Describe including its own "prove the gate can fail" It, plus the real-
+# repo-tree scan), the new depth-3 recursive-redaction Describe in
+# ProtectTypedPolicySensitivePayload.Tests.ps1 (4 Its: the raw Protect-PulseTypedPolicyRow
+# call, the public Protect-PulseTypedPolicySensitivePayload entry point, an array-of-depth-
+# 3-elements case, and a hostile-scalar-at-depth-2 fail-closed case), plus discovery-time
+# SecretScan.tests.ps1 per-file cases for the 2 new files (the QA gate test file itself and
+# the new tests/Fixtures/SettingsCatalogCorpus/checked-definitions.json fixture). 1912 is
+# the real, measured `./build.ps1 -Tasks build,test` total for this commit; both tracking
+# locations bumped together in the same commit as these test changes, per the ratchet's own
+# rule.
+$script:tenantPulseGateMinimumTests = 1912
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
