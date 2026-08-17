@@ -46,6 +46,9 @@ naming exactly this).
   - `source/Data/Checks/TP.INT.0014.psd1` ("BitLocker full-disk encryption enforced via
     Endpoint Security policy", Task 3.2) - adapts the check logic behind Maester's
     `MT.1123` (`Test-MtBitLockerFullDiskEncryption`).
+  - `source/Data/Checks/TP.INT.0015.psd1` ("LAPS configuration policy meets minimum
+    security bar", Task 3.2) - adapts the check logic behind Maester's `MT.1177`
+    (`Test-MtIntuneLAPSConfiguration`).
 
   Each descriptor's own `Origin` field (`Project`/`Id`/`License`) records this at the point
   of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as

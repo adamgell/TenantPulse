@@ -165,4 +165,12 @@
     # docstring for why the CSP suffix-matching itself is deliberately deferred to
     # whichever composite descriptor eventually ships, not re-implemented here.
     endpointSecurityDiskEncryptionPolicies = @{ Type = 'EndpointSecurityDiskEncryptionPolicyWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 3.2 (TP.INT.0015): same templateFamily-filtered configurationPolicies + settings
+    # walk pattern as TP.INT.0014 above, filtered to the LAPS template
+    # (adc46e5a-f4aa-4ff6-aeff-4f27bc525796 per Maester's own hardcoded value - see
+    # Test-PulseLapsConfigurationMeetsBar.ps1's own docstring "template ID trap" note),
+    # resolved to {policyId, policyName, backsUpToEntra, hasSufficientComplexity,
+    # hasSufficientLength, hasPostAuthAction}.
+    endpointSecurityLapsPolicies = @{ Type = 'EndpointSecurityLapsPolicyWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }
