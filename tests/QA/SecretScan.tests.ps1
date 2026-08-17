@@ -1197,6 +1197,15 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
             (Join-Path $projectPath 'README.md')
             (Join-Path $projectPath 'CHANGELOG.md')
             (Join-Path $projectPath '.github/workflows/ci.yml')
+            # Phase 3 whole-phase review, security walk finding 8 (MINOR): these root
+            # files were never in the explicit list (only the recursed source/tests/
+            # scripts/docs/.build roots were covered) - closing that gap so a planted
+            # secret in any of them would actually be caught by this same scan.
+            (Join-Path $projectPath 'THIRD-PARTY-NOTICES.md')
+            (Join-Path $projectPath 'RequiredModules.psd1')
+            (Join-Path $projectPath 'Resolve-Dependency.ps1')
+            (Join-Path $projectPath 'Resolve-Dependency.psd1')
+            (Join-Path $projectPath 'LICENSE')
         ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object { Get-Item -LiteralPath $_ }
 
         $scanFiles = @(
