@@ -51,28 +51,29 @@
     property this map does not even list - is copied through completely unchanged; this is
     a surgical, map-driven redaction, not a blanket "wipe everything" pass.
 
-    ONE LEVEL OF NESTING, BY CONSTRUCTION - STILL CORRECT AND SAFE AT ANY DEPTH THE MAP NOW
-    DESCRIBES (Part C/T3.4: TypedPolicyMaps.psd1's schema no longer caps Nested at one
-    level - see that file's own docstring for the "Sensitive always wins, at every depth"
-    discipline this function's UNCHANGED behavior below relies on): a `Nested` property's
-    raw value is walked once, per-element if it is an array (omaSettings) or once directly
-    if it is a single object (installationSchedule), and only the Nested.Properties entries
-    flagged Sensitive are redacted within it - the Nested container itself, and every
-    non-Sensitive nested property, is left untouched. This function's OWN code did not need
-    to change when the map schema grew a second level: a Nested.Properties entry that is
-    itself Sensitive (windows10CustomConfiguration's `omaSettings.value`, which now also
-    carries its own `Nested` description of the real observed `{redacted:true}` shape - see
-    TypedPolicyMaps.psd1's own comment there) is still redacted WHOLESALE by this function's
-    existing one-level Sensitive-name check, exactly as before Part C - the redaction
-    happens before anything would ever need to look at that property's own deeper Nested
-    key, so there is nothing new for this pass to walk into for the one real case the map
-    actually declares. A FUTURE map entry that needed a non-Sensitive property to
-    decompose two levels deep would require extending this function too (only
-    ConvertTo-PulseTypedPolicyRows.ps1's row-emission walk gained genuine recursive
-    capability in Part C - this raw-redaction pass did not, since it had no live-confirmed
-    case requiring it); flagged here, honestly, as the boundary this fix did NOT need to
-    cross, not implied to be more general than it is - matching this file's own established
-    "honest boundary" documentation style (see the DATASET SCOPE section above).
+    RECURSIVE, UNBOUNDED DEPTH - SYMMETRIC WITH ConvertTo-PulseTypedPolicyRows.ps1
+    (T3.4 whole-task dual review, fix round 1, MEDIUM finding - adversarial-proven live: a
+    depth-3 Sensitive leaf reached raw disk cleartext through THIS pass, because it was
+    still capped at one level of Nested while the row-emission walk had already grown
+    genuine recursion in Part C. Inert with today's SHIPPED map - no real map entry
+    actually nests 3 levels deep yet - but a structural hole, not merely a documentation
+    gap, closed here rather than left latent for the next map entry that does nest that
+    deep to reopen it for real.): `Protect-PulseTypedPolicyValueBySpec` (below) now walks a
+    property's own `Nested` description exactly as deep as the map declares it, calling
+    itself recursively for every Nested.Properties entry - the SAME "Sensitive always wins,
+    at every depth, unconditionally; a Sensitive property's own Nested description, if
+    present, is schema-legal documentation, never walked" rule
+    ConvertTo-PulseTypedPolicyRows.ps1/TypedPolicyMaps.psd1 already state, now TRUE for
+    BOTH layers, not just the row-emission one. `Protect-PulseTypedPolicyNestedElement`
+    (the ORIGINAL one-level helper, -SensitiveNames-based) is kept UNCHANGED below - not
+    because the main path still calls it, but because its own dedicated regression suite
+    (ProtectTypedPolicySensitivePayload.Tests.ps1's "FAIL CLOSED" Describe block) calls it
+    DIRECTLY by that exact signature; retired as the main path's engine, kept as its own
+    tested, working primitive. `Protect-PulseTypedPolicyValueBySpec`/
+    `Protect-PulseTypedPolicyNestedContainer` (new, below) are the real recursive engine
+    `Protect-PulseTypedPolicyRow` now calls, mirroring the SAME fail-closed rule for an
+    unrecognized/scalar container shape under a Nested property (redact wholesale, never
+    pass through) at every recursion level, not just the first.
 #>
 
 # DATASET -> policyType MAP (see this file's own DATASET SCOPE docstring section for why
@@ -138,13 +139,103 @@ function Protect-PulseTypedPolicyNestedElement {
     return New-PulseRedactedMarker
 }
 
+function Protect-PulseTypedPolicyNestedContainer {
+    <#
+        Private helper (Part C/T3.4 fix round, new): redact ONE container (an omaSettings
+        array element, an installationSchedule-shaped object, or any deeper Nested
+        container) according to -NestedProperties (the map's own PropertySpec objects for
+        this container's own declared children - Name/Sensitive/optionally a further
+        Nested), recursing into Protect-PulseTypedPolicyValueBySpec per named child. Mirrors
+        Protect-PulseTypedPolicyNestedElement's own FAIL CLOSED rule for a container shape
+        this function cannot decompose into (redact WHOLESALE, never pass through
+        unredacted) - the same discipline, now available at every recursion depth, not just
+        the first.
+    #>
+    param($Container, [object[]] $NestedProperties)
+
+    if ($Container -is [System.Collections.IDictionary]) {
+        $clone = [ordered]@{}
+        foreach ($key in @($Container.Keys)) {
+            $spec = $NestedProperties | Where-Object { [string] $_.Name -eq $key } | Select-Object -First 1
+            $clone[$key] = if ($spec) { Protect-PulseTypedPolicyValueBySpec -Value $Container[$key] -PropertySpec $spec } else { $Container[$key] }
+        }
+        return $clone
+    }
+
+    if ($Container -is [System.Management.Automation.PSObject]) {
+        $clone = [pscustomobject]@{}
+        foreach ($property in @($Container.PSObject.Properties)) {
+            $spec = $NestedProperties | Where-Object { [string] $_.Name -eq $property.Name } | Select-Object -First 1
+            $value = if ($spec) { Protect-PulseTypedPolicyValueBySpec -Value $property.Value -PropertySpec $spec } else { $property.Value }
+            Add-Member -InputObject $clone -NotePropertyName $property.Name -NotePropertyValue $value
+        }
+        return $clone
+    }
+
+    # FAIL CLOSED: an unrecognized/scalar shape sitting where a Nested container was
+    # expected cannot be confidently decomposed into per-property redaction - redact
+    # WHOLESALE rather than risk a Sensitive leaf somewhere inside surviving unredacted.
+    # Same rule Protect-PulseTypedPolicyNestedElement already established one level deep;
+    # here at any depth.
+    return New-PulseRedactedMarker
+}
+
+function Protect-PulseTypedPolicyValueBySpec {
+    <#
+        Private helper (Part C/T3.4 fix round, new): the RECURSIVE engine -
+        Protect-PulseTypedPolicyRow's own top-level walk and every Nested container level
+        below it all call this SAME function. Redacts -Value according to -PropertySpec
+        (one entry from a TypedPolicyMaps.psd1 Properties/Nested.Properties list):
+          - Sensitive=$true -> redacted WHOLESALE, unconditionally, regardless of -Value's
+            own shape and regardless of whether -PropertySpec ALSO carries a Nested key
+            (never walked into if Sensitive - "Sensitive always wins, at every depth").
+          - Sensitive=$false with a Nested key -> walked once per array element, or once
+            directly for a single object, via Protect-PulseTypedPolicyNestedContainer -
+            which calls back into THIS function for each of ITS OWN declared children,
+            recursing to whatever depth the map actually declares.
+          - Sensitive=$false, no Nested key -> returned completely UNCHANGED (nothing to
+            redact into).
+    #>
+    param($Value, $PropertySpec)
+
+    if ([bool] $PropertySpec.Sensitive) {
+        return New-PulseRedactedMarker
+    }
+
+    $hasNested = $PropertySpec.Contains('Nested') -and $null -ne $PropertySpec.Nested
+    if (-not $hasNested) {
+        return $Value
+    }
+
+    if ($null -eq $Value) { return $Value }
+
+    $nestedProperties = @($PropertySpec.Nested.Properties)
+
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string] -and -not (Test-PulseSettingsCatalogNode -Node $Value)) {
+        $elements = @($Value)
+        $clonedElements = [object[]]::new($elements.Count)
+        for ($i = 0; $i -lt $elements.Count; $i++) {
+            $clonedElements[$i] = Protect-PulseTypedPolicyNestedContainer -Container $elements[$i] -NestedProperties $nestedProperties
+        }
+        return , $clonedElements
+    }
+
+    # Single-object shape OR an unrecognized/scalar shape sitting where an object was
+    # expected - Protect-PulseTypedPolicyNestedContainer itself fails closed on anything
+    # that is not [IDictionary]/[PSObject] (mirrors Protect-PulseTypedPolicyNestedElement's
+    # own FAIL-OPEN fix, task-2.3-review round 2 finding 1) - every non-null, non-array
+    # value for a Nested property routes through it uniformly.
+    return Protect-PulseTypedPolicyNestedContainer -Container $Value -NestedProperties $nestedProperties
+}
+
 function Protect-PulseTypedPolicyRow {
     <#
-        Private helper: clone ONE raw policy row, redacting Sensitive top-level and
-        one-level-nested properties per -TypeMap (the relevant policyType sub-map from
-        TypedPolicyMaps.psd1). An unmapped `@odata.type` (or a row with none at all)
-        returns the ORIGINAL row object unchanged - see this file's own UNMAPPED
-        @odata.type docstring section.
+        Private helper: clone ONE raw policy row, redacting Sensitive and Nested
+        properties (to whatever depth -TypeMap's own PropertySpecs declare - see
+        Protect-PulseTypedPolicyValueBySpec's own docstring for the recursive engine) per
+        -TypeMap (the relevant policyType sub-map from TypedPolicyMaps.psd1). An unmapped
+        `@odata.type` (or a row with none at all) returns the ORIGINAL row object
+        unchanged - see this file's own UNMAPPED @odata.type docstring section.
     #>
     param($Row, [System.Collections.IDictionary] $TypeMap)
 
@@ -156,55 +247,29 @@ function Protect-PulseTypedPolicyRow {
     }
 
     $typeEntry = $TypeMap[$odataType]
+    $properties = @($typeEntry.Properties)
 
-    $sensitiveTopNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    $nestedSpecByName = @{}
-    foreach ($propertySpec in @($typeEntry.Properties)) {
-        $propertyName = [string] $propertySpec.Name
-        if ([bool] $propertySpec.Sensitive) { [void] $sensitiveTopNames.Add($propertyName) }
-        if ($propertySpec.Contains('Nested') -and $null -ne $propertySpec.Nested) {
-            $nestedSensitiveNames = @($propertySpec.Nested.Properties | Where-Object { [bool] $_.Sensitive } | ForEach-Object { [string] $_.Name })
-            if ($nestedSensitiveNames.Count -gt 0) { $nestedSpecByName[$propertyName] = $nestedSensitiveNames }
+    $anyRedactionPossible = $false
+    foreach ($propertySpec in $properties) {
+        if ([bool] $propertySpec.Sensitive -or ($propertySpec.Contains('Nested') -and $null -ne $propertySpec.Nested)) {
+            $anyRedactionPossible = $true
+            break
         }
     }
-
-    if ($sensitiveTopNames.Count -eq 0 -and $nestedSpecByName.Count -eq 0) {
-        # Nothing this map flags Sensitive for this type at all - no clone needed, return
-        # the original row (avoids an unnecessary allocation for the common case).
+    if (-not $anyRedactionPossible) {
+        # Nothing this map flags Sensitive/Nested for this type at all - no clone needed,
+        # return the original row (avoids an unnecessary allocation for the common case).
         return $Row
     }
 
+    $specsByName = @{}
+    foreach ($propertySpec in $properties) { $specsByName[[string] $propertySpec.Name] = $propertySpec }
+
     function Protect-PulseTypedPolicyPropertyValue {
         param([string] $Name, $Value)
-
-        if ($sensitiveTopNames.Contains($Name)) {
-            return New-PulseRedactedMarker
+        if ($specsByName.ContainsKey($Name)) {
+            return Protect-PulseTypedPolicyValueBySpec -Value $Value -PropertySpec $specsByName[$Name]
         }
-
-        if ($nestedSpecByName.ContainsKey($Name)) {
-            $nestedSensitiveNames = $nestedSpecByName[$Name]
-
-            if ($null -eq $Value) { return $Value }
-
-            if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string] -and -not (Test-PulseSettingsCatalogNode -Node $Value)) {
-                $elements = @($Value)
-                $clonedElements = [object[]]::new($elements.Count)
-                for ($i = 0; $i -lt $elements.Count; $i++) {
-                    $clonedElements[$i] = Protect-PulseTypedPolicyNestedElement -Element $elements[$i] -SensitiveNames $nestedSensitiveNames
-                }
-                return , $clonedElements
-            }
-
-            # Single-object shape (installationSchedule) OR an unrecognized/scalar shape
-            # sitting where an object was expected - Protect-PulseTypedPolicyNestedElement
-            # itself now fails closed on anything that is not [IDictionary]/[PSObject] (the
-            # FAIL-OPEN fix, task-2.3-review round 2 finding 1) - so every non-null, non-
-            # array value for a Sensitive-nested property routes through it uniformly;
-            # there is no longer a separate "recognized container vs. everything else"
-            # branch here that could let a wrong-shaped value pass through unredacted.
-            return Protect-PulseTypedPolicyNestedElement -Element $Value -SensitiveNames $nestedSensitiveNames
-        }
-
         return $Value
     }
 
