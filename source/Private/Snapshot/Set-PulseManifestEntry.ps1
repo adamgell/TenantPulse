@@ -238,7 +238,13 @@ function Set-PulseManifestEntry {
             # own docstring. A 1.0.0-schema manifest has no `references` member at all; a
             # reference write here is refused rather than silently promoting the manifest to
             # a self-contradictory "schemaVersion 1.0.0 but has a references key" shape.
-            if (-not $manifest.ContainsKey('references') -or $manifest.references -isnot [System.Collections.IDictionary]) {
+            # .Contains, NOT .ContainsKey (here and at the expansions/datasets sites
+            # below): this manifest can be an [ordered]@{} (System.Collections.
+            # Specialized.OrderedDictionary), which has no ContainsKey method on
+            # PowerShell 7.4's runtime - CI's 7.4 legs fail with "does not contain a
+            # method named 'ContainsKey'". IDictionary.Contains is key-containment on
+            # every shape this path receives (Hashtable, OrderedHashtable, OrderedDictionary).
+            if (-not $manifest.Contains('references') -or $manifest.references -isnot [System.Collections.IDictionary]) {
                 throw "Set-PulseManifestEntry: cannot write reference entry '$ReferenceName' - '$($Store.Root)' declares schemaVersion '$($manifest.schemaVersion)', which has no 'references' namespace. References were introduced in schema 1.1.0; only a store created (or already upgraded) to that schema accepts Set-PulseReferenceEntry writes."
             }
 
@@ -267,7 +273,7 @@ function Set-PulseManifestEntry {
         elseif ($PSCmdlet.ParameterSetName -eq 'Expansion') {
             # REJECT, do not auto-vivify - same rule as the Reference set above, see this
             # file's own docstring (omp finding #4).
-            if (-not $manifest.ContainsKey('expansions') -or $manifest.expansions -isnot [System.Collections.IDictionary]) {
+            if (-not $manifest.Contains('expansions') -or $manifest.expansions -isnot [System.Collections.IDictionary]) {
                 throw "Set-PulseManifestEntry: cannot write expansion entry '$ExpansionName' - '$($Store.Root)' declares schemaVersion '$($manifest.schemaVersion)', which has no 'expansions' namespace. Expansions were introduced in schema 1.1.0; only a store created (or already upgraded) to that schema accepts Set-PulseExpansionEntry writes."
             }
 
@@ -305,7 +311,7 @@ function Set-PulseManifestEntry {
             }
         }
         else {
-            if (-not $manifest.ContainsKey('datasets') -or $null -eq $manifest.datasets) {
+            if (-not $manifest.Contains('datasets') -or $null -eq $manifest.datasets) {
                 $manifest.datasets = [ordered]@{}
             }
 

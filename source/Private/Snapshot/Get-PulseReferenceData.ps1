@@ -53,7 +53,7 @@ function Get-PulseReferenceData {
     $manifest = Get-PulseSnapshotManifest -Store $Store
     $fileName = "$Name.json"
 
-    if (-not $manifest.references -or -not $manifest.references.ContainsKey($Name)) {
+    if (-not $manifest.references -or -not $manifest.references.Contains($Name)) {
         throw "Get-PulseReferenceData: no manifest entry for reference '$Name' ($fileName)."
     }
 

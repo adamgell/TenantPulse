@@ -42,7 +42,7 @@ function Read-PulseDataset {
     $manifest = Get-PulseSnapshotManifest -Store $Store
     $fileName = "$Name.json"
 
-    if (-not $manifest.datasets -or -not $manifest.datasets.ContainsKey($Name)) {
+    if (-not $manifest.datasets -or -not $manifest.datasets.Contains($Name)) {
         throw "Read-PulseDataset: no manifest entry for dataset '$Name' ($fileName)."
     }
 
