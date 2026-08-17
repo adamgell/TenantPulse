@@ -158,4 +158,11 @@
     # shape Test-PulseRbacGroupsProtected.ps1's own docstring documents. No released
     # GraphKit descriptor exists for this composite walk.
     intuneRbacGroupProtection = @{ Type = 'IntuneRbacGroupProtectionWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 3.2 (TP.INT.0014): templateFamily-filtered configurationPolicies list + a
+    # per-policy settings walk, resolved down to {policyId, policyName,
+    # isFullDiskEncryption} - see Test-PulseBitLockerFullDiskEncryption.ps1's own
+    # docstring for why the CSP suffix-matching itself is deliberately deferred to
+    # whichever composite descriptor eventually ships, not re-implemented here.
+    endpointSecurityDiskEncryptionPolicies = @{ Type = 'EndpointSecurityDiskEncryptionPolicyWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }

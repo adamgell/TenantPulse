@@ -43,6 +43,9 @@ naming exactly this).
   - `source/Data/Checks/TP.INT.0013.psd1` ("Intune RBAC groups protected via RMAU or
     role-assignable groups", Task 3.2) - adapts the check logic behind Maester's `MT.1103`
     (`Test-MtIntuneRbacGroupsProtected`).
+  - `source/Data/Checks/TP.INT.0014.psd1` ("BitLocker full-disk encryption enforced via
+    Endpoint Security policy", Task 3.2) - adapts the check logic behind Maester's
+    `MT.1123` (`Test-MtBitLockerFullDiskEncryption`).
 
   Each descriptor's own `Origin` field (`Project`/`Id`/`License`) records this at the point
   of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as
