@@ -365,7 +365,7 @@
 # set once post-merge per the merge review's ratchet step - not the sum of the
 # two branch totals (1465 + 1402), which would double-count the shared pre-1063
 # history and does not match this real post-merge count.
-$script:tenantPulseGateMinimumTests = 1800
+$script:tenantPulseGateMinimumTests = 1814
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
