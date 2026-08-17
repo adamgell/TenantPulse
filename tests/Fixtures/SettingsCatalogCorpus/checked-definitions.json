@@ -1,0 +1,100 @@
+[
+  {
+    "id": "device_vendor_msft_bitlocker_systemdrivesencryptiontype",
+    "displayName": "Enforce drive encryption type on operating system drives",
+    "options": [
+      {
+        "itemId": "device_vendor_msft_bitlocker_systemdrivesencryptiontype_0",
+        "name": "Disabled"
+      },
+      {
+        "itemId": "device_vendor_msft_bitlocker_systemdrivesencryptiontype_1",
+        "name": "Enabled"
+      }
+    ]
+  },
+  {
+    "id": "device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name",
+    "displayName": "Select the encryption type:",
+    "options": [
+      {
+        "itemId": "device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name_0",
+        "name": "Allow user to choose (default)"
+      },
+      {
+        "itemId": "device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name_1",
+        "name": "Full encryption"
+      },
+      {
+        "itemId": "device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name_2",
+        "name": "Used Space Only encryption"
+      }
+    ]
+  },
+  {
+    "id": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers",
+    "displayName": "Block abuse of exploited vulnerable signed drivers (Device)",
+    "options": [
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers_off",
+        "name": "Off"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers_block",
+        "name": "Block"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers_audit",
+        "name": "Audit"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers_warn",
+        "name": "Warn"
+      }
+    ]
+  },
+  {
+    "id": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockcredentialstealingfromwindowslocalsecurityauthoritysubsystem",
+    "displayName": "Block credential stealing from the Windows local security authority subsystem",
+    "options": [
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockcredentialstealingfromwindowslocalsecurityauthoritysubsystem_off",
+        "name": "Off"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockcredentialstealingfromwindowslocalsecurityauthoritysubsystem_block",
+        "name": "Block"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockcredentialstealingfromwindowslocalsecurityauthoritysubsystem_audit",
+        "name": "Audit"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockcredentialstealingfromwindowslocalsecurityauthoritysubsystem_warn",
+        "name": "Warn"
+      }
+    ]
+  },
+  {
+    "id": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockpersistencethroughwmieventsubscription",
+    "displayName": "Block persistence through WMI event subscription",
+    "options": [
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockpersistencethroughwmieventsubscription_off",
+        "name": "Off"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockpersistencethroughwmieventsubscription_block",
+        "name": "Block"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockpersistencethroughwmieventsubscription_audit",
+        "name": "Audit"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockpersistencethroughwmieventsubscription_warn",
+        "name": "Warn"
+      }
+    ]
+  }
+]

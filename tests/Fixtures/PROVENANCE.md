@@ -58,3 +58,4 @@ or a third-party source without attribution. One line per fixture file.
 - `tests/Fixtures/TypedPolicy/deviceConfiguration-windowsUpdateForBusiness.json` — sanitized(ivy24 scratch/live-011)
 - `tests/Fixtures/TypedPolicy/deviceConfiguration-sharedPC.json` — sanitized(ivy24 scratch/live-011)
 - `tests/Fixtures/TypedPolicy/deviceConfiguration-windows10Custom-deeperNesting.json` — sanitized(ivy24 scratch/live-27)
+- `tests/Fixtures/SettingsCatalogCorpus/checked-definitions.json` — sanitized(ivy24 scratch/live-27/snapshot/reference/settingDefinitions.json - compact extraction, id/displayName/options[].itemId+name only, for exactly the 5 definitions TP.INT.0016/0031 hard-code; no tenant policy data, Microsoft's own public Settings Catalog schema)
