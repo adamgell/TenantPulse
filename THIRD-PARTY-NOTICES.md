@@ -29,6 +29,9 @@ naming exactly this).
   - `source/Data/Checks/TP.INT.0008.psd1` ("Intune Multi Admin Approval policy
     configured", Task 3.2) - adapts the check logic behind Maester's `MT.1096`
     (`Test-MtOperationApprovalPolicies`).
+  - `source/Data/Checks/TP.INT.0009.psd1` ("Windows diagnostic data processor
+    configuration enabled", Task 3.2) - adapts the check logic behind Maester's `MT.1099`
+    (`Test-MtWindowsDataProcessor`).
 
   Each descriptor's own `Origin` field (`Project`/`Id`/`License`) records this at the point
   of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as

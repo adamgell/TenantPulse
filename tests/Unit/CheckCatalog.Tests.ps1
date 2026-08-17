@@ -63,12 +63,12 @@ Describe 'Import-PulseCheckCatalog' {
         @($result).Count | Should -Be 0
     }
 
-    It 'loads and validates the module''s own default catalog path cleanly (Task 1.9 seed checks + Task 3.1''s TP.INT.0006 + Task 3.2''s TP.INT.0007-0008, self-check)' {
+    It 'loads and validates the module''s own default catalog path cleanly (Task 1.9 seed checks + Task 3.1''s TP.INT.0006 + Task 3.2''s TP.INT.0007-0009, self-check)' {
         $result = InModuleScope TenantPulse {
             Import-PulseCheckCatalog
         }
 
-        @($result).Count | Should -Be 13
+        @($result).Count | Should -Be 14
         $ids = @($result | ForEach-Object { $_.Id })
         $ids | Should -Contain 'TP.ENT.0001'
         $ids | Should -Contain 'TP.INT.0005'
