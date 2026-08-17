@@ -141,6 +141,20 @@ BeforeAll {
         '22222222-0000-4000-8000-000000000001' # TypedPolicy fixture: deviceConfiguration-windows10Custom
         '22222222-0000-4000-8000-000000000002' # TypedPolicy fixture: deviceConfiguration-windowsUpdateForBusiness
         '22222222-0000-4000-8000-000000000003' # TypedPolicy fixture: deviceConfiguration-sharedPC
+        # Task 4.4 - built-in Microsoft authentication STRENGTH policy ids (public,
+        # tenant-stable, documented at learn.microsoft.com/entra/identity/authentication/
+        # concept-authentication-strengths) - see
+        # source/Private/Checks/Test-PulsePrivilegedRolesPhishingResistantMfa.ps1's own
+        # docstring for both id variants.
+        '00000000-0000-0000-0000-000000000004' # built-in "Phishing-resistant MFA" strength
+        '00000000-0000-0000-0000-000000000005' # built-in phishing-resistant strength variant (cert-based auth)
+        # Task 4.4 - synthetic test-fixture principal ids (repeated-digit pattern, never a
+        # real tenant identifier), same by-value convention as the TypedPolicy fixture ids
+        # above - each sits within 200 characters of a dotted PowerShell property-path
+        # token (e.g. 'conditions.clientApplications', 'detail.exempt') the domain-shaped
+        # heuristic cannot distinguish from a real domain.
+        '22222222-2222-2222-2222-222222222222' # ConvertTo-PulseCaPolicyView.Tests.ps1 synthetic excludeApplications id
+        '33333333-3333-3333-3333-333333333333' # TP.ENT.0022.Tests.ps1 synthetic ServiceAccounts principal id
     )
 
     # Reference/documentation domains that appear throughout Consulting.PortalLinks and

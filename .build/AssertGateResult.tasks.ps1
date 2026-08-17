@@ -214,7 +214,17 @@
 # TP.ENT.0011.psd1/Test-PulseVoiceCallMethodDisabled.ps1/TP.ENT.0011.Tests.ps1 files.
 # 1252 is the real, measured ./build.ps1 -Tasks test total; all four tracking
 # locations bumped together in this commit.
-$script:tenantPulseGateMinimumTests = 1252
+# 1252 -> 1325 (Task 4.4, TP.ENT.0017-0024 - 8 new ScuBA/CISA CA + role +
+# credential checks): +73 - new It cases across
+# tests/Unit/Checks/TP.ENT.001[7-9].Tests.ps1, TP.ENT.002[0-4].Tests.ps1
+# (44 new It cases across the 8 new check test files), +2 new It cases in
+# tests/Unit/Checks/ConvertTo-PulseCaPolicyView.Tests.ps1 (clientApplications
+# field, TP.ENT.0024's own dataset), +1 CheckCatalog.Tests.ps1 count-pin bump
+# (20 -> 28) plus per-file SecretScan.tests.ps1 growth for the 8 new
+# TP.ENT.00[17-24].psd1/Test-Pulse*.ps1/TP.ENT.00[17-24].Tests.ps1 files. 1325
+# is the real, measured ./build.ps1 -Tasks test total; all four tracking
+# locations bumped together in this commit.
+$script:tenantPulseGateMinimumTests = 1325
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
