@@ -25,6 +25,9 @@
             'https://learn.microsoft.com/entra/identity/conditional-access/block-legacy-authentication'
             'MS.AAD.1.1v1'
         )
+        # Optional cite-only CIS cross-reference (Task 4.5) - exercised here so the
+        # "loads valid descriptors" test proves the loader passes it through unchanged.
+        Cis         = @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)')
     }
     Origin     = $null
 }

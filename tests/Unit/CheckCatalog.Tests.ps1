@@ -39,6 +39,8 @@ Describe 'Import-PulseCheckCatalog' {
         $result[0].Title | Should -Not -BeNullOrEmpty
         $result[0].Data.Datasets | Should -Contain 'conditionalAccessPolicies'
         $result[1].Origin.Project | Should -Be 'Maester'
+        # Optional cite-only References.Cis (Task 4.5) passes through unchanged.
+        $result[0].References.Cis | Should -Be @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)')
     }
 
     It 'does not throw and yields zero descriptors for an empty catalog directory' {
@@ -308,6 +310,16 @@ Describe 'Import-PulseCheckCatalog' {
                     Import-PulseCheckCatalog -Path $path
                 }
             } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0022*References.Authorities*must not be empty*'
+        }
+
+        It 'throws "must be a string array" for a scalar References.Cis (Task 4.5, optional field validated only when present)' {
+            {
+                InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/scalar-cis') {
+                    param($path)
+                    function Test-PulseFixtureRule { $true }
+                    Import-PulseCheckCatalog -Path $path
+                }
+            } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0025*References.Cis*must be a string array*'
         }
 
         It 'throws "is required" for a missing Rule.Expression when Rule.Type is Expression' {

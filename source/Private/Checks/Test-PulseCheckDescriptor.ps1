@@ -243,6 +243,19 @@ function Test-PulseCheckDescriptor {
         $references = $Descriptor.References
         Test-PulseScalarStringField -Container $references -Key 'Research' -FieldPath 'References.Research' -Required | Out-Null
         Test-PulseStringArrayField -Container $references -Key 'Authorities' -FieldPath 'References.Authorities' | Out-Null
+
+        # References.Cis - OPTIONAL, cite-only CIS benchmark cross-references (Task 4.5).
+        # Unlike Authorities (required-array), Cis is validated only when the key is
+        # present at all - most checks carry none, since the Phase 4 research entries
+        # this catalog was authored from carry zero CIS mappings (see
+        # docs/research/iha-v2/2026-08-16-cis-benchmarks-licensing.md for why: cite-only,
+        # never bulk-populated ahead of a verified per-check mapping). Each element is a
+        # bare "benchmark name + version, Rec. <id> (<profile>)"-style string - never CIS
+        # recommendation TEXT (title/description/rationale/audit/remediation), which would
+        # pull the MIT-licensed catalog into CIS's incompatible CC BY-NC-SA license.
+        if ($references.ContainsKey('Cis')) {
+            Test-PulseStringArrayField -Container $references -Key 'Cis' -FieldPath 'References.Cis' -AllowEmpty | Out-Null
+        }
     }
 
     # Origin - optional, but if present must be $null or a hashtable.

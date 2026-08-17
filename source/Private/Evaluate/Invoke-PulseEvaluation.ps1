@@ -271,6 +271,20 @@ function Invoke-PulseEvaluation {
             references = [pscustomobject]@{
                 research    = $referencesSource.Research
                 authorities = @($referencesSource.Authorities)
+                # Shape-neutral presence check (References.Cis is OPTIONAL - see
+                # Test-PulseCheckDescriptor's own docstring): $referencesSource can arrive
+                # as either a Hashtable (the real on-disk psd1 shape, post
+                # Import-PulseCheckCatalog) or a PSCustomObject (every other test fixture
+                # in this codebase that hand-builds a check descriptor) - .ContainsKey only
+                # exists on the former, so both branches are checked rather than assuming
+                # one shape, matching the "shape-neutral" rule this whole module follows.
+                cis         = @(
+                    if ($referencesSource -is [System.Collections.IDictionary]) {
+                        if ($referencesSource.ContainsKey('Cis')) { $referencesSource.Cis }
+                    } elseif ($referencesSource.PSObject.Properties.Name -contains 'Cis') {
+                        $referencesSource.Cis
+                    }
+                )
             }
             origin     = if ($null -eq $originSource) {
                 $null
@@ -291,6 +305,31 @@ function Invoke-PulseEvaluation {
         $moduleVersion = $MyInvocation.MyCommand.Module.Version.ToString()
     }
 
+    # CIS disclaimer (Task 4.5): fires ONLY when at least one rendered finding carries a
+    # non-empty References.Cis array - computed here, at evaluate time, not at render time,
+    # so Export-PulseReport's byte-identical re-render guarantee (see that command's own
+    # docstring) holds without needing to re-scan findings on every render. Text matches
+    # the cite-only pattern from docs/research/iha-v2/2026-08-15-cis-benchmarks-licensing.md
+    # section 5 point 4: attribute CIS's copyright, state the cross-reference-only intent,
+    # and explicitly disclaim any CIS Benchmark compliance claim (CIS's own non-member terms
+    # prohibit representing/claiming a level of CIS compliance without paid SecureSuite
+    # vendor certification). Absent entirely (not an empty string) when no finding cites
+    # CIS, so a renderer can gate a footer purely on "is this property present/truthy"
+    # without also needing to know the exact disclaimer text.
+    $anyCisReference = $false
+    foreach ($f in $findings) {
+        if (@($f.references.cis).Count -gt 0) { $anyCisReference = $true; break }
+    }
+
+    $cisDisclaimer = if ($anyCisReference) {
+        'CIS Benchmarks are (c) Center for Internet Security, Inc. Recommendation ' +
+        'references in this report are provided for cross-reference only. This project ' +
+        'is not affiliated with, endorsed by, or certified by CIS, and its results do ' +
+        'not constitute a claim of CIS Benchmark compliance.'
+    } else {
+        $null
+    }
+
     $document = [pscustomobject]@{
         schemaVersion = '1.0'
         generatedUtc  = $manifest.createdUtc
@@ -303,6 +342,9 @@ function Invoke-PulseEvaluation {
         coverage      = $null
         scores        = $null
         findings      = $findings.ToArray()
+        notices       = [pscustomobject]@{
+            cisDisclaimer = $cisDisclaimer
+        }
     }
 
     return [pscustomobject]@{

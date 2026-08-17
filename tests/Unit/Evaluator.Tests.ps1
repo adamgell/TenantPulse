@@ -23,8 +23,20 @@ BeforeAll {
             [string] $Severity = 'Medium',
             [string[]] $Datasets = @('datasetA'),
             [string[]] $Gates = @(),
-            [hashtable] $Rule
+            [hashtable] $Rule,
+            # Cite-only CIS cross-references (Task 4.5) - omitted by default, since
+            # real catalog checks carry none today; tests that need to exercise the
+            # disclaimer-firing path pass one or more explicit strings here.
+            [string[]] $Cis = @()
         )
+
+        $references = @{
+            Research    = "docs/research/$Id.md"
+            Authorities = @('MS.FIXTURE.1')
+        }
+        if ($Cis.Count -gt 0) {
+            $references.Cis = $Cis
+        }
 
         [pscustomobject]@{
             PSTypeName = 'TenantPulse.CheckDescriptor'
@@ -42,10 +54,7 @@ BeforeAll {
                 Remediation  = @("Fix $Id.")
                 PortalLinks  = @('https://example.com/portal')
             }
-            References = @{
-                Research    = "docs/research/$Id.md"
-                Authorities = @('MS.FIXTURE.1')
-            }
+            References = $references
             Origin     = $null
         }
     }
@@ -554,6 +563,84 @@ Describe 'Invoke-PulseEvaluation' {
         $evaluation.Document.PSObject.Properties.Name | Should -Contain 'scores'
         $evaluation.Document.scores | Should -BeNullOrEmpty
         $evaluation.Document.tenant | Should -Be 'tp-fixturetenant'
+    }
+
+    It 'carries an empty references.cis array on a finding whose check declares no Cis references' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$true' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].references.PSObject.Properties.Name | Should -Contain 'cis'
+        @($evaluation.Document.findings[0].references.cis).Count | Should -Be 0
+    }
+
+    It 'carries a check''s declared References.Cis strings verbatim on its finding' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$true' } -Cis @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)')
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].references.cis | Should -Be @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)')
+    }
+
+    It 'CIS disclaimer footer (Document.notices.cisDisclaimer): stays $null when no rendered finding carries a CIS reference' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$true' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.PSObject.Properties.Name | Should -Contain 'notices'
+        $evaluation.Document.notices.PSObject.Properties.Name | Should -Contain 'cisDisclaimer'
+        $evaluation.Document.notices.cisDisclaimer | Should -BeNullOrEmpty
+    }
+
+    It 'CIS disclaimer footer: fires (non-null, mentions CIS and "not constitute" a compliance claim) when at least one rendered finding carries a CIS reference' {
+        $withCis = New-PulseFixtureCheck -Id 'TP.ENT.0001' -Rule @{ Type = 'Expression'; Expression = '$true' } -Cis @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)')
+        $withoutCis = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$true' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($withCis, $withoutCis)
+
+        $evaluation.Document.notices.cisDisclaimer | Should -Not -BeNullOrEmpty
+        $evaluation.Document.notices.cisDisclaimer | Should -Match 'CIS'
+        $evaluation.Document.notices.cisDisclaimer | Should -Match 'not constitute'
+    }
+
+    It 'reads References.Cis off a PSCustomObject-shaped References (shape-neutral, matching every other check-descriptor fixture shape in this suite)' {
+        $check = InModuleScope TenantPulse {
+            [pscustomobject]@{
+                PSTypeName = 'TenantPulse.CheckDescriptor'
+                Id         = 'TP.INT.0001'
+                Title      = 'Fixture check'
+                Category   = 'Fixture.Category'
+                Severity   = 'Medium'
+                Effort     = 'Low'
+                Impact     = 'Medium'
+                Data       = @{ Datasets = @('datasetA'); Gates = @() }
+                Rule       = @{ Type = 'Expression'; Expression = '$true' }
+                Consulting = @{ WhatItMeans = 'x'; WhyItMatters = 'x'; Remediation = @('x'); PortalLinks = @('https://example.com') }
+                References = [pscustomobject]@{
+                    Research    = 'docs/research/TP.INT.0001.md'
+                    Authorities = @('MS.FIXTURE.1')
+                    Cis         = @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)')
+                }
+                Origin     = $null
+            }
+        }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].references.cis | Should -Be @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)')
+        $evaluation.Document.notices.cisDisclaimer | Should -Not -BeNullOrEmpty
+    }
+
+    It 'CIS disclaimer footer: fires when the ONLY CIS-carrying check is not the first (ordinal-sorted) finding' {
+        # Regression-shaped: the disclaimer computation must scan every finding, not just
+        # the first, in whatever order they land in $findings.
+        $withoutCis = New-PulseFixtureCheck -Id 'TP.ENT.0001' -Rule @{ Type = 'Expression'; Expression = '$true' }
+        $withCis = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Expression'; Expression = '$true' } -Cis @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 4.2.1 (E5 Level 2)')
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($withoutCis, $withCis)
+
+        $evaluation.Document.findings[0].id | Should -Be 'TP.ENT.0001'
+        $evaluation.Document.notices.cisDisclaimer | Should -Not -BeNullOrEmpty
     }
 
     It 'builds a RedactionMap covering every evidence identity, keyed by the raw identity' {

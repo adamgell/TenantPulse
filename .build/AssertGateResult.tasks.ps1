@@ -242,7 +242,18 @@
 # real, measured `./build.ps1 -Tasks test` total for the fix-round commit;
 # all four tracking locations bumped together in the SAME commit as these
 # test changes, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1366
+# 1366 -> 1375 (Task 4.5, CIS cross-references + phase gate): +9 net new Its -
+# References.Cis (optional, cite-only) descriptor validation coverage
+# (CheckCatalog.Tests.ps1: valid-fixture pass-through assertion folded into an
+# existing It, one new scalar-type-rejection It) and the CIS disclaimer
+# footer's both-directions wiring in Evaluator.Tests.ps1 (silent when no
+# finding cites CIS, fires when at least one does, fires regardless of finding
+# order, verbatim References.Cis pass-through, and the Hashtable/PSCustomObject
+# shape-neutral read of References.Cis). 1375 is the real, measured
+# `./build.ps1 -Tasks test` total for this commit; all four tracking locations
+# bumped together in the SAME commit as these test changes, per the ratchet's
+# own rule.
+$script:tenantPulseGateMinimumTests = 1375
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
