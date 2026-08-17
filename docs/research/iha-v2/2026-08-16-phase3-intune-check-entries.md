@@ -555,3 +555,30 @@ enforcement on top).
 - Notes: for v1, expressed as strict pass/fail against the threshold (graduated/scored
   scale deferred to Phase 5 rule-type-3/thresholded rules per the evaluator's current
   Phase 1 rule-type contract) - confirm this framing holds at implementation time.
+
+**RESOLVED (2026-08-17):** two corrections to the entry above, both superseded by what
+actually shipped in `Test-PulseFleetComplianceRateAcceptable.ps1` (`TP.INT.0030.psd1`):
+
+1. **Scoring scheme.** This Notes section's own "for v1, expressed as strict pass/fail"
+   framing did NOT hold at implementation time - the shipped check is a real three-tier
+   Pass/Warn/Fail using the evaluator's existing Warn status (no Phase 5 thresholded
+   rule-type was needed; Warn is already first-class in the Rule.Type 'Function' contract).
+   Deferring to Phase 5 was an unnecessary hedge.
+2. **Bucket adjudication (post-review HIGH fix, dual-review fix round).** The FIRST
+   shipped version of this check only counted `complianceState -eq 'noncompliant'` toward
+   the numerator - every other state (`conflict`, `error`, `inGracePeriod`, `configManager`,
+   `unknown`, and any future/unrecognized value) silently fell through uncounted, meaning a
+   fleet with unverifiable devices could Pass identically to a perfectly compliant one. The
+   check now classifies every device into exactly three buckets - verified COMPLIANT
+   (`compliant`), verified NONCOMPLIANT (`noncompliant`), and UNVERIFIED-OR-UNHEALTHY
+   (everything else, fail-closed) - and a MATERIAL unverified share (>= 5% of the fleet)
+   escalates the finding to Warn even when the verified-noncompliant rate alone is
+   comfortably under 5%. See `Test-PulseFleetComplianceRateAcceptable.ps1`'s own docstring
+   for the full per-state bucket mapping and rationale.
+3. **"Microsoft's own staged-rollout guidance target" attribution.** Also already corrected
+   in the shipped rule's own docstring (T3.3's original authoring pass) - neither the
+   Authority URL nor a live web search could locate an official Microsoft "<5% noncompliant"
+   SHALL/SHOULD figure anywhere. The 5%/10% bands are this check's own practitioner-judgment
+   default, not a Microsoft citation - this entry's own Authority/Origin bullets above are
+   the SUPERSEDED original research claim, kept for record-completeness, not the shipped
+   check's actual position.
