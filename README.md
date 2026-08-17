@@ -98,15 +98,32 @@ a pseudonym is required to reproduce it.
 
 ## CIS compliance disclaimer
 
-TenantPulse's checks are informed by Microsoft's own official guidance and, for two checks
-(`TP.INT.0001`, `TP.INT.0003`), adapted logic from the open-source
+TenantPulse's checks are informed by Microsoft's own official guidance, CISA's SCuBA/ScubaGear
+baselines, and (for the EIDSCA-ported and two Intune checks) adapted logic from the open-source
 [Maester](https://github.com/maester365/maester) project (MIT-licensed - see
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)). **TenantPulse does not claim, imply, or
 certify CIS Benchmark compliance, alignment, or coverage of any kind**, for Intune, Entra,
-or any other product. No check in this module's Phase 1 catalog is mapped to, scored
-against, or claims correspondence with any CIS Benchmark control. If you need a CIS
-Benchmark assessment, use a tool that specifically implements and maintains that mapping;
-TenantPulse's findings should not be represented as one.
+or any other product.
+
+As of Phase 4 (Task 4.5), the check-descriptor schema supports an *optional, cite-only*
+`References.Cis` field - a bare "benchmark name + version, Rec. `<id>` (`<profile>`)" string,
+never CIS recommendation text (title/description/rationale/audit/remediation), which would pull
+this MIT-licensed catalog into CIS's incompatible CC BY-NC-SA license (see
+`docs/research/iha-v2/2026-08-15-cis-benchmarks-licensing.md` for the full licensing analysis).
+**No check in this module's 28-check catalog carries a `References.Cis` entry today** - the
+Phase 4 research this catalog was authored from cites ScuBA/CISA, Maester/EIDSCA, and Microsoft
+Learn exclusively, with zero verified CIS mappings. The wiring exists and is tested end to end
+(a findings document's `notices.cisDisclaimer` field is `null` when no rendered finding carries a
+CIS reference, and is populated with the disclaimer text below the moment even one does) so a
+future task can add a verified mapping without a schema or renderer change - but today it fires
+for nobody, because nobody qualifies. If you need a CIS Benchmark assessment, use a tool that
+specifically implements and maintains that mapping; TenantPulse's findings should not be
+represented as one.
+
+When the disclaimer does fire, its text reads: *"CIS Benchmarks are (c) Center for Internet
+Security, Inc. Recommendation references in this report are provided for cross-reference only.
+This project is not affiliated with, endorsed by, or certified by CIS, and its results do not
+constitute a claim of CIS Benchmark compliance."*
 
 ## Operator prerequisites
 
@@ -130,29 +147,68 @@ and `Policy.Read.All` has been granted on the Ivy24 lab app registration (Condit
 -backed checks assess for real). Only TenantPulse's own first publish to PSGallery remains
 - see `docs/STATUS.md` for the current live-gate results and that gate's status.
 
-## Phase 1 scope - what this is and isn't, honestly
+## Catalog scope - what this is and isn't, honestly
 
-TenantPulse's Phase 1 catalog ships **ten checks** across Entra Conditional Access
-(`TP.ENT.0001`-`0005`) and Intune device management (`TP.INT.0001`-`0005`) - a deliberately
-small, verified-against-a-real-tenant starting set, not a comprehensive tenant-health
-product. What Phase 1 delivers:
+TenantPulse's catalog has grown across four phases to **28 checks**: Phase 1's ten-check seed
+(Entra Conditional Access `TP.ENT.0001`-`0005`, Intune device management `TP.INT.0001`-`0005`),
+Phase 3's Intune settings-catalog/typed-policy expansion work (feeding those same ten Intune/CA
+checks richer data, not new check IDs), and Phase 4's Entra core catalog - the EIDSCA port
+(`TP.ENT.0006`-`0011`), authorization/consent/password/guest-access clusters
+(`TP.ENT.0012`/`0013`/`0015`/`0016`), and the ScuBA/CISA-cited Conditional Access, privileged-role,
+and credential-hygiene checks (`TP.ENT.0017`-`0024`). Not a comprehensive tenant-health product -
+a deliberately scoped, verified-against-a-real-tenant catalog.
 
-- A deterministic, byte-reproducible evaluation engine: re-evaluating the same snapshot
-  with the same catalog always produces the same findings document.
-- Honest degradation everywhere a signal is missing - a permission gap, a not-yet-released
-  GraphKit descriptor, or a malformed manifest field degrades the affected check to
-  `NotApplicable` or `Error`, never a confident, silently-wrong verdict.
-- Pseudonymization of the tenant identifier and (with `-Redact`) evidence identities -
-  never full de-identification of a report; see `-Redact`'s own help for the honestly
-  documented residual (rule-authored evidence `Detail` fields and free-text reason strings
-  are not redacted).
+| Id | Category | Severity | Dataset | Title |
+|---|---|---|---|---|
+| TP.ENT.0001 | Entra.Identity | High | Live | Security Defaults state is appropriate |
+| TP.ENT.0002 | Entra.PrivilegedRoles | High | Live | Fewer than 5 Global Administrators |
+| TP.ENT.0003 | Entra.ConditionalAccess | Critical | Live | Break-glass accounts exist and are excluded from Conditional Access |
+| TP.ENT.0004 | Entra.ConditionalAccess | High | Live | Legacy authentication is blocked by an enforced Conditional Access policy |
+| TP.ENT.0005 | Entra.ConditionalAccess | High | Live | MFA is required for admin roles by an enforced Conditional Access policy |
+| TP.ENT.0006 | Entra.AuthenticationMethods | High | Live | FIDO2 security key authentication method is enabled with attestation and key restrictions enforced |
+| TP.ENT.0007 | Entra.AuthenticationMethods | High | Live | Authentication methods policy general settings (migration state, suspicious-activity reporting) |
+| TP.ENT.0008 | Entra.AuthenticationMethods | High | Live | Microsoft Authenticator is enabled with number matching and app-name display required tenant-wide |
+| TP.ENT.0009 | Entra.AuthenticationMethods | High | Live | SMS is not usable as an authentication sign-in factor |
+| TP.ENT.0010 | Entra.AuthenticationMethods | Medium | Live | Temporary Access Pass is enabled and configured for one-time use |
+| TP.ENT.0011 | Entra.AuthenticationMethods | High | Live | Voice call is not enabled as an authentication method |
+| TP.ENT.0012 | Entra.AuthorizationPolicy | High | Pending | Default authorization policy settings restrict SSPR-for-admins, guest self-service, and default app-registration rights |
+| TP.ENT.0013 | Entra.Consent | High | Pending | Group/team owner and risk-based user consent restrictions |
+| TP.ENT.0015 | Entra.PasswordProtection | High | Pending | Password Protection mode, on-prem enforcement, and Smart Lockout thresholds |
+| TP.ENT.0016 | Entra.GuestAccess | Medium | Pending | Guest group ownership is restricted and guest group-content access is intact |
+| TP.ENT.0017 | Entra.ConditionalAccess | Critical | Live | MFA is required for all users by an enforced Conditional Access policy |
+| TP.ENT.0018 | Entra.ConditionalAccess | Critical | Live | Phishing-resistant authentication strength is required for privileged roles |
+| TP.ENT.0019 | Entra.Identity | High | Live | Service principal credential hygiene (password/certificate lifetime) |
+| TP.ENT.0020 | Entra.PrivilegedRoles | High | Live | Global Administrator count is within ScuBA's 2-8 SHALL range |
+| TP.ENT.0021 | Entra.PrivilegedRoles | High | Live | Fewer than 10 total privileged role assignments |
+| TP.ENT.0022 | Entra.PrivilegedRoles | High | Pending | Zero permanent-active assignments for privileged roles (PIM posture, Entra ID P2) |
+| TP.ENT.0023 | Entra.Identity | Medium | Pending | Cross-tenant access default settings restrict inbound/outbound B2B collaboration |
+| TP.ENT.0024 | Entra.ConditionalAccess | Info | Live | Conditional Access coverage for workload identities (awareness, non-scored) |
+| TP.INT.0001 | Intune.Enrollment | Critical | Live | MDM authority is set to Intune |
+| TP.INT.0002 | Intune.Compliance | High | Live | A compliance policy exists for every enrolled platform |
+| TP.INT.0003 | Intune.Compliance | High | Live | Devices without an assigned compliance policy are marked noncompliant |
+| TP.INT.0004 | Intune.Updates | Medium | Live | At least 2 Windows Update rings have deadlines configured |
+| TP.INT.0005 | Intune.DeviceLifecycle | Medium | Live | Devices inactive for more than 90 days |
 
-What Phase 1 does **not** cover: group- or role-based Conditional Access exclusion
-resolution (several checks are explicitly documented as fail-closed or limited on this
-axis), assignment verification for Intune policies (existence is checked, not whether a
-policy is actually assigned to any device), a CIS Benchmark mapping (see the disclaimer
-above), or a rendering format other than JSON. These are documented, known limitations in
-each affected check's own docstring - not silent gaps.
+"Dataset: Pending" means the check's descriptor is written, tested (both PSObject- and
+Hashtable-shaped fixtures), and cited, but degrades honestly to `NotApplicable` with reason
+`descriptor-pending: awaiting GraphKit release` until a future GraphKit release ships the
+underlying descriptor(s) it needs (`Entra.AuthorizationPolicy.Get`, `Entra.DirectorySettings.Values`,
+`Entra.PIM.RoleAssignmentScheduleInstances/RoleEligibilityScheduleInstances.List`,
+`Entra.CrossTenantAccessPolicy.Default.Get`) - never a silent gap, never a guessed result.
+`TP.ENT.0022` additionally requires Entra ID P2 licensing once its descriptor lands; a 400/403 on
+a non-P2 tenant is itself a rendered finding ("PIM posture unassessable - Entra ID P2 required"),
+per its own research entry - not a collection failure hidden from the report.
+
+What the catalog does **not** cover, honestly, as of Phase 4: group-**membership** expansion for
+Conditional Access exclusions (only direct user/group/role references resolve today - a group
+assigned to a CA exclusion is read as a group reference, not expanded to its members, because no
+group-members dataset exists yet; several checks document this as a known limitation, not a
+silent gap), assignment verification for Intune policies (existence is checked, not whether a
+policy is actually assigned to any device), transitive/group-assigned role-assignment expansion
+for `TP.ENT.0021`'s privileged-role count (direct assignments only - documented in that check's
+own evidence text), `TP.ENT.0019`'s service-principal-only credential-hygiene note (application
+objects and service principals are both read, but evidence is capped to the top 50 worst
+offenders by design, not exhaustive), and a rendering format other than JSON.
 
 ## Development
 
