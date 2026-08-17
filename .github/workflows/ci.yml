@@ -609,10 +609,10 @@ jobs:
           # since Phase 1) - first exercised when the matrix first went green-capable.
           # Everywhere else the zero-skip rule stands.
           $allowedSkips = if ($IsWindows) { 2 } else { 0 }
-          # Task 3.2 schema round bumped 1142 -> 1148; TP.INT.0007 port bumped 1148 -> 1162
-          # (.build/AssertGateResult.tasks.ps1's own -MinimumTests, which must be bumped
-          # together with this value).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1162 -AllowedSkips $allowedSkips -AllowNotRun 1
+          # Task 3.2 schema round bumped 1142 -> 1148; TP.INT.0007 port bumped 1148 -> 1162;
+          # TP.INT.0008 port bumped 1162 -> 1177 (.build/AssertGateResult.tasks.ps1's own
+          # -MinimumTests, which must be bumped together with this value).
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1177 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

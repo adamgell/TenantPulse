@@ -139,4 +139,17 @@
     # /deviceManagement/managedDeviceCleanupSettings) - confirmed via a live
     # Get-GraphOperation lookup, not Pending.
     managedDeviceCleanupSettings = @{ Type = 'DeviceCleanupRule'; Operation = 'Get'; ApiVersion = 'beta' }
+
+    # Task 3.2 PENDING entries (TP.INT.0008/0009/0011/0012): none of these four Graph
+    # resources have a released GraphKit 0.1.1 descriptor - confirmed against a live
+    # Get-GraphOperation -List enumeration of the installed catalog (55 operations, none
+    # matching). Each check still ships with real rule logic tested via fixture data
+    # (Write-PulseDataset does not consult Pending); on a live tenant each resolves
+    # NotApplicable until GraphKit ships the descriptor - a G-batch request, not invented
+    # here. ExpectedThrottleClass/ExpectedReplayPolicy declare the Read/Safe shape the
+    # static read-only gate (tests/QA/ReadOnly.tests.ps1) requires for every Pending entry.
+    operationApprovalPolicies = @{ Type = 'OperationApprovalPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    dataProcessorServiceForWindowsFeaturesOnboarding = @{ Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    intuneBrandingProfiles = @{ Type = 'IntuneBrandingProfile'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    windowsFeatureUpdateProfiles = @{ Type = 'WindowsFeatureUpdateProfile'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }

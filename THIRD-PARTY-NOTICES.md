@@ -26,6 +26,9 @@ naming exactly this).
     `managedDeviceCleanupRules` collection call - see
     `source/Private/Checks/Test-PulseDeviceCleanupRuleConfigured.ps1`'s own docstring for
     that divergence.
+  - `source/Data/Checks/TP.INT.0008.psd1` ("Intune Multi Admin Approval policy
+    configured", Task 3.2) - adapts the check logic behind Maester's `MT.1096`
+    (`Test-MtOperationApprovalPolicies`).
 
   Each descriptor's own `Origin` field (`Project`/`Id`/`License`) records this at the point
   of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as
