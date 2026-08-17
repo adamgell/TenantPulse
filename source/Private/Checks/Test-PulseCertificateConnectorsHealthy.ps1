@@ -98,7 +98,9 @@ function Test-PulseCertificateConnectorsHealthy {
     $offending = [System.Collections.Generic.List[object]]::new()
     $allRows = [System.Collections.Generic.List[object]]::new()
 
-    foreach ($connector in $connectors) {
+    for ($index = 0; $index -lt $connectors.Count; $index++) {
+        $connector = $connectors[$index]
+
         foreach ($prop in @('state', 'connectorVersion', 'lastConnectionDateTime')) {
             if (-not (Test-PulseRowPropertyPresent -Row $connector -PropertyName $prop) -or $null -eq $connector.$prop) {
                 throw "Test-PulseCertificateConnectorsHealthy: an ndesConnectors row is missing '$prop'."
@@ -113,7 +115,13 @@ function Test-PulseCertificateConnectorsHealthy {
         $isBelowFloor = (Compare-PulseConnectorVersion -Left $version -Right $minimumVersion) -lt 0
         $isStale = $lastConnection -lt $connectionThreshold
 
-        $identity = if (Test-PulseRowPropertyPresent -Row $connector -PropertyName 'id') { [string] $connector.id } else { [string] $connector.displayName }
+        # ORDINAL FALLBACK (Phase 3 whole-phase review, catalog-coherence finding I2): the
+        # id-less fallback used to be displayName itself - two id-less connectors sharing a
+        # displayName would collide on the same evidence Identity/SortKey pair and degrade
+        # the whole evaluation to Error via Assert-PulseEvidenceNoDuplicates. Per-row
+        # ordinal ('cert-connector-<index>', 0-based) is guaranteed unique within one
+        # evaluation.
+        $identity = if (Test-PulseRowPropertyPresent -Row $connector -PropertyName 'id') { [string] $connector.id } else { "cert-connector-$index" }
         $row = @{
             Identity = $identity
             Detail   = @{

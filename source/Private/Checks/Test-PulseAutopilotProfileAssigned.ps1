@@ -57,7 +57,9 @@ function Test-PulseAutopilotProfileAssigned {
 
     $assignedCount = 0
     $rows = [System.Collections.Generic.List[object]]::new()
-    foreach ($profile in $profiles) {
+    for ($index = 0; $index -lt $profiles.Count; $index++) {
+        $profile = $profiles[$index]
+
         $assignments = @()
         if ((Test-PulseRowPropertyPresent -Row $profile -PropertyName 'assignments') -and $null -ne $profile.assignments) {
             $assignments = @($profile.assignments)
@@ -65,7 +67,13 @@ function Test-PulseAutopilotProfileAssigned {
         $hasAssignment = $assignments.Count -gt 0
         if ($hasAssignment) { $assignedCount++ }
 
-        $identity = if (Test-PulseRowPropertyPresent -Row $profile -PropertyName 'id') { [string] $profile.id } else { [string] $profile.displayName }
+        # ORDINAL FALLBACK (Phase 3 whole-phase review, catalog-coherence finding I2): the
+        # id-less fallback used to be displayName itself - two id-less profiles sharing a
+        # displayName would collide on the same evidence Identity/SortKey pair and degrade
+        # the whole evaluation to Error via Assert-PulseEvidenceNoDuplicates. Per-row
+        # ordinal ('autopilot-profile-<index>', 0-based) is guaranteed unique within one
+        # evaluation.
+        $identity = if (Test-PulseRowPropertyPresent -Row $profile -PropertyName 'id') { [string] $profile.id } else { "autopilot-profile-$index" }
         $rows.Add(@{
             Identity = $identity
             Detail   = @{ displayName = $profile.displayName; assignmentCount = $assignments.Count }

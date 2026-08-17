@@ -78,7 +78,9 @@ function Test-PulseAppleAdeTokensValid {
     $expiredOrStale = [System.Collections.Generic.List[object]]::new()
     $approachingOnly = [System.Collections.Generic.List[object]]::new()
 
-    foreach ($token in $tokens) {
+    for ($index = 0; $index -lt $tokens.Count; $index++) {
+        $token = $tokens[$index]
+
         if (-not (Test-PulseRowPropertyPresent -Row $token -PropertyName 'tokenExpirationDateTime') -or $null -eq $token.tokenExpirationDateTime) {
             throw 'Test-PulseAppleAdeTokensValid: a depOnboardingSettings row is missing tokenExpirationDateTime.'
         }
@@ -93,7 +95,13 @@ function Test-PulseAppleAdeTokensValid {
         $isApproaching = (-not $isExpired) -and ($expiry -le $warnThreshold)
         $isSyncStale = $lastSync.Date -ne $cutoffDate
 
-        $identity = if (Test-PulseRowPropertyPresent -Row $token -PropertyName 'id') { [string] $token.id } else { [string] $token.appleIdentifier }
+        # ORDINAL FALLBACK (Phase 3 whole-phase review, catalog-coherence finding I2): the
+        # id-less fallback used to be appleIdentifier itself - the SAME Apple ID can
+        # legitimately own multiple tokens, so two id-less rows sharing an appleIdentifier
+        # would collide on the same evidence Identity/SortKey pair and degrade the whole
+        # evaluation to Error via Assert-PulseEvidenceNoDuplicates. Per-row ordinal
+        # ('ade-token-<index>', 0-based) is guaranteed unique within one evaluation.
+        $identity = if (Test-PulseRowPropertyPresent -Row $token -PropertyName 'id') { [string] $token.id } else { "ade-token-$index" }
         $row = @{
             Identity = $identity
             Detail   = @{

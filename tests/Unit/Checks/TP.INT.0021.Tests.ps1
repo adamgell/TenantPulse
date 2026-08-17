@@ -100,4 +100,16 @@ Describe 'TP.INT.0021 - Apple Volume Purchase Program tokens valid and syncing' 
         )
         $finding.status | Should -Be 'Error'
     }
+
+    It 'Fail (not Error): two id-less tokens sharing the SAME organizationName do not collide on evidence identity (I2 ordinal fallback)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0021' -Datasets @(
+            @{ Name = 'vppTokens'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                    [pscustomobject]@{ organizationName = 'Shared Org'; expirationDateTime = '2026-01-01T00:00:00Z'; lastSyncDateTime = '2020-01-01T00:00:00Z' }
+                    [pscustomobject]@{ organizationName = 'Shared Org'; expirationDateTime = '2026-01-02T00:00:00Z'; lastSyncDateTime = '2020-01-01T00:00:00Z' }
+                ) }
+        )
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence.Count | Should -Be 2
+        ($finding.evidence.identity | Select-Object -Unique).Count | Should -Be 2
+    }
 }

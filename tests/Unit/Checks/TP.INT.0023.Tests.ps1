@@ -101,4 +101,16 @@ Describe 'TP.INT.0023 - Intune Certificate Connectors healthy and on a supported
         )
         $finding.status | Should -Be 'Error'
     }
+
+    It 'Fail (not Error): two id-less connectors sharing the SAME displayName do not collide on evidence identity (I2 ordinal fallback)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0023' -Datasets @(
+            @{ Name = 'ndesConnectors'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                    [pscustomobject]@{ displayName = 'Shared CC'; state = 'error'; connectorVersion = '6.2510.3.3007'; lastConnectionDateTime = '2020-01-01T00:00:00Z' }
+                    [pscustomobject]@{ displayName = 'Shared CC'; state = 'error'; connectorVersion = '6.2510.3.3007'; lastConnectionDateTime = '2020-01-01T00:00:00Z' }
+                ) }
+        )
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence.Count | Should -Be 2
+        ($finding.evidence.identity | Select-Object -Unique).Count | Should -Be 2
+    }
 }

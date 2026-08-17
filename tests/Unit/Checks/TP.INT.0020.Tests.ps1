@@ -103,6 +103,18 @@ Describe 'TP.INT.0020 - Apple Automated Device Enrollment tokens valid and synci
         $finding.status | Should -Be 'NotApplicable'
     }
 
+    It 'Fail (not Error): two id-less tokens sharing the SAME appleIdentifier do not collide on evidence identity (I2 ordinal fallback)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0020' -Datasets @(
+            @{ Name = 'depOnboardingSettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                    [pscustomobject]@{ appleIdentifier = 'shared@example.com'; tokenName = 'A'; tokenExpirationDateTime = '2026-01-01T00:00:00Z'; lastSuccessfulSyncDateTime = '2020-01-01T00:00:00Z' }
+                    [pscustomobject]@{ appleIdentifier = 'shared@example.com'; tokenName = 'B'; tokenExpirationDateTime = '2026-01-02T00:00:00Z'; lastSuccessfulSyncDateTime = '2020-01-01T00:00:00Z' }
+                ) }
+        )
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence.Count | Should -Be 2
+        ($finding.evidence.identity | Select-Object -Unique).Count | Should -Be 2
+    }
+
     It 'Error: tokenExpirationDateTime is absent on an existing token row (field-absence lens)' {
         $today = New-PulseTodayString
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0020' -Datasets @(

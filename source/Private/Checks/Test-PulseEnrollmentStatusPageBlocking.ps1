@@ -61,7 +61,9 @@ function Test-PulseEnrollmentStatusPageBlocking {
     $rows = [System.Collections.Generic.List[object]]::new()
     $hasBlockingAssigned = $false
 
-    foreach ($esp in $espRows) {
+    for ($index = 0; $index -lt $espRows.Count; $index++) {
+        $esp = $espRows[$index]
+
         if (-not (Test-PulseRowPropertyPresent -Row $esp -PropertyName 'allowDeviceUseOnInstallFailure') -or $null -eq $esp.allowDeviceUseOnInstallFailure) {
             throw 'Test-PulseEnrollmentStatusPageBlocking: a windows10EnrollmentCompletionPageConfiguration row is missing allowDeviceUseOnInstallFailure.'
         }
@@ -75,7 +77,13 @@ function Test-PulseEnrollmentStatusPageBlocking {
 
         if ($isAssigned -and $isBlocking) { $hasBlockingAssigned = $true }
 
-        $identity = if (Test-PulseRowPropertyPresent -Row $esp -PropertyName 'id') { [string] $esp.id } else { [string] $esp.displayName }
+        # ORDINAL FALLBACK (Phase 3 whole-phase review, catalog-coherence finding I2): the
+        # id-less fallback used to be displayName itself - two id-less ESP profiles sharing
+        # a displayName would collide on the same evidence Identity/SortKey pair and
+        # degrade the whole evaluation to Error via Assert-PulseEvidenceNoDuplicates.
+        # Per-row ordinal ('esp-profile-<index>', 0-based) is guaranteed unique within one
+        # evaluation.
+        $identity = if (Test-PulseRowPropertyPresent -Row $esp -PropertyName 'id') { [string] $esp.id } else { "esp-profile-$index" }
         $rows.Add(@{
             Identity = $identity
             Detail   = @{

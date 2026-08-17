@@ -106,4 +106,16 @@ Describe 'TP.INT.0028 - Enrollment Status Page configured with blocking failure 
         )
         $finding.status | Should -Be 'Error'
     }
+
+    It 'Fail (not Error): two id-less ESP rows sharing the SAME displayName do not collide on evidence identity (I2 ordinal fallback)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
+            @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                    [pscustomobject]@{ '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Shared ESP'; allowDeviceUseOnInstallFailure = $true; assignments = @() }
+                    [pscustomobject]@{ '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Shared ESP'; allowDeviceUseOnInstallFailure = $true; assignments = @() }
+                ) }
+        )
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence.Count | Should -Be 2
+        ($finding.evidence.identity | Select-Object -Unique).Count | Should -Be 2
+    }
 }

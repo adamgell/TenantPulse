@@ -97,4 +97,16 @@ Describe 'TP.INT.0026 - Windows Autopilot deployment profile exists and is assig
         $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Be 'descriptor-pending: awaiting GraphKit release'
     }
+
+    It 'Fail (not Error): two id-less profiles sharing the SAME displayName do not collide on evidence identity (I2 ordinal fallback)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0026' -Datasets @(
+            @{ Name = 'windowsAutopilotDeploymentProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                    [pscustomobject]@{ displayName = 'Shared Autopilot'; assignments = @() }
+                    [pscustomobject]@{ displayName = 'Shared Autopilot'; assignments = @() }
+                ) }
+        )
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence.Count | Should -Be 2
+        ($finding.evidence.identity | Select-Object -Unique).Count | Should -Be 2
+    }
 }

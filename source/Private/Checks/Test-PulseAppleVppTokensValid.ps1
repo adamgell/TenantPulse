@@ -69,7 +69,9 @@ function Test-PulseAppleVppTokensValid {
     $expiredOrStale = [System.Collections.Generic.List[object]]::new()
     $approachingOnly = [System.Collections.Generic.List[object]]::new()
 
-    foreach ($token in $tokens) {
+    for ($index = 0; $index -lt $tokens.Count; $index++) {
+        $token = $tokens[$index]
+
         if (-not (Test-PulseRowPropertyPresent -Row $token -PropertyName 'expirationDateTime') -or $null -eq $token.expirationDateTime) {
             throw 'Test-PulseAppleVppTokensValid: a vppTokens row is missing expirationDateTime.'
         }
@@ -84,7 +86,14 @@ function Test-PulseAppleVppTokensValid {
         $isApproaching = (-not $isExpired) -and ($expiry -le $warnThreshold)
         $isSyncStale = $lastSync -lt $syncThreshold
 
-        $identity = if (Test-PulseRowPropertyPresent -Row $token -PropertyName 'id') { [string] $token.id } else { [string] $token.organizationName }
+        # ORDINAL FALLBACK (Phase 3 whole-phase review, catalog-coherence finding I2): the
+        # id-less fallback used to be organizationName itself - the SAME organization can
+        # legitimately hold multiple VPP tokens, so two id-less rows sharing an
+        # organizationName would collide on the same evidence Identity/SortKey pair and
+        # degrade the whole evaluation to Error via Assert-PulseEvidenceNoDuplicates.
+        # Per-row ordinal ('vpp-token-<index>', 0-based) is guaranteed unique within one
+        # evaluation.
+        $identity = if (Test-PulseRowPropertyPresent -Row $token -PropertyName 'id') { [string] $token.id } else { "vpp-token-$index" }
         $row = @{
             Identity = $identity
             Detail   = @{
