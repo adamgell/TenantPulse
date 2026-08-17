@@ -57,24 +57,27 @@ function Test-PulseNoOrphanedAutopilotIdentities {
     }
 
     $orphaned = [System.Collections.Generic.List[object]]::new()
+    $allRows = [System.Collections.Generic.List[object]]::new()
     foreach ($identity in $identities) {
         if (-not (Test-PulseRowPropertyPresent -Row $identity -PropertyName 'deploymentProfileAssignmentStatus') -or $null -eq $identity.deploymentProfileAssignmentStatus) {
             throw 'Test-PulseNoOrphanedAutopilotIdentities: a windowsAutopilotDeviceIdentities row is missing deploymentProfileAssignmentStatus.'
         }
 
         $status = [string] $identity.deploymentProfileAssignmentStatus
+        $rowIdentity = if (Test-PulseRowPropertyPresent -Row $identity -PropertyName 'id') { [string] $identity.id } else { [string] $identity.serialNumber }
+        $row = @{
+            Identity = $rowIdentity
+            Detail   = @{ serialNumber = $identity.serialNumber; model = $identity.model; deploymentProfileAssignmentStatus = $status }
+            SortKey  = $rowIdentity
+        }
+        $allRows.Add($row)
         if ($status -eq 'notAssigned') {
-            $rowIdentity = if (Test-PulseRowPropertyPresent -Row $identity -PropertyName 'id') { [string] $identity.id } else { [string] $identity.serialNumber }
-            $orphaned.Add(@{
-                Identity = $rowIdentity
-                Detail   = @{ serialNumber = $identity.serialNumber; model = $identity.model; deploymentProfileAssignmentStatus = $status }
-                SortKey  = $rowIdentity
-            })
+            $orphaned.Add($row)
         }
     }
 
     if ($orphaned.Count -eq 0) {
-        return New-PulseFinding -Status Pass -Reason "All $($identities.Count) registered Windows Autopilot device identity(ies) are covered by at least one deployment profile assignment."
+        return New-PulseFinding -Status Pass -Reason "All $($identities.Count) registered Windows Autopilot device identity(ies) are covered by at least one deployment profile assignment." -Evidence $allRows.ToArray()
     }
 
     $reason = "$($orphaned.Count) of $($identities.Count) registered Windows Autopilot device identity(ies) have never been targeted by any deployment profile (deploymentProfileAssignmentStatus 'notAssigned') - these devices will fail zero-touch provisioning and require manual intervention when unboxed."

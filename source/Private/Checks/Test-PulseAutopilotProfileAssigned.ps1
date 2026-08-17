@@ -74,7 +74,7 @@ function Test-PulseAutopilotProfileAssigned {
     }
 
     if ($assignedCount -gt 0) {
-        return New-PulseFinding -Status Pass -Reason "$assignedCount of $($profiles.Count) Windows Autopilot deployment profile(s) have at least one assignment - registered Autopilot devices covered by an assigned profile receive the intended out-of-box provisioning experience."
+        return New-PulseFinding -Status Pass -Reason "$assignedCount of $($profiles.Count) Windows Autopilot deployment profile(s) have at least one assignment - registered Autopilot devices covered by an assigned profile receive the intended out-of-box provisioning experience." -Evidence $rows.ToArray()
     }
 
     return New-PulseFinding -Status Fail -Reason "None of the $($profiles.Count) Windows Autopilot deployment profile(s) configured for this tenant have any assignment - registered Autopilot devices fall through to standard Azure AD Join/manual setup instead of the intended zero-touch provisioning experience until at least one profile is assigned to a group." -Evidence $rows.ToArray()

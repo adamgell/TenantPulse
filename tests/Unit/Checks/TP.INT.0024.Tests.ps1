@@ -98,4 +98,27 @@ Describe 'TP.INT.0024 - Mobile Threat Defense connectors enabled and syncing' {
         )
         $finding.status | Should -Be 'Error'
     }
+
+    It 'Pass carries a corroborating evidence row per connector' {
+        $recent = [datetime]::UtcNow.AddHours(-2).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0024' -Datasets @(
+            @{ Name = 'mobileThreatDefenseConnectors'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'mtd1'; partnerState = 'enabled'; lastHeartbeatDateTime = $recent }) }
+        )
+        $finding.status | Should -Be 'Pass'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'mtd1'
+    }
+
+    It 'HOSTILE (post-review MINOR fix): two id-less connectors sharing the same partnerState do not collide on evidence Identity' {
+        $recent = [datetime]::UtcNow.AddHours(-2).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0024' -Datasets @(
+            @{ Name = 'mobileThreatDefenseConnectors'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ partnerState = 'enabled'; lastHeartbeatDateTime = $recent }
+                [pscustomobject]@{ partnerState = 'enabled'; lastHeartbeatDateTime = $recent }
+            ) }
+        )
+        $finding.status | Should -Be 'Pass'
+        @($finding.evidence).Count | Should -Be 2
+        ($finding.evidence | ForEach-Object { $_.identity } | Select-Object -Unique).Count | Should -Be 2
+    }
 }

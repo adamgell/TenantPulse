@@ -38,27 +38,13 @@
     was more than an hour before the cutoff. Fail if any connector is offending, Pass
     otherwise (this check has no Warn tier - Maester's own source treats connector health as
     a binary pass/fail).
+
+    Compare-PulseConnectorVersion is nested inside this function (post-review MINOR fix) -
+    it exists only to serve this one rule's version-floor comparison and is not referenced
+    anywhere else in the module, so it follows the same file-local-helper convention
+    Test-PulseStaleDevices.ps1's own ConvertTo-PulseNullableUtcDateTime already established
+    rather than being a second module-scoped function name to track.
 #>
-
-function Compare-PulseConnectorVersion {
-    [CmdletBinding()]
-    [OutputType([int])]
-    param(
-        [Parameter(Mandatory)] [string] $Left,
-        [Parameter(Mandatory)] [string] $Right
-    )
-
-    $leftParts = @($Left -split '\.' | ForEach-Object { $v = 0; [void][int]::TryParse($_, [ref] $v); $v })
-    $rightParts = @($Right -split '\.' | ForEach-Object { $v = 0; [void][int]::TryParse($_, [ref] $v); $v })
-    $max = [System.Math]::Max($leftParts.Count, $rightParts.Count)
-
-    for ($i = 0; $i -lt $max; $i++) {
-        $l = if ($i -lt $leftParts.Count) { $leftParts[$i] } else { 0 }
-        $r = if ($i -lt $rightParts.Count) { $rightParts[$i] } else { 0 }
-        if ($l -ne $r) { return $l.CompareTo($r) }
-    }
-    return 0
-}
 
 function Test-PulseCertificateConnectorsHealthy {
     [CmdletBinding()]
@@ -70,6 +56,24 @@ function Test-PulseCertificateConnectorsHealthy {
         [Parameter()]
         [hashtable] $Context = @{}
     )
+
+    function Compare-PulseConnectorVersion {
+        param(
+            [Parameter(Mandatory)] [string] $Left,
+            [Parameter(Mandatory)] [string] $Right
+        )
+
+        $leftParts = @($Left -split '\.' | ForEach-Object { $v = 0; [void][int]::TryParse($_, [ref] $v); $v })
+        $rightParts = @($Right -split '\.' | ForEach-Object { $v = 0; [void][int]::TryParse($_, [ref] $v); $v })
+        $max = [System.Math]::Max($leftParts.Count, $rightParts.Count)
+
+        for ($i = 0; $i -lt $max; $i++) {
+            $l = if ($i -lt $leftParts.Count) { $leftParts[$i] } else { 0 }
+            $r = if ($i -lt $rightParts.Count) { $rightParts[$i] } else { 0 }
+            if ($l -ne $r) { return $l.CompareTo($r) }
+        }
+        return 0
+    }
 
     $connectors = @($Datasets.ndesConnectors)
     if ($connectors.Count -eq 0) {
@@ -92,6 +96,7 @@ function Test-PulseCertificateConnectorsHealthy {
     $minimumVersion = '6.2406.0.1001'
 
     $offending = [System.Collections.Generic.List[object]]::new()
+    $allRows = [System.Collections.Generic.List[object]]::new()
 
     foreach ($connector in $connectors) {
         foreach ($prop in @('state', 'connectorVersion', 'lastConnectionDateTime')) {
@@ -108,26 +113,29 @@ function Test-PulseCertificateConnectorsHealthy {
         $isBelowFloor = (Compare-PulseConnectorVersion -Left $version -Right $minimumVersion) -lt 0
         $isStale = $lastConnection -lt $connectionThreshold
 
+        $identity = if (Test-PulseRowPropertyPresent -Row $connector -PropertyName 'id') { [string] $connector.id } else { [string] $connector.displayName }
+        $row = @{
+            Identity = $identity
+            Detail   = @{
+                displayName            = $connector.displayName
+                state                  = $state
+                connectorVersion       = $version
+                lastConnectionDateTime = $connector.lastConnectionDateTime
+                inactive               = $isInactive
+                belowVersionFloor      = $isBelowFloor
+                staleConnection        = $isStale
+            }
+            SortKey  = $identity
+        }
+        $allRows.Add($row)
+
         if ($isInactive -or $isBelowFloor -or $isStale) {
-            $identity = if (Test-PulseRowPropertyPresent -Row $connector -PropertyName 'id') { [string] $connector.id } else { [string] $connector.displayName }
-            $offending.Add(@{
-                Identity = $identity
-                Detail   = @{
-                    displayName            = $connector.displayName
-                    state                  = $state
-                    connectorVersion       = $version
-                    lastConnectionDateTime = $connector.lastConnectionDateTime
-                    inactive               = $isInactive
-                    belowVersionFloor      = $isBelowFloor
-                    staleConnection        = $isStale
-                }
-                SortKey  = $identity
-            })
+            $offending.Add($row)
         }
     }
 
     if ($offending.Count -eq 0) {
-        return New-PulseFinding -Status Pass -Reason "All $($connectors.Count) Intune Certificate Connector(s) are active, on a supported version, and connected within the last hour."
+        return New-PulseFinding -Status Pass -Reason "All $($connectors.Count) Intune Certificate Connector(s) are active, on a supported version, and connected within the last hour." -Evidence $allRows.ToArray()
     }
 
     $reason = "$($offending.Count) of $($connectors.Count) Intune Certificate Connector(s) are unhealthy (inactive, below the supported version floor, or have not connected in the last hour) - certificate-based Wi-Fi/VPN/authentication profile delivery to new and renewing devices is at risk of silently breaking behind the affected connector(s)."

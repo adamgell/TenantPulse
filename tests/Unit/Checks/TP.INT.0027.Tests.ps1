@@ -61,6 +61,8 @@ Describe 'TP.INT.0027 - No orphaned Windows Autopilot device identities' {
             ) }
         )
         $finding.status | Should -Be 'Pass'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'd1'
     }
 
     It 'Fail: at least one identity is notAssigned' {

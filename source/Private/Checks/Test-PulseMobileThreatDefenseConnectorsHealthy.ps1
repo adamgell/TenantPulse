@@ -28,7 +28,19 @@
     behavior; common for tenants relying on Defender for Endpoint compliance signals
     differently, or not at all). Otherwise a connector is "offending" if partnerState is
     not `enabled`, OR its last heartbeat was more than a day before the cutoff. Fail if any
-    connector is offending, Pass otherwise.
+    connector is offending, Pass otherwise (now carrying a corroborating evidence row per
+    connector on the Pass path too, post-review MINOR fix, consistent with
+    Test-PulseStaleDevices.ps1's own precedent of never leaving a Pass evidence-empty when
+    there is real per-row data to corroborate it with).
+
+    IDENTITY FALLBACK (post-review MINOR fix): the FIRST version of this rule fell back to
+    `partnerState` itself as the evidence Identity when `id` was absent - two id-less
+    connectors sharing the same partnerState (a real possibility if a future GraphKit
+    descriptor ever omits `id`) would collide on the SAME Identity/SortKey pair, which
+    Assert-PulseEvidenceNoDuplicates (Invoke-PulseEvaluation.ps1) degrades to an engine
+    Error. The fallback is now an ordinal, per-row `mtd-connector-<index>` (0-based
+    position in the dataset) - guaranteed unique within a single evaluation regardless of
+    how many rows share every other property.
 #>
 
 function Test-PulseMobileThreatDefenseConnectorsHealthy {
@@ -62,8 +74,11 @@ function Test-PulseMobileThreatDefenseConnectorsHealthy {
     $heartbeatThreshold = $cutoff.AddDays(-1)
 
     $offending = [System.Collections.Generic.List[object]]::new()
+    $allRows = [System.Collections.Generic.List[object]]::new()
 
-    foreach ($connector in $connectors) {
+    for ($index = 0; $index -lt $connectors.Count; $index++) {
+        $connector = $connectors[$index]
+
         if (-not (Test-PulseRowPropertyPresent -Row $connector -PropertyName 'partnerState') -or $null -eq $connector.partnerState) {
             throw 'Test-PulseMobileThreatDefenseConnectorsHealthy: a mobileThreatDefenseConnectors row is missing partnerState.'
         }
@@ -77,23 +92,26 @@ function Test-PulseMobileThreatDefenseConnectorsHealthy {
         $isDisabled = $state -ne 'enabled'
         $isStale = $lastHeartbeat -lt $heartbeatThreshold
 
+        $identity = if (Test-PulseRowPropertyPresent -Row $connector -PropertyName 'id') { [string] $connector.id } else { "mtd-connector-$index" }
+        $row = @{
+            Identity = $identity
+            Detail   = @{
+                partnerState          = $state
+                lastHeartbeatDateTime = $connector.lastHeartbeatDateTime
+                disabled              = $isDisabled
+                staleHeartbeat        = $isStale
+            }
+            SortKey  = $identity
+        }
+        $allRows.Add($row)
+
         if ($isDisabled -or $isStale) {
-            $identity = if (Test-PulseRowPropertyPresent -Row $connector -PropertyName 'id') { [string] $connector.id } else { [string] $connector.partnerState }
-            $offending.Add(@{
-                Identity = $identity
-                Detail   = @{
-                    partnerState          = $state
-                    lastHeartbeatDateTime = $connector.lastHeartbeatDateTime
-                    disabled              = $isDisabled
-                    staleHeartbeat        = $isStale
-                }
-                SortKey  = $identity
-            })
+            $offending.Add($row)
         }
     }
 
     if ($offending.Count -eq 0) {
-        return New-PulseFinding -Status Pass -Reason "All $($connectors.Count) Mobile Threat Defense connector(s) are enabled and reported a heartbeat within the last day."
+        return New-PulseFinding -Status Pass -Reason "All $($connectors.Count) Mobile Threat Defense connector(s) are enabled and reported a heartbeat within the last day." -Evidence $allRows.ToArray()
     }
 
     $reason = "$($offending.Count) of $($connectors.Count) Mobile Threat Defense connector(s) are disabled or have not reported a heartbeat within the last day - compliance policies that key off device threat level ($($offending.Count) affected) can silently stop receiving fresh risk signal, letting noncompliant/compromised devices pass compliance unnoticed."

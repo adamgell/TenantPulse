@@ -61,6 +61,8 @@ Describe 'TP.INT.0026 - Windows Autopilot deployment profile exists and is assig
             ) }
         )
         $finding.status | Should -Be 'Pass'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'p1'
     }
 
     It 'Fail: profiles exist but none have assignments' {

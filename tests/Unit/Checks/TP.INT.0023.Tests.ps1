@@ -60,6 +60,8 @@ Describe 'TP.INT.0023 - Intune Certificate Connectors healthy and on a supported
             @{ Name = 'ndesConnectors'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'conn1'; displayName = 'CC01'; state = 'active'; connectorVersion = '6.2510.3.3007'; lastConnectionDateTime = $recent }) }
         )
         $finding.status | Should -Be 'Pass'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'conn1'
     }
 
     It 'Fail: state is not active' {
