@@ -184,6 +184,36 @@ Describe 'Get-PulseCollectionManifest' {
             }
         } | Should -Throw -ExpectedMessage '*cycle*'
     }
+
+    It 'artifact-only check (Data.Datasets is $null/absent, e.g. TP.INT.0006''s post-Data.Expansions shape) never throws ContainsKey($null) and contributes zero manifest entries' {
+        $check = New-TestCheck -Id 'TP.INT.0006' -Datasets $null
+        $map = @{ conditionalAccessPolicies = @{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' } }
+
+        # Confirm the fixture actually reproduces the real shape this guards against:
+        # Data.Datasets genuinely $null, not an empty array.
+        $check.Data.Datasets | Should -BeNullOrEmpty
+
+        $manifest = InModuleScope TenantPulse -ArgumentList @($check), $map {
+            param($checks, $map)
+            Get-PulseCollectionManifest -Checks $checks -DatasetMap $map
+        }
+
+        @($manifest).Count | Should -Be 0
+    }
+
+    It 'artifact-only check mixed with a real-dataset check: the null-Datasets check contributes nothing, the other check''s dataset still resolves correctly' {
+        $artifactOnlyCheck = New-TestCheck -Id 'TP.INT.0006' -Datasets $null
+        $datasetCheck = New-TestCheck -Id 'TP.ENT.0001' -Datasets @('conditionalAccessPolicies')
+        $map = @{ conditionalAccessPolicies = @{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' } }
+
+        $manifest = InModuleScope TenantPulse -ArgumentList @($artifactOnlyCheck, $datasetCheck), $map {
+            param($checks, $map)
+            Get-PulseCollectionManifest -Checks $checks -DatasetMap $map
+        }
+
+        @($manifest).Count | Should -Be 1
+        $manifest[0].Dataset | Should -Be 'conditionalAccessPolicies'
+    }
 }
 
 Describe 'Assert-PulseReadOnlyDescriptor' {
