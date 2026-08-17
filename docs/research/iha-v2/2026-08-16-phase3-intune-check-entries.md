@@ -152,6 +152,32 @@ Consulting.WhatItMeans/WhyItMatters text was corrected to match this on 2026-08-
 that file's own git history) - any remaining GDPR mention there is explicitly the
 author's own contextual note, not attributed to the cited Authority.
 
+## TP.INT.0010 — numbering gap (BLOCKED at T3.2, never a research entry here)
+
+There is no research entry for TP.INT.0010 above - the id sequence jumps from TP.INT.0009
+to TP.INT.0011 deliberately, not by accident. `TP.INT.0010` names Maester's "Intune
+diagnostic settings → Audit Logs" check, and it was formally evaluated (and blocked) during
+Task 3.2 - see that task's own report,
+`.superpowers/sdd/2026-08-16-tenantpulse-phase3-intune-catalog/task-3.2-report.md`'s
+per-check ship/blocked table and its own concerns/follow-ups item 1:
+
+> "TP.INT.0010 (Intune diagnostic settings → Audit Logs) | BLOCKED, not shipped | ARM (`GET
+> providers/microsoft.intune/diagnosticSettings`), not Graph | Genuine architecture gap, not
+> a missing-descriptor case - GraphKit is a Graph-only transport and will never surface an
+> ARM call via `Get-GraphOperation`; the ordinary Pending-mechanism would misleadingly imply
+> "wait for GraphKit." Needs an explicit product decision (separate ARM auth path, or
+> permanently-scoped-out) before it can ship honestly."
+
+This is the one Maester Intune check that is not a Graph call at all, so it was never wired
+into TenantPulse's own descriptor-Pending mechanism the way every other not-yet-collectible
+check (TP.INT.0008, 0009, 0011-0015, etc.) was - doing so would have implied "wait for a
+GraphKit release" for something GraphKit's own Graph-only transport can never surface.
+T3.2's own recommendation stands, unchanged by this task: either descope it permanently from
+the Maester-port catalog, or schedule a dedicated ARM-auth-path task - it should not
+silently reappear as "just another Pending dataset" in a future batch. No `.psd1` file, no
+research-entry section, and no Consulting content exist for TP.INT.0010 anywhere in this
+repo, and this task does not create one.
+
 ## TP.INT.0011 — Default branding profile customized
 
 Whether the tenant's default Intune branding profile has a non-default displayName or
@@ -354,30 +380,42 @@ built-in controls selected or a non-empty uploaded XML payload.
   this check correctly, because audit-only policies provide zero real-world blocking.
   Empty-XML-upload is a second silent-failure mode.
 - Task 3.3 scoping note: imported for record-completeness, not implemented in T3.3.
-- **BLOCKED (2026-08-17, Task 3.5 fold-in from T3.4 review): still not implemented.** Two
-  separate open items, mirrored here from the prior review pass, neither resolved by this
-  task:
-  1. VISIBILITY OPEN QUESTION - live-fetched
+- **BLOCKED (2026-08-17, Task 3.5 fold-in from T3.4 review; PROVENANCE CORRECTED same day
+  by dual review): still not implemented.** Two separate open items, mirrored here from the
+  prior review pass, neither resolved by this task:
+  1. VISIBILITY - IS confirmed, from the in-repo live capture, not from published Graph
+     schema docs. `scratch/live-27/snapshot/reference/settingDefinitions.json` (a real
+     live-tenant settingDefinitions capture already checked into this repo) carries a
+     `visibility` property on every entry, and the App Control policy-creation-type
+     definition `device_vendor_msft_policy_config_applicationcontrolv2_buildoptions`
+     explicitly has `"visibility": "template"` (confirmed directly against that file for
+     this correction - the field's observed value distribution across the whole capture is
+     `settingsCatalog,template` / `settingsCatalog` / `template` / `none`, so `"template"`
+     alone on this definition means it is NOT discoverable through a generic Settings
+     Catalog browse, only through the App Control template surface - consistent with why
+     this entry's own `Data` line already filters on `templateFamily eq
+     'endpointSecurityApplicationControl'` rather than a generic settings scan). The
+     narrower, still-accurate claim: Microsoft's **published Graph API schema
+     documentation** does not document this property anywhere - live-fetched
      https://learn.microsoft.com/en-us/graph/api/resources/intune-deviceconfigv2-devicemanagementconfigurationpolicytemplate?view=graph-rest-beta
-     (2026-08-17, confirmed live) for this task: the beta `deviceManagementConfigurationPolicyTemplate`
+     (2026-08-17, confirmed live) for this task, and its `deviceManagementConfigurationPolicyTemplate`
      resource documents `templateFamily = endpointSecurityApplicationControl` as a real,
-     named enum member (confirming App Control's own template family, same filtering
-     approach this entry already uses), but documents **no `visibility` property anywhere
-     on that resource or its `settingTemplates` relationship**. Whatever a prior review
-     pass meant by a `"visibility":"template"` field for App Control specifically therefore
-     remains UNCONFIRMED against the published Graph schema - it is not resolvable from
-     Learn documentation alone and needs verification against a live tenant's actual
-     `configurationPolicies`/`deviceManagementConfigurationPolicyTemplate` response shape,
-     the same class of PENDING VERIFICATION hedge TP.INT.0016's own entry already carries
-     for its settingDefinitionId string.
+     named enum member (confirming App Control's own template family) but has **no
+     `visibility` property listed at all** - a genuine docs-vs-live-schema gap, not an
+     unconfirmed claim. (The prior version of this note wrongly framed the whole
+     `visibility:"template"` fact as "unconfirmed, needs live-tenant verification" - it does
+     not; the live-tenant evidence was sitting in this same repo's own `scratch/` capture the
+     whole time.)
   2. CORPUS ABSENCE - `tests/Fixtures/SettingsCatalogCorpus/checked-definitions.json` (the
      corpus TP.INT.0016's settings-presence-index port validates its settingDefinitionIds
      against) has **zero entries matching App Control or Managed Installer** (confirmed by
-     direct search of the fixture file for this task) - so even a TP.INT.0016-style
-     settings-presence-index port has nothing to key against yet for either check. Both
-     items are genuine implementation BLOCKERS, not merely scoping deferrals like the
-     original "imported for record-completeness" note above - Task 3.5 leaves TP.INT.0017
-     unimplemented and does not touch TP.INT.0016's already-shipped consulting content.
+     direct search of the fixture file for this task), even though the live capture above
+     has 34 raw App Control/Managed Installer `settingDefinitions` entries - so even a
+     TP.INT.0016-style settings-presence-index port has nothing to key against in the
+     CORPUS yet for either check, independent of item 1 above. Both items are genuine
+     implementation BLOCKERS, not merely scoping deferrals like the original "imported for
+     record-completeness" note above - Task 3.5 leaves TP.INT.0017 unimplemented and does
+     not touch TP.INT.0016's already-shipped consulting content.
 
 ## TP.INT.0018 — Managed Installer rules paired with an enforcing App Control policy
 
