@@ -42,16 +42,34 @@
     This applies at BOTH levels this walk ever recurses to - a top-level Sensitive property,
     and a Nested.Properties entry marked Sensitive within an array/object container.
 
-    NESTED (exactly ONE level, by construction - TypedPolicyMaps.psd1's own docstring):
-    a property whose map entry carries `Nested` gets a CONTAINER row first (value:$null,
-    mirroring T2.2's GroupSettingCollectionInstance container-row pattern), then one row
-    per Nested.Properties entry - walked once directly if the raw property value is a
-    single object, or once PER ELEMENT (ordinal-suffixed settingPath/instanceId) if the raw
+    NESTED (RECURSIVE, arbitrary depth - Part C/T3.4 extension; was "exactly ONE level" per
+    TypedPolicyMaps.psd1's original docstring, closing the deferred-F3/T2.7-live-gate gap
+    - see TypedPolicyMaps.psd1's own docstring for the full accounting): a property whose
+    map entry carries `Nested` gets a CONTAINER row first (value:$null, mirroring T2.2's
+    GroupSettingCollectionInstance container-row pattern), then one row per
+    Nested.Properties entry - walked once directly if the raw property value is a single
+    object, or once PER ELEMENT (ordinal-suffixed settingPath/instanceId) if the raw
     property value is an array. A raw value that is neither an object nor an array under a
     Nested property contributes the container row only (nothing to descend into) - not a
     gap; an absent/null/scalar value under a documented Nested property is a legitimate,
     unpopulated-shell shape (T2.0's own "8 admin-template configurations, ALL unpopulated
     shells" finding applies equally here).
+
+    Each Nested.Properties entry is now itself walked through the EXACT SAME rule this
+    docstring describes for a top-level property - which means a Nested.Properties entry
+    MAY carry its own `Nested` key, recursing to a further container row + its own
+    Nested.Properties walk, to whatever depth the map actually declares (no depth limit is
+    enforced here; TypedPolicyMaps.psd1's own docstring is the map-authoring discipline that
+    keeps this from growing unboundedly in practice). SENSITIVE ALWAYS WINS, AT EVERY DEPTH,
+    UNCONDITIONALLY: a property spec with Sensitive=$true is redacted wholesale - one row,
+    redacted:true, value:$null - the INSTANT it is reached, regardless of whether it ALSO
+    carries a `Nested` key. A Sensitive property's own Nested description (if present) is
+    therefore never walked into; it exists in the map purely as documentation of the real
+    observed shape (see windows10CustomConfiguration's own `omaSettings.value` entry - a
+    live-confirmed 2-level-deep shape, still unconditionally redacted at its own Sensitive
+    leaf, never decomposed). This is the SAME "declared flag, never inferred, never bypassed
+    by structure" discipline this whole map already applies at depth 1, just proven to hold
+    at any depth now that depth is no longer capped at 1.
 
     INSTANCE IDS: '<PolicyId>/p:<settingPath>' - the 'p:' tag (property) keeps this
     namespace visually distinct from T2.2's own 'n:'/'s:'/'o:' tags, though collision safety
@@ -122,53 +140,71 @@ function ConvertTo-PulseTypedPolicyRows {
         }
     }
 
-    function Invoke-PulseWalkNestedProperties {
+    # RECURSIVE PROPERTY WALK (Part C/T3.4 extension - see this file's own docstring's
+    # NESTED section): the single rule "Sensitive redacts wholesale unconditionally;
+    # otherwise a Nested spec gets a container row + a walk of its own Nested.Properties,
+    # each walked through this SAME rule" now applies uniformly at the top level AND at
+    # every Nested.Properties entry, to whatever depth the map declares - no separate
+    # "top-level" vs "nested" code path any more (the two used to be near-duplicates of
+    # each other; unifying them is what makes depth >1 possible without duplicating the
+    # container/array/object dispatch logic at every level).
+    function Invoke-PulseWalkTypedPolicyPropertySpec {
+        param([string] $SettingPath, [string] $PropertyName, $RawValue, $PropertySpec)
+
+        if ([bool] $PropertySpec.Sensitive) {
+            # SENSITIVE ALWAYS WINS, AT EVERY DEPTH (see docstring) - redacted wholesale,
+            # one row, regardless of the raw value's own shape and regardless of whether
+            # this spec ALSO carries a `Nested` key (never walked into if Sensitive).
+            $rows.Add((New-PulseTypedPolicyRow -SettingPath $SettingPath -SettingName $PropertyName `
+                        -Value $RawValue -Redacted $true)) | Out-Null
+            return
+        }
+
+        $hasNested = $PropertySpec.Contains('Nested') -and $null -ne $PropertySpec.Nested
+        if (-not $hasNested) {
+            $rows.Add((New-PulseTypedPolicyRow -SettingPath $SettingPath -SettingName $PropertyName `
+                        -Value $RawValue -Redacted $false)) | Out-Null
+            return
+        }
+
+        # CONTAINER ROW - value always $null, mirrors T2.2's collection-instance container
+        # row pattern (see this file's own docstring).
+        $rows.Add((New-PulseTypedPolicyRow -SettingPath $SettingPath -SettingName $PropertyName `
+                    -Value $null -Redacted $false)) | Out-Null
+
+        $nestedProperties = @($PropertySpec.Nested.Properties)
+        if ($null -eq $RawValue) { return }
+
+        if ($RawValue -is [System.Collections.IEnumerable] -and $RawValue -isnot [string] -and -not (Test-PulseSettingsCatalogNode -Node $RawValue)) {
+            $elements = @($RawValue)
+            for ($i = 0; $i -lt $elements.Count; $i++) {
+                Invoke-PulseWalkNestedContainer -ParentSettingPath "$SettingPath/$i" -Container $elements[$i] -NestedProperties $nestedProperties
+            }
+        } elseif (Test-PulseSettingsCatalogNode -Node $RawValue) {
+            Invoke-PulseWalkNestedContainer -ParentSettingPath $SettingPath -Container $RawValue -NestedProperties $nestedProperties
+        }
+        # else: a scalar under a documented Nested property - unpopulated-shell shape,
+        # container row already emitted above, nothing more to walk (not a gap - see this
+        # file's own docstring).
+    }
+
+    function Invoke-PulseWalkNestedContainer {
         param([string] $ParentSettingPath, $Container, [object[]] $NestedProperties)
         foreach ($nestedSpec in $NestedProperties) {
             $nestedName = [string] $nestedSpec.Name
-            $nestedSensitive = [bool] $nestedSpec.Sensitive
             $nestedSegment = Protect-PulseTypedPolicyPathSegment -Segment $nestedName
             $nestedPath = "$ParentSettingPath/$nestedSegment"
             $nestedValue = Get-PulseSettingsCatalogValueProperty -Node $Container -PropertyName $nestedName
-            $rows.Add((New-PulseTypedPolicyRow -SettingPath $nestedPath -SettingName $nestedName `
-                        -Value $nestedValue -Redacted $nestedSensitive)) | Out-Null
+            Invoke-PulseWalkTypedPolicyPropertySpec -SettingPath $nestedPath -PropertyName $nestedName -RawValue $nestedValue -PropertySpec $nestedSpec
         }
     }
 
     $properties = @($TypeEntry.Properties)
     foreach ($propertySpec in $properties) {
         $propertyName = [string] $propertySpec.Name
-        $propertySensitive = [bool] $propertySpec.Sensitive
         $propertySegment = Protect-PulseTypedPolicyPathSegment -Segment $propertyName
-        $settingPath = $propertySegment
         $rawValue = Get-PulseSettingsCatalogValueProperty -Node $Policy -PropertyName $propertyName
-
-        $hasNested = $propertySpec.Contains('Nested') -and $null -ne $propertySpec.Nested
-        if (-not $hasNested) {
-            $rows.Add((New-PulseTypedPolicyRow -SettingPath $settingPath -SettingName $propertyName `
-                        -Value $rawValue -Redacted $propertySensitive)) | Out-Null
-            continue
-        }
-
-        # CONTAINER ROW - value always $null, mirrors T2.2's collection-instance container
-        # row pattern (see this file's own docstring).
-        $rows.Add((New-PulseTypedPolicyRow -SettingPath $settingPath -SettingName $propertyName `
-                    -Value $null -Redacted $false)) | Out-Null
-
-        $nestedProperties = @($propertySpec.Nested.Properties)
-        if ($null -eq $rawValue) { continue }
-
-        if ($rawValue -is [System.Collections.IEnumerable] -and $rawValue -isnot [string] -and -not (Test-PulseSettingsCatalogNode -Node $rawValue)) {
-            $elements = @($rawValue)
-            for ($i = 0; $i -lt $elements.Count; $i++) {
-                Invoke-PulseWalkNestedProperties -ParentSettingPath "$settingPath/$i" -Container $elements[$i] -NestedProperties $nestedProperties
-            }
-        } elseif (Test-PulseSettingsCatalogNode -Node $rawValue) {
-            Invoke-PulseWalkNestedProperties -ParentSettingPath $settingPath -Container $rawValue -NestedProperties $nestedProperties
-        }
-        # else: a scalar under a documented Nested property - unpopulated-shell shape,
-        # container row already emitted above, nothing more to walk (not a gap - see this
-        # file's own docstring).
+        Invoke-PulseWalkTypedPolicyPropertySpec -SettingPath $propertySegment -PropertyName $propertyName -RawValue $rawValue -PropertySpec $propertySpec
     }
 
     return [pscustomobject]@{ Rows = $rows.ToArray() }

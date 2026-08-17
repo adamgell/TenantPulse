@@ -278,6 +278,157 @@ Describe 'ConvertTo-PulseTypedPolicyRows' {
         $result.Rows[0].value | Should -BeNullOrEmpty
     }
 
+    # --- DEEPER NESTING (Part C, T3.4 - closes the deferred-F3/T2.7-live-gate gap,
+    # docs/STATUS.md, TypedPolicyMaps.psd1's own windows10CustomConfiguration comment).
+    # covers all 8 live-confirmed windows10CustomConfiguration policies' real shape. -------
+
+    It 'GOLDEN (deeper-nesting): the real, sanitized live-27 fixture whose omaSettings[].value is ITSELF an object still redacts fail-closed - Sensitive wins over the newly-added Nested description' {
+        $policy = Get-PulseTypedPolicyFixture -Name 'deviceConfiguration-windows10Custom-deeperNesting'
+        $entry = Get-PulseDeviceConfigTypeEntry -ODataType $policy.'@odata.type'
+
+        # Sanity on the fixture itself: the real observed shape genuinely is a 2-level
+        # object under `value`, not a scalar - otherwise this test would not be exercising
+        # the gap it claims to close.
+        $policy.omaSettings[0].value | Should -Not -BeNullOrEmpty
+        $policy.omaSettings[0].value.redacted | Should -BeTrue
+
+        $result = InModuleScope TenantPulse -ArgumentList $policy, $entry {
+            param($policy, $entry)
+            ConvertTo-PulseTypedPolicyRows -PolicyId $policy.id -PolicyType 'deviceConfiguration' -Policy $policy -TypeEntry $entry -Assignments @()
+        }
+
+        # Exactly 2 rows (container + the Sensitive `value` leaf) - IDENTICAL row count to
+        # the pre-Part-C scalar-secret case (see the sibling 'redacts fail-closed on REAL
+        # observed data' GOLDEN test above) - adding a Nested description to a Sensitive
+        # property must never add rows nobody asked for; Sensitive still wins, unconditionally.
+        $result.Rows.Count | Should -Be 2
+        $containerRow = $result.Rows | Where-Object { $_.settingPath -eq 'omaSettings' }
+        $containerRow.redacted | Should -BeFalse
+        $containerRow.value | Should -BeNullOrEmpty
+
+        $valueRow = $result.Rows | Where-Object { $_.settingPath -eq 'omaSettings/0/value' }
+        $valueRow | Should -Not -BeNullOrEmpty
+        $valueRow.redacted | Should -BeTrue
+        $valueRow.value | Should -BeNullOrEmpty
+
+        # No row for the deeper 'redacted' marker property exists at all - proof the walker
+        # never descended into value's own Nested description (Sensitive short-circuited
+        # before it was ever consulted).
+        ($result.Rows | Where-Object { $_.settingPath -eq 'omaSettings/0/value/redacted' }) | Should -BeNullOrEmpty
+    }
+
+    It 'a Sensitive property that ALSO carries its own Nested description still redacts wholesale and never emits a row for its declared sub-property (synthetic, decoupled from the real map)' {
+        # Direct, synthetic map entry proving the "Sensitive always wins, at every depth"
+        # rule independent of whether the real map happens to exercise it - mirrors this
+        # file's own existing "redacts a top-level Sensitive property UNCONDITIONALLY"
+        # sibling test in ProtectTypedPolicySensitivePayload.Tests.ps1.
+        $syntheticEntry = @{
+            Properties = @(
+                @{
+                    Name      = 'topContainer'
+                    Sensitive = $false
+                    Nested    = @{
+                        Properties = @(
+                            @{
+                                Name      = 'secretLeafWithOwnShape'
+                                Sensitive = $true
+                                Nested    = @{
+                                    Properties = @(
+                                        @{ Name = 'innerFieldThatMustNeverAppear'; Sensitive = $false }
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+            )
+        }
+        $plantedInnerSecret = 'PLANTED-inner-field-zzz111'
+        $policy = [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.syntheticDeeperNestingType'
+            id            = 'synthetic-1'
+            topContainer  = [pscustomobject]@{
+                secretLeafWithOwnShape = [pscustomobject]@{ innerFieldThatMustNeverAppear = $plantedInnerSecret }
+            }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $policy, $syntheticEntry {
+            param($policy, $entry)
+            ConvertTo-PulseTypedPolicyRows -PolicyId 'synthetic-1' -PolicyType 'deviceConfiguration' -Policy $policy -TypeEntry $entry -Assignments @()
+        }
+
+        $result.Rows.Count | Should -Be 2
+        $leafRow = $result.Rows | Where-Object { $_.settingPath -eq 'topContainer/secretLeafWithOwnShape' }
+        $leafRow.redacted | Should -BeTrue
+        $leafRow.value | Should -BeNullOrEmpty
+        ($result.Rows | Where-Object { $_.settingPath -eq 'topContainer/secretLeafWithOwnShape/innerFieldThatMustNeverAppear' }) | Should -BeNullOrEmpty
+        $serialized = $result.Rows | ConvertTo-Json -Depth 10 -Compress
+        $serialized | Should -Not -Match ([regex]::Escape($plantedInnerSecret))
+    }
+
+    It 'RECURSION MECHANISM PROOF: a genuinely NON-Sensitive property nested 3 levels deep walks all the way down to a real leaf row, with a Sensitive leaf at the SAME depth still redacting independently (synthetic, proves depth is not artificially capped at 1 or 2)' {
+        $syntheticEntry = @{
+            Properties = @(
+                @{
+                    Name      = 'level1'
+                    Sensitive = $false
+                    Nested    = @{
+                        Properties = @(
+                            @{
+                                Name      = 'level2'
+                                Sensitive = $false
+                                Nested    = @{
+                                    Properties = @(
+                                        @{ Name = 'level3Plain'; Sensitive = $false }
+                                        @{ Name = 'level3Secret'; Sensitive = $true }
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+            )
+        }
+        $plantedSecret = 'PLANTED-level3-secret-zzz222'
+        $policy = [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.syntheticThreeLevelType'
+            id            = 'synthetic-3level'
+            level1        = [pscustomobject]@{
+                level2 = [pscustomobject]@{
+                    level3Plain  = 'plain-value-42'
+                    level3Secret = $plantedSecret
+                }
+            }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $policy, $syntheticEntry {
+            param($policy, $entry)
+            ConvertTo-PulseTypedPolicyRows -PolicyId 'synthetic-3level' -PolicyType 'deviceConfiguration' -Policy $policy -TypeEntry $entry -Assignments @()
+        }
+
+        # level1 container + level2 container + level3Plain leaf + level3Secret leaf = 4 rows.
+        $result.Rows.Count | Should -Be 4
+
+        $level1Row = $result.Rows | Where-Object { $_.settingPath -eq 'level1' }
+        $level1Row.value | Should -BeNullOrEmpty
+        $level1Row.redacted | Should -BeFalse
+
+        $level2Row = $result.Rows | Where-Object { $_.settingPath -eq 'level1/level2' }
+        $level2Row.value | Should -BeNullOrEmpty
+        $level2Row.redacted | Should -BeFalse
+
+        $plainRow = $result.Rows | Where-Object { $_.settingPath -eq 'level1/level2/level3Plain' }
+        $plainRow.value | Should -Be 'plain-value-42'
+        $plainRow.redacted | Should -BeFalse
+
+        $secretRow = $result.Rows | Where-Object { $_.settingPath -eq 'level1/level2/level3Secret' }
+        $secretRow.value | Should -BeNullOrEmpty
+        $secretRow.redacted | Should -BeTrue
+
+        $serialized = $result.Rows | ConvertTo-Json -Depth 10 -Compress
+        $serialized | Should -Not -Match ([regex]::Escape($plantedSecret))
+    }
+
     # --- SHAPE NEUTRALITY (task-2.3-review I1 fix): matches T2.2's own standard exactly -
     # EVERY typed fixture family, through BOTH -AsHashtable and PSObject materializations,
     # not just the one token flat-property case the original T2.3 delivery covered. -------

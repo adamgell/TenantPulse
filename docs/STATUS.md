@@ -147,6 +147,21 @@ conflict detection, all in one run.
   regardless of its internal shape - confirmed by `redactedSecretCount` 8 for
   `deviceConfiguration`, exactly matching the 8 affected policies), but the module cannot
   currently decompose that nested object into individual settings. Flagged for Phase 3.
+  **RESOLVED T3.4 (Part C)**: root-caused first - the "deeper nesting" is this module's OWN
+  collection-time redaction marker (`{redacted:true}`, `Protect-PulseTypedPolicySensitivePayload`)
+  replacing `value` before the typed-policy expansion ever reads it back, not a Graph-native
+  shape variance; `scratch/live-27/snapshot/datasets/deviceConfigurations.json` (still
+  in-repo) is the exact evidentiary artifact, all 8 `windows10CustomConfiguration` policies
+  present at that capture, 8/8. `TypedPolicyMaps.psd1`'s `Nested` schema is no longer capped
+  at one level (`ConvertTo-PulseTypedPolicyRows.ps1`'s walk is now genuinely recursive,
+  arbitrary depth); `omaSettings.value` now carries a `Nested` description of that real
+  2-level shape - and `value` keeps `Sensitive = $true`, completely unchanged, so the
+  existing unconditional wholesale-redaction behavior for a real, live secret is untouched.
+  "Sensitive always wins, at every depth" is the closing invariant, proven (not merely
+  asserted) by dedicated regression tests in `TypedPolicyWalk.Tests.ps1` (a golden fixture
+  sanitized from the exact live-27 evidence, plus two synthetic mechanism-proof tests) and
+  `ProtectTypedPolicySensitivePayload.Tests.ps1` (the raw-dataset redaction pass, unchanged
+  code, proven still correct against an object-shaped raw `value`).
 
 **Live-gate surprises, fixed with regression tests (first full-expansion live run, as
 expected)**:

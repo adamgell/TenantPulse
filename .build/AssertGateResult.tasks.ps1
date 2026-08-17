@@ -389,7 +389,20 @@
 # locations bumped together in the same commit as these test changes, per the ratchet's own
 # rule. A DROPPING total is expected and correct here, not a regression - see this task's
 # own report for the full retired-test inventory.
-$script:tenantPulseGateMinimumTests = 1816
+#
+# 1816 -> 1822 (Task 3.4 Part C, TypedPolicyMaps deeper-nesting gap resolved): +6 -
+# TypedPolicyWalk.Tests.ps1's 3 new Its (GOLDEN fixture sanitized from the real live-27
+# deeper-nesting evidence; a synthetic "Sensitive always wins over its own Nested
+# description" proof; a synthetic 3-level recursion mechanism proof), 1 new It in
+# ProtectTypedPolicySensitivePayload.Tests.ps1 (the raw-redaction pass still correctly
+# wholesale-redacts an object-shaped `value`, unchanged code, proven against the new map
+# shape), plus 2 discovery-time SecretScan.tests.ps1 per-file cases (secret-scan +
+# control-byte check) the new
+# tests/Fixtures/TypedPolicy/deviceConfiguration-windows10Custom-deeperNesting.json fixture
+# adds automatically. 1822 is the real, measured `./build.ps1 -Tasks build,test` total for
+# this commit; both tracking locations bumped together in the same commit as these test
+# changes, per the ratchet's own rule.
+$script:tenantPulseGateMinimumTests = 1822
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

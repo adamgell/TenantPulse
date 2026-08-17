@@ -114,6 +114,42 @@ Describe 'Protect-PulseTypedPolicySensitivePayload' {
         $result[0].omaSettings[0].value.redacted | Should -BeTrue
         ($result[0] | ConvertTo-Json -Depth 10 -Compress) | Should -Not -Match ([regex]::Escape($plantedSecret))
     }
+
+    # Part C, T3.4 (deeper-nesting map schema change): TypedPolicyMaps.psd1's own
+    # windows10CustomConfiguration.omaSettings.value entry now ALSO carries a Nested
+    # description of its real observed 2-level shape (a `redacted` marker property) -
+    # this test proves that schema addition did not weaken THIS pass's own (unchanged)
+    # one-level Sensitive-name redaction: a raw `value` that is ALREADY an object (matching
+    # the real live-27 evidence, and also what an un-collected, genuinely secret Graph
+    # value would never legitimately look like) still redacts wholesale to a single
+    # {redacted:true} marker, not walked into or double-wrapped.
+    It 'a raw omaSettings[].value that is ITSELF an object (matching the real live-confirmed deeper-nesting shape) still redacts wholesale via this pass''s unchanged one-level logic' {
+        $plantedInnerField = 'PLANTED-already-object-shaped-value'
+        $row = [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.windows10CustomConfiguration'
+            id            = 'c5'
+            omaSettings   = @(
+                [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.omaSettingBoolean'
+                    omaUri        = './x'
+                    value         = [pscustomobject]@{ someInnerField = $plantedInnerField }
+                }
+            )
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $row, $script:typedPolicyMaps {
+            param($row, $maps)
+            Protect-PulseTypedPolicySensitivePayload -Data @($row) -DatasetName 'deviceConfigurations' -TypedPolicyMaps $maps
+        }
+
+        $result[0].omaSettings[0].value.redacted | Should -BeTrue
+        # The wholesale marker replaces the ENTIRE object - no trace of its own inner shape
+        # (someInnerField) survives, proving this pass did not try to walk into value's own
+        # newly-added Nested description (it doesn't need to - Sensitive already redacted
+        # the whole container before any such walk would matter).
+        ($result[0].omaSettings[0].value.PSObject.Properties.Name) | Should -Be @('redacted')
+        ($result[0] | ConvertTo-Json -Depth 10 -Compress) | Should -Not -Match ([regex]::Escape($plantedInnerField))
+    }
 }
 
 Describe 'Protect-PulseTypedPolicyRow' {

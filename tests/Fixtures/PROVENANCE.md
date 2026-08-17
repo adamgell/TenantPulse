@@ -57,3 +57,4 @@ or a third-party source without attribution. One line per fixture file.
 - `tests/Fixtures/TypedPolicy/deviceConfiguration-windows10Custom.json` — sanitized(ivy24 scratch/live-011)
 - `tests/Fixtures/TypedPolicy/deviceConfiguration-windowsUpdateForBusiness.json` — sanitized(ivy24 scratch/live-011)
 - `tests/Fixtures/TypedPolicy/deviceConfiguration-sharedPC.json` — sanitized(ivy24 scratch/live-011)
+- `tests/Fixtures/TypedPolicy/deviceConfiguration-windows10Custom-deeperNesting.json` — sanitized(ivy24 scratch/live-27)

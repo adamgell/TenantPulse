@@ -25,12 +25,23 @@
                 }
             }
         }
-    `Nested` is exactly ONE level deep (Nested.Properties entries do not themselves carry a
-    further `Nested` key in this task's maps) - ConvertTo-PulseTypedPolicyRows enforces this
-    structurally; see that file's own docstring. A `Nested` property whose raw value is an
-    ARRAY is walked per-element (matches windows10CustomConfiguration.omaSettings, an
-    array of polymorphic omaSetting objects); a `Nested` property whose raw value is a
-    single OBJECT is walked once, directly.
+    `Nested` supports RECURSIVE depth (Part C/T3.4 extension - was "exactly ONE level" until
+    this task; a Nested.Properties entry MAY now itself carry a further `Nested` key,
+    walked by ConvertTo-PulseTypedPolicyRows/Protect-PulseTypedPolicySensitivePayload
+    exactly like a top-level property - see those files' own docstrings for the full walk
+    rule). A `Nested` property whose raw value is an ARRAY is walked per-element (matches
+    windows10CustomConfiguration.omaSettings, an array of polymorphic omaSetting objects);
+    a `Nested` property whose raw value is a single OBJECT is walked once, directly.
+
+    SENSITIVE ALWAYS WINS, AT EVERY DEPTH (the discipline that makes unbounded depth safe
+    to allow): a property spec with Sensitive=$true redacts wholesale the INSTANT it is
+    reached, regardless of whether it ALSO carries its own `Nested` key describing what is
+    inside it - that Nested description, if present on a Sensitive property, is schema-
+    legal but is documentation only, never walked. This is why windows10CustomConfiguration's
+    `omaSettings.value` below can now carry a `Nested` description of its own real,
+    live-confirmed 2-level shape (see that entry's own comment) WITHOUT weakening its
+    existing unconditional redaction in the slightest - proven by a dedicated regression
+    test (TypedPolicyWalk.Tests.ps1), not merely asserted here.
 
     EXACT-MATCH DISPATCH (T2.2's hard lesson, carried forward unconditionally): a policy's
     own `@odata.type` is looked up in the relevant policyType sub-map as an EXACT,
@@ -210,6 +221,33 @@
         # REAL, exhaustive capture (scratch/live-011/snapshot/datasets/deviceConfigurations.json).
         # omaSettings is arbitrary/unstructured - see this file's top docstring for why its
         # own `value` is flagged Sensitive fail-closed.
+        #
+        # DEEPER-NESTING GAP (deferred F3, T2.7 live gate, docs/STATUS.md) - RESOLVED T3.4:
+        # the T2.7 live gate against Ivy24 confirmed all 8 real windows10CustomConfiguration
+        # policies present at capture time each carry exactly one omaSettings element whose
+        # `value` is itself an OBJECT, one level past what this map's Nested schema could
+        # describe at the time (scratch/live-27/snapshot/datasets/deviceConfigurations.json,
+        # still in-repo, is the exact evidentiary artifact - all 8 windows10CustomConfiguration
+        # policies in that capture, 8/8). Root cause, confirmed by reading the collection
+        # path: this is NOT a Graph-native shape variance - it is this module's OWN
+        # collection-time redaction marker (Protect-PulseTypedPolicySensitivePayload,
+        # Invoke-PulseCollection.ps1, called BEFORE Write-PulseDataset ever persists this
+        # dataset) replacing `value` with `{ redacted: true }` because `value` is declared
+        # Sensitive below - i.e. the "deeper nesting" observed live is this module's own
+        # safe output shape for a value it already correctly protected, not an unclassified
+        # secret leaking through. `value` keeps Sensitive=$true here, completely UNCHANGED -
+        # the fail-closed redaction behavior for a real, live secret (a WiFi PSK/VPN secret/
+        # certificate an admin actually configured) is not touched by this resolution at
+        # all. What changes: the schema can now DESCRIBE that real 2-level shape (Nested
+        # added below, `redacted` marked non-Sensitive since it is this module's own boolean
+        # marker literal, never Graph-sourced secret content - declared by architecture
+        # knowledge, never by name-pattern matching), and ConvertTo-PulseTypedPolicyRows/
+        # Protect-PulseTypedPolicySensitivePayload can now walk to that depth in general -
+        # but per the "Sensitive always wins" rule (this file's own top docstring), `value`
+        # being Sensitive means this Nested description is schema-legal documentation of the
+        # real observed shape, never actually walked - proven, not merely asserted, by
+        # TypedPolicyWalk.Tests.ps1's dedicated regression test against a fixture sanitized
+        # from that exact live-27 evidence.
         '#microsoft.graph.windows10CustomConfiguration' = @{
             Properties = @(
                 @{
@@ -217,7 +255,15 @@
                     Sensitive = $false
                     Nested    = @{
                         Properties = @(
-                            @{ Name = 'value'; Sensitive = $true }
+                            @{
+                                Name      = 'value'
+                                Sensitive = $true
+                                Nested    = @{
+                                    Properties = @(
+                                        @{ Name = 'redacted'; Sensitive = $false }
+                                    )
+                                }
+                            }
                         )
                     }
                 }

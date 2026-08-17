@@ -51,12 +51,28 @@
     property this map does not even list - is copied through completely unchanged; this is
     a surgical, map-driven redaction, not a blanket "wipe everything" pass.
 
-    ONE LEVEL OF NESTING ONLY (mirrors ConvertTo-PulseTypedPolicyRows.ps1's own Nested
-    contract exactly - TypedPolicyMaps.psd1's schema does not describe anything deeper): a
-    `Nested` property's raw value is walked once, per-element if it is an array
-    (omaSettings) or once directly if it is a single object (installationSchedule), and
-    only the Nested.Properties entries flagged Sensitive are redacted within it - the
-    Nested container itself, and every non-Sensitive nested property, is left untouched.
+    ONE LEVEL OF NESTING, BY CONSTRUCTION - STILL CORRECT AND SAFE AT ANY DEPTH THE MAP NOW
+    DESCRIBES (Part C/T3.4: TypedPolicyMaps.psd1's schema no longer caps Nested at one
+    level - see that file's own docstring for the "Sensitive always wins, at every depth"
+    discipline this function's UNCHANGED behavior below relies on): a `Nested` property's
+    raw value is walked once, per-element if it is an array (omaSettings) or once directly
+    if it is a single object (installationSchedule), and only the Nested.Properties entries
+    flagged Sensitive are redacted within it - the Nested container itself, and every
+    non-Sensitive nested property, is left untouched. This function's OWN code did not need
+    to change when the map schema grew a second level: a Nested.Properties entry that is
+    itself Sensitive (windows10CustomConfiguration's `omaSettings.value`, which now also
+    carries its own `Nested` description of the real observed `{redacted:true}` shape - see
+    TypedPolicyMaps.psd1's own comment there) is still redacted WHOLESALE by this function's
+    existing one-level Sensitive-name check, exactly as before Part C - the redaction
+    happens before anything would ever need to look at that property's own deeper Nested
+    key, so there is nothing new for this pass to walk into for the one real case the map
+    actually declares. A FUTURE map entry that needed a non-Sensitive property to
+    decompose two levels deep would require extending this function too (only
+    ConvertTo-PulseTypedPolicyRows.ps1's row-emission walk gained genuine recursive
+    capability in Part C - this raw-redaction pass did not, since it had no live-confirmed
+    case requiring it); flagged here, honestly, as the boundary this fix did NOT need to
+    cross, not implied to be more general than it is - matching this file's own established
+    "honest boundary" documentation style (see the DATASET SCOPE section above).
 #>
 
 # DATASET -> policyType MAP (see this file's own DATASET SCOPE docstring section for why

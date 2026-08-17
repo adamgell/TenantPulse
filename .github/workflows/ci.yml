@@ -655,7 +655,14 @@ jobs:
           # converted onto the sequential call every other test in its file already uses.
           # See .build/AssertGateResult.tasks.ps1's own accounting for the full retirement
           # note - a DROPPING total here is expected and correct, not a regression.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1816 -AllowedSkips $allowedSkips -AllowNotRun 1
+          #
+          # 1816 -> 1822 (Task 3.4 Part C, TypedPolicyMaps deeper-nesting gap resolved): +6 -
+          # 3 new TypedPolicyWalk.Tests.ps1 Its (real deeper-nesting GOLDEN fixture,
+          # Sensitive-always-wins synthetic proof, 3-level recursion mechanism proof), 1 new
+          # ProtectTypedPolicySensitivePayload.Tests.ps1 It, plus 2 discovery-time
+          # SecretScan.tests.ps1 per-file cases the new deeper-nesting fixture adds
+          # automatically. See .build/AssertGateResult.tasks.ps1's own accounting.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1822 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
