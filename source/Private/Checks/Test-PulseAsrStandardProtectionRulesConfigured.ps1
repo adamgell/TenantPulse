@@ -82,6 +82,13 @@
     ONLY 3 OF ~19 ASR RULES (this check's own research entry, carried through
     unconditionally): this is intentionally a floor, not full ASR coverage - Consulting
     text says so explicitly, matching the research entry's own Notes.
+
+    EVIDENCE (Phase 3 whole-phase review, catalog-coherence finding I4): every status
+    path (Pass/Warn/Fail) now attaches one evidence row per rule, Identity =
+    settingDefinitionId (unique per rule, no collision risk), carrying that rule's own
+    presence/assignment/redaction counts summed across families from
+    Resolve-PulseSettingPresenceCriterion.ps1's Entry. The presence index has NO policy
+    names to offer - this evidence honestly surfaces counts only.
 #>
 
 function Test-PulseAsrStandardProtectionRulesConfigured {
@@ -135,6 +142,12 @@ function Test-PulseAsrStandardProtectionRulesConfigured {
     $totalUnknownAssignmentPolicyCount = 0
     $anyRedactedAssignedOnUnsatisfied = $false
     $anySatisfiedButUnassigned = $false
+    # PER-RULE EVIDENCE (Phase 3 whole-phase review, catalog-coherence finding I4): the
+    # presence-index Entry never carries POLICY NAMES (keyed by definitionId/family, not
+    # by policy) - only presence/assignment/redaction COUNTS, summed across families here.
+    # Identity is the rule's own definitionId, unique per rule by construction (no
+    # collision risk).
+    $evidence = [System.Collections.Generic.List[object]]::new()
 
     foreach ($definitionId in $standardProtectionRules.Keys) {
         # CORPUS-VERIFIED (see this file's own docstring): the satisfying values are the
@@ -151,15 +164,27 @@ function Test-PulseAsrStandardProtectionRulesConfigured {
         $ruleSatisfiedByAssigned = $false
         $ruleSatisfiedButUnassigned = $false
         $ruleRedactedAssigned = $false
+        $ruleSatisfiedAssignedCount = 0
+        $ruleSatisfiedUnassignedCount = 0
+        $ruleRedactedAssignedCount = 0
+        $rulePresent = $false
+        $ruleAnyUnknownAssignment = $false
+        $ruleUnknownAssignmentCount = 0
 
         foreach ($family in $familyNames) {
             $criterion = Resolve-PulseSettingPresenceCriterion -Artifact $artifact -Family $family -DefinitionId $definitionId -IsSatisfyingValue $isBlockOrAudit
+            if ($criterion.Present) { $rulePresent = $true }
             if ($criterion.SatisfiedAssignedPolicyCount -gt 0) { $ruleSatisfiedByAssigned = $true }
             if ($criterion.SatisfiedUnassignedPolicyCount -gt 0) { $ruleSatisfiedButUnassigned = $true }
             if ($criterion.RedactedAssignedPolicyCount -gt 0) { $ruleRedactedAssigned = $true }
+            $ruleSatisfiedAssignedCount += $criterion.SatisfiedAssignedPolicyCount
+            $ruleSatisfiedUnassignedCount += $criterion.SatisfiedUnassignedPolicyCount
+            $ruleRedactedAssignedCount += $criterion.RedactedAssignedPolicyCount
             if ($criterion.AnyUnknownAssignment) {
                 $anyUnknownAssignment = $true
+                $ruleAnyUnknownAssignment = $true
                 $totalUnknownAssignmentPolicyCount += $criterion.UnknownAssignmentPolicyCount
+                $ruleUnknownAssignmentCount += $criterion.UnknownAssignmentPolicyCount
             }
         }
 
@@ -170,6 +195,21 @@ function Test-PulseAsrStandardProtectionRulesConfigured {
             if ($ruleRedactedAssigned) { $anyRedactedAssignedOnUnsatisfied = $true }
             if ($ruleSatisfiedButUnassigned) { $anySatisfiedButUnassigned = $true }
         }
+
+        $evidence.Add(@{
+            Identity = $definitionId
+            Detail   = @{
+                settingDefinitionId             = $definitionId
+                ruleName                         = $standardProtectionRules[$definitionId]
+                present                          = $rulePresent
+                satisfiedAssignedPolicyCount    = $ruleSatisfiedAssignedCount
+                satisfiedUnassignedPolicyCount  = $ruleSatisfiedUnassignedCount
+                redactedAssignedPolicyCount     = $ruleRedactedAssignedCount
+                anyUnknownAssignment            = $ruleAnyUnknownAssignment
+                unknownAssignmentPolicyCount    = $ruleUnknownAssignmentCount
+            }
+            SortKey  = $definitionId
+        })
     }
 
     $unknownDisclosure = if ($anyUnknownAssignment) {
@@ -178,14 +218,14 @@ function Test-PulseAsrStandardProtectionRulesConfigured {
 
     if ($unsatisfiedRules.Count -eq 0) {
         $reason = "${gapDisclosure}All 3 Standard Protection ASR rules (Block abuse of exploited vulnerable signed drivers, Block credential stealing from LSASS, Block persistence through WMI event subscription) are configured to Block or Audit on at least one assigned policy each (union across policies).${unknownDisclosure}"
-        return New-PulseFinding -Status Pass -Reason $reason
+        return New-PulseFinding -Status Pass -Reason $reason -Evidence $evidence.ToArray()
     }
 
     if ($anyRedactedAssignedOnUnsatisfied) {
         $reason = "${gapDisclosure}$($unsatisfiedRules.Count) of 3 Standard Protection ASR rule(s) ($([string]::Join('; ', $unsatisfiedRules))) could not be confirmed - at least one is present on an assigned policy but its value is redacted and could not be read.${unknownDisclosure}"
-        return New-PulseFinding -Status Warn -Reason $reason
+        return New-PulseFinding -Status Warn -Reason $reason -Evidence $evidence.ToArray()
     }
 
     $reason = "${gapDisclosure}$($unsatisfiedRules.Count) of 3 Standard Protection ASR rule(s) are not configured to Block or Audit on any confirmed-assigned policy: $([string]::Join('; ', $unsatisfiedRules)).$(if ($anySatisfiedButUnassigned) { ' At least one of these has a correct value on a policy that could not be confirmed as assigned - an unassigned policy protects nothing.' } else { '' })${unknownDisclosure}"
-    return New-PulseFinding -Status Fail -Reason $reason
+    return New-PulseFinding -Status Fail -Reason $reason -Evidence $evidence.ToArray()
 }

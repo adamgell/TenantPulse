@@ -125,6 +125,11 @@ Describe 'TP.INT.0031 - BitLocker CSP settings present and correct across all Se
 
         $finding.status | Should -Be 'Pass'
         $finding.reason | Should -Match 'Full encryption'
+        # I4 (Phase 3 whole-phase review): every status path now attaches per-family
+        # evidence (setting presence/assignment counts, no policy names).
+        $finding.evidence.Count | Should -Be 3
+        $finding.evidence.identity | Should -Contain 'settingsCatalog'
+        $finding.evidence[0].detail.settingDefinitionId | Should -Be $script:BitlockerChildDefinitionId
     }
 
     It 'Fail: setting not present in any expanded policy at all' {

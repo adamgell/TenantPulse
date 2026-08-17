@@ -107,6 +107,10 @@ Describe 'TP.INT.0016 - Attack Surface Reduction "Standard Protection" baseline 
 
         $finding.status | Should -Be 'Pass'
         $finding.reason | Should -Match 'All 3 Standard Protection ASR rules'
+        # I4 (Phase 3 whole-phase review): every status path now attaches per-rule
+        # evidence (presence/assignment counts, no policy names).
+        $finding.evidence.Count | Should -Be 3
+        $finding.evidence.identity | Should -Contain $script:AsrDefinitionIds[0]
     }
 
     It 'Pass: UNION across policies - rule 1 on policy A, rules 2+3 on policy B, still counts as a combined Pass' {

@@ -66,6 +66,13 @@
         (a satisfying value was found on a DIFFERENT, confirmed-assigned policy, but some
         OTHER policy carrying this same setting has unresolvable assignment status too).
 
+    EVIDENCE (Phase 3 whole-phase review, catalog-coherence finding I4): every status path
+    now attaches one evidence row per family (settingsCatalog/compliance/
+    deviceConfiguration) carrying that family's own presence/assignment/redaction counts
+    from Resolve-PulseSettingPresenceCriterion.ps1's Entry. The presence index is keyed by
+    definitionId/family, never by policy - it has NO policy names to offer - so this
+    evidence honestly surfaces counts only, never a policy identity or name.
+
     PARTIAL SCAN DISCLOSURE (TP.INT.0006 precedent, reused verbatim): whenever
     -Artifact.Gaps is non-empty, the Reason is prefixed with the same
     "PARTIAL SCAN - N family(ies) excluded (...)" text TP.INT.0006 already established,
@@ -136,6 +143,13 @@ function Test-PulseBitlockerCspSettingsPresentAndCorrect {
         AnyUnknownAssignment           = $false
         UnknownAssignmentPolicyCount   = 0
     }
+    # PER-FAMILY EVIDENCE (Phase 3 whole-phase review, catalog-coherence finding I4): the
+    # presence-index Entry Resolve-PulseSettingPresenceCriterion.ps1 exposes never carries
+    # POLICY NAMES (the index is keyed by definitionId/family, not by policy) - only
+    # presence/assignment/redaction COUNTS per family. Evidence below honestly attaches
+    # what the index actually offers; it does not (and cannot) name which policy carries
+    # the setting.
+    $evidence = [System.Collections.Generic.List[object]]::new()
     foreach ($family in $familyNames) {
         $criterion = Resolve-PulseSettingPresenceCriterion -Artifact $artifact -Family $family `
             -DefinitionId $script:PulseBitlockerSystemDrivesEncryptionTypeDefinitionId -IsSatisfyingValue $isFullEncryption
@@ -145,6 +159,21 @@ function Test-PulseBitlockerCspSettingsPresentAndCorrect {
         $combined.RedactedAssignedPolicyCount += $criterion.RedactedAssignedPolicyCount
         if ($criterion.AnyUnknownAssignment) { $combined.AnyUnknownAssignment = $true }
         $combined.UnknownAssignmentPolicyCount += $criterion.UnknownAssignmentPolicyCount
+
+        $evidence.Add(@{
+            Identity = $family
+            Detail   = @{
+                family                          = $family
+                settingDefinitionId             = $script:PulseBitlockerSystemDrivesEncryptionTypeDefinitionId
+                present                         = $criterion.Present
+                satisfiedAssignedPolicyCount    = $criterion.SatisfiedAssignedPolicyCount
+                satisfiedUnassignedPolicyCount  = $criterion.SatisfiedUnassignedPolicyCount
+                redactedAssignedPolicyCount     = $criterion.RedactedAssignedPolicyCount
+                anyUnknownAssignment            = $criterion.AnyUnknownAssignment
+                unknownAssignmentPolicyCount    = $criterion.UnknownAssignmentPolicyCount
+            }
+            SortKey  = $family
+        })
     }
 
     $unknownDisclosure = if ($combined.AnyUnknownAssignment) {
@@ -153,24 +182,24 @@ function Test-PulseBitlockerCspSettingsPresentAndCorrect {
 
     if ($combined.SatisfiedAssignedPolicyCount -gt 0) {
         $reason = "${gapDisclosure}The BitLocker CSP system-drive encryption type resolves to Full encryption on at least one assigned Settings Catalog policy ($($combined.SatisfiedAssignedPolicyCount) polic(ies)).${unknownDisclosure}"
-        return New-PulseFinding -Status Pass -Reason $reason
+        return New-PulseFinding -Status Pass -Reason $reason -Evidence $evidence.ToArray()
     }
 
     if ($combined.RedactedAssignedPolicyCount -gt 0) {
         $reason = "${gapDisclosure}The BitLocker CSP system-drive encryption type is configured on $($combined.RedactedAssignedPolicyCount) assigned policy(ies), but its value is redacted (Sensitive/secret-classified) and could not be read - presence is confirmed, correctness is not.${unknownDisclosure}"
-        return New-PulseFinding -Status Warn -Reason $reason
+        return New-PulseFinding -Status Warn -Reason $reason -Evidence $evidence.ToArray()
     }
 
     if ($combined.SatisfiedUnassignedPolicyCount -gt 0) {
         $reason = "${gapDisclosure}The BitLocker CSP system-drive encryption type resolves to Full encryption on $($combined.SatisfiedUnassignedPolicyCount) polic(ies), but none of them could be confirmed as assigned to any device or user - an unassigned policy protects nothing.${unknownDisclosure}"
-        return New-PulseFinding -Status Fail -Reason $reason
+        return New-PulseFinding -Status Fail -Reason $reason -Evidence $evidence.ToArray()
     }
 
     if (-not $combined.Present) {
         $reason = "${gapDisclosure}The BitLocker CSP system-drive encryption type setting was not found in any expanded Settings Catalog, compliance, or device configuration policy for this snapshot.${unknownDisclosure}"
-        return New-PulseFinding -Status Fail -Reason $reason
+        return New-PulseFinding -Status Fail -Reason $reason -Evidence $evidence.ToArray()
     }
 
     $reason = "${gapDisclosure}The BitLocker CSP system-drive encryption type is configured somewhere, but never resolves to Full encryption on any policy this module could evaluate.${unknownDisclosure}"
-    return New-PulseFinding -Status Fail -Reason $reason
+    return New-PulseFinding -Status Fail -Reason $reason -Evidence $evidence.ToArray()
 }
