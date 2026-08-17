@@ -169,11 +169,18 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         # GraphKit 0.1.1 migration (Task 1.11): the six datasets this map used to carry
         # Pending = $true for (securityDefaultsPolicy, directoryRoleAssignments,
         # directoryRoleDefinitions, organization, organizationMdmAuthority, entraDevices)
-        # shipped and Pending was dropped from all of them - see DatasetMap.psd1. Zero
-        # Pending entries currently exist, so this -ForEach is legitimately empty; the
+        # shipped and Pending was dropped from all of them - see DatasetMap.psd1.
+        # STALE COMMENT FIXED (2026-08-16): this used to say "Zero Pending entries
+        # currently exist" - Task 3.2's own Intune-check batch added 7 new Pending
+        # datasets since (operationApprovalPolicies,
+        # dataProcessorServiceForWindowsFeaturesOnboarding, intuneBrandingProfiles,
+        # windowsFeatureUpdateProfiles, intuneRbacGroupProtection,
+        # endpointSecurityDiskEncryptionPolicies, endpointSecurityLapsPolicies - see
+        # DatasetMap.psd1 for the current count), so $script:pendingDatasetCases is no
+        # longer empty and this -ForEach now runs real per-dataset assertions. The
         # mechanism itself (and its own synthetic-fixture unit coverage in
         # Get-PulseTenantSnapshot.Tests.ps1's Invoke-PulseCollection Describe block) stays
-        # in place for the next descriptor that ships Pending.
+        # in place for whichever of these ships next, and for the next batch after that.
         It "Pending dataset '<Name>' (<Type>/<Op>) declares ExpectedThrottleClass='Read' and ExpectedReplayPolicy='Safe'" -ForEach $script:pendingDatasetCases -AllowNullOrEmptyForEach {
             # No live descriptor exists to resolve - GraphKit 0.1.0 genuinely does not have
             # this Type/Operation pair yet. Confirm that (rather than silently trusting the
