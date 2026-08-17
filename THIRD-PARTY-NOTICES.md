@@ -35,6 +35,11 @@ naming exactly this).
   - `source/Data/Checks/TP.INT.0011.psd1` ("Default branding profile customized",
     Task 3.2) - adapts the check logic behind Maester's `MT.1101`
     (`Test-MtTenantCustomization`).
+  - `source/Data/Checks/TP.INT.0012.psd1` ("Windows Feature Update policy avoids
+    end-of-support builds", Task 3.2) - adapts the check logic behind Maester's `MT.1102`
+    (`Test-MtFeatureUpdatePolicy`), adapted for TenantPulse's own determinism model (a
+    snapshot-time cutoff rather than live wall-clock `Get-Date`) - see
+    `source/Private/Checks/Test-PulseFeatureUpdatePolicyAvoidsEos.ps1`'s own docstring.
 
   Each descriptor's own `Origin` field (`Project`/`Id`/`License`) records this at the point
   of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as
