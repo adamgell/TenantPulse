@@ -32,6 +32,9 @@ naming exactly this).
   - `source/Data/Checks/TP.INT.0009.psd1` ("Windows diagnostic data processor
     configuration enabled", Task 3.2) - adapts the check logic behind Maester's `MT.1099`
     (`Test-MtWindowsDataProcessor`).
+  - `source/Data/Checks/TP.INT.0011.psd1` ("Default branding profile customized",
+    Task 3.2) - adapts the check logic behind Maester's `MT.1101`
+    (`Test-MtTenantCustomization`).
 
   Each descriptor's own `Origin` field (`Project`/`Id`/`License`) records this at the point
   of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as
