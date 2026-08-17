@@ -181,6 +181,24 @@ function Invoke-PulseEvaluation {
     foreach ($key in $Context.Keys) { $effectiveContext[$key] = $Context[$key] }
     $effectiveContext.SnapshotCreatedUtc = $manifest.createdUtc
     $effectiveContext.EvaluationCutoffBase = $manifest.createdUtc
+
+    # STORE ACCESS FOR ARTIFACT-READING RULES (Task 3.1): a Function rule only ever
+    # receives $Datasets (Data.Datasets-declared raw collections) - the standing
+    # "checks consume datasets/compact artifacts only" contract never gave a rule any
+    # way to reach a COMPACT, WHOLE-DOCUMENT expansion artifact (e.g. expanded/
+    # conflicts.json, T2.6) that is not itself a DatasetMap-registered Graph collection.
+    # TP.INT.0006 is the first check that needs this - it reads the conflicts artifact
+    # via a manifest.expansions lookup, not manifest.datasets. Rather than invent a new
+    # per-artifact plumbing mechanism, $Store is threaded through $Context exactly like
+    # SnapshotCreatedUtc/EvaluationCutoffBase above: unconditional here, but OPT-IN at
+    # the rule-function call site (Invoke-PulseCheckEvaluation only passes -Context to a
+    # rule function that itself declares a -Context parameter), so every pre-existing
+    # rule function keeps working completely unchanged. A rule that reads
+    # $Context.Store must still only ever call read-only reader functions
+    # (Get-PulseSnapshotManifest, Get-PulseConflictArtifact, Get-PulseReferenceData,
+    # Read-PulseDataset) against it - nothing about this handoff grants write access
+    # rules did not already have some other way to reach.
+    $effectiveContext.Store = $Store
     $Context = $effectiveContext
 
     # Used only to satisfy Protect-PulseReason's mandatory -Pseudonym parameter (see the

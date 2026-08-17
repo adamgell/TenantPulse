@@ -63,15 +63,16 @@ Describe 'Import-PulseCheckCatalog' {
         @($result).Count | Should -Be 0
     }
 
-    It 'loads and validates the module''s own default catalog path cleanly (Task 1.9 seed checks, self-check)' {
+    It 'loads and validates the module''s own default catalog path cleanly (Task 1.9 seed checks + Task 3.1''s TP.INT.0006, self-check)' {
         $result = InModuleScope TenantPulse {
             Import-PulseCheckCatalog
         }
 
-        @($result).Count | Should -Be 10
+        @($result).Count | Should -Be 11
         $ids = @($result | ForEach-Object { $_.Id })
         $ids | Should -Contain 'TP.ENT.0001'
         $ids | Should -Contain 'TP.INT.0005'
+        $ids | Should -Contain 'TP.INT.0006'
 
         # Ordinal-sorted by Id regardless of on-disk filename order (same contract the
         # 'valid' fixture test above already exercises).

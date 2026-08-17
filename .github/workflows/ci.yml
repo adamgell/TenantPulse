@@ -597,12 +597,15 @@ jobs:
           # driver-level -MaxParallel regression test [+1, 1091->1092] - see that file's
           # own comments for the itemized detail). Set to the REAL total (1092), matching
           # the module's own post-fix Pester run - the gate IS the count.
+          # 1092 -> 1131 (Task 3.1, Maester shim + TP.INT.0006 conflict check): see
+          # .build/AssertGateResult.tasks.ps1's own accounting for the itemized +39, which
+          # must be bumped together with this value.
           # AllowedSkips is platform-aware: exactly two tests skip BY DESIGN on Windows
           # (Identity key-file 0600 / key-dir 0700 POSIX-permission tests, $IsWindows-gated
           # since Phase 1) - first exercised when the matrix first went green-capable.
           # Everywhere else the zero-skip rule stands.
           $allowedSkips = if ($IsWindows) { 2 } else { 0 }
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1092 -AllowedSkips $allowedSkips -AllowNotRun 1
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1131 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

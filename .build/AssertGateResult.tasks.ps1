@@ -152,7 +152,14 @@
 # same review round, per the live-gate parallel-slowness finding - see that file's own
 # docstring), asserting byte-identity vs -Sequential over 24 captured-payload policies.
 # Set to the REAL total (1092), matching the module's own post-fix Pester run.
-$script:tenantPulseGateMinimumTests = 1092
+# 1092 -> 1131 (Task 3.1): +39 - the Maester shim's own suite (Convert-PulseMaesterAdapter.ps1,
+# 10 tests), Get-PulseConflictArtifact's own suite (6 tests), TP.INT.0006's own
+# fixture-driven suite (9 tests: catalog self-check, Pass/Warn/Fail/NotApplicable, evidence
+# shape, determinism), plus discovery picking up the remainder via the structural QA suites
+# that enumerate every shipped source file (module.tests.ps1/SecretScan.tests.ps1) and the
+# CheckCatalog.Tests.ps1 self-check bump from 10 to 11 seed+T3.1 checks. Set to the REAL
+# total (1131), matching the module's own post-fix Pester run.
+$script:tenantPulseGateMinimumTests = 1131
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
