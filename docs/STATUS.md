@@ -288,23 +288,85 @@ architecture gap), `TP.INT.0017`/`TP.INT.0018` (corpus + docs-schema gaps). Suit
 1929/1929 tests, 0 failed, 0 errors (`./build.ps1 -Tasks build,test`, re-verified for this
 task).
 
-### Task 3.6 - Phase 3 live gate: NOT completed live-tenant-side
+### Task 3.6 - Phase 3 live gate: EXECUTED
 
 This task's brief called for a full live assessment of all 51 checks against the Ivy24 lab
 tenant (fresh snapshot, full evaluation, reconciliation, `-FromSnapshot` byte-identity, a
 secret/PII sweep, and a scripted license/attribution audit), mirroring the T4.5 Phase 4 gate
-pattern (`docs/gates/phase4-ivy24-findings.redacted.json`, 28 checks). **The live-tenant
-portion did not run in this pass.** While preparing the run, the environment's own permission
-system denied a read of `~/.graphkit/profiles.json` (checking the `ivy24` profile's shape
-before invoking it) with an explicit "let the user decide" instruction; the agent stopped
-there rather than working around the denial, per this project's own operating rules. This is
-recorded here as an honest, explicit pending item rather than a run that didn't happen being
-implied to have happened - see the task's own report for the full timeline. What a live Task
-3.6 gate still needs, whenever it runs: all 51 checks producing a real status or an honest
-`NotApplicable` (with `TP.INT.0006` expected to `Fail` with real conflict evidence per the
-Phase 2 baseline), reconciliation against the 781-policy Phase 2 baseline (tenant may have
-drifted), the byte-identity check, the secret/PII sweep, and the scripted license/attribution
-audit (item 5 of the brief - see below for what could be done without live data).
+pattern (`docs/gates/phase4-ivy24-findings.redacted.json`, 28 checks). The permission-boundary
+block recorded in an earlier draft of this section (a denied read of
+`~/.graphkit/profiles.json`) was cleared by the operator; the live-tenant portion then ran to
+completion, attended, on 2026-08-17.
+
+**Round A (10 commits, whole-phase review fix round, `4aa3db9`..`5836106`):** the review pass
+immediately preceding the live gate, closing every finding the review turned up before the
+gate ran against real tenant data:
+
+- `4aa3db9` - the permanent license/attribution audit itself (`tests/QA/LicenseAttributionAudit.tests.ps1`,
+  6 standing tests: Origin<->THIRD-PARTY-NOTICES reconciliation both directions, Maester MIT
+  notice verbatim check, CIS cite-only prose sweep, authority-quote attribution) plus this same
+  Phase 3 STATUS catch-up in its earlier form; fixed the TP.INT.0016 notices gap the audit
+  itself caught.
+- `4450995` (I1) - TP.INT.0016 unconditional redaction-Warn honesty, matching TP.INT.0031's
+  existing behavior.
+- `806f78d` (I2) - ordinal evidence-identity fallback for TP.INT.0020/0021/0023/0026/0028 (an
+  id-less row's fallback identity is now a per-row ordinal, not a field that can collide across
+  rows sharing the same value).
+- `d8045e1` (I3) - TP.INT.0020 severity demoted Critical -> High, Impact High -> Medium.
+- `0e17965` (I4) - honest per-row evidence on every status path for TP.INT.0016/0031.
+- `906b50f` (M1) - corroborating Pass-path evidence for TP.INT.0020/0021/0028 (never leave a
+  Pass evidence-empty when real per-row data already exists to corroborate it with).
+- `65673f7` (M2/M3/M4) - three documentation-only review notes for TP.INT.0013/0014/0029.
+- `d3cee3c` (finding 7) - structural fail-closed fallback in the collector for unmapped
+  `@odata.type` rows.
+- `1ed6e80` (finding 8) - SecretScan's own explicit file list widened to cover missing root
+  files.
+- `5836106` (finding 9) - README artifact-sharing statement.
+
+License/attribution audit: **shipped** (`4aa3db9`, `tests/QA/LicenseAttributionAudit.tests.ps1`,
+6 permanent suite tests, part of the standing gate from that commit onward).
+
+**LIVE GATE: EXECUTED, 2026-08-17, attended, against the Ivy24 lab tenant.** Results across all
+51 checks: **13 Pass / 16 Fail / 21 NotApplicable / 1 Error.** Highlights:
+
+- **TP.INT.0006** (settings-catalog conflict detection) reproduced the Phase 2 conflict
+  baseline **exactly**: 165 conflicts (0 proven / 34 possible / 123 unknown / 8 none) -
+  byte-for-byte the same distribution Phase 2's own gate recorded, confirming the conflict-
+  detection pipeline is stable across everything Phase 3 built on top of it.
+- **Policy count**: 781 policies collected, an exact match against the Phase 2 baseline - no
+  tenant drift between the two gate runs.
+- **`-FromSnapshot` byte-identity replay**: exact - re-evaluating the same snapshot reproduced
+  byte-identical `tenantpulse-findings.json` output, confirming
+  `ConvertTo-PulseCanonicalJson`'s determinism guarantee holds against a real, full-size
+  51-check live document, not just fixture-scale test data.
+- **Two live surprises**, both closed by this repo's own Phase 3 closing fix series (see that
+  series' own commits, immediately following this gate on `main`):
+  1. **TP.INT.0028** (Enrollment Status Page blocking) - the live
+     `DeviceEnrollmentConfiguration`/List v1.0 endpoint returns TRIMMED
+     `windows10EnrollmentCompletionPageConfiguration` rows (9 properties, no
+     `allowDeviceUseOnInstallFailure`/`showInstallationProgress`), which the pre-fix check
+     treated as an unconditional `Error` rather than the benign List-endpoint projection
+     limitation it actually is - fixed to `NotApplicable` when the property is absent from
+     every ESP row, still `Error` for a genuine mixed-absence anomaly.
+  2. **Evidence-Detail redaction gap (Critical-class)** - a real Apple ID UPN surfaced raw in
+     rendered findings evidence Detail under `-Redact`, via TP.INT.0020/0021's
+     `appleIdentifier`/`organizationName` detail keys - `-Redact` only ever substituted
+     `evidence.identity`/`evidence.sortKey`, never anything inside `Detail`. Fixed via a
+     minimal contract extension (`RedactDetailKeys` on an evidence entry) and a full audit of
+     every check's evidence construction, which found one further unmarked instance
+     (TP.INT.0019's `appleIdentifier`) beyond the two the live run surfaced directly.
+
+The secret/PII sweep against this gate's own run found no other raw identifying value under
+`-Redact` beyond the two surprises above. **Honest note on re-verification:** the closing fix
+series that fixed both surprises intended to re-run this gate's `-FromSnapshot` output through
+the fixed module (no new Graph calls) as a final proof the fixes actually close the leak
+end-to-end - the local snapshot that live gate produced (`output/live-gate-p3-full`,
+gitignored by design) did not survive between sessions, so that specific re-verification step
+could not run and is not claimed here. Both fixes carry their own fixture-level regression
+coverage (see the closing fix series' own commits) proving the mechanism in isolation; only the
+against-the-real-live-payload re-check is the part still outstanding, blocked on a fresh
+snapshot (either a new live collection, or recovering the original) rather than on any more
+code.
 
 ## Phase 4: core Entra catalog (complete, Task 4.5 phase gate)
 
