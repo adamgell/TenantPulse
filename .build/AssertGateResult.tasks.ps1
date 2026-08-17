@@ -414,7 +414,19 @@
 # files plus the new test file itself). 1861 is the real, measured
 # `./build.ps1 -Tasks build,test` total for this commit; both tracking locations bumped
 # together in the same commit as these test changes, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1861
+# 1861 -> 1900 (Task 3.4 Part B, expansion-powered checks TP.INT.0016/0031): +39 - 14 new
+# TP.INT.0016.Tests.ps1 Its (ASR Standard Protection union-across-policies logic,
+# redaction/unknown-assignment honesty, Settings-Catalog-choice-suffix tolerance,
+# determinism) + 11 new TP.INT.0031.Tests.ps1 Its (BitLocker CSP presence+value,
+# assignment-awareness, redaction honesty, PARTIAL SCAN disclosure, determinism), 1 new
+# CheckCatalog.Tests.ps1 catalog-count bump (49 -> 51 across two commits), plus 14
+# discovery-time SecretScan.tests.ps1 per-file cases (secret-scan + control-byte check,
+# x7 new files: Resolve-PulseSettingPresenceCriterion.ps1 (shared honesty-state helper),
+# Test-PulseBitlockerCspSettingsPresentAndCorrect.ps1, Test-PulseAsrStandardProtectionRulesConfigured.ps1,
+# TP.INT.0031.psd1, TP.INT.0016.psd1, and the two new test files). 1900 is the real,
+# measured `./build.ps1 -Tasks build,test` total for this commit; both tracking locations
+# bumped together in the same commit as these test changes, per the ratchet's own rule.
+$script:tenantPulseGateMinimumTests = 1900
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

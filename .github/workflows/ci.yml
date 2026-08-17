@@ -669,7 +669,13 @@ jobs:
           # (Data.Expansions accepts 'settingPresenceIndex'), plus 12 discovery-time
           # SecretScan.tests.ps1 per-file cases (6 new files x 2 checks each). See
           # .build/AssertGateResult.tasks.ps1's own accounting.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1861 -AllowedSkips $allowedSkips -AllowNotRun 1
+          #
+          # 1861 -> 1900 (Task 3.4 Part B, expansion-powered checks TP.INT.0016/0031): +39 -
+          # 14 new TP.INT.0016.Tests.ps1 Its + 11 new TP.INT.0031.Tests.ps1 Its, 1
+          # CheckCatalog.Tests.ps1 catalog-count bump, plus 14 discovery-time
+          # SecretScan.tests.ps1 per-file cases (7 new files x 2 checks each). See
+          # .build/AssertGateResult.tasks.ps1's own accounting.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1900 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
