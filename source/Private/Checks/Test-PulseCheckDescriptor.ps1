@@ -248,13 +248,54 @@ function Test-PulseCheckDescriptor {
         # Unlike Authorities (required-array), Cis is validated only when the key is
         # present at all - most checks carry none, since the Phase 4 research entries
         # this catalog was authored from carry zero CIS mappings (see
-        # docs/research/iha-v2/2026-08-16-cis-benchmarks-licensing.md for why: cite-only,
-        # never bulk-populated ahead of a verified per-check mapping). Each element is a
-        # bare "benchmark name + version, Rec. <id> (<profile>)"-style string - never CIS
-        # recommendation TEXT (title/description/rationale/audit/remediation), which would
-        # pull the MIT-licensed catalog into CIS's incompatible CC BY-NC-SA license.
+        # docs/licensing/cis-cite-only.md, this repo's own vendored licensing summary, for
+        # the full rule and why: cite-only, never bulk-populated ahead of a verified
+        # per-check mapping). Each element is a bare "benchmark name + version, Rec. <id>
+        # (<profile>)" ID-ONLY string - benchmark ID, version, and profile level, and
+        # NOTHING else. This is stricter than "no bulk text": a CIS recommendation's TITLE
+        # is itself CIS's copyrighted expression, not a fact, so titles are excluded here
+        # exactly like Description/Rationale/Audit/Remediation prose - including one would
+        # pull this MIT-licensed catalog into CIS's incompatible CC BY-NC-SA license.
+        # NOT -AllowEmpty (Task 4.5 fix round, NEW-3): the field is optional - a check with
+        # no CIS mapping simply omits the `Cis` key entirely (see the schema doc, source/
+        # Data/Checks/README.md) - but a descriptor that DOES include the key is making an
+        # explicit claim to have one, and `Cis = @()` is a contradiction of that claim, not
+        # a valid "no mapping" spelling. Same "empty is an error, omission is fine" rule
+        # `References.Authorities` already enforces (that field is required, so it cannot
+        # be omitted, but the emptiness rule is the same principle either way).
         if ($references.ContainsKey('Cis')) {
-            Test-PulseStringArrayField -Container $references -Key 'Cis' -FieldPath 'References.Cis' -AllowEmpty | Out-Null
+            $rawCisValues = Test-PulseStringArrayField -Container $references -Key 'Cis' -FieldPath 'References.Cis'
+
+            # FORMAT ENFORCEMENT (merge-review fix, MAJOR-adjacent): the ID-only rule above
+            # was previously prose-only - a check author could still write a real
+            # recommendation TITLE or free-text description into `Cis` and nothing would
+            # catch it before this shipped. Every element must now match the exact
+            # "<Benchmark name> Benchmark v<semver>, Rec. <dotted-id> (<profile level>)"
+            # shape - benchmark name/version/recommendation-id/profile level, structurally
+            # incapable of matching a sentence of prose (no verb phrases, no lowercase-led
+            # narrative text survives this pattern). A string that fails the pattern is
+            # rejected with a message showing the required shape, not merely "invalid".
+            #
+            # $null CHECKED BEFORE @()-WRAPPING, DELIBERATELY (merge-review round-2 fix):
+            # Test-PulseStringArrayField returns $null on a type/emptiness failure (already
+            # reported as its own error above) - @()-wrapping THAT first would turn $null
+            # into a real one-element array containing $null, which then survives the
+            # `$null -ne` gate and reaches -notmatch as an empty string, adding a confusing
+            # SECOND error on top of the real one. Only a genuinely non-null return is
+            # wrapped in @() - required because a single-element array returned through a
+            # PowerShell function's output stream unwraps to a scalar [string] unless
+            # forced back into array shape, and a bare `$cisValues[0]` on that unwrapped
+            # scalar indexes into its CHARACTERS ('C', not the whole string), not its
+            # (nonexistent) array elements - reproduced and fixed during this same round.
+            if ($null -ne $rawCisValues) {
+                $cisValues = @($rawCisValues)
+                $cisPattern = '^CIS [A-Za-z0-9 ]+ Benchmark v\d+\.\d+\.\d+, Rec\. \d+(\.\d+)+ \(E[35] Level [12]\)$'
+                for ($i = 0; $i -lt $cisValues.Count; $i++) {
+                    if ($cisValues[$i] -notmatch $cisPattern) {
+                        $errors.Add("${Label}: References.Cis[$i]: '$($cisValues[$i])' does not match the required ID-only format 'CIS <Benchmark name> Benchmark v<version>, Rec. <id> (<E3|E5> Level <1|2>)' - see docs/licensing/cis-cite-only.md.")
+                    }
+                }
+            }
         }
     }
 

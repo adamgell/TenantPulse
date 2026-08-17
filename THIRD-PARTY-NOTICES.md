@@ -1,9 +1,9 @@
 # Third-Party Notices
 
-TenantPulse depends on third-party software, and two of its Phase 1 checks adapt logic from
-a third-party project. This file lists both and their licenses (post-review fix: an earlier
-draft of this file claimed "no third-party content has been ported into this repository
-yet", which contradicted TP.INT.0001 and TP.INT.0003 - both of which carry a
+TenantPulse depends on third-party software, and several of its checks adapt logic from
+third-party projects. This file lists all of them and their licenses (post-review fix: an
+earlier draft of this file claimed "no third-party content has been ported into this
+repository yet", which contradicted TP.INT.0001 and TP.INT.0003 - both of which carry a
 `Origin = @{ Project = 'Maester'; License = 'MIT' }` field in their own check descriptor
 naming exactly this).
 
@@ -24,7 +24,34 @@ naming exactly this).
   of adaptation - `Get-PulseCheckCatalog` and every findings document surface it as
   provenance on the check itself, not only here.
 
-Maester's MIT license and copyright notice:
+### EIDSCA
+
+- **Project:** [EIDSCA](https://maester.dev/docs/tests/eidsca/) (Entra ID Security Config
+  Analyzer, part of the [Maester](https://github.com/maester365/maester) project - the
+  same upstream project as the Maester adaptations above, distributed under the same MIT
+  license)
+- **License:** MIT
+- **Ported into (Phase 4, Tasks 4.2-4.3):** each check below adapts the check logic behind
+  the named EIDSCA control ID(s), recorded verbatim in the check descriptor's own `Origin`
+  field:
+  - `source/Data/Checks/TP.ENT.0006.psd1` - EIDSCA AF01-AF06 (FIDO2 security key method)
+  - `source/Data/Checks/TP.ENT.0007.psd1` - EIDSCA AG01-AG03 (authentication methods policy general settings)
+  - `source/Data/Checks/TP.ENT.0008.psd1` - EIDSCA AM01-AM04, AM06, AM07, AM09, AM10 (Microsoft Authenticator method)
+  - `source/Data/Checks/TP.ENT.0009.psd1` - EIDSCA AS04 (SMS sign-in method disabled)
+  - `source/Data/Checks/TP.ENT.0010.psd1` - EIDSCA AT01-AT02 (Temporary Access Pass)
+  - `source/Data/Checks/TP.ENT.0011.psd1` - EIDSCA AV01 (Voice call method disabled)
+  - `source/Data/Checks/TP.ENT.0012.psd1` - EIDSCA AP01, AP04-AP10, AP14 (authorization policy defaults)
+  - `source/Data/Checks/TP.ENT.0013.psd1` - EIDSCA CP01, CP03, CP04 (owner/risk-based consent restrictions)
+  - `source/Data/Checks/TP.ENT.0015.psd1` - EIDSCA PR01, PR02, PR03, PR05, PR06 (Password Protection/Smart Lockout)
+  - `source/Data/Checks/TP.ENT.0016.psd1` - EIDSCA ST08-ST09 (guest group ownership/content access)
+
+  Same provenance-surfacing contract as the Maester entries above: each descriptor's own
+  `Origin` field is what `Get-PulseCheckCatalog` and every findings document expose - this
+  file is a discoverable summary of that, not the sole record of it. EIDSCA's own copyright
+  notice and license terms are the same MIT text reproduced immediately below, since EIDSCA
+  ships as part of the Maester repository.
+
+Maester's (and, by the same repository, EIDSCA's) MIT license and copyright notice:
 
 ```
 MIT License

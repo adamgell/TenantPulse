@@ -133,8 +133,9 @@ this branch (`phase4/t4.1-normalization`) against the already-registered `ivy24`
 profile (certificate auth, `~/.graphkit/profiles.json`).
 
 **Coverage: 21/28 assessed (75%)**. The 7 not-assessed checks are all honest `NotApplicable`,
-not errors: `TP.ENT.0012`/`0013`/`0015`/`0016` (the four directorySettings-backed clusters) and
-`TP.ENT.0022`/`0023` (PIM posture, cross-tenant access) are `descriptor-pending: awaiting
+not errors: `TP.ENT.0012` (the `authorizationPolicy`-backed cluster), `TP.ENT.0013`/`0015`/`0016`
+(the three `directorySettings`-backed clusters), and `TP.ENT.0022`/`0023` (PIM posture,
+cross-tenant access) are `descriptor-pending: awaiting
 GraphKit release` - written, tested, cited, just waiting on GraphKit descriptors this catalog's
 research already scoped. `TP.ENT.0001` (Security Defaults) is a genuine, correct
 `NotApplicable`: this tenant runs Conditional Access, not Security Defaults, so the check

@@ -309,8 +309,8 @@ function Invoke-PulseEvaluation {
     # non-empty References.Cis array - computed here, at evaluate time, not at render time,
     # so Export-PulseReport's byte-identical re-render guarantee (see that command's own
     # docstring) holds without needing to re-scan findings on every render. Text matches
-    # the cite-only pattern from docs/research/iha-v2/2026-08-15-cis-benchmarks-licensing.md
-    # section 5 point 4: attribute CIS's copyright, state the cross-reference-only intent,
+    # the cite-only pattern documented in this repo's own docs/licensing/cis-cite-only.md:
+    # attribute CIS's copyright, state the cross-reference-only intent,
     # and explicitly disclaim any CIS Benchmark compliance claim (CIS's own non-member terms
     # prohibit representing/claiming a level of CIS compliance without paid SecureSuite
     # vendor certification). Absent entirely (not an empty string) when no finding cites

@@ -589,7 +589,11 @@ Describe 'Invoke-PulseEvaluation' {
 
         $evaluation.Document.PSObject.Properties.Name | Should -Contain 'notices'
         $evaluation.Document.notices.PSObject.Properties.Name | Should -Contain 'cisDisclaimer'
-        $evaluation.Document.notices.cisDisclaimer | Should -BeNullOrEmpty
+        # -BeNull (not -BeNullOrEmpty): the exact contract is `$null`, not merely falsy - an
+        # empty string would also satisfy -BeNullOrEmpty but would be the WRONG shape here
+        # (see Invoke-PulseEvaluation's own docstring: "Absent entirely ... when no finding
+        # cites CIS, so a renderer can gate a footer purely on is-this-property-truthy").
+        $evaluation.Document.notices.cisDisclaimer | Should -BeNull
     }
 
     It 'CIS disclaimer footer: fires (non-null, mentions CIS and "not constitute" a compliance claim) when at least one rendered finding carries a CIS reference' {

@@ -1,0 +1,2806 @@
+{
+  "coverage": {
+    "byCategory": {
+      "Entra.AuthenticationMethods": {
+        "applicable": 6,
+        "assessed": 6,
+        "percent": 100
+      },
+      "Entra.AuthorizationPolicy": {
+        "applicable": 1,
+        "assessed": 0,
+        "percent": 0
+      },
+      "Entra.ConditionalAccess": {
+        "applicable": 6,
+        "assessed": 6,
+        "percent": 100
+      },
+      "Entra.Consent": {
+        "applicable": 1,
+        "assessed": 0,
+        "percent": 0
+      },
+      "Entra.GuestAccess": {
+        "applicable": 1,
+        "assessed": 0,
+        "percent": 0
+      },
+      "Entra.Identity": {
+        "applicable": 3,
+        "assessed": 1,
+        "percent": 33.3
+      },
+      "Entra.PasswordProtection": {
+        "applicable": 1,
+        "assessed": 0,
+        "percent": 0
+      },
+      "Entra.PrivilegedRoles": {
+        "applicable": 4,
+        "assessed": 3,
+        "percent": 75
+      },
+      "Intune.Compliance": {
+        "applicable": 2,
+        "assessed": 2,
+        "percent": 100
+      },
+      "Intune.DeviceLifecycle": {
+        "applicable": 1,
+        "assessed": 1,
+        "percent": 100
+      },
+      "Intune.Enrollment": {
+        "applicable": 1,
+        "assessed": 1,
+        "percent": 100
+      },
+      "Intune.Updates": {
+        "applicable": 1,
+        "assessed": 1,
+        "percent": 100
+      }
+    },
+    "overall": {
+      "applicable": 28,
+      "assessed": 21,
+      "percent": 75
+    }
+  },
+  "findings": [
+    {
+      "category": "Entra.Identity",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/PropertiesBladeAADSecurityDefaults"
+        ],
+        "remediation": [
+          "If the tenant does not have Entra ID P1 (no Conditional Access licensing), enable Security Defaults immediately: Entra admin center > Identity > Overview > Properties > Manage Security defaults > Enable Security defaults.",
+          "If the tenant DOES have Entra ID P1, build Conditional Access policies covering MFA-for-all-users, MFA-for-admins, and block-legacy-authentication (see TP.ENT.0004/TP.ENT.0005), then turn Security Defaults off once those policies are enabled and validated - running both simultaneously is unsupported and Microsoft recommends against it once CA takes over the same ground."
+        ],
+        "whatItMeans": "Security Defaults is Microsoft's free, all-or-nothing baseline identity policy: it forces MFA registration and enforcement for everyone, blocks legacy authentication protocols, and requires admins to re-authenticate for privileged actions. This check confirms the tenant is not left with NEITHER Security Defaults NOR Conditional Access protecting it - the one configuration state that leaves sign-in fundamentally unprotected.",
+        "whyItMatters": "A tenant with Security Defaults disabled and no Conditional Access policy enabled has no baseline enforcement of MFA and no block on legacy authentication protocols - the two controls almost every credential-compromise incident response finds missing. This is the highest-value, lowest-effort finding a health check can surface: it costs nothing to fix and closes a wide-open door."
+      },
+      "effort": "Low",
+      "evidence": [],
+      "id": "TP.ENT.0001",
+      "impact": "High",
+      "origin": null,
+      "reason": "Conditional Access is in use (4 enabled policies); Security Defaults is no longer the tenant's primary access-control layer and is not evaluated as a standalone control here.",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/fundamentals/security-defaults",
+          "https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-conditional-access-policy-common"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#2-conditional-access-guidance"
+      },
+      "severity": "High",
+      "status": "NotApplicable",
+      "title": "Security Defaults state is appropriate"
+    },
+    {
+      "category": "Entra.PrivilegedRoles",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AllRolesBlade"
+        ],
+        "remediation": [
+          "Review every Global Administrator assignment in Entra ID > Roles and administrators > Global Administrator; for each one, confirm it is still needed and cannot be replaced by a narrower built-in role (Application Administrator, User Administrator, etc.).",
+          "Move any Global Administrator who does not need STANDING access to Privileged Identity Management (PIM) eligible assignment instead of a permanent/active one - eligible-but-not-activated assignments do not count toward this check's directoryRoleAssignments-based total.",
+          "Keep exactly the break-glass accounts (see TP.ENT.0003) as the only PERMANENT Global Administrator assignments; everyone else should be PIM-eligible."
+        ],
+        "whatItMeans": "The Microsoft Entra admin center itself flags a tenant when 5 or more principals hold the Global Administrator role - this check mirrors that same threshold. Global Administrator resolution joins active directoryRoleAssignments against directoryRoleDefinitions by display name/template id (falling back to the well-known Global Administrator template id when a role definition cannot be resolved), so a custom or renamed role never masks the count.",
+        "whyItMatters": "Every Global Administrator is a single point of total tenant compromise - if any one of their credentials is phished, the attacker owns every workload, every mailbox, every device policy. Microsoft's own guidance on Entra role best practices names 5 as the threshold worth alerting on; each admin beyond the minimum needed is pure, uncompensated blast-radius growth."
+      },
+      "effort": "Medium",
+      "evidence": [],
+      "id": "TP.ENT.0002",
+      "impact": "High",
+      "origin": null,
+      "reason": null,
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/best-practices"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#5-zero-trust--privileged-access--role-hygiene"
+      },
+      "severity": "High",
+      "status": "Fail",
+      "title": "Fewer than 5 Global Administrators"
+    },
+    {
+      "category": "Entra.ConditionalAccess",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ConditionalAccessBlade"
+        ],
+        "remediation": [
+          "Create at least 2 cloud-only (*.onmicrosoft.com) accounts with permanent Global Administrator assignment, strong unique credentials (or phishing-resistant hardware keys) stored offline, and no ties to an individual employee.",
+          "Exclude both accounts from EVERY enabled Conditional Access policy's user/group exclusions - not just the MFA policies, all of them.",
+          "Declare the accounts in TenantPulse's -AssessmentProfile (BreakGlassAccounts) BY THEIR ENTRA OBJECT ID (GUID) - not UPN or display name. Conditional Access excludeUsers holds GUID principal ids, so this check (and TP.ENT.0002/0004/0005) can only match a declared account against a policy's exclusions when it is GUID-shaped; a non-GUID value reads as an unresolvable format (Warn), not a verified exclusion.",
+          "Monitor sign-ins to these accounts and alert on any use - a break-glass sign-in should always be a rare, deliberate, logged event."
+        ],
+        "whatItMeans": "Break-glass (emergency access) accounts are dedicated, cloud-only, permanently-privileged accounts held back specifically for when normal sign-in is broken - a Conditional Access misconfiguration, an MFA outage, a federation failure. This check confirms the operator has declared which accounts those are AND that every enabled Conditional Access policy explicitly excludes them.",
+        "whyItMatters": "A tenant with no verified break-glass account, or one that Conditional Access itself can lock out, has no way back in during the exact incident that motivated Conditional Access in the first place - a bad policy push, a broken MFA provider, an expired certificate. Microsoft's own emergency-access guidance treats this as a hard prerequisite before deploying any blocking CA policy, not an optional hardening step."
+      },
+      "effort": "Low",
+      "evidence": [],
+      "id": "TP.ENT.0003",
+      "impact": "High",
+      "origin": null,
+      "reason": "No break-glass accounts are declared in the assessment profile (BreakGlassAccounts) - emergency access cannot be verified to exist or to be protected from Conditional Access lockout.",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/security-emergency-access",
+          "https://learn.microsoft.com/en-us/entra/identity/conditional-access/managed-policies"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#2-conditional-access-guidance"
+      },
+      "severity": "Critical",
+      "status": "Fail",
+      "title": "Break-glass accounts exist and are excluded from Conditional Access"
+    },
+    {
+      "category": "Entra.ConditionalAccess",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ConditionalAccessBlade"
+        ],
+        "remediation": [
+          "If a legacy-auth-block policy already exists in report-only mode (Microsoft auto-deploys one via managed policies), confirm break-glass accounts are excluded (see TP.ENT.0003), then switch its state to On.",
+          "If no such policy exists, create one from Microsoft's own template: Conditional Access > Policies > New policy > Templates > \"Block legacy authentication\" - target all users, client apps Exchange ActiveSync + Other clients, grant control Block.",
+          "Confirm legacy auth is not actually in use first (sign-in logs, clientAppUsed) so the new block does not unexpectedly cut off a still-dependent line-of-business app - migrate it to modern auth before enforcing."
+        ],
+        "whatItMeans": "Legacy authentication protocols (POP, IMAP, older Exchange ActiveSync clients, legacy SMTP) cannot present an MFA challenge at all - if a Conditional Access policy does not explicitly block them, MFA requirements everywhere else in the tenant can simply be bypassed by using a legacy protocol instead. This check requires the block to be ENFORCED (state 'enabled'), not merely staged in report-only mode.",
+        "whyItMatters": "Legacy authentication is one of the most heavily abused vectors in password-spray and credential-stuffing attacks precisely because it has no MFA challenge to defeat. Microsoft has been telling customers to block it for years; a report-only policy that never got turned on gives a false sense of protection while leaving the door open."
+      },
+      "effort": "Low",
+      "evidence": [
+        {
+          "detail": {
+            "displayName": "tp-4d5049c0ca862c8920c7d6bbc664470dcd66997f77fb39e78833ce0e38cdf404"
+          },
+          "identity": "tp-55d5f5d1fb977edb7209c8e3a2c631abbc40242edeff61f3081f1507e4fb4235",
+          "sortKey": "tp-55d5f5d1fb977edb7209c8e3a2c631abbc40242edeff61f3081f1507e4fb4235"
+        },
+        {
+          "detail": {
+            "displayName": "tp-6b4de9471d7b5811659575ad4f9df89ab13e96f0e24f24336f396da74d9194ce"
+          },
+          "identity": "tp-2fbebcf52213e5af4d032464e3aec378594dce695981ff8bb893bc95df375cb6",
+          "sortKey": "tp-2fbebcf52213e5af4d032464e3aec378594dce695981ff8bb893bc95df375cb6"
+        }
+      ],
+      "id": "TP.ENT.0004",
+      "impact": "High",
+      "origin": null,
+      "reason": "2 enabled Conditional Access policies block legacy authentication.",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-block-legacy-authentication",
+          "https://learn.microsoft.com/en-us/entra/identity/conditional-access/managed-policies"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#2-conditional-access-guidance"
+      },
+      "severity": "High",
+      "status": "Pass",
+      "title": "Legacy authentication is blocked by an enforced Conditional Access policy"
+    },
+    {
+      "category": "Entra.ConditionalAccess",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ConditionalAccessBlade"
+        ],
+        "remediation": [
+          "If Microsoft's managed \"Require multifactor authentication for admins\" policy exists in report-only, confirm break-glass exclusions (TP.ENT.0003) and switch it to On.",
+          "Otherwise create a policy from the phishing-resistant admin MFA template: target the 9+ admin roles, grant control require authentication strength (phishing-resistant preferred, MFA as a floor).",
+          "Re-run this check after any role restructuring - a renamed custom role built on top of a built-in admin role does not change the underlying role template id this check keys on, but a role assignment moved to a genuinely different role definition can."
+        ],
+        "whatItMeans": "Confirms an enabled (not report-only) Conditional Access policy requires MFA for Microsoft's documented minimum set of 9 admin roles - Global Administrator, Application Administrator, Authentication Administrator, Billing Administrator, Cloud Application Administrator, Conditional Access Administrator, Exchange Administrator, Helpdesk Administrator, and Password Administrator. Coverage can be split across more than one enabled policy; each role just needs to be covered by at least one of them.",
+        "whyItMatters": "Admin roles are the highest-value credential-theft target in the tenant - a compromised admin account without MFA is a compromised tenant. Microsoft auto-deploys a report-only \"MFA for admins\" managed policy specifically because this gap is so common and so consequential; leaving it in report-only is functionally the same as not having it."
+      },
+      "effort": "Low",
+      "evidence": [
+        {
+          "detail": {
+            "displayName": "tp-156d8a6c2a53923b310c8dceacb04028471092ea0e12294f8a75773e044f511a",
+            "mfaMechanism": "tp-c0d0b6aa6bedd1100c463ee263897f8f503bcdfe3b2aad05ff51c4ccbe0e7818"
+          },
+          "identity": "tp-c6f3e3b01cc093311c6b11f3bbe5675a9210e331108be6c38a89b0fb49f0e2c1",
+          "sortKey": "tp-c6f3e3b01cc093311c6b11f3bbe5675a9210e331108be6c38a89b0fb49f0e2c1"
+        },
+        {
+          "detail": {
+            "displayName": "tp-e359d244fbeb269d12bc67e64db5bd07d6959dfa8c5a9c3db59ca0cfedabdd84",
+            "mfaMechanism": "tp-c0d0b6aa6bedd1100c463ee263897f8f503bcdfe3b2aad05ff51c4ccbe0e7818"
+          },
+          "identity": "tp-a1f59c9fc10e3cbcff158349bf4e3ec149be6f5615b19c796d7640eb650eb306",
+          "sortKey": "tp-a1f59c9fc10e3cbcff158349bf4e3ec149be6f5615b19c796d7640eb650eb306"
+        }
+      ],
+      "id": "TP.ENT.0005",
+      "impact": "High",
+      "origin": null,
+      "reason": "All 9 of Microsoft's minimum admin roles are covered by MFA-requiring, enabled Conditional Access policies.",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/identity/conditional-access/how-to-policy-phish-resistant-admin-mfa",
+          "https://learn.microsoft.com/en-us/entra/identity/conditional-access/managed-policies"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#2-conditional-access-guidance"
+      },
+      "severity": "High",
+      "status": "Pass",
+      "title": "MFA is required for admin roles by an enforced Conditional Access policy"
+    },
+    {
+      "category": "Entra.AuthenticationMethods",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AdminAuthMethods"
+        ],
+        "remediation": [
+          "In Entra ID > Authentication methods > Policies, enable the FIDO2 Security Key method if it is currently disabled.",
+          "Under FIDO2 security key settings, set \"Enforce attestation\" to Yes so only enterprise-attested keys can be registered.",
+          "Set \"Enforce key restrictions\" to Yes and configure an explicit allow-list (or block-list) of AAGUIDs matching your procured hardware, rather than leaving key restriction off."
+        ],
+        "whatItMeans": "Confirms FIDO2 security keys are enabled as an authentication method (EIDSCA.AF01), with attestation enforced so only enterprise-attested keys can register (AF03), and key-restriction policy turned on (AF04). Self-service registration (AF02) and the specific allow/block key-restriction shape (AF05/AF06) are reported alongside as context, not as pass/fail gates on their own.",
+        "whyItMatters": "FIDO2 is one of only two Microsoft-recognized phishing-resistant authentication methods (with certificate-based auth). Enabling FIDO2 without attestation lets any FIDO2-compliant key - including a cheap, unmanaged one an attacker could supply - register for a user, quietly undermining the entire phishing-resistant-MFA control area this check's sibling, TP.ENT.0018, depends on."
+      },
+      "effort": "Medium",
+      "evidence": [
+        {
+          "detail": {
+            "expected": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a",
+            "setting": "tp-ea73e16da81b46b60ba022ea66bca2194e2d8a72e6fea585628d9d997b81071d",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "value": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a"
+          },
+          "identity": "tp-55e67d4998619d150a9b42579c3787beb158d544e1283572985150bd8409e5cc",
+          "sortKey": "tp-55e67d4998619d150a9b42579c3787beb158d544e1283572985150bd8409e5cc"
+        },
+        {
+          "detail": {
+            "setting": "tp-f2b6644c18bc0dfa1a5c21ab308b18306f68f1b6bdc723816313800bcfd787ca",
+            "value": true
+          },
+          "identity": "tp-10286df4605d092ec1dbf141e9edf628efea1981bf5ad6b302815165c37267e6",
+          "sortKey": "tp-10286df4605d092ec1dbf141e9edf628efea1981bf5ad6b302815165c37267e6"
+        },
+        {
+          "detail": {
+            "expected": true,
+            "setting": "tp-1823b71970058f002af6c5f4a97449e704a1329fd08caa61568e939a5ec5c0df",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "value": false
+          },
+          "identity": "tp-820d7c4e1161c58966cbbfdd67de3ffc655fb950e1e58a5c63fba63a4ed42c86",
+          "sortKey": "tp-820d7c4e1161c58966cbbfdd67de3ffc655fb950e1e58a5c63fba63a4ed42c86"
+        },
+        {
+          "detail": {
+            "expected": true,
+            "setting": "tp-fb96494b78c56bb2d4b242f36f51b465edc82c1bdba30fb7b05cc426e83c643a",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "value": false
+          },
+          "identity": "tp-c5fec226f8d983363381a663877e65311c6d4d09b8f22976ff44b4b3fe834d83",
+          "sortKey": "tp-c5fec226f8d983363381a663877e65311c6d4d09b8f22976ff44b4b3fe834d83"
+        },
+        {
+          "detail": {
+            "setting": "tp-d113f961b3f2a8ec20ede92e6ce71fa22e71f789b1c3aed0fd425b54da648829",
+            "value": "tp-1571e2664c32a6fdfabcb149fdbfaa5c661146506854d8a47cff57ae9609f32b"
+          },
+          "identity": "tp-99b68f091edbe0c77d5d6c0367a53ace6df4ab3162cf74521caa8cbd1e18b29a",
+          "sortKey": "tp-99b68f091edbe0c77d5d6c0367a53ace6df4ab3162cf74521caa8cbd1e18b29a"
+        },
+        {
+          "detail": {
+            "count": 0,
+            "setting": "tp-116fd69ff1f9e6de7ae5d7022211b40c70b23cf29efe3f328cf97c833ebe688d",
+            "value": null
+          },
+          "identity": "tp-c730fc3e95bd675447865515502926bb686643cc52afcb5a6b335535b67fc984",
+          "sortKey": "tp-c730fc3e95bd675447865515502926bb686643cc52afcb5a6b335535b67fc984"
+        }
+      ],
+      "id": "TP.ENT.0006",
+      "impact": "High",
+      "origin": {
+        "id": "AF01,AF02,AF03,AF04,AF05,AF06",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "FIDO2 attestation is not enforced (EIDSCA.AF03). FIDO2 key restrictions are not enforced (EIDSCA.AF04).",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.AF01",
+          "https://maester.dev/docs/tests/EIDSCA.AF03",
+          "https://maester.dev/docs/tests/EIDSCA.AF04"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0006--fido2-security-key-authentication-method-configuration-eidscaaf01af06"
+      },
+      "severity": "High",
+      "status": "Fail",
+      "title": "FIDO2 security key authentication method is enabled with attestation and key restrictions enforced"
+    },
+    {
+      "category": "Entra.AuthenticationMethods",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AuthMethodsSettings"
+        ],
+        "remediation": [
+          "In Entra ID > Authentication methods > Policies, complete the migration from the legacy per-user MFA/SSPR policies to the unified authentication methods policy if not already done.",
+          "Under Authentication methods > Settings, enable \"Report suspicious activity\" and scope it to all users (not a narrow pilot group left over from testing)."
+        ],
+        "whatItMeans": "Confirms three general settings on the tenant's single authenticationMethodsPolicy object: the legacy per-user MFA/SSPR-to-unified-policy migration is complete or was never started fresh (policyMigrationState, EIDSCA.AG01); suspicious sign-in-attempt reporting from the Authenticator app/voice calls is enabled (reportSuspiciousActivitySettings.state, EIDSCA.AG02); and that reporting is scoped to all users, not silently narrowed (reportSuspiciousActivitySettings.includeTarget.id, EIDSCA.AG03).",
+        "whyItMatters": "An incomplete migration (AG01) means legacy per-user MFA/SSPR policy can still silently override the unified policy's settings - undermining every other authentication-method check in this catalog (TP.ENT.0006/0008/0009/0010/0011) even when those checks themselves report Pass, because the legacy policy may be the one actually in effect. AG02/AG03 close the MFA-fatigue/push-bombing detection loop: without suspicious-activity reporting scoped to all users, a user targeted by a push-bombing attack has no way to signal it, and their risk score never rises for Conditional Access to act on."
+      },
+      "effort": "Low",
+      "evidence": [
+        {
+          "detail": {
+            "expected": [
+              "tp-b8ed29c97a02cad68de49921ab7f3be2254bd02780599a0c9fa5064ca0d5ff78",
+              "tp-701feb8d32d37f20249d961f116cec38aa0ce2fa8fa9d50e5b50df35e8cc0d31"
+            ],
+            "ok": false,
+            "setting": "tp-cb1b2443d9c04a5bc6739515413340bdd289fcbcdd63f236a730d0e9b721966a",
+            "severity": "tp-161f67f0282550477a4964a98603f7c45e16aed474171d575574d40b7155360b",
+            "value": "tp-e1410078f6204abbf487e5683fa78d80af8e006404d26074e2444e41796bab6f"
+          },
+          "identity": "tp-c79098a61c58eb6446049f84bbee7bae4a2bee13bdd00a8579e85613ca5bc054",
+          "sortKey": "tp-c79098a61c58eb6446049f84bbee7bae4a2bee13bdd00a8579e85613ca5bc054"
+        },
+        {
+          "detail": {
+            "expected": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a",
+            "ok": false,
+            "setting": "tp-e167e62bf17e5baf02ed635646f4c5fed1d2a5f2c457be6bf25f0f59834b0b57",
+            "severity": "tp-9a8f6040c61f191ff1d34488cbbb818e9f94940a5138c9829cb92bb6aeeb3206",
+            "value": "tp-93d7d4ad1270850fae7d0bc726652d72442221db3f628f5927189b3c294a686c"
+          },
+          "identity": "tp-81cf002df622e2f699a21c184baf98ecc96c39bd80f47a18180f740fe5e5a221",
+          "sortKey": "tp-81cf002df622e2f699a21c184baf98ecc96c39bd80f47a18180f740fe5e5a221"
+        },
+        {
+          "detail": {
+            "expected": "tp-355cd7b1d38dd1ec625d300d3088ff92a9fec5db5e80774fdee92d5fd2b9ced6",
+            "ok": true,
+            "setting": "tp-0b0a2dacca22fe3e7dfd5dbf0da4b8234ceee0df556affabf9cd354f378d0fc8",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "value": "tp-355cd7b1d38dd1ec625d300d3088ff92a9fec5db5e80774fdee92d5fd2b9ced6"
+          },
+          "identity": "tp-b291cf0e876a5d8e984e98e506357959d986ddaf183f05cdc34425407f56e22e",
+          "sortKey": "tp-b291cf0e876a5d8e984e98e506357959d986ddaf183f05cdc34425407f56e22e"
+        }
+      ],
+      "id": "TP.ENT.0007",
+      "impact": "Medium",
+      "origin": {
+        "id": "AG01,AG02,AG03",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "Suspicious sign-in-attempt reporting from the Authenticator app/voice calls is not enabled (reportSuspiciousActivitySettings.state = 'default', not 'enabled', EIDSCA.AG02).",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.AG01",
+          "https://maester.dev/docs/tests/EIDSCA.AG02",
+          "https://maester.dev/docs/tests/EIDSCA.AG03"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0007--authentication-methods-policy-general-settings-eidscaag01ag03"
+      },
+      "severity": "High",
+      "status": "Fail",
+      "title": "Authentication methods policy general settings (migration state, suspicious-activity reporting)"
+    },
+    {
+      "category": "Entra.AuthenticationMethods",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AdminAuthMethods"
+        ],
+        "remediation": [
+          "In Entra ID > Authentication methods > Microsoft Authenticator, confirm the method is enabled and its Include target covers All users (or a group covering every real user).",
+          "Under Configure, set \"Require number matching for push notifications\" to Enabled, scoped to All users.",
+          "Set \"Show application name in push and passwordless notifications\" to Enabled, scoped to All users, and disable the OTP fallback (\"Allow use of Microsoft Authenticator OTP\") unless a documented business need requires it."
+        ],
+        "whatItMeans": "Confirms Microsoft Authenticator is enabled (EIDSCA.AM01), its OTP fallback is turned off (AM02), and number matching for push approvals (AM03/AM04) plus application-name display in notifications (AM06/AM07) are both required and scoped to all users, not just a pilot group. Geographic-location display (AM09/AM10) is reported alongside as a fraud-detection-assistive setting.",
+        "whyItMatters": "Authenticator push is the most widely deployed MFA method in most Entra tenants, which makes it the most attractive target for MFA-fatigue/push-bombing attacks - an attacker who has a stolen password simply spams push approvals until an exhausted user taps Approve. Number matching (a code the user must retype from the sign-in screen) is the specific control that closes that gap; scoping it to less than \"all users\" leaves exactly the gap it was meant to close for whoever falls outside the scope."
+      },
+      "effort": "Low",
+      "evidence": [
+        {
+          "detail": {
+            "expected": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a",
+            "setting": "tp-ea73e16da81b46b60ba022ea66bca2194e2d8a72e6fea585628d9d997b81071d",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "value": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a"
+          },
+          "identity": "tp-4a9a0605de860b333c3f374b36943b2a458776d435a5316157605fffcacbb52e",
+          "sortKey": "tp-4a9a0605de860b333c3f374b36943b2a458776d435a5316157605fffcacbb52e"
+        },
+        {
+          "detail": {
+            "expected": "tp-61f87cb47e29b78397710457a2c7b4debe51beda4e59ff7e02c9fcc1a7b0f5db",
+            "setting": "tp-d388e47627778aa2a23d76911e67fae3d967a527482d6bbad78320867741ea60",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "value": false
+          },
+          "identity": "tp-2cca0e7927b62496b6d0af22a895071a32169537accecedca1b6da8bcd99596f",
+          "sortKey": "tp-2cca0e7927b62496b6d0af22a895071a32169537accecedca1b6da8bcd99596f"
+        },
+        {
+          "detail": {
+            "expected": {
+              "scope": "tp-355cd7b1d38dd1ec625d300d3088ff92a9fec5db5e80774fdee92d5fd2b9ced6",
+              "state": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a"
+            },
+            "feature": "tp-01ae1a1827d0a761f787b5ef123ffc50cad8e1b9523372163980188812522983",
+            "scope": "tp-355cd7b1d38dd1ec625d300d3088ff92a9fec5db5e80774fdee92d5fd2b9ced6",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "state": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a"
+          },
+          "identity": "tp-ddb28e337fdaf2cbe8f9f6615e60a5bcb8453d875af15a6dafcaba49a47af8e2",
+          "sortKey": "tp-ddb28e337fdaf2cbe8f9f6615e60a5bcb8453d875af15a6dafcaba49a47af8e2"
+        },
+        {
+          "detail": {
+            "expected": {
+              "scope": "tp-355cd7b1d38dd1ec625d300d3088ff92a9fec5db5e80774fdee92d5fd2b9ced6",
+              "state": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a"
+            },
+            "feature": "tp-b0b7d3a6201d2b893f2ff953130324278aa8eb1c1abf510cd128dfdb9b3ead42",
+            "scope": "tp-355cd7b1d38dd1ec625d300d3088ff92a9fec5db5e80774fdee92d5fd2b9ced6",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "state": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a"
+          },
+          "identity": "tp-07527df95680c21495292722f58e56679a0bea8b5f30676039522c61086c1063",
+          "sortKey": "tp-07527df95680c21495292722f58e56679a0bea8b5f30676039522c61086c1063"
+        },
+        {
+          "detail": {
+            "expected": {
+              "scope": "tp-355cd7b1d38dd1ec625d300d3088ff92a9fec5db5e80774fdee92d5fd2b9ced6",
+              "state": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a"
+            },
+            "feature": "tp-278be37f703664d30f68c36d2fa0ae8d410aa4c783bfb8314ab583a166a0674c",
+            "scope": "tp-355cd7b1d38dd1ec625d300d3088ff92a9fec5db5e80774fdee92d5fd2b9ced6",
+            "severity": "tp-9a8f6040c61f191ff1d34488cbbb818e9f94940a5138c9829cb92bb6aeeb3206",
+            "state": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a"
+          },
+          "identity": "tp-b09e6b81f7aedbf90c8d880cc2f850d4786b7aa9076d107ebfc416daf5c68638",
+          "sortKey": "tp-b09e6b81f7aedbf90c8d880cc2f850d4786b7aa9076d107ebfc416daf5c68638"
+        }
+      ],
+      "id": "TP.ENT.0008",
+      "impact": "High",
+      "origin": {
+        "id": "AM01,AM02,AM03,AM04,AM06,AM07,AM09,AM10",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "Microsoft Authenticator is enabled with OTP fallback disabled and number matching plus app-name display required tenant-wide (EIDSCA.AM01-AM04, AM06-AM07).",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.AM01",
+          "https://maester.dev/docs/tests/EIDSCA.AM03"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0008--microsoft-authenticator-method-configuration-eidscaam01-am04-am06-am07-am09-am10"
+      },
+      "severity": "High",
+      "status": "Pass",
+      "title": "Microsoft Authenticator is enabled with number matching and app-name display required tenant-wide"
+    },
+    {
+      "category": "Entra.AuthenticationMethods",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AdminAuthMethods"
+        ],
+        "remediation": [
+          "In Entra ID > Authentication methods > Policies > SMS, review every target group listed and disable \"Usable for sign-in\" for each one still marked enabled.",
+          "If a target group must temporarily allow SMS for a migration/exception scenario, document the business justification and set a review date rather than leaving it open-ended."
+        ],
+        "whatItMeans": "Confirms no target group in the Sms authentication method configuration is usable for sign-in (authenticationMethodConfigurations('Sms').includeTargets[].isUsableForSignIn == false for every target, EIDSCA.AS04). SMS may still be configured for other purposes, but must not be a viable primary or MFA sign-in path for any target scope.",
+        "whyItMatters": "SMS (and voice call, TP.ENT.0011's sibling control) one-time-passcode authentication is vulnerable to SIM-swap attacks and SS7 protocol interception - an attacker who compromises a phone number, not the device or account, can complete sign-in or MFA. CISA's SCuBA baseline (MS.AAD.3.5v2) rates disabling SMS/voice/email OTP SHALL - the strongest, federally-mandatory criticality tier under BOD 25-01. This is per-target-group, not a single tenant-wide toggle: a tenant can disable SMS for most users but leave a forgotten pilot or exception group still exposed, and that gap will not show up in a simple \"is SMS enabled\" summary."
+      },
+      "effort": "Medium",
+      "evidence": [
+        {
+          "detail": {
+            "setting": "tp-132fe6152d1a897c559e3fa8af512abd8b28d83fb85243a8e9762bcffc0b8e3c",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "targetCount": 1,
+            "usableForSignInTargetIds": "tp-355cd7b1d38dd1ec625d300d3088ff92a9fec5db5e80774fdee92d5fd2b9ced6"
+          },
+          "identity": "tp-b191c2154ff5862db757da787ff7997d37d9f4f1e7146c1389b0301a0ee5783e",
+          "sortKey": "tp-b191c2154ff5862db757da787ff7997d37d9f4f1e7146c1389b0301a0ee5783e"
+        }
+      ],
+      "id": "TP.ENT.0009",
+      "impact": "High",
+      "origin": {
+        "id": "AS04",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "SMS is still usable as a sign-in factor for 1 target group(s): all_users (EIDSCA.AS04).",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.AS04"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0009--sms-sign-in-authentication-method-disabled-eidscaas04"
+      },
+      "severity": "High",
+      "status": "Fail",
+      "title": "SMS is not usable as an authentication sign-in factor"
+    },
+    {
+      "category": "Entra.AuthenticationMethods",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AdminAuthMethods"
+        ],
+        "remediation": [
+          "In Entra ID > Authentication methods > Policies > Temporary Access Pass, set the method to Enabled if not already.",
+          "For general onboarding scenarios, configure passes as one-time use; reserve reusable passes for specific, time-boxed operational needs (e.g. bulk device provisioning) with a documented justification."
+        ],
+        "whatItMeans": "Confirms Temporary Access Pass is enabled (authenticationMethodConfigurations('TemporaryAccessPass').state == enabled, EIDSCA.AT01) and, where used, is deliberately configured for one-time use rather than left reusable (isUsableOnce, EIDSCA.AT02) - reported as its own evidence row since it is only meaningful once AT01 is enabled.",
+        "whyItMatters": "Temporary Access Pass supports secure onboarding and recovery flows that avoid emailing or verbally sharing initial passwords - a common weak-onboarding pattern that hands an attacker a durable, phishable credential before the user ever sets their own password. Without TAP enabled, organizations tend to fall back to those weaker methods by default, not because they made a deliberate choice. A reusable (not one-time) pass is a smaller but related gap: it stays valid for repeated use within its lifetime window rather than expiring after first use."
+      },
+      "effort": "Low",
+      "evidence": [
+        {
+          "detail": {
+            "expected": "tp-e52dcaacc3cf4c95e5017dfe3c9e006f37d73c4dce6967bd34e1bdc80e63c78a",
+            "ok": false,
+            "setting": "tp-ea73e16da81b46b60ba022ea66bca2194e2d8a72e6fea585628d9d997b81071d",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "value": "tp-c5ba3ec3330622e2a30693668323dd61d811ea20e16a9f2f1b2ed61661c89367"
+          },
+          "identity": "tp-466b30bb4a64e1526591c6cf001a5cbe9136b6b2d9cc8a87460b5b23936fee6a",
+          "sortKey": "tp-466b30bb4a64e1526591c6cf001a5cbe9136b6b2d9cc8a87460b5b23936fee6a"
+        },
+        {
+          "detail": {
+            "expected": true,
+            "setting": "tp-b129fcb95d5b830fa10b06c8ff57aff922d12fe211d046a8295692ffa1dc64d3",
+            "severity": "tp-9a8f6040c61f191ff1d34488cbbb818e9f94940a5138c9829cb92bb6aeeb3206",
+            "value": false
+          },
+          "identity": "tp-7a6b5667f73309d0d9b70ff64fcf9ffe400ed02884d2094d9b754f81c16cd616",
+          "sortKey": "tp-7a6b5667f73309d0d9b70ff64fcf9ffe400ed02884d2094d9b754f81c16cd616"
+        }
+      ],
+      "id": "TP.ENT.0010",
+      "impact": "Medium",
+      "origin": {
+        "id": "AT01,AT02",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "Temporary Access Pass is not enabled (state = 'disabled', EIDSCA.AT01).",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.AT01",
+          "https://maester.dev/docs/tests/EIDSCA.AT02"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0010--temporary-access-pass-method-configuration-eidscaat01at02"
+      },
+      "severity": "Medium",
+      "status": "Fail",
+      "title": "Temporary Access Pass is enabled and configured for one-time use"
+    },
+    {
+      "category": "Entra.AuthenticationMethods",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AdminAuthMethods"
+        ],
+        "remediation": [
+          "In Entra ID > Authentication methods > Policies > Voice calls, set the method to Disabled."
+        ],
+        "whatItMeans": "Confirms Voice call is not enabled as an authentication method (authenticationMethodConfigurations('Voice').state == disabled, EIDSCA.AV01) - a single tenant-wide toggle, unlike TP.ENT.0009's SMS sibling which is evaluated per target group.",
+        "whyItMatters": "Voice call one-time-passcode authentication shares SMS's exposure to SIM-swap attacks and SS7 protocol interception - an attacker who compromises a phone number, not the device or account, can complete sign-in or MFA. CISA's SCuBA baseline (MS.AAD.3.5v2) rates disabling SMS/voice/email OTP SHALL - the strongest, federally-mandatory criticality tier under BOD 25-01, the same authority as TP.ENT.0009."
+      },
+      "effort": "Low",
+      "evidence": [
+        {
+          "detail": {
+            "expected": "tp-c5ba3ec3330622e2a30693668323dd61d811ea20e16a9f2f1b2ed61661c89367",
+            "ok": true,
+            "setting": "tp-ea73e16da81b46b60ba022ea66bca2194e2d8a72e6fea585628d9d997b81071d",
+            "severity": "tp-2700283b002f3567da33ce2d17728fc8c2d137e3bc53bfe6c1ef36282af78b19",
+            "value": "tp-c5ba3ec3330622e2a30693668323dd61d811ea20e16a9f2f1b2ed61661c89367"
+          },
+          "identity": "tp-e2f760ad571210d8bdda3f1979cf21647a7e64b25df274db2d40f3673a56cc20",
+          "sortKey": "tp-e2f760ad571210d8bdda3f1979cf21647a7e64b25df274db2d40f3673a56cc20"
+        }
+      ],
+      "id": "TP.ENT.0011",
+      "impact": "High",
+      "origin": {
+        "id": "AV01",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "Voice call is disabled as an authentication method (EIDSCA.AV01).",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.AV01"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0011--voice-call-authentication-method-disabled-eidscaav01"
+      },
+      "severity": "High",
+      "status": "Pass",
+      "title": "Voice call is not enabled as an authentication method"
+    },
+    {
+      "category": "Entra.AuthorizationPolicy",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/UserSettings"
+        ],
+        "remediation": [
+          "In Entra ID > User settings, set \"Users can register applications\" to No so app registration is not a default right of every user.",
+          "In Entra ID > External Identities > External collaboration settings, restrict guest invite rights, disable email-based subscription self-signup and join-by-email-verification, and set the default guest role to the most-restricted option.",
+          "In Entra ID > Enterprise applications > Consent and permissions, assign a non-legacy user consent policy and disable auto-allowing consent for apps Microsoft flags as risky."
+        ],
+        "whatItMeans": "Reads the tenant's single authorizationPolicy object and reports nine separate default-permission settings: admins cannot use SSPR for recovery (EIDSCA.AP01), guest invites are restricted to admins/inviters (AP04), email-based subscription self-signup is off (AP05), join-by-email-verification is off (AP06), the guest role is the most-restricted option (AP07), the default consent policy is not the legacy permissive one (AP08), risk-based user consent is not auto-allowed (AP09), default users cannot register app registrations (AP10), and default users retain their normal profile-read permissions (AP14, informational). This check currently has NO released GraphKit descriptor to collect it - see this check's own References.Research for the G-batch request.",
+        "whyItMatters": "These nine settings are the tenant's default permission floor - every user gets them unless a more specific policy overrides them. Left at Microsoft's out-of-the-box defaults, several of these settings are permissive: any user can register an application (a common privilege-escalation path once that app is granted permissions), guest self-signup is wide open, and admins themselves can bypass normal recovery controls via SSPR. Microsoft's own guidance (MS.AAD.5.1v1, \"only admins register apps\") and ScuBA's guest-access family both anchor directly on this one object."
+      },
+      "effort": "Medium",
+      "evidence": [],
+      "id": "TP.ENT.0012",
+      "impact": "High",
+      "origin": {
+        "id": "AP01,AP04,AP05,AP06,AP07,AP08,AP09,AP10,AP14",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "descriptor-pending: awaiting GraphKit release",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.AP01",
+          "https://maester.dev/docs/tests/EIDSCA.AP10"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0012--default-authorization-policy-settings-cluster-eidscaap01-ap04ap10-ap14"
+      },
+      "severity": "High",
+      "status": "NotApplicable",
+      "title": "Default authorization policy settings restrict SSPR-for-admins, guest self-service, and default app-registration rights"
+    },
+    {
+      "category": "Entra.Consent",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ConsentPoliciesMenuBlade"
+        ],
+        "remediation": [
+          "In Entra ID > Enterprise applications > Consent and permissions > User consent settings, or via the Microsoft Graph settings API, set EnableGroupSpecificConsent to False for the tenant's Group.Unified directorySetting.",
+          "Confirm BlockUserConsentForRiskyApps is set to true so Microsoft's risk-based consent gate stays active.",
+          "Set EnableAdminConsentRequests to true (and pair with TP.ENT.0014's workflow configuration) so an owner or user who legitimately needs an app approved has a path other than self-granting consent."
+        ],
+        "whatItMeans": "Confirms three consent-policy directorySettings: group/team owners cannot independently grant a third-party app permission to read all of that group's data on members' behalf (EnableGroupSpecificConsent = False, EIDSCA.CP01); user consent is blocked for apps Microsoft flags as risky (BlockUserConsentForRiskyApps = true, EIDSCA.CP03); and a user blocked from self-consenting can raise an admin-consent request rather than being dead-ended (EnableAdminConsentRequests = true, EIDSCA.CP04). This check currently has NO released GraphKit descriptor to collect it - see this check's own References.Research for the G-batch request.",
+        "whyItMatters": "Group/team owners are not tenant admins, but CP01 gives them admin-adjacent consent power over every member's data inside their group - and Microsoft's own default for this setting is True (permissive). CP03 is the tenant's automated backstop against known-risky consent grants slipping through regardless of who requests them. CP04 is the operational complement to restricting consent: without an admin-consent-request path, a legitimately-blocked user has no route forward other than shadow IT. User/group consent sprawl is the most common real-world path a malicious OAuth app takes to reach tenant data, and all three settings sit below the admin console most operators actually watch."
+      },
+      "effort": "Low",
+      "evidence": [],
+      "id": "TP.ENT.0013",
+      "impact": "Medium",
+      "origin": {
+        "id": "CP01,CP03,CP04",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "descriptor-pending: awaiting GraphKit release",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.CP01",
+          "https://maester.dev/docs/tests/EIDSCA.CP03",
+          "https://maester.dev/docs/tests/EIDSCA.CP04"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0013--groupteam-owner-and-risk-based-user-consent-restrictions-eidscacp01-cp03-cp04"
+      },
+      "severity": "High",
+      "status": "NotApplicable",
+      "title": "Group/team owner and risk-based user consent restrictions"
+    },
+    {
+      "category": "Entra.PasswordProtection",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/PasswordProtection"
+        ],
+        "remediation": [
+          "In Entra ID > Security > Authentication methods > Password protection, set \"Mode\" to Enforce.",
+          "If the tenant is hybrid, confirm the on-premises Password Protection proxy/agent is also enabled and healthy before flipping to Enforce, or the on-prem side keeps allowing banned passwords unaffected by this cloud-side setting.",
+          "Enable \"Enforce custom list\" and populate it with organization-specific banned terms (company name, product names, local sports teams).",
+          "Review Smart Lockout's lockout duration (>=60s) and lockout threshold (<=10 attempts) and set them deliberately rather than leaving Microsoft's defaults unreviewed."
+        ],
+        "whatItMeans": "Confirms five Password Rule Settings directorySettings: mode is Enforce, not Audit (BannedPasswordCheckOnPremisesMode, EIDSCA.PR01); the on-premises AD password-protection proxy/agent is enabled where hybrid (EnableBannedPasswordCheckOnPremises, EIDSCA.PR02); a custom banned-password list is active (EnableBannedPasswordCheck, EIDSCA.PR03); and Smart Lockout duration is at least 60 seconds (LockoutDurationInSeconds, EIDSCA.PR05) with a lockout threshold of at most 10 failed attempts (LockoutThreshold, EIDSCA.PR06). This check currently has NO released GraphKit descriptor to collect it - see this check's own References.Research for the G-batch request.",
+        "whyItMatters": "Audit mode looks like Password Protection is configured - the banned-password list and Smart Lockout exist, log entries even get written when someone tries a weak/banned password - but it blocks nothing. A tenant left in the default Audit mode is exactly as exposed to credential-guessing/spray attacks (NIST/MITRE TA0006 Credential Access, T1110 Brute Force) as one with no Password Protection at all. PR02 closes the same gap for on-premises/hybrid identities. PR03 stops org-specific weak passwords (company name, product names) that Microsoft's global list cannot know about. PR05/PR06 bound how long and how many guesses an attacker gets before Smart Lockout engages - defaults that were never reviewed are not the same as a deliberately-tuned posture."
+      },
+      "effort": "Low",
+      "evidence": [],
+      "id": "TP.ENT.0015",
+      "impact": "High",
+      "origin": {
+        "id": "PR01,PR02,PR03,PR05,PR06",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "descriptor-pending: awaiting GraphKit release",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.PR01",
+          "https://maester.dev/docs/tests/EIDSCA.PR02",
+          "https://maester.dev/docs/tests/EIDSCA.PR03",
+          "https://maester.dev/docs/tests/EIDSCA.PR05",
+          "https://maester.dev/docs/tests/EIDSCA.PR06"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0015--password-protection-mode-and-smart-lockout-settings-eidscapr01pr03-pr05-pr06"
+      },
+      "severity": "High",
+      "status": "NotApplicable",
+      "title": "Password Protection mode, on-prem enforcement, and Smart Lockout thresholds"
+    },
+    {
+      "category": "Entra.GuestAccess",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/General"
+        ],
+        "remediation": [
+          "In Entra ID > Groups > General settings (or the equivalent Microsoft 365 admin center guest-access settings), set \"Guests can be assigned as group owner\" to No.",
+          "Audit existing Microsoft 365 groups for any guest account currently in an owner role and either replace it with a member-tenant owner or document the specific business exception.",
+          "If AllowGuestsToAccessGroups shows as disabled, confirm that was a deliberate, documented decision - an untouched tenant already has this set to True, so an explicit False is very likely an accidental change that will surface as broken guest collaboration complaints."
+        ],
+        "whatItMeans": "Confirms two Group.Unified directorySettings: guests cannot become owners of Microsoft 365 groups (AllowGuestsToBeGroupOwner = false, EIDSCA.ST08); and, separately, guest access to group content has not been inadvertently disabled (AllowGuestsToAccessGroups = True, EIDSCA.ST09 - this is a functional-continuity check, not a restriction: EIDSCA's own recommended value matches the platform default, and disabling this tenant-wide toggle breaks guest collaboration in every group). Narrower in scope than it sounds: this governs Microsoft 365 group/team ownership and content access specifically, not general external-collaboration invite policy (TP.ENT.0012's AP04) or tenant-wide B2B cross-tenant defaults (TP.ENT.0023). This check currently has NO released GraphKit descriptor to collect it - see this check's own References.Research for the G-batch request.",
+        "whyItMatters": "A group owner controls membership, content, and (per TP.ENT.0013's CP01) potentially third-party app consent for everyone in that group. An external guest holding that role has effectively been handed admin rights over a piece of the tenant's data and membership without ever passing through the tenant's own admin-role or PIM controls - a quiet privilege-escalation path that is easy to miss because it never shows up in a Global Administrator or role-assignment review. ST09 is the opposite kind of finding: it exists to catch a well-intentioned but overly broad guest-restriction effort that also silently switched off the master toggle for guest group-content access, breaking legitimate collaboration rather than closing a real gap."
+      },
+      "effort": "Low",
+      "evidence": [],
+      "id": "TP.ENT.0016",
+      "impact": "Medium",
+      "origin": {
+        "id": "ST08,ST09",
+        "license": "MIT",
+        "project": "EIDSCA"
+      },
+      "reason": "descriptor-pending: awaiting GraphKit release",
+      "references": {
+        "authorities": [
+          "https://maester.dev/docs/tests/EIDSCA.ST08",
+          "https://maester.dev/docs/tests/EIDSCA.ST09"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0016--guest-group-ownership-and-content-access-restrictions-eidscast08st09"
+      },
+      "severity": "Medium",
+      "status": "NotApplicable",
+      "title": "Guest group ownership is restricted and guest group-content access is intact"
+    },
+    {
+      "category": "Entra.ConditionalAccess",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ConditionalAccessBlade"
+        ],
+        "remediation": [
+          "If Microsoft's managed \"Require multifactor authentication for all users\" policy exists in report-only, confirm break-glass/service-account exclusions (TP.ENT.0003) and switch it to On.",
+          "Otherwise create a policy targeting All users, All cloud apps, grant control require MFA (or a stronger authentication strength).",
+          "Document any exclusion in the assessment profile's BreakGlassAccounts/ServiceAccounts so it is recognized as intentional rather than surfaced as an undocumented gap."
+        ],
+        "whatItMeans": "Confirms an enabled (not report-only) Conditional Access policy requires MFA - or a stronger authentication-strength grant - for ALL users in the tenant, not just admin roles. This is the all-users complement to the admin-scoped TP.ENT.0005.",
+        "whyItMatters": "ScuBA rates this control SHALL (CISA BOD 25-01 mandatory tier) - it is the single highest-leverage Conditional Access control in the whole catalog. Microsoft auto-deploys several \"Require MFA for all users\" managed policies in report-only by default specifically because this gap is so common; leaving it in report-only is functionally the same as not having it."
+      },
+      "effort": "Low",
+      "evidence": [
+        {
+          "detail": {
+            "displayName": "tp-156d8a6c2a53923b310c8dceacb04028471092ea0e12294f8a75773e044f511a",
+            "mfaMechanism": "tp-c0d0b6aa6bedd1100c463ee263897f8f503bcdfe3b2aad05ff51c4ccbe0e7818"
+          },
+          "identity": "tp-c6f3e3b01cc093311c6b11f3bbe5675a9210e331108be6c38a89b0fb49f0e2c1",
+          "sortKey": "tp-c6f3e3b01cc093311c6b11f3bbe5675a9210e331108be6c38a89b0fb49f0e2c1"
+        },
+        {
+          "detail": {
+            "displayName": "tp-e359d244fbeb269d12bc67e64db5bd07d6959dfa8c5a9c3db59ca0cfedabdd84",
+            "mfaMechanism": "tp-c0d0b6aa6bedd1100c463ee263897f8f503bcdfe3b2aad05ff51c4ccbe0e7818"
+          },
+          "identity": "tp-a1f59c9fc10e3cbcff158349bf4e3ec149be6f5615b19c796d7640eb650eb306",
+          "sortKey": "tp-a1f59c9fc10e3cbcff158349bf4e3ec149be6f5615b19c796d7640eb650eb306"
+        }
+      ],
+      "id": "TP.ENT.0017",
+      "impact": "High",
+      "origin": null,
+      "reason": "An enabled, enforced Conditional Access policy requires MFA (or a stronger authentication-strength grant) for all users.",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-all-users-mfa-strength"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0017--mfa-required-for-all-users-by-an-enforced-conditional-access-policy"
+      },
+      "severity": "Critical",
+      "status": "Pass",
+      "title": "MFA is required for all users by an enforced Conditional Access policy"
+    },
+    {
+      "category": "Entra.ConditionalAccess",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ConditionalAccessBlade"
+        ],
+        "remediation": [
+          "Create a Conditional Access policy from Microsoft's phishing-resistant admin MFA template, scoped to at least the 9 minimum admin roles.",
+          "Grant control: require authentication strength, set to the built-in \"Phishing-resistant MFA\" strength.",
+          "Ensure FIDO2 security keys or Windows Hello for Business are actually provisioned for privileged accounts (TP.ENT.0006) before enforcing - the policy alone does not provision credentials."
+        ],
+        "whatItMeans": "Confirms an enforced Conditional Access policy requires the built-in \"Phishing-resistant MFA\" authentication strength (FIDO2, Windows Hello for Business, or certificate-based authentication) - not merely generic MFA - for Microsoft's documented minimum set of 9 privileged admin roles. A policy binding a CUSTOM authentication strength is reported in evidence but never counted toward coverage: this check cannot verify from Conditional Access data alone whether a custom strength's underlying allowed-combinations are actually phishing-resistant, so it is surfaced for manual review rather than auto-trusted.",
+        "whyItMatters": "ScuBA rates both the all-users (MS.AAD.3.1v1) and privileged-role (MS.AAD.3.6v1) phishing-resistant requirements SHALL. A tenant can pass \"MFA required for admins\" (TP.ENT.0005) while still allowing SMS or voice-call OTP as the second factor - both are vulnerable to SIM-swap/SS7 interception and real-world MFA-bypass attacks that phishing-resistant methods close off entirely."
+      },
+      "effort": "Medium",
+      "evidence": [
+        {
+          "detail": {
+            "roleDisplayName": "tp-44f94ff177a928097a7aef26c02b4ebb6295d6b524aa209e6666587a88fb0052"
+          },
+          "identity": "tp-ca2a3365a0cc3457b92f487ec97ee85be76570835caf5367872c944c5a911350",
+          "sortKey": "tp-ca2a3365a0cc3457b92f487ec97ee85be76570835caf5367872c944c5a911350"
+        },
+        {
+          "detail": {
+            "roleDisplayName": "tp-9fb290a1e0dd308c9ce72b241179b0d1b318feaa3858cd826bcc4bd232487abe"
+          },
+          "identity": "tp-5d2339c5c5ef5960962276b9b895b2c2f4689d70cad741f048b8d4b9f756c2cb",
+          "sortKey": "tp-5d2339c5c5ef5960962276b9b895b2c2f4689d70cad741f048b8d4b9f756c2cb"
+        },
+        {
+          "detail": {
+            "roleDisplayName": "tp-1acbf2eea9be75dd60d82f05d8b3c08d93e8dfd4bc0c3183c337f077893e075d"
+          },
+          "identity": "tp-a6f26a2db9620e5b9196a5f39c4666f02ba990129bea63373cefc73d423b5c81",
+          "sortKey": "tp-a6f26a2db9620e5b9196a5f39c4666f02ba990129bea63373cefc73d423b5c81"
+        },
+        {
+          "detail": {
+            "roleDisplayName": "tp-36f5a8c3bdfc8f065bfb7942e55f138e96341000f7ef3f351b1d97d2cf139de1"
+          },
+          "identity": "tp-d5d616effc5481353b32dea7112ac6118a076c679edde0067721ea41216aeb53",
+          "sortKey": "tp-d5d616effc5481353b32dea7112ac6118a076c679edde0067721ea41216aeb53"
+        },
+        {
+          "detail": {
+            "roleDisplayName": "tp-fade18f544c04578222751def22e6107617676e5bc0684aa990f22de4cd277d5"
+          },
+          "identity": "tp-49fe9060004ad81bd6d56af3eacaf7237ab05bdd34b22b2f231b257d929186e0",
+          "sortKey": "tp-49fe9060004ad81bd6d56af3eacaf7237ab05bdd34b22b2f231b257d929186e0"
+        },
+        {
+          "detail": {
+            "roleDisplayName": "tp-03dc7025705df24ee841a0b43d8ed4f2288c64c15bcbe1079ca9fc9e271f8dd4"
+          },
+          "identity": "tp-e19f8cb60767f7c998807a0e498b5ff4c3a829fa15f2d175a11ba25acd709641",
+          "sortKey": "tp-e19f8cb60767f7c998807a0e498b5ff4c3a829fa15f2d175a11ba25acd709641"
+        },
+        {
+          "detail": {
+            "roleDisplayName": "tp-b1f3eabf2c6f398a1faa5e020b3d8e5185650090c13a7d80e39ba5a5d34db246"
+          },
+          "identity": "tp-abc02fe9b82dbd7f5c4354d93700ad1b40e56e0e1a3fb91ce3092b3276b1c91b",
+          "sortKey": "tp-abc02fe9b82dbd7f5c4354d93700ad1b40e56e0e1a3fb91ce3092b3276b1c91b"
+        },
+        {
+          "detail": {
+            "roleDisplayName": "tp-1324738dd9ac3eb8f16c164768ee5497668960e21b3bd38443c93c1ae27e2523"
+          },
+          "identity": "tp-f9e4765b7a718825c0528551e113c97752c3bf5f3803add86a6a54a6ef30619e",
+          "sortKey": "tp-f9e4765b7a718825c0528551e113c97752c3bf5f3803add86a6a54a6ef30619e"
+        },
+        {
+          "detail": {
+            "roleDisplayName": "tp-7fc3718d7602e7c845ebb2a6f05e1a8cbec4aee718c3a5585c3fa4f9aa5e606d"
+          },
+          "identity": "tp-f34066bd51981011d9717f404acf9993f55ac6076559d026a2777c9af84d36e0",
+          "sortKey": "tp-f34066bd51981011d9717f404acf9993f55ac6076559d026a2777c9af84d36e0"
+        }
+      ],
+      "id": "TP.ENT.0018",
+      "impact": "High",
+      "origin": null,
+      "reason": "9 of Microsoft's 9 minimum admin roles are not covered by any enforced Conditional Access policy requiring the built-in phishing-resistant authentication strength (generic MFA - builtInControls 'mfa' alone - does not satisfy this check; see TP.ENT.0005 for that lower bar).",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/identity/conditional-access/how-to-policy-phish-resistant-admin-mfa",
+          "https://learn.microsoft.com/en-us/entra/identity/authentication/concept-authentication-strengths"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0018--phishing-resistant-authentication-strength-required-for-privileged-roles"
+      },
+      "severity": "Critical",
+      "status": "Fail",
+      "title": "Phishing-resistant authentication strength is required for privileged roles"
+    },
+    {
+      "category": "Entra.Identity",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AppAppsPreview"
+        ],
+        "remediation": [
+          "Rotate any flagged password credential to a certificate credential where the integration supports it, or to a shorter-lived secret.",
+          "Set a rotation reminder or automated rotation for any credential approaching the 180-day (password) / 365-day (certificate) threshold.",
+          "Prefer Managed Identity over a client secret/certificate wherever the workload runs on Azure infrastructure that supports it - eliminates the credential entirely."
+        ],
+        "whatItMeans": "Flags service principal password credentials (client secrets) older than 180 days and certificate credentials older than 365 days - ScuBA's recommended lifetime ceilings. Evidence is capped to the 50 worst offenders (by degree over threshold); the total offending and total evaluated counts always appear in the finding reason even when evidence itself is capped. SCOPE NOTE: this check evaluates service principal credentials only - app-registration (application object) credential hygiene is not yet collectible pending a future GraphKit descriptor release; a tenant's app registrations with long-lived secrets are not visible to this check yet.",
+        "whyItMatters": "Long-lived app-only secrets are a durable, easily-forgotten credential class - a leaked long-lived secret grants standing access with none of the rotation hygiene interactive user credentials get, and app-only compromises are a common real-world breach vector distinct from user-account compromise."
+      },
+      "effort": "Medium",
+      "evidence": [
+        {
+          "detail": {
+            "credentialType": "tp-15f2b3da6acf1b4e6574d409c4c09003bed211abcb6e5e165832331104c4045d",
+            "lifetimeDays": 365,
+            "maxAllowedDays": 180,
+            "servicePrincipalName": "tp-ea73090714d533fe977ff8387def55795db83c350b365a953c84a3759ab79391"
+          },
+          "identity": "tp-581c25f89e18619eda66fdaa78ea6b586733d7206898c1031f763f18a39723e6",
+          "sortKey": "tp-581c25f89e18619eda66fdaa78ea6b586733d7206898c1031f763f18a39723e6"
+        }
+      ],
+      "id": "TP.ENT.0019",
+      "impact": "Medium",
+      "origin": null,
+      "reason": "1 of 12 evaluated service principal credential(s) exceed ScuBA's lifetime guidance (password <=180 days, certificate <=365 days).",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/graph/api/resources/application"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0019--application-and-service-principal-credential-hygiene"
+      },
+      "severity": "High",
+      "status": "Fail",
+      "title": "Service principal credential hygiene (password/certificate lifetime)"
+    },
+    {
+      "category": "Entra.PrivilegedRoles",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AllRolesBlade"
+        ],
+        "remediation": [
+          "If below 2: designate at least one additional Global Administrator (ideally a dedicated break-glass account per TP.ENT.0003) so a single lost/compromised credential cannot leave the tenant unrecoverable.",
+          "If above 8: work through TP.ENT.0002's own remediation steps - move standing Global Administrator assignments to PIM-eligible, keep only genuine break-glass accounts as permanent."
+        ],
+        "whatItMeans": "ScuBA MS.AAD.7.1v1 (SHALL) requires between 2 and 8 (inclusive) users provisioned with the Global Administrator role - enough for break-glass/succession resilience, few enough to bound blast radius. This is a DIFFERENT bar from the already-seeded TP.ENT.0002 (Microsoft's own <5 guidance, which has no explicit floor): a tenant with exactly 1 Global Administrator passes TP.ENT.0002 but fails this check, since single-admin risk (no succession path if that one account is lost or compromised) is exactly the failure mode ScuBA's floor targets and Microsoft's own guidance does not capture at all. Same Global Administrator resolution (role-template-id join, not display name) as TP.ENT.0002.",
+        "whyItMatters": "Too few Global Administrators means no resilient path if the sole admin's account is lost, locked out, or compromised - a single point of both compromise AND recovery failure. Too many is the more commonly discussed risk (TP.ENT.0002's own rationale) but the floor half of this range is arguably the more urgent gap for a small tenant to overlook."
+      },
+      "effort": "Medium",
+      "evidence": [],
+      "id": "TP.ENT.0020",
+      "impact": "High",
+      "origin": null,
+      "reason": null,
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/best-practices"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0020--global-administrator-count-within-scubas-28-shall-range"
+      },
+      "severity": "High",
+      "status": "Pass",
+      "title": "Global Administrator count is within ScuBA's 2-8 SHALL range"
+    },
+    {
+      "category": "Entra.PrivilegedRoles",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AllRolesBlade"
+        ],
+        "remediation": [
+          "Review every assignment surfaced in evidence; for each, confirm it is still needed and cannot be narrowed to a less-privileged built-in or custom role.",
+          "Move standing/permanent privileged-role assignments to PIM-eligible where the tenant is licensed for Entra ID P2 (see TP.ENT.0022 for PIM posture specifically).",
+          "If a privileged role is assigned to a group, review that group's membership directly in the Entra admin center - this check's count does not expand it."
+        ],
+        "whatItMeans": "Counts active assignments across every Entra role flagged isPrivileged=true - not just Global Administrator - and confirms the total is below 10, the threshold Microsoft's own role-hygiene guidance (and the Entra admin center itself) warns above. LIMITATION: this counts direct roleAssignments rows only - a privileged role assigned to a role-assignable GROUP counts as one assignment here, not one per group member, since no group-membership-expansion dataset is wired up yet. A tenant that assigns privileged roles to groups may have a larger true blast radius than this count shows.",
+        "whyItMatters": "Broad privileged-role sprawl - not just Global Administrator - is the realistic picture of blast radius in most tenants. Many high-impact roles (Application Administrator, Privileged Role Administrator, Exchange Administrator) sit outside Global Administrator but carry serious lateral-movement/escalation potential; counting only Global Admin (TP.ENT.0002/TP.ENT.0020) misses this broader exposure."
+      },
+      "effort": "Medium",
+      "evidence": [
+        {
+          "detail": {
+            "principalId": "tp-3dd9d4025be4548ee4d6e600201c9008fdaa84b871a96d2351fee886bee82087",
+            "roleDefinitionId": "tp-35655b25b851739cf261f4c591ddc6890a576075f1951cdf299be2ed9650eed1",
+            "roleDisplayName": "tp-a5de3e6c84751755140591aba262eebca756405eae1c11e03cf8541fabc90d8f"
+          },
+          "identity": "tp-3a2f35c2a73fb7507509c106084a2ee4bdac1e67ecb0172a45d91db0cae42678",
+          "sortKey": "tp-3a2f35c2a73fb7507509c106084a2ee4bdac1e67ecb0172a45d91db0cae42678"
+        },
+        {
+          "detail": {
+            "principalId": "tp-09209d844d5ee66edd2c0853c00ab6f0651933940087429683e9790e4f728b66",
+            "roleDefinitionId": "tp-ce2a81703bcf3b994396f571663c1a3dfdd09cbb3dcba3cd88f17efb4d89e414",
+            "roleDisplayName": "tp-44f94ff177a928097a7aef26c02b4ebb6295d6b524aa209e6666587a88fb0052"
+          },
+          "identity": "tp-0501e3a93985e1df6d2de81bc1a11a59002c183ea5f4d98f2b1cd49e1aafb4ba",
+          "sortKey": "tp-0501e3a93985e1df6d2de81bc1a11a59002c183ea5f4d98f2b1cd49e1aafb4ba"
+        },
+        {
+          "detail": {
+            "principalId": "tp-528e4274262da1a2f4cfcf15b53c458deeb08c338b58b11fe5a6ae0f93aee083",
+            "roleDefinitionId": "tp-154bbde3bccd1430790e41421052b6a472e32796dac5c37245e360f8a01e285f",
+            "roleDisplayName": "tp-68624af620a24619b146302d2351836296c0af5606bc5c08e7cf64d0b43477fa"
+          },
+          "identity": "tp-15cf9174ec265c11a4b5fe1a2186bcf470329c97121bec664e369f3b5c73e866",
+          "sortKey": "tp-15cf9174ec265c11a4b5fe1a2186bcf470329c97121bec664e369f3b5c73e866"
+        },
+        {
+          "detail": {
+            "principalId": "tp-319cf0830700c616f129492426dbb6028552f0d802d4aa2d85803bb1be25b12a",
+            "roleDefinitionId": "tp-546466be65870e9316fba08e76f2b6846a3f61e4714f208e30b1f37939a603b3",
+            "roleDisplayName": "tp-03dc7025705df24ee841a0b43d8ed4f2288c64c15bcbe1079ca9fc9e271f8dd4"
+          },
+          "identity": "tp-998345ad75a6d67d2d21aea96961f50135a45bcc547843bb7ee24092890378c1",
+          "sortKey": "tp-998345ad75a6d67d2d21aea96961f50135a45bcc547843bb7ee24092890378c1"
+        },
+        {
+          "detail": {
+            "principalId": "tp-09209d844d5ee66edd2c0853c00ab6f0651933940087429683e9790e4f728b66",
+            "roleDefinitionId": "tp-546466be65870e9316fba08e76f2b6846a3f61e4714f208e30b1f37939a603b3",
+            "roleDisplayName": "tp-03dc7025705df24ee841a0b43d8ed4f2288c64c15bcbe1079ca9fc9e271f8dd4"
+          },
+          "identity": "tp-95f0ee9ae1263abd5d2fa05cd0f933a9f44ca0279693b7780c17b9fc232cdd6d",
+          "sortKey": "tp-95f0ee9ae1263abd5d2fa05cd0f933a9f44ca0279693b7780c17b9fc232cdd6d"
+        },
+        {
+          "detail": {
+            "principalId": "tp-1c594b5994c16b272f756540ba0f238bde8ca20287ad156e761dbf9e9303935d",
+            "roleDefinitionId": "tp-efe7a06381766002250e13aaf63194d6edd58fd02ce9c0c5b8e92debe72d5e12",
+            "roleDisplayName": "tp-1acbf2eea9be75dd60d82f05d8b3c08d93e8dfd4bc0c3183c337f077893e075d"
+          },
+          "identity": "tp-788810a96fb8bff5d7c7636140f561e52aae444f41cfceab2c536a4f9af7c31b",
+          "sortKey": "tp-788810a96fb8bff5d7c7636140f561e52aae444f41cfceab2c536a4f9af7c31b"
+        },
+        {
+          "detail": {
+            "principalId": "tp-319cf0830700c616f129492426dbb6028552f0d802d4aa2d85803bb1be25b12a",
+            "roleDefinitionId": "tp-efe7a06381766002250e13aaf63194d6edd58fd02ce9c0c5b8e92debe72d5e12",
+            "roleDisplayName": "tp-1acbf2eea9be75dd60d82f05d8b3c08d93e8dfd4bc0c3183c337f077893e075d"
+          },
+          "identity": "tp-dce71b753d10b64c8164fafc29cd705e392dcc6de3dd461ab865cd8f8fbb8c7c",
+          "sortKey": "tp-dce71b753d10b64c8164fafc29cd705e392dcc6de3dd461ab865cd8f8fbb8c7c"
+        },
+        {
+          "detail": {
+            "principalId": "tp-638505267df80f126180ecc77a6b491adb9489e8dbd8b199f063832ddc5f887f",
+            "roleDefinitionId": "tp-efe7a06381766002250e13aaf63194d6edd58fd02ce9c0c5b8e92debe72d5e12",
+            "roleDisplayName": "tp-1acbf2eea9be75dd60d82f05d8b3c08d93e8dfd4bc0c3183c337f077893e075d"
+          },
+          "identity": "tp-ce1ddae3a8f4d4d8cecb83f9ef5c228b7189ff874afe2944dab86079318377a3",
+          "sortKey": "tp-ce1ddae3a8f4d4d8cecb83f9ef5c228b7189ff874afe2944dab86079318377a3"
+        },
+        {
+          "detail": {
+            "principalId": "tp-09209d844d5ee66edd2c0853c00ab6f0651933940087429683e9790e4f728b66",
+            "roleDefinitionId": "tp-efe7a06381766002250e13aaf63194d6edd58fd02ce9c0c5b8e92debe72d5e12",
+            "roleDisplayName": "tp-1acbf2eea9be75dd60d82f05d8b3c08d93e8dfd4bc0c3183c337f077893e075d"
+          },
+          "identity": "tp-3f1ba0c4bef30585b5704a916e252188dac3b5472299d0f4934fd92bb1cf7f71",
+          "sortKey": "tp-3f1ba0c4bef30585b5704a916e252188dac3b5472299d0f4934fd92bb1cf7f71"
+        },
+        {
+          "detail": {
+            "principalId": "tp-cf885460de6e1aea7a29cdfdbd09035cf2acb49363d5c9b47b3ee4747f4f2427",
+            "roleDefinitionId": "tp-efe7a06381766002250e13aaf63194d6edd58fd02ce9c0c5b8e92debe72d5e12",
+            "roleDisplayName": "tp-1acbf2eea9be75dd60d82f05d8b3c08d93e8dfd4bc0c3183c337f077893e075d"
+          },
+          "identity": "tp-57e833deab7388eb7dab09c95f9580fb233182a159d5dcaee19c5b1ecd4777d8",
+          "sortKey": "tp-57e833deab7388eb7dab09c95f9580fb233182a159d5dcaee19c5b1ecd4777d8"
+        },
+        {
+          "detail": {
+            "principalId": "tp-892699ecddcccc0f59b59073b03340f81b7f8ab99bdca055fc6a82d7be0f1856",
+            "roleDefinitionId": "tp-efe7a06381766002250e13aaf63194d6edd58fd02ce9c0c5b8e92debe72d5e12",
+            "roleDisplayName": "tp-1acbf2eea9be75dd60d82f05d8b3c08d93e8dfd4bc0c3183c337f077893e075d"
+          },
+          "identity": "tp-bd892db8ff03ecc537515c0d470ed2e80ef1ab093d08eb0933e9531382754b30",
+          "sortKey": "tp-bd892db8ff03ecc537515c0d470ed2e80ef1ab093d08eb0933e9531382754b30"
+        }
+      ],
+      "id": "TP.ENT.0021",
+      "impact": "High",
+      "origin": null,
+      "reason": "11 active privileged-role assignments across 36 privileged role(s) meets or exceeds Microsoft's fewer-than-10 guidance. Note: direct assignments only - a role assigned to a group undercounts true blast radius (see this check's own Consulting text).",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/best-practices"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0021--fewer-than-10-total-privileged-role-assignments"
+      },
+      "severity": "High",
+      "status": "Fail",
+      "title": "Fewer than 10 total privileged role assignments"
+    },
+    {
+      "category": "Entra.PrivilegedRoles",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/PrivilegedIdentityManagementMenuBlade/~/AzureADRoles"
+        ],
+        "remediation": [
+          "For each non-exempt permanent-active assignment in evidence, convert it to PIM-eligible so activation requires a deliberate, time-bound request.",
+          "If an assignment genuinely needs to stay permanent (break-glass), declare that account in the assessment profile's BreakGlassAccounts so it is recognized as an intentional exception.",
+          "For a legitimate non-interactive service account that cannot use PIM's activation flow, declare it in ServiceAccounts rather than leaving it as an unexplained permanent assignment."
+        ],
+        "whatItMeans": "Confirms every privileged-role assignment is either PIM-eligible-with-activation or, if active, time-bound - not a permanent, no-expiration standing assignment. Requires Entra ID P2 (Privileged Identity Management); on a tenant without P2 licensing this renders as NotApplicable with an explicit licensing reason, never a silent pass. A permanent-active assignment held by a declared break-glass or service account (assessment profile BreakGlassAccounts/ServiceAccounts) is treated as a legitimate exception, not a gap - it still appears in evidence, marked exempt.",
+        "whyItMatters": "ScuBA MS.AAD.7.4v1 rates this SHALL NOT. Standing privileged access is the single most common finding in real-world Entra assessments and the specific gap PIM exists to close - licensing and configuring PIM without actually requiring time-bound activation for every non-exempt assignment leaves the tenant with the same blast radius as no PIM at all."
+      },
+      "effort": "Medium",
+      "evidence": [],
+      "id": "TP.ENT.0022",
+      "impact": "High",
+      "origin": null,
+      "reason": "descriptor-pending: awaiting GraphKit release",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-deployment-plan"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0022--zero-permanent-active-assignments-for-privileged-roles-pim-posture"
+      },
+      "severity": "High",
+      "status": "NotApplicable",
+      "title": "Zero permanent-active assignments for privileged roles (PIM posture)"
+    },
+    {
+      "category": "Entra.Identity",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/CrossTenantAccessSettingsMenuBlade"
+        ],
+        "remediation": [
+          "Review Entra ID > External Identities > Cross-tenant access settings > Default settings.",
+          "If broad ad hoc collaboration is not a business need, restrict inbound and/or outbound B2B collaboration to specific target organizations rather than leaving the default allow-all in place.",
+          "Partner-specific overrides live at policies/crossTenantAccessPolicy/partners - this check only evaluates the default, not per-partner exceptions; review those separately."
+        ],
+        "whatItMeans": "Checks whether the tenant's DEFAULT cross-tenant access policy (v1.0/policies/crossTenantAccessPolicy/default) still allows unrestricted inbound and/or outbound B2B collaboration with every external Microsoft Entra tenant - Microsoft's out-of-the-box default, not necessarily a deliberate choice. Distinct from the per-group guest controls in TP.ENT.0016 and the invite-approval setting in TP.ENT.0012 (AP04) - this is the tenant's outer B2B perimeter, not group membership or invite workflow. NO DEDICATED SCUBA CONTROL ANCHORS THIS OBJECT (re-fetched directly against the live ScubaGear aad.md baseline - Section 8 has exactly three numbered controls, 8.1-8.3, none of which test this object); MS.AAD.8.1v1 is cited as directional guest-access authority only.",
+        "whyItMatters": "Default cross-tenant access is permissive by design out of the box, to support ad hoc collaboration - this is a \"verify it was a deliberate choice\" finding, not a clear violation. An organization with no legitimate broad-collaboration need that has never reviewed this setting may be exposing directory data to any external Entra tenant that attempts B2B collaboration."
+      },
+      "effort": "Medium",
+      "evidence": [],
+      "id": "TP.ENT.0023",
+      "impact": "Medium",
+      "origin": null,
+      "reason": "descriptor-pending: awaiting GraphKit release",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/external-id/cross-tenant-access-overview"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0023--cross-tenant-access-default-settings-restrict-inboundoutbound-b2b-collaboration"
+      },
+      "severity": "Medium",
+      "status": "NotApplicable",
+      "title": "Cross-tenant access default settings restrict inbound/outbound B2B collaboration"
+    },
+    {
+      "category": "Entra.ConditionalAccess",
+      "consulting": {
+        "portalLinks": [
+          "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/ConditionalAccessBlade"
+        ],
+        "remediation": [
+          "Inventory service principals holding privileged Microsoft Graph application permissions (e.g. Application.ReadWrite.All, RoleManagement.ReadWrite.Directory).",
+          "For any that warrant it, create a Conditional Access policy scoping Workload identities > conditions.clientApplications to that service principal, requiring a compliant network location or certificate-based authentication.",
+          "Confirm Entra ID Workload ID Premium licensing before relying on this control - Conditional Access for workload identities requires it to actually enforce."
+        ],
+        "whatItMeans": "Counts enforced Conditional Access policies that scope conditions.clientApplications (workload-identity targeting) rather than only interactive user sign-ins. This is an INFO-severity, non-scored practitioner awareness note - it cannot determine whether the tenant's specific service principals actually warrant such a policy, only whether one exists at all.",
+        "whyItMatters": "Workload identities (service principals, especially ones holding privileged Graph permissions) are increasingly targeted the same way user accounts are, but most tenants apply Conditional Access to users only. This is a judgment call, not an automatable pass/fail - the finding exists so the gap is not silently absent from the catalog, per the research entry's own \"an idea still needs a paper trail\" rule."
+      },
+      "effort": "High",
+      "evidence": [],
+      "id": "TP.ENT.0024",
+      "impact": "Low",
+      "origin": null,
+      "reason": "0 enforced Conditional Access policies scope conditions.clientApplications (workload-identity targeting). This is a practitioner awareness note, not a scored finding - consider whether any of this tenant's service principals with privileged Graph permissions warrant a workload-identity CA policy. Requires Entra ID Workload ID Premium to act on.",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/entra/identity/conditional-access/workload-identity",
+          "https://learn.microsoft.com/en-us/entra/workload-id/workload-identities-overview"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0024--conditional-access-coverage-for-workload-identities-practitioner-note"
+      },
+      "severity": "Info",
+      "status": "Pass",
+      "title": "Conditional Access coverage for workload identities (awareness)"
+    },
+    {
+      "category": "Intune.Enrollment",
+      "consulting": {
+        "portalLinks": [
+          "https://intune.microsoft.com/"
+        ],
+        "remediation": [
+          "If mobileDeviceManagementAuthority is unset (this is a NEW tenant that has never had a device enroll), it self-resolves to Intune automatically the first time an admin opens the Intune admin center or a device attempts enrollment - open https://intune.microsoft.com once and re-run this check.",
+          "If it is set to a third-party MDM or a legacy Configuration Manager co-management state, MDM authority cannot be changed without first removing all enrolled devices from the current authority - this is a disruptive, planned migration, not a toggle; engage Microsoft support guidance before proceeding."
+        ],
+        "whatItMeans": "mobileDeviceManagementAuthority is a one-time, tenant-wide switch that determines who is the source of truth for mobile device management policy - Intune, a third-party MDM, or none. This check confirms it is set to Intune, which every other Intune posture check in this tool (compliance, configuration, Autopilot) silently assumes. This property does NOT appear on the plain /organization list response - it only surfaces on the dedicated per-organization read, which is why this check declares two datasets (organization, to resolve the org id; organizationMdmAuthority, the actual read).",
+        "whyItMatters": "If MDM authority is unset or pointed elsewhere, every deviceCompliancePolicies/deviceConfigurations/managedDevices object this tool (and the Intune admin center itself) reads is either empty or not authoritative - policies can be created and assigned in the console with no error, and simply never take effect on any device. This is the single most common \"why isn't anything working\" root cause in a fresh or migrated Intune tenant."
+      },
+      "effort": "Low",
+      "evidence": [],
+      "id": "TP.INT.0001",
+      "impact": "High",
+      "origin": {
+        "id": "MT.1105",
+        "license": "MIT",
+        "project": "Maester"
+      },
+      "reason": null,
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/graph/api/resources/organization?view=graph-rest-1.0",
+          "https://learn.microsoft.com/en-us/mem/intune/fundamentals/deployment-guide-enrollment"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#6-intune-operational-guidance"
+      },
+      "severity": "Critical",
+      "status": "Pass",
+      "title": "MDM authority is set to Intune"
+    },
+    {
+      "category": "Intune.Compliance",
+      "consulting": {
+        "portalLinks": [
+          "https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesComplianceMenu"
+        ],
+        "remediation": [
+          "Intune admin center > Devices > Compliance policies > Create policy, choose the missing platform, and configure at minimum: minimum OS version, encryption required, and (where the platform supports it) a threat-level requirement tied to Defender for Endpoint.",
+          "Assign the new policy to a group covering the enrolled devices on that platform - policy existence alone is necessary but not sufficient; TP.INT.0002 checks existence only (see the check function's own documented limitation on assignment verification)."
+        ],
+        "whatItMeans": "Compares the set of platforms actually enrolled in the tenant (from managedDevices) against the set of platforms with at least one compliance policy defined (discriminated by each policy's own @odata.type - windows10CompliancePolicy, iosCompliancePolicy, an androidXCompliancePolicy variant, or macOSCompliancePolicy). Every enrolled platform should have at least one.",
+        "whyItMatters": "Device compliance is the input every \"require compliant device\" Conditional Access policy depends on - a platform with no compliance policy at all can never be marked compliant, which either silently blocks every user on that platform once such a CA policy exists, or (worse, if TP.INT.0003's \"no policy = compliant\" default is misconfigured) silently lets every device on that platform through with zero posture checks."
+      },
+      "effort": "Medium",
+      "evidence": [],
+      "id": "TP.INT.0002",
+      "impact": "High",
+      "origin": null,
+      "reason": "Every enrolled in-scope platform (Windows) has at least one compliance policy.",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/intune/device-security/compliance/overview"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#6-intune-operational-guidance"
+      },
+      "severity": "High",
+      "status": "Pass",
+      "title": "A compliance policy exists for every enrolled platform"
+    },
+    {
+      "category": "Intune.Compliance",
+      "consulting": {
+        "portalLinks": [
+          "https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesComplianceMenu"
+        ],
+        "remediation": [
+          "Intune admin center > Tenant administration > Connectors and tokens > device compliance defaults (or Devices > Compliance policies > Compliance policy settings) - set \"Mark devices with no compliance policy assigned as\" to Not compliant.",
+          "After changing this, audit for any device population that is enrolled but intentionally has no compliance policy assigned (e.g. kiosk/shared devices) - they will immediately start reading as noncompliant and may need an explicit compliance policy of their own rather than relying on the old fail-open default."
+        ],
+        "whatItMeans": "deviceManagement/settings carries a single tenant-wide default, secureByDefault, that decides what happens to a device that enrolls but is never targeted by ANY compliance policy. secureByDefault = true means an unassigned device is marked NOT compliant (the secure default); false means it is treated as compliant by default - silently passing every \"require compliant device\" Conditional Access check with zero posture verification. This check asserts the secure ($true) state.",
+        "whyItMatters": "A gap in compliance policy assignment - a new device platform, a group that missed a policy assignment, an onboarding delay - is inevitable in every real tenant. Whether that gap is fail-safe (unassigned = noncompliant, caught immediately) or fail-open (unassigned = compliant, invisible until an incident) is decided entirely by this one setting. Fail-open silently defeats every device-compliance-gated Conditional Access policy in the tenant for exactly the devices most likely to be unmanaged."
+      },
+      "effort": "Low",
+      "evidence": [],
+      "id": "TP.INT.0003",
+      "impact": "High",
+      "origin": {
+        "id": "MT.1054",
+        "license": "MIT",
+        "project": "Maester"
+      },
+      "reason": null,
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/intune/device-security/compliance/overview"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#6-intune-operational-guidance"
+      },
+      "severity": "High",
+      "status": "Pass",
+      "title": "Devices without an assigned compliance policy are marked noncompliant"
+    },
+    {
+      "category": "Intune.Updates",
+      "consulting": {
+        "portalLinks": [
+          "https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesWindowsUpdateForBusinessMenu"
+        ],
+        "remediation": [
+          "Intune admin center > Devices > Windows > Update rings > Create profile - build at minimum a Pilot ring (small test group, 0-day feature deferral) and a Broad ring (wider rollout, several days' feature deferral for staged safety).",
+          "On each ring, set Deadline for feature updates and Deadline for quality updates (Update settings > Deadline for updates) - a deadline forces installation after the grace period even if the user keeps deferring."
+        ],
+        "whatItMeans": "Windows Update for Business ring profiles (deviceConfigurations with @odata.type windowsUpdateForBusinessConfiguration) control how feature and quality updates roll out to Windows devices. This check confirms at least 2 rings exist AND each has an actual deadline configured (deadlineForFeatureUpdatesInDays or deadlineForQualityUpdatesInDays greater than zero) - Microsoft ships deadlines unset by default, so this is checking for deliberate authoring, not a default that happened to look fine.",
+        "whyItMatters": "Without at least a pilot ring and a broad ring, every device updates on the same schedule - a bad update breaks the whole fleet at once instead of surfacing in a small pilot group first. Without deadlines, users can defer updates indefinitely, leaving devices unpatched against known vulnerabilities for months."
+      },
+      "effort": "Medium",
+      "evidence": [
+        {
+          "detail": {
+            "displayName": "tp-bb53d64b177bfa263696d59119c81db8d1b5f1498a0e17498261de9510e3b976"
+          },
+          "identity": "tp-b35e25e2aaaa74f70cd74fd21a3b0aef1976189147fc46ebb63e649788d46869",
+          "sortKey": "tp-b35e25e2aaaa74f70cd74fd21a3b0aef1976189147fc46ebb63e649788d46869"
+        },
+        {
+          "detail": {
+            "displayName": "tp-f42709edc25ddd4bf7454280f3d29c32cf0e4674f59377887fdbb9dec316e8c2"
+          },
+          "identity": "tp-df64d6d4680a46c10f0a8574067a5223ddef10ca97bfe0729b833cdb38d73414",
+          "sortKey": "tp-df64d6d4680a46c10f0a8574067a5223ddef10ca97bfe0729b833cdb38d73414"
+        },
+        {
+          "detail": {
+            "displayName": "tp-b7f900a85bde23d09adb3cee1b8ce4139353029b3e2bc002dfc4ce11761bed5c"
+          },
+          "identity": "tp-42c5c02d50af4f0cc558a4a54a2488c051cbd54e7694905b19aa7a3eea1df4b3",
+          "sortKey": "tp-42c5c02d50af4f0cc558a4a54a2488c051cbd54e7694905b19aa7a3eea1df4b3"
+        },
+        {
+          "detail": {
+            "displayName": "tp-535fc48af2ef7f97c7ffe7b102a42ae5dc833783e3e396549b9afde5f94a36db"
+          },
+          "identity": "tp-f5de8cd8bae671c37a14cf6eb0407f943d4d70ddaae2ae21ca9e3f9176a21b79",
+          "sortKey": "tp-f5de8cd8bae671c37a14cf6eb0407f943d4d70ddaae2ae21ca9e3f9176a21b79"
+        }
+      ],
+      "id": "TP.INT.0004",
+      "impact": "Medium",
+      "origin": null,
+      "reason": "4 Windows Update rings have deadlines configured.",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/intune/device-updates/windows/manage-update-rings",
+          "https://learn.microsoft.com/en-us/intune/device-updates/windows/ref-update-ring-settings"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#6-intune-operational-guidance"
+      },
+      "severity": "Medium",
+      "status": "Pass",
+      "title": "At least 2 Windows Update rings have deadlines configured"
+    },
+    {
+      "category": "Intune.DeviceLifecycle",
+      "consulting": {
+        "portalLinks": [
+          "https://intune.microsoft.com/#view/Microsoft_Intune_Devices/DevicesMenu",
+          "https://entra.microsoft.com/#view/Microsoft_AAD_Devices/DevicesMenuBlade"
+        ],
+        "remediation": [
+          "Configure an Intune device cleanup rule (Devices > Device clean-up rules) to automatically hide devices inactive beyond a defined threshold - this hides, it does not delete or wipe, and never touches the underlying Entra device object.",
+          "For Entra-registered devices, follow Microsoft's stale-device management guidance: disable first (with a grace period), monitor for any owner objection, then delete - never delete a system-managed (Autopilot) device.",
+          "Investigate the population gap this check reports (Entra-registered but not Intune-managed) separately - it may indicate BYOD registrations that were never enrolled, or an incomplete migration."
+        ],
+        "whatItMeans": "Reports devices with no recorded check-in activity in over 90 days, from TWO genuinely different populations: Intune-managed devices (managedDevices.lastSyncDateTime) and Entra-registered devices (entraDevices.approximateLastSignInDateTime). These are not the same device count in most tenants - a device can be Entra-registered (has an identity, can authenticate) without ever being Intune-enrolled, and this check also surfaces that population gap directly, because an Entra-registered-but-unmanaged device is itself a coverage finding.",
+        "whyItMatters": "A stale device is an unpatched, unmonitored, un-reviewed endpoint sitting in inventory - it still counts against license totals, can still authenticate if its credentials are valid, and its compliance state is stale data an admin might mistakenly trust. Microsoft's own device-lifecycle guidance (Intune cleanup rules, Entra stale-device management) exists specifically because this backlog accumulates silently otherwise."
+      },
+      "effort": "Medium",
+      "evidence": [
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-ac46705d7fc5fbbb9ec0084c1c95566625b60fab926bec073692440338b64901",
+            "displayName": "tp-5d84e55e501291ab5fb0cc661ec9873b7e48521ca4c612b935bca725bb21cbf8",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-f7586ac4aa8a76a351c276812d196349028a2e2491787fa9a0fe4e7e6ed16a36",
+          "sortKey": "tp-f7586ac4aa8a76a351c276812d196349028a2e2491787fa9a0fe4e7e6ed16a36"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-24c9592fe40b2098f12e0b7f7c870450cd292dae10950849da8908a74e49eca7",
+            "displayName": "tp-4dc4728e6ca2c8cc1d3f139bf9276921338b1e3c558ffb3e74357332706ee061",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-5c92cbd3bc0cffb9b394ff69d56723b054269429058834c7bf2e8b345cf8b476",
+          "sortKey": "tp-5c92cbd3bc0cffb9b394ff69d56723b054269429058834c7bf2e8b345cf8b476"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-f681878440d0677d97b1e8fc6c51dde825b0519a28c87f4ca9d7761d093ce830",
+            "displayName": "tp-38ac0fc755833e19887486fde21b480a0832aa65792326874c9ea4ba747ade6e",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-d71a4f044686890902bd8fefe375b69bb019bacfa1d1d7f09d26227f95983397",
+          "sortKey": "tp-d71a4f044686890902bd8fefe375b69bb019bacfa1d1d7f09d26227f95983397"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-0da197563b6303938e95f27f61306fb764a485659a442288ee6f7c6b38614cac",
+            "displayName": "tp-4062ea2ed586aed67f8e94940ce572fa7340083890ba7747ea022ecfda4895f8",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-7c6ca4ce7dc50d9a4269163aebdba9ff01b8820e52c5f1dd7b0e4436385121d0",
+          "sortKey": "tp-7c6ca4ce7dc50d9a4269163aebdba9ff01b8820e52c5f1dd7b0e4436385121d0"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-188f4acdb9e542925547ad1e670bea95f7285dedeaf4301d4259162e313cd9de",
+            "displayName": "tp-21cc412bcce16518febe03d9ec7cb470126bdfd2c8cfba16a3e4c73eadfc6686",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-00b3075b78945043b691f6daaea7aba9542db6302e207cbfc954d6322cc16e10",
+          "sortKey": "tp-00b3075b78945043b691f6daaea7aba9542db6302e207cbfc954d6322cc16e10"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-cc69c3d7cf909b38be3ff8749dc7cd82d37163a289db16fdbf2fa56849f846c8",
+            "displayName": "tp-f036f49eb12e353bb874e7d09597e00c10038127631968a718a2cb727d7e32c9",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-c90caf94f07184d9c7ab962db1dc8da8e928f0e83a2bc00516208cac7dd54b95",
+          "sortKey": "tp-c90caf94f07184d9c7ab962db1dc8da8e928f0e83a2bc00516208cac7dd54b95"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": null,
+            "displayName": "tp-def1a9fbfb041c3276805a65512fbb3753363049d90901553ff88ee068cce453",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-0630b3d8168acd44bb3ae4f84a51071b6705485c113744a43961011d3f660921",
+          "sortKey": "tp-0630b3d8168acd44bb3ae4f84a51071b6705485c113744a43961011d3f660921"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-0de47b51f6cd26cdfce70cc8126804fd10b55f795fe7406f8d65aa8c8d53ae55",
+            "displayName": "tp-5eca768d004a2e090d1aa08e92d7f3d27f9c8ac689033b9e2800ad7055afe705",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-4c1d95c5a39c4d04d4a82e3db85d8d7d6fef6fa369ee86b1588da8a8f5398614",
+          "sortKey": "tp-4c1d95c5a39c4d04d4a82e3db85d8d7d6fef6fa369ee86b1588da8a8f5398614"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-981fccf048be89103f4d6f1c753e2fb2e1a167c0952aa1e97828133dbab9a000",
+            "displayName": "tp-50a5bc4153301c017df2c82e911c83f2a81fcf85f66260d7c1e6fcc5469fe95b",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-4cbaba2b18b4c922b55cfab1a345fc398e4dceadc7ac17214cc085462d2db1f0",
+          "sortKey": "tp-4cbaba2b18b4c922b55cfab1a345fc398e4dceadc7ac17214cc085462d2db1f0"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-b7f5db82e93aa975b427751f914241cae9479c6873215cd31e59452486712201",
+            "displayName": "tp-5f13ce78b4a2a45cdcce96b86a5ec764101d4f45d3908faf439748a0af033628",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-871efdeb2a41c793d0ef23368dac6bbfa1b6b328610a42792e8e2b2908e1d971",
+          "sortKey": "tp-871efdeb2a41c793d0ef23368dac6bbfa1b6b328610a42792e8e2b2908e1d971"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-a9d5b6f394cd489b3a9f0df10a806ec8485a47f0fd200e05f7aeedc2d21931e1",
+            "displayName": "tp-6e0f0b01279d15039b745555e9dc32edd124b9ea609b8e5ec8175c0e3c881c00",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-4fe1c91915bcf4802502323bd7549bfccd062c5f6f756cd375c2104c2581ccc2",
+          "sortKey": "tp-4fe1c91915bcf4802502323bd7549bfccd062c5f6f756cd375c2104c2581ccc2"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-62e3b2513c8f159562a642d203e6f8e05ea4cfd0ef363f9ee0da78d5a3606343",
+            "displayName": "tp-79d0f7b22131b73ca1cd4b6bb3d1d5ce65f0ef32cc5146be1351af148905b1fd",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-c7f2aba7c07a2b5e2d71dbcc3eed6822dfc56f4783150153dda3ee1d0647b468",
+          "sortKey": "tp-c7f2aba7c07a2b5e2d71dbcc3eed6822dfc56f4783150153dda3ee1d0647b468"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-38ad990f14ea57125596a8e6f5ba7a7544d9dc49d055ec27a6c58214c52b9f4d",
+            "displayName": "tp-bcfb9c7f7426b619ee6a7d785a31f5686d1cbefa2a958dde422ee024c41d49f5",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-c15bd5fa58bdc3933265c9306cf8fe0419d127a638d1199ed9319d7534dc144c",
+          "sortKey": "tp-c15bd5fa58bdc3933265c9306cf8fe0419d127a638d1199ed9319d7534dc144c"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-f7dd95a7701330d824f1660c136478460c1367ba3728727f3c6e0efe1d8311f9",
+            "displayName": "tp-116b773dd5bb71d384417530b5a41d2a576b5c8032b75479fd7aec409dc55e53",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-ea98a5c07d8c927b14c1bb6f83cc68d258874d93d814cd5a9833c0ddfc48e90c",
+          "sortKey": "tp-ea98a5c07d8c927b14c1bb6f83cc68d258874d93d814cd5a9833c0ddfc48e90c"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-0a8ac7bc6f5a8af04bd672565dc8cb4ef5a7f555a4694627f3ec4b5c041afcf8",
+            "displayName": "tp-284bd1316f986fa4b7ec3b577b832e7955cfe03c659b86c737c39a9fdd4233b8",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-c62d762858ebd5124ce1cd757d4f78207aec408c6e6de8471f3b5de08a2957a2",
+          "sortKey": "tp-c62d762858ebd5124ce1cd757d4f78207aec408c6e6de8471f3b5de08a2957a2"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-d078006a2c31a3f43f13c91634bf7d5477a11e8fe4ba1770a1b258b77f10326a",
+            "displayName": "tp-1dbc97798e8250d4361d83a689def41294bb6a66a0bbed7b15eae4b4725a2950",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-202372cb38cd662739db2e38b6cba57b5915db8885010d847978adcd6ce9c3a5",
+          "sortKey": "tp-202372cb38cd662739db2e38b6cba57b5915db8885010d847978adcd6ce9c3a5"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-66395f67c6dbc81f982dcc49c106ac9da124353af2378ad1ed55f0654e0d1234",
+            "displayName": "tp-51711f95bf6ef9c5272bdce912c2489406a765dbe837050d14be078431010a8d",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-5068dc865f921a3e8a9ed29be06a5bf3b128040238e2dbd1f520cb05bdab92f3",
+          "sortKey": "tp-5068dc865f921a3e8a9ed29be06a5bf3b128040238e2dbd1f520cb05bdab92f3"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-01475b2169ab6931caebc7036683373133d7801e07ddedcd2085417999b7984f",
+            "displayName": "tp-7564307d7e479974abf808c8cff6f6208534f328b422fcb4c90fde43e622b31c",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-be5376ceec4ef62ea0011ec0345407d3818849f724c04df335ee8ab718b3a214",
+          "sortKey": "tp-be5376ceec4ef62ea0011ec0345407d3818849f724c04df335ee8ab718b3a214"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-b5872e48f87ad6e37f57b97836d60ee77ce304e73b66f23838d00134caafab06",
+            "displayName": "tp-15d181123ca6ec020c7f7de702fdccbe4804d66a4fa03bf274d754a7e4b228f7",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-b67d90f4ce4af3717041a3da28e9a439d00fc29d2e4704f1a1f7a1176c4a1ca7",
+          "sortKey": "tp-b67d90f4ce4af3717041a3da28e9a439d00fc29d2e4704f1a1f7a1176c4a1ca7"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-524148c7b14293158943aeb4bb9dbd14dffa8f67950ff51b69cf0bb126b92085",
+            "displayName": "tp-fb5b32331d5034c860718fbb78e6d3b4956982d990414af44a16f837328ad7ea",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-44f33b21f4be3b10656ad1a89c095f15264a8b77971e04186dffba0ee7a70508",
+          "sortKey": "tp-44f33b21f4be3b10656ad1a89c095f15264a8b77971e04186dffba0ee7a70508"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-b0b59df79366a29fbf0a65ed67335e2351a71fe991029fc7aa12f1c6ca5e9d52",
+            "displayName": "tp-c88478938c7136716d6b849380ed533d6ebb242ad4ae08e259354fbb3b19ca0e",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-f2be1d06e086d9c6c6e83208e9a091b43d96e3c79a7bf4395b4fb0f337b9df4c",
+          "sortKey": "tp-f2be1d06e086d9c6c6e83208e9a091b43d96e3c79a7bf4395b4fb0f337b9df4c"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-2b085f7c5a39f610c350d2cd811b7c07c10e0af531cc42fa7ebc5293498f22bc",
+            "displayName": "tp-7564307d7e479974abf808c8cff6f6208534f328b422fcb4c90fde43e622b31c",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-bb380a3710dc18edc8f4b415f9fe665af66ba9f7996f852c3b214453033d977c",
+          "sortKey": "tp-bb380a3710dc18edc8f4b415f9fe665af66ba9f7996f852c3b214453033d977c"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-4b325ecaabd7cca01d631ab1c5c8b269af17b07bb441fc17f6d91863bf4e4bbe",
+            "displayName": "tp-4062ea2ed586aed67f8e94940ce572fa7340083890ba7747ea022ecfda4895f8",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-226a7f286fa9e7d0cbf37ab2021b286a49693c0ad4d27efe70b49acf69077b10",
+          "sortKey": "tp-226a7f286fa9e7d0cbf37ab2021b286a49693c0ad4d27efe70b49acf69077b10"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-2025e5eaddcbfda8697bfb3675d9f42edcea3d8c0f140bf96e50572e36ccbe0f",
+            "displayName": "tp-4ad863211e2af3779f0718a574c6b326462d560eb93c243b59787ecd1893263a",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-15e3fe4eae06bc4b08b819c3e4a149d0f7d571a1441deb9b079369188c382d6d",
+          "sortKey": "tp-15e3fe4eae06bc4b08b819c3e4a149d0f7d571a1441deb9b079369188c382d6d"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-67949e299b3372b8fdbc959dc8cf2436336e1b183c4aefe8c661c949f8d27d9b",
+            "displayName": "tp-7564307d7e479974abf808c8cff6f6208534f328b422fcb4c90fde43e622b31c",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-177a5fb2dfc9704728ed8920c919d835c42ee8e2b539f21af0276d894f31c394",
+          "sortKey": "tp-177a5fb2dfc9704728ed8920c919d835c42ee8e2b539f21af0276d894f31c394"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-536554814e2e436cd4fb65bf568f51a9e783bcc9846e40970a7cd6df4d4bf8a6",
+            "displayName": "tp-f036f49eb12e353bb874e7d09597e00c10038127631968a718a2cb727d7e32c9",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-6531aab7188ff1eaf757c01298bd816fa2bcb9073976fbce7ebb32c0e483e045",
+          "sortKey": "tp-6531aab7188ff1eaf757c01298bd816fa2bcb9073976fbce7ebb32c0e483e045"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-f9b23d9b184f244f0ac570be40a634391bdee333299fa32db49d9ff8d3ba5e7d",
+            "displayName": "tp-8bebb004259b1814e2a1dcc6d52b0be96d532f083a66cf937faf112fce5f24f8",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-8fdc4b1aa10b995dd09ff7dd21c9056ef0b30048575a1461a121da2ad136da9d",
+          "sortKey": "tp-8fdc4b1aa10b995dd09ff7dd21c9056ef0b30048575a1461a121da2ad136da9d"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-0d92e449057aac8554143f428c636dee6a265adcf579e086948f0099f685a12c",
+            "displayName": "tp-8b8e52822b31f4b02c10fd12709521f9ba73419e3053e57fddbeefebcd975ff0",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-a48fbdfdb6fb19d63f105613e415c8106be6811e189ffbb0f836f420f10fb10b",
+          "sortKey": "tp-a48fbdfdb6fb19d63f105613e415c8106be6811e189ffbb0f836f420f10fb10b"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-b2a71bcdc4e985f2b23bdc7180c9fdd0a2b3720f49348ec3778e51e1ab51a24e",
+            "displayName": "tp-2f93bda2b402b6d2def935f8190d29f284c22b24e3c678fe73237ab5bd4f7ab2",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-2a7458169cab0079a40e7f9f944b37f8fc045af62939b9879ebb5619ca2ea62c",
+          "sortKey": "tp-2a7458169cab0079a40e7f9f944b37f8fc045af62939b9879ebb5619ca2ea62c"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-41ec54db94f09aeca96668e08e500ac911a9dd34f8c66d91535e13fbcce266f4",
+            "displayName": "tp-416ebef9ccb31f6324f441a0ad98cd01324f9d3562f8741b52c1a5ff60a47725",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-6a19c662a6730065c75527712830ae6cc5f74fcb5dce495c00c9ae5f4509c133",
+          "sortKey": "tp-6a19c662a6730065c75527712830ae6cc5f74fcb5dce495c00c9ae5f4509c133"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-9d555e80e3ed2db0532a9b4eafd34bbbad27fb642cd2d1edc7e2b2dbb460040c",
+            "displayName": "tp-83c6fe4e4a6d2e17cfb7f81b84429ad77b5b873220e52432b1a317f53c0e4232",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-3753b7f6e2597459fd6a9be815f6289c0003d067f9c97c8ea48cd72d9fdf06a9",
+          "sortKey": "tp-3753b7f6e2597459fd6a9be815f6289c0003d067f9c97c8ea48cd72d9fdf06a9"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-3aaf1da75b9e8e88046425f4239b18837889e7e6b5ee22bd86ea8eaba7c11fde",
+            "displayName": "tp-17199f5642f2ccd17ab7aa82f9e04ea2ddd969a2cfe7cf03c3b6eef6a998c778",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-012de0a954cb3269b930ce59f5109ea02eb116deae6227724b6598fa8ece6305",
+          "sortKey": "tp-012de0a954cb3269b930ce59f5109ea02eb116deae6227724b6598fa8ece6305"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-47238067c1fe5820dbd429e423ba9a68e56a36f69ac7e5d47983dbbbe53e8fb1",
+            "displayName": "tp-4062ea2ed586aed67f8e94940ce572fa7340083890ba7747ea022ecfda4895f8",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-aa09e70f3512aaebfcfffb4326dfb3d1a8fc68031db535e4900456f8ef5054b5",
+          "sortKey": "tp-aa09e70f3512aaebfcfffb4326dfb3d1a8fc68031db535e4900456f8ef5054b5"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-a978b51ba5902f858f515c5c6066c84c68ffd32b5c4de8aaabda0c23662bda22",
+            "displayName": "tp-e6a8263634970418abedf9d165a0af2652c6a140054bd27bd8c92282e2d9b724",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-ee9459e305686bb8693a79841adddfd28b31bbf085143824ac54ccd1b0169123",
+          "sortKey": "tp-ee9459e305686bb8693a79841adddfd28b31bbf085143824ac54ccd1b0169123"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-33863568729db20f15e6c567cec4ecd4b6464eaa1c455089a901baa34464ff7b",
+            "displayName": "tp-c906073e1ce2643fedb560e96cfda780b8177b33ce254a2fcbecc1ae7c83c8ba",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-c6bfd79a1689f81509d304dbe73213c87142f7386d36fd43eefcb21a5d8ac064",
+          "sortKey": "tp-c6bfd79a1689f81509d304dbe73213c87142f7386d36fd43eefcb21a5d8ac064"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-dcbb33634aaa7084ee05560fd443062c5044204bae1c394acbf1c6fe85c54968",
+            "displayName": "tp-5fd5281b72deaf1beb4026a685fb8fb33a0a67056cc92040945ec29568c9e4c7",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-9c68143cb4566c3badea320ee3c560c1a2e059480449fd60fd5d26ef62436bb3",
+          "sortKey": "tp-9c68143cb4566c3badea320ee3c560c1a2e059480449fd60fd5d26ef62436bb3"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-f7b6428ff933e6e134d25dfe16e201b3987bf4246869bf2bf04b4ec1e5f10891",
+            "displayName": "tp-1d1677d3f8c7f0e6244b23d13e78786fcb4809960d278c703113b5dec4dd800c",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-6388037106ca578f61f3dfe10f90395b381eaf76cfd4873da0ecbb10ea88edeb",
+          "sortKey": "tp-6388037106ca578f61f3dfe10f90395b381eaf76cfd4873da0ecbb10ea88edeb"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-731dba3a099c134ea28bc21d07680ca25a391dfc15289475fe61a6d93afdd0df",
+            "displayName": "tp-ca52d5280a30ebe44b4a5f193af57cbad9d988f1bec46a0a841defc8d125059b",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-f30bac8ebea3c65242d9f64a925d3e3fce5383c5247b5cb28a6df56aa72c7627",
+          "sortKey": "tp-f30bac8ebea3c65242d9f64a925d3e3fce5383c5247b5cb28a6df56aa72c7627"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-9d062df7262ed1800064342442baea6b2f0c026573a85fe999da7a054a7e4fe1",
+            "displayName": "tp-813cadd1df6a9530a6f2eac4fd04a0bebf79847f396349f1daa79e22d587233c",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-53c58e55d3c3d80c8dc2d447febb86dd8b38676f79a580c7944b050b38395179",
+          "sortKey": "tp-53c58e55d3c3d80c8dc2d447febb86dd8b38676f79a580c7944b050b38395179"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-8fcd508f048093021f95b597ab1c9bc126df69aab9c45aa68d8437d62f0b5485",
+            "displayName": "tp-763baf80e6de7ab52280847c1541f60a626f92de4a036dc0957a59de2462081b",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-d9f3ba3fa7109ce86a300c6c4201282a6fcdeab705159e5e0a5a7bba306fc3ae",
+          "sortKey": "tp-d9f3ba3fa7109ce86a300c6c4201282a6fcdeab705159e5e0a5a7bba306fc3ae"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-d22574de6791fb10c6fe07ddf8cd2bdfd8d82c3b4797474bc833e5a5b609841c",
+            "displayName": "tp-4062ea2ed586aed67f8e94940ce572fa7340083890ba7747ea022ecfda4895f8",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-375f58689200c0e688e01ac98897188e93ddea5d3b1d56e34fa4fb4c58293f8e",
+          "sortKey": "tp-375f58689200c0e688e01ac98897188e93ddea5d3b1d56e34fa4fb4c58293f8e"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-d654e6e780e387414e0bc06d8d4f6bf240e5fc0a54c8ed2c9a524d5ec266064c",
+            "displayName": "tp-c93b063ca690de1cdbf4afa733356e9eeb456bc41795af0b8ed8ee44ca21b9b5",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-4456125bda824812bc4899fc45eef9cb73671a7c2557150ef3d761def25c893a",
+          "sortKey": "tp-4456125bda824812bc4899fc45eef9cb73671a7c2557150ef3d761def25c893a"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-7438e614d2dad875ce7d15699adca57c436d33d6efe6b72dd1408d9cac2a26ab",
+            "displayName": "tp-d3f9a701c6ab5393863c4ff5a877503e3e55deebbdf3f7f4aabe93eb0e891f29",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-79ec43e0ed9bba0c94589734a08134d24582c521f0ec384d9a732c1bb43b342e",
+          "sortKey": "tp-79ec43e0ed9bba0c94589734a08134d24582c521f0ec384d9a732c1bb43b342e"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-0ea1ce7449a77b3699bed805ac7f9f0d46ba3b783892284e3ba616f32530915f",
+            "displayName": "tp-a0171bd123721ae24d903dfcc1843b8845bb4def58c3855a3d7a5d137545e4fe",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-9423f4dea7d043f7b78177d2ab3d0169d66d5f200d8615627c0eec5ca79f02d1",
+          "sortKey": "tp-9423f4dea7d043f7b78177d2ab3d0169d66d5f200d8615627c0eec5ca79f02d1"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-afbfa76989ce33cdd241f28884b6680069773ebff6d73a503202d0df609a9f48",
+            "displayName": "tp-49c57262320d0f5c3192800f80b99ff4b59223d0e9ad6fef1ea24f910a365913",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-a7d5d6c4b8d9bea8ab438ec232ef90a8c3c75766ade1093ffbf2a2644196605b",
+          "sortKey": "tp-a7d5d6c4b8d9bea8ab438ec232ef90a8c3c75766ade1093ffbf2a2644196605b"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-6858346e55810819ba3f9ee5d94779c0494d1f6961bab2a5b9cd4fdd790a7a02",
+            "displayName": "tp-1bb53ef2a06d77de31fb9d8cd3d257478172a2b79f069320a93ade189b740aff",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-eb376ccd3a62bb63fd0e8c8320e471dd2192b8322bb1469a8ef67703ff2bd9a3",
+          "sortKey": "tp-eb376ccd3a62bb63fd0e8c8320e471dd2192b8322bb1469a8ef67703ff2bd9a3"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-593fbec5f0c2163fc481ba68c7630932ad4532c5c6d934e86b97b7b7bb90cdb3",
+            "displayName": "tp-f4895302c916a7beae4dee77207f90bfa3f5bfc3bff428cc12744108e4e5e225",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-36948d08ed99c306fb3e8e6c6facf0e824b5402fb3f32b3908f3b89b2eb2859e",
+          "sortKey": "tp-36948d08ed99c306fb3e8e6c6facf0e824b5402fb3f32b3908f3b89b2eb2859e"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-21124237fcd7c2d204dd6a969b195496bf70266e656900cd5d87e16bc931586b",
+            "displayName": "tp-68be33c7ea9927f2f6261ccf6404c2c32e0ae4c85e759766c5a50b615a32c82f",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-52db3bd3e54481895d13cfc4c24a9da1106fb0ad70c0027209496425b1fa3d2f",
+          "sortKey": "tp-52db3bd3e54481895d13cfc4c24a9da1106fb0ad70c0027209496425b1fa3d2f"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-7ba8f0ba095495c42131d1a85cc3bd7f02f78cf4700da4110451a7c88887f1d7",
+            "displayName": "tp-7257b4f08b1d0b4d7dced233f7f04951f099af58d61555190a06e5636204e6fe",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-405ae24ec88fea2bc5ed5c045e9c34c2a1b65b15d85af68a5e5d820ebb79fede",
+          "sortKey": "tp-405ae24ec88fea2bc5ed5c045e9c34c2a1b65b15d85af68a5e5d820ebb79fede"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-3b427490c4a4d4e853cce6e7f712f5c9c8f5fc21658387bd4f617c9883b9a358",
+            "displayName": "tp-d4b53eace506d818af9d607c2ec13bb79e4c31c98c6841071787130ce130dd15",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-4ad3f954ffe25706ccf96f1d4bc709d488935627a73a51c37ee925b35435f748",
+          "sortKey": "tp-4ad3f954ffe25706ccf96f1d4bc709d488935627a73a51c37ee925b35435f748"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-c0af7c908dc0ba5afa3bd09921cac81e9d876fc4e597aa3d6b19292186affccb",
+            "displayName": "tp-bbbc4f15ee00d53cdd5bfe8e8240b530ef14ddf333b8e25b4f0bc5f2a9372064",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-acb13945e9d355f5476df7f4db3c748ee4266b1380c4c0e31548ecd6fc54a26c",
+          "sortKey": "tp-acb13945e9d355f5476df7f4db3c748ee4266b1380c4c0e31548ecd6fc54a26c"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-9752d27fa4412e8fbb5ba9e34dd435d1e424363932c992b028dd6938014f44bc",
+            "displayName": "tp-8f6bb216c474645720ed9871f4358778a704befedb0c3e0250fe714b49a308d2",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-947ee4fab7d71ef0e07e59a9d3ff4cc4e0d72bddd31c00b587453ba3fc23f6fa",
+          "sortKey": "tp-947ee4fab7d71ef0e07e59a9d3ff4cc4e0d72bddd31c00b587453ba3fc23f6fa"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-dfc7b1b68a895e717065412e2c60eb96579461d8bca634948d05d63f7fa8f612",
+            "displayName": "tp-7a9d8173609c7db1de4f55efe447e069d0004648b9cfe3bb650554a6746aaba5",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-c998b5ec7d6d3166d5816ee21b42f90812417553aa0690eaa087e5405ade14a1",
+          "sortKey": "tp-c998b5ec7d6d3166d5816ee21b42f90812417553aa0690eaa087e5405ade14a1"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-59e68f28f2e80790c3dbe7664c904169cbb0fb3f7ff7b1210f2735db14c82c42",
+            "displayName": "tp-3f55762850057294baa619bbbcdcf048720ebe2bafefb6c7e1678a665203191a",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-761a2c69a6a37485c4487988799568c37ec7bd7cb5c08222b3c8e95818ffdff2",
+          "sortKey": "tp-761a2c69a6a37485c4487988799568c37ec7bd7cb5c08222b3c8e95818ffdff2"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-b4c6322aa49910a2d568f30615f5d57dde6e5c3b1e66051c519b50e414583372",
+            "displayName": "tp-1e96e39da83cbe46eb79b8214d42bc07d8e2dfd049b8ff371950480fe0661a51",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-018720c022c071f4faec724ee03c34e9807ab32ab1022826c02eea4536c95281",
+          "sortKey": "tp-018720c022c071f4faec724ee03c34e9807ab32ab1022826c02eea4536c95281"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-c629e1787ad74f4c74c0173a45149cffcf0da33210d0a8b82579735041eb162c",
+            "displayName": "tp-1048bc2a93f009bf01a3c18a0250f98d70985459e684476735cc15e9c1d64d27",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-8ef3f98d84192c94f90a40fbe3b9af127315e905ff360b7f5f38df1d7987780f",
+          "sortKey": "tp-8ef3f98d84192c94f90a40fbe3b9af127315e905ff360b7f5f38df1d7987780f"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-6f0c1ce188bf8179dc7633968f09c29aeb48da9fcec1df770007f3e052b029c8",
+            "displayName": "tp-a005bf1acc0a56aba0afd34751ccf7f0e0fed013e2e936d13c4d6e6ebc9efa54",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-a3ed12536992ca8ac3260eea13596d4b93a9c3b3d7bcbf71d939c38607a5597a",
+          "sortKey": "tp-a3ed12536992ca8ac3260eea13596d4b93a9c3b3d7bcbf71d939c38607a5597a"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-39fca7e232a0e90f8d7572b7454bf3f1c063dcfbeee91a60abfbf93472c69ae7",
+            "displayName": "tp-0f6ef6c19bd7f3bf8a4ae10b6fb94f2ad15364d79e1e24e2fc925e9285b9e940",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-4df56bf9753db96f131b3358f8f44dc3319b9cc677930408a9b8e11809a850d3",
+          "sortKey": "tp-4df56bf9753db96f131b3358f8f44dc3319b9cc677930408a9b8e11809a850d3"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-7abc3719630d66fc9170f87d7ecf275bfec3be4d5bf8dce91e8a1f2353195552",
+            "displayName": "tp-dfe36787e48eae38188440ac53159b673158085cdcd9a99ce53ba0b0da4d3524",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-73453ad828062abe08c49e40e98d1807860d6c2ce4a85d89bf7af255143f4573",
+          "sortKey": "tp-73453ad828062abe08c49e40e98d1807860d6c2ce4a85d89bf7af255143f4573"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-ac7cc6d007fb11b3899f3e42a02d1c75750d8b781ad45d9c12c73030e538a81c",
+            "displayName": "tp-fe57952466c8ceeeb1d858f0912dccf23fa4ca975b21ed3811e87a68c7ae9742",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-815ae47de3619bcfa0b239661850f3e0988e5cd1568e7d79b270ea3c83d1ef0a",
+          "sortKey": "tp-815ae47de3619bcfa0b239661850f3e0988e5cd1568e7d79b270ea3c83d1ef0a"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-0fe597bf4e52765bc26c9e6c2d472db206db6e13a751b7faf02227f5c19cad17",
+            "displayName": "tp-991e63a93b02042b9a274eb8cdac440a6c81c37e7dac6b52a650597a9dae1fb8",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-36eb63a2a4d016c0148d5f9499fc706dfed75d9e699d5cad9af3b2a75bc8374c",
+          "sortKey": "tp-36eb63a2a4d016c0148d5f9499fc706dfed75d9e699d5cad9af3b2a75bc8374c"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-348b90f764af13de1e200282d2b42fb852dcfaced46c396d718ebfdd2c381ca6",
+            "displayName": "tp-1fd347ad88c347af6448af4306c7c604dd0f71baa68686918bb30ac7dce57cc9",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-b6f87424e3df9ed66e1699a93ff8a62b5bb769b1ca89b9b1da37da2e18f54fce",
+          "sortKey": "tp-b6f87424e3df9ed66e1699a93ff8a62b5bb769b1ca89b9b1da37da2e18f54fce"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-7e8a6316ba24cb84cf908146e66ac771b2dc82995fefa6de72ad3c2952d316a8",
+            "displayName": "tp-9ce102ce5c72a65d950af741e7ff5e2f1abe3a7856d0534534713de398b2fccd",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-673a8a2e0d5fab92f59e745475c52a6fe5b946f2420ee23d156921496996dc4c",
+          "sortKey": "tp-673a8a2e0d5fab92f59e745475c52a6fe5b946f2420ee23d156921496996dc4c"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-059409c0a13a65bca61d4038ed5a27105724eae3d3a6fb056489cc12ada31a67",
+            "displayName": "tp-ac20a0b498275713d2750cc395840b23df5ea5ca57e4816599bba4fd562d6e09",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-cbb65962e495d48b54889773018f53c1a677c9a812dd2f8252454ea5cb24d736",
+          "sortKey": "tp-cbb65962e495d48b54889773018f53c1a677c9a812dd2f8252454ea5cb24d736"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-e92e58ef85289bc5b90228cbacfe583d897dab2bda42b8ece548bd70f6cf0333",
+            "displayName": "tp-09d95a5eb989faa6ce342b9b7831e2b0488bfee394dbd773f8b41615ddcd2853",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-559d94134306f8de3df3fdbcb2b35308ee0ca189ba33314c907ab0d8d0787084",
+          "sortKey": "tp-559d94134306f8de3df3fdbcb2b35308ee0ca189ba33314c907ab0d8d0787084"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-064e6ae446c6f826c1737a70c5d3dfbb9f18f7c975c4ae0640d525068013917f",
+            "displayName": "tp-8e48fe7d34032d67fa2fa4732043a6459e22bc63acd7729ab976a8ee778ac00f",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-84f6eb25081516c51b9410799272b0aa1b642b2517f1baca23ae880657781503",
+          "sortKey": "tp-84f6eb25081516c51b9410799272b0aa1b642b2517f1baca23ae880657781503"
+        },
+        {
+          "detail": {
+            "approximateLastSignInDateTime": "tp-074e470d98062a1bed8e2766fcfc02174dbb480aee87e7acf7dbdee43b455264",
+            "displayName": "tp-5ed3a199f35ce3dc54cb9ddab9d516559f965cb593f20721ab84c27dd7ff51b6",
+            "source": "tp-2397a19af06be9c98c908726bf3c658b2217898ce38c89609dc43d9273da9424"
+          },
+          "identity": "tp-8a78d6d247531f7197ce45b2b59a59bbf562d07ab0c478e4177130dbc4c1711f",
+          "sortKey": "tp-8a78d6d247531f7197ce45b2b59a59bbf562d07ab0c478e4177130dbc4c1711f"
+        },
+        {
+          "detail": {
+            "displayName": "tp-5d84e55e501291ab5fb0cc661ec9873b7e48521ca4c612b935bca725bb21cbf8",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-5622c80f6b398d4ad4584dae24ffea64a176b29ffd57a7cdf79732442f86e7d6",
+          "sortKey": "tp-5622c80f6b398d4ad4584dae24ffea64a176b29ffd57a7cdf79732442f86e7d6"
+        },
+        {
+          "detail": {
+            "displayName": "tp-4dc4728e6ca2c8cc1d3f139bf9276921338b1e3c558ffb3e74357332706ee061",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-aa269b597d8a3b505c3ceeed93ee1e94ed532241f363bc78ab588985d5893be3",
+          "sortKey": "tp-aa269b597d8a3b505c3ceeed93ee1e94ed532241f363bc78ab588985d5893be3"
+        },
+        {
+          "detail": {
+            "displayName": "tp-38ac0fc755833e19887486fde21b480a0832aa65792326874c9ea4ba747ade6e",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-70fbdc101620828aa051e78393f3dcef51740490d9761429fd2c518cfb0fef37",
+          "sortKey": "tp-70fbdc101620828aa051e78393f3dcef51740490d9761429fd2c518cfb0fef37"
+        },
+        {
+          "detail": {
+            "displayName": "tp-4062ea2ed586aed67f8e94940ce572fa7340083890ba7747ea022ecfda4895f8",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-824f3ee13515e3bdde1aec8bce666cb92e77ce02e7f91f38be782481256ed094",
+          "sortKey": "tp-824f3ee13515e3bdde1aec8bce666cb92e77ce02e7f91f38be782481256ed094"
+        },
+        {
+          "detail": {
+            "displayName": "tp-21cc412bcce16518febe03d9ec7cb470126bdfd2c8cfba16a3e4c73eadfc6686",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-daaee4a6d33d690b8d428c886a8526fcdc93df0becf474a264e33066ff4c4a6b",
+          "sortKey": "tp-daaee4a6d33d690b8d428c886a8526fcdc93df0becf474a264e33066ff4c4a6b"
+        },
+        {
+          "detail": {
+            "displayName": "tp-f036f49eb12e353bb874e7d09597e00c10038127631968a718a2cb727d7e32c9",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-7cb90e58749559212361ec2541c9564f627ccd18480173ec19cb7d6742a76c0f",
+          "sortKey": "tp-7cb90e58749559212361ec2541c9564f627ccd18480173ec19cb7d6742a76c0f"
+        },
+        {
+          "detail": {
+            "displayName": "tp-def1a9fbfb041c3276805a65512fbb3753363049d90901553ff88ee068cce453",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-b17c98abf4b073298ad572c022e7ceefc3b6b1cd80d0125e8bff0692c14d7eb3",
+          "sortKey": "tp-b17c98abf4b073298ad572c022e7ceefc3b6b1cd80d0125e8bff0692c14d7eb3"
+        },
+        {
+          "detail": {
+            "displayName": "tp-5eca768d004a2e090d1aa08e92d7f3d27f9c8ac689033b9e2800ad7055afe705",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-d390ece71663cf776779da956899d838e0cc022fe081d8c3ca1ca77b9b6e35a1",
+          "sortKey": "tp-d390ece71663cf776779da956899d838e0cc022fe081d8c3ca1ca77b9b6e35a1"
+        },
+        {
+          "detail": {
+            "displayName": "tp-50a5bc4153301c017df2c82e911c83f2a81fcf85f66260d7c1e6fcc5469fe95b",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-4d9e4ee68c46bcf70a91368ab2533b43fc786c3ad85c52ed89e2173d50adf3b5",
+          "sortKey": "tp-4d9e4ee68c46bcf70a91368ab2533b43fc786c3ad85c52ed89e2173d50adf3b5"
+        },
+        {
+          "detail": {
+            "displayName": "tp-5f13ce78b4a2a45cdcce96b86a5ec764101d4f45d3908faf439748a0af033628",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-75de0a3d5518b4b7332a09d62f200eebe188ad93c66bab79f8ccc2b030fa63bd",
+          "sortKey": "tp-75de0a3d5518b4b7332a09d62f200eebe188ad93c66bab79f8ccc2b030fa63bd"
+        },
+        {
+          "detail": {
+            "displayName": "tp-6e0f0b01279d15039b745555e9dc32edd124b9ea609b8e5ec8175c0e3c881c00",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-5fe27512ce290d8671e89fe068dad6d494ed853f762d57a9e879373b0dad6659",
+          "sortKey": "tp-5fe27512ce290d8671e89fe068dad6d494ed853f762d57a9e879373b0dad6659"
+        },
+        {
+          "detail": {
+            "displayName": "tp-79d0f7b22131b73ca1cd4b6bb3d1d5ce65f0ef32cc5146be1351af148905b1fd",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-5229ee675dbca65846a24ba043fd2bc87941e98c434b2abe4882283aaa30132f",
+          "sortKey": "tp-5229ee675dbca65846a24ba043fd2bc87941e98c434b2abe4882283aaa30132f"
+        },
+        {
+          "detail": {
+            "displayName": "tp-bcfb9c7f7426b619ee6a7d785a31f5686d1cbefa2a958dde422ee024c41d49f5",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-df1b17ccf5486997f7724decb97232d5757e0c25f4105e3c772026e76f7027ff",
+          "sortKey": "tp-df1b17ccf5486997f7724decb97232d5757e0c25f4105e3c772026e76f7027ff"
+        },
+        {
+          "detail": {
+            "displayName": "tp-b32b17bb3522f2950f311f9542139f6bd448f9408d414015ff95aff4d8b3439a",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-f7a8cdf74502eb57a250fbc40c8b67beb835ba486f3a1e491f7c6e36f37e6e6d",
+          "sortKey": "tp-f7a8cdf74502eb57a250fbc40c8b67beb835ba486f3a1e491f7c6e36f37e6e6d"
+        },
+        {
+          "detail": {
+            "displayName": "tp-116b773dd5bb71d384417530b5a41d2a576b5c8032b75479fd7aec409dc55e53",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-106309964db00d19f249ccb6288b7f8f121f19604c92aeeef8b73b9f805a4f14",
+          "sortKey": "tp-106309964db00d19f249ccb6288b7f8f121f19604c92aeeef8b73b9f805a4f14"
+        },
+        {
+          "detail": {
+            "displayName": "tp-284bd1316f986fa4b7ec3b577b832e7955cfe03c659b86c737c39a9fdd4233b8",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-dd81cdfc64ace783d739577c011af0bf3b15155b7d3a67f7155ce0c0735b7054",
+          "sortKey": "tp-dd81cdfc64ace783d739577c011af0bf3b15155b7d3a67f7155ce0c0735b7054"
+        },
+        {
+          "detail": {
+            "displayName": "tp-1dbc97798e8250d4361d83a689def41294bb6a66a0bbed7b15eae4b4725a2950",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-2e2b7951e7cdcab79c4fe1aff682ee0cd99a6540233390a0248fbe61021c7f50",
+          "sortKey": "tp-2e2b7951e7cdcab79c4fe1aff682ee0cd99a6540233390a0248fbe61021c7f50"
+        },
+        {
+          "detail": {
+            "displayName": "tp-51711f95bf6ef9c5272bdce912c2489406a765dbe837050d14be078431010a8d",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-3d680089be2992e5af6ffc7e447758f3900188525db3f1f579df0007008a5d6b",
+          "sortKey": "tp-3d680089be2992e5af6ffc7e447758f3900188525db3f1f579df0007008a5d6b"
+        },
+        {
+          "detail": {
+            "displayName": "tp-7564307d7e479974abf808c8cff6f6208534f328b422fcb4c90fde43e622b31c",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-d6c95c8da8c2ea4043873069f52eb0844271e11c3b58aae8e6e4b2299ad92836",
+          "sortKey": "tp-d6c95c8da8c2ea4043873069f52eb0844271e11c3b58aae8e6e4b2299ad92836"
+        },
+        {
+          "detail": {
+            "displayName": "tp-15d181123ca6ec020c7f7de702fdccbe4804d66a4fa03bf274d754a7e4b228f7",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-550b0477d9f8757a9ee9fc820ae622e518de9dfbf20d6ddafc7c3fbe6a7e91f8",
+          "sortKey": "tp-550b0477d9f8757a9ee9fc820ae622e518de9dfbf20d6ddafc7c3fbe6a7e91f8"
+        },
+        {
+          "detail": {
+            "displayName": "tp-49be0f7b8e3e85a8666b86900b1343c048049026fcb495882386ed6728c23c74",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-509e7474b74bd63320707697c837265b5bdaa8644d6f26ec41765ec750bd7eba",
+          "sortKey": "tp-509e7474b74bd63320707697c837265b5bdaa8644d6f26ec41765ec750bd7eba"
+        },
+        {
+          "detail": {
+            "displayName": "tp-fb5b32331d5034c860718fbb78e6d3b4956982d990414af44a16f837328ad7ea",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-5841156c581f6dd15610894e362fddca89fd0327b855f0e3cf46ae5c2eac233f",
+          "sortKey": "tp-5841156c581f6dd15610894e362fddca89fd0327b855f0e3cf46ae5c2eac233f"
+        },
+        {
+          "detail": {
+            "displayName": "tp-ceb44b85384fadc44179a91765810cd382e1d0fe897359c32842bb48f8276ce9",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-b47cd49f906fd1eb5d7fbc82e76e7e917fc8e6f43a4e6190a670eccc7da566ff",
+          "sortKey": "tp-b47cd49f906fd1eb5d7fbc82e76e7e917fc8e6f43a4e6190a670eccc7da566ff"
+        },
+        {
+          "detail": {
+            "displayName": "tp-c88478938c7136716d6b849380ed533d6ebb242ad4ae08e259354fbb3b19ca0e",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-7e5a066dff42faa38c42c0c6179c47ad4452ec31fbd234d1f3130dd2748ec126",
+          "sortKey": "tp-7e5a066dff42faa38c42c0c6179c47ad4452ec31fbd234d1f3130dd2748ec126"
+        },
+        {
+          "detail": {
+            "displayName": "tp-7564307d7e479974abf808c8cff6f6208534f328b422fcb4c90fde43e622b31c",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-4863da627c16dc966f9e4b315c467f324785fac901e5b6654770c3e54ee18671",
+          "sortKey": "tp-4863da627c16dc966f9e4b315c467f324785fac901e5b6654770c3e54ee18671"
+        },
+        {
+          "detail": {
+            "displayName": "tp-4062ea2ed586aed67f8e94940ce572fa7340083890ba7747ea022ecfda4895f8",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-5562ff731a819f0c18c32c8f207604bfe261888eea4be6f8e7acd964297e7432",
+          "sortKey": "tp-5562ff731a819f0c18c32c8f207604bfe261888eea4be6f8e7acd964297e7432"
+        },
+        {
+          "detail": {
+            "displayName": "tp-4ad863211e2af3779f0718a574c6b326462d560eb93c243b59787ecd1893263a",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-d9199a71d086c212e0b01fbf39d20220400a51c1106d9dff9ecf8320daf6bbe8",
+          "sortKey": "tp-d9199a71d086c212e0b01fbf39d20220400a51c1106d9dff9ecf8320daf6bbe8"
+        },
+        {
+          "detail": {
+            "displayName": "tp-7564307d7e479974abf808c8cff6f6208534f328b422fcb4c90fde43e622b31c",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-9204f27a30f8d4e6db94a226ab7bf40718580c841e7ccf2dca4e14e98167ff4f",
+          "sortKey": "tp-9204f27a30f8d4e6db94a226ab7bf40718580c841e7ccf2dca4e14e98167ff4f"
+        },
+        {
+          "detail": {
+            "displayName": "tp-f036f49eb12e353bb874e7d09597e00c10038127631968a718a2cb727d7e32c9",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-42e7006b27af039618b34e771d23921c98c4c8265f0e55ed5902ca36ebd011fc",
+          "sortKey": "tp-42e7006b27af039618b34e771d23921c98c4c8265f0e55ed5902ca36ebd011fc"
+        },
+        {
+          "detail": {
+            "displayName": "tp-8bebb004259b1814e2a1dcc6d52b0be96d532f083a66cf937faf112fce5f24f8",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-c2d2aecc32ad73fecedef0133198c26ac440dbcde9ec638f03e5435a99f5cce3",
+          "sortKey": "tp-c2d2aecc32ad73fecedef0133198c26ac440dbcde9ec638f03e5435a99f5cce3"
+        },
+        {
+          "detail": {
+            "displayName": "tp-8b8e52822b31f4b02c10fd12709521f9ba73419e3053e57fddbeefebcd975ff0",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-ea38a1dd1f51b50fab8f6421d0a8277b5c997442bb344bbf5b61ffe3b88752bc",
+          "sortKey": "tp-ea38a1dd1f51b50fab8f6421d0a8277b5c997442bb344bbf5b61ffe3b88752bc"
+        },
+        {
+          "detail": {
+            "displayName": "tp-2f93bda2b402b6d2def935f8190d29f284c22b24e3c678fe73237ab5bd4f7ab2",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-e507028003f675696a2cfb7e3927c76e6b6b966f38e5b0a49c425c40690d543e",
+          "sortKey": "tp-e507028003f675696a2cfb7e3927c76e6b6b966f38e5b0a49c425c40690d543e"
+        },
+        {
+          "detail": {
+            "displayName": "tp-416ebef9ccb31f6324f441a0ad98cd01324f9d3562f8741b52c1a5ff60a47725",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-b756be89e17888afb189377106476cee88719b29820a2fca280c783c297d4a26",
+          "sortKey": "tp-b756be89e17888afb189377106476cee88719b29820a2fca280c783c297d4a26"
+        },
+        {
+          "detail": {
+            "displayName": "tp-83c6fe4e4a6d2e17cfb7f81b84429ad77b5b873220e52432b1a317f53c0e4232",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-406769a948e6358b53cb39da36168f92a023043bd24c1b7cb5474304ba462a37",
+          "sortKey": "tp-406769a948e6358b53cb39da36168f92a023043bd24c1b7cb5474304ba462a37"
+        },
+        {
+          "detail": {
+            "displayName": "tp-17199f5642f2ccd17ab7aa82f9e04ea2ddd969a2cfe7cf03c3b6eef6a998c778",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-9ccc840eae2049d709b7cb65d57c335e3012a0a28f3fdafbac53863fd68f5b77",
+          "sortKey": "tp-9ccc840eae2049d709b7cb65d57c335e3012a0a28f3fdafbac53863fd68f5b77"
+        },
+        {
+          "detail": {
+            "displayName": "tp-4062ea2ed586aed67f8e94940ce572fa7340083890ba7747ea022ecfda4895f8",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-8d584b660b46b2d30adebc3f22541eb7d5b65f9424cb832bdd40bf0c8aad5f20",
+          "sortKey": "tp-8d584b660b46b2d30adebc3f22541eb7d5b65f9424cb832bdd40bf0c8aad5f20"
+        },
+        {
+          "detail": {
+            "displayName": "tp-e6a8263634970418abedf9d165a0af2652c6a140054bd27bd8c92282e2d9b724",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-57556abb44f135d5d6954543f64738419ecfee46112a24ff7a40541022988921",
+          "sortKey": "tp-57556abb44f135d5d6954543f64738419ecfee46112a24ff7a40541022988921"
+        },
+        {
+          "detail": {
+            "displayName": "tp-c906073e1ce2643fedb560e96cfda780b8177b33ce254a2fcbecc1ae7c83c8ba",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-9e6fdcd7a41223f19104432f441a2a323da73ef4170ca56444b5f051e1a24f6c",
+          "sortKey": "tp-9e6fdcd7a41223f19104432f441a2a323da73ef4170ca56444b5f051e1a24f6c"
+        },
+        {
+          "detail": {
+            "displayName": "tp-5fd5281b72deaf1beb4026a685fb8fb33a0a67056cc92040945ec29568c9e4c7",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-d2fc4d0a850293410d32619d362cdf0250e93109e4a464077ab320675b54b33a",
+          "sortKey": "tp-d2fc4d0a850293410d32619d362cdf0250e93109e4a464077ab320675b54b33a"
+        },
+        {
+          "detail": {
+            "displayName": "tp-1d1677d3f8c7f0e6244b23d13e78786fcb4809960d278c703113b5dec4dd800c",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-08f5a971335327f4668d7c315b03daa79967f8ff6ae9a1bd5cf983edb381faac",
+          "sortKey": "tp-08f5a971335327f4668d7c315b03daa79967f8ff6ae9a1bd5cf983edb381faac"
+        },
+        {
+          "detail": {
+            "displayName": "tp-ca52d5280a30ebe44b4a5f193af57cbad9d988f1bec46a0a841defc8d125059b",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-df1cdc7a1b8e14a559cee647895c501dd17bb86365b4b9e2a84d8bfeaab0ca15",
+          "sortKey": "tp-df1cdc7a1b8e14a559cee647895c501dd17bb86365b4b9e2a84d8bfeaab0ca15"
+        },
+        {
+          "detail": {
+            "displayName": "tp-813cadd1df6a9530a6f2eac4fd04a0bebf79847f396349f1daa79e22d587233c",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-1aee90683d55fa40ded507551418f56042b3cce07ba39aedd629fd3963a775a6",
+          "sortKey": "tp-1aee90683d55fa40ded507551418f56042b3cce07ba39aedd629fd3963a775a6"
+        },
+        {
+          "detail": {
+            "displayName": "tp-763baf80e6de7ab52280847c1541f60a626f92de4a036dc0957a59de2462081b",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-d83992b1a2df3e5e03dabeda8c9591a720fd708c25a196c8f8555fe981d62652",
+          "sortKey": "tp-d83992b1a2df3e5e03dabeda8c9591a720fd708c25a196c8f8555fe981d62652"
+        },
+        {
+          "detail": {
+            "displayName": "tp-4062ea2ed586aed67f8e94940ce572fa7340083890ba7747ea022ecfda4895f8",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-47f7021ef824650fe283e8becaba76df2781f203be50a406e0d3b037031b0bd4",
+          "sortKey": "tp-47f7021ef824650fe283e8becaba76df2781f203be50a406e0d3b037031b0bd4"
+        },
+        {
+          "detail": {
+            "displayName": "tp-3fadc1a33e5ee2888f6a4162cdfe26b7a7d530d912aa69f683fdbc7fba1a15f1",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-b98360267077b5f0d113643b228b817b4880ebd529198444784a3b6ddf36ff68",
+          "sortKey": "tp-b98360267077b5f0d113643b228b817b4880ebd529198444784a3b6ddf36ff68"
+        },
+        {
+          "detail": {
+            "displayName": "tp-c93b063ca690de1cdbf4afa733356e9eeb456bc41795af0b8ed8ee44ca21b9b5",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-ff465914688e6c9d5a452129fc50f9df75918d875d67bb9dd1220d0258cdb95a",
+          "sortKey": "tp-ff465914688e6c9d5a452129fc50f9df75918d875d67bb9dd1220d0258cdb95a"
+        },
+        {
+          "detail": {
+            "displayName": "tp-d3f9a701c6ab5393863c4ff5a877503e3e55deebbdf3f7f4aabe93eb0e891f29",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-42e326f2ee0973c260e415fb2928cb9d5ab959fdd030ad25a00b2f399a5ec85b",
+          "sortKey": "tp-42e326f2ee0973c260e415fb2928cb9d5ab959fdd030ad25a00b2f399a5ec85b"
+        },
+        {
+          "detail": {
+            "displayName": "tp-a0171bd123721ae24d903dfcc1843b8845bb4def58c3855a3d7a5d137545e4fe",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-bef1c5bdeac5170e745c7b6c282835aa53bb49e95c21bc335720866274ccfa07",
+          "sortKey": "tp-bef1c5bdeac5170e745c7b6c282835aa53bb49e95c21bc335720866274ccfa07"
+        },
+        {
+          "detail": {
+            "displayName": "tp-49c57262320d0f5c3192800f80b99ff4b59223d0e9ad6fef1ea24f910a365913",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-93d0ea31e1e561936b0fe37219f5174bef904f6e19dcd62ee8943061681e9b5f",
+          "sortKey": "tp-93d0ea31e1e561936b0fe37219f5174bef904f6e19dcd62ee8943061681e9b5f"
+        },
+        {
+          "detail": {
+            "displayName": "tp-b8a39665f92a1783d24e89e9c0a2bb75157acf5bd92b2790034be6f567df2135",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-b636e19ee010e0ca6d5599521da6741efd09cafa82e07dc5bd5b13ea0e5348c7",
+          "sortKey": "tp-b636e19ee010e0ca6d5599521da6741efd09cafa82e07dc5bd5b13ea0e5348c7"
+        },
+        {
+          "detail": {
+            "displayName": "tp-f7426587eef2000ee522b6fa7e444db5f3e16d047f89350e3b4f288ba8214fe7",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-7e55804d5d764af53c20ca99438839557a6dee9ce7e65637a0f9076f971a2e10",
+          "sortKey": "tp-7e55804d5d764af53c20ca99438839557a6dee9ce7e65637a0f9076f971a2e10"
+        },
+        {
+          "detail": {
+            "displayName": "tp-29890778e0ecfcb783cc152bd7eb3726313f39375ab410d2f6dffa9567c82019",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-196ff817d700a8ccbb46790a79b2585f258fb518b38a02c049a7f9ca656a6b6e",
+          "sortKey": "tp-196ff817d700a8ccbb46790a79b2585f258fb518b38a02c049a7f9ca656a6b6e"
+        },
+        {
+          "detail": {
+            "displayName": "tp-6ced6d48edf404aa7321d9b76f4c6001221d661e97b95ab329892dfa6d5bf3b6",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-f75b9779a28d611688629f6c835a8fbfabdaa6d6e0fd53c27bc8b75545a02108",
+          "sortKey": "tp-f75b9779a28d611688629f6c835a8fbfabdaa6d6e0fd53c27bc8b75545a02108"
+        },
+        {
+          "detail": {
+            "displayName": "tp-1bb53ef2a06d77de31fb9d8cd3d257478172a2b79f069320a93ade189b740aff",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-7d0cc73e43d7b1ef547dfc1d16cb946ad6e2dceb07af58be905131d1b57a6dc4",
+          "sortKey": "tp-7d0cc73e43d7b1ef547dfc1d16cb946ad6e2dceb07af58be905131d1b57a6dc4"
+        },
+        {
+          "detail": {
+            "displayName": "tp-f4895302c916a7beae4dee77207f90bfa3f5bfc3bff428cc12744108e4e5e225",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-685b7b13af61e918a1ad0b211e28bb0f70ffa5c2391fa356f798db2d8b19bf64",
+          "sortKey": "tp-685b7b13af61e918a1ad0b211e28bb0f70ffa5c2391fa356f798db2d8b19bf64"
+        },
+        {
+          "detail": {
+            "displayName": "tp-68be33c7ea9927f2f6261ccf6404c2c32e0ae4c85e759766c5a50b615a32c82f",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-bb78dafca4c1d45e86ca6ab95ca0bb8284423314a9482705f465c6c3a54ad6a8",
+          "sortKey": "tp-bb78dafca4c1d45e86ca6ab95ca0bb8284423314a9482705f465c6c3a54ad6a8"
+        },
+        {
+          "detail": {
+            "displayName": "tp-7257b4f08b1d0b4d7dced233f7f04951f099af58d61555190a06e5636204e6fe",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-4d8642ba7f72ca942564d02e30590c523cbf4db72db4b903e9acd0e125ad8fee",
+          "sortKey": "tp-4d8642ba7f72ca942564d02e30590c523cbf4db72db4b903e9acd0e125ad8fee"
+        },
+        {
+          "detail": {
+            "displayName": "tp-d4b53eace506d818af9d607c2ec13bb79e4c31c98c6841071787130ce130dd15",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-51cb618a4ce64494ad204a46c5a8db5315f8f60cba3aa2b4488e51b38d08d6bb",
+          "sortKey": "tp-51cb618a4ce64494ad204a46c5a8db5315f8f60cba3aa2b4488e51b38d08d6bb"
+        },
+        {
+          "detail": {
+            "displayName": "tp-f9974c2152be35238eaf31f47c2541d332e9e4a0c388e0d30cbebf1e3ef14d52",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-499444c76920c562fb22b15eac1aea7fd9d704246d114bbaa2cf19f0849ad316",
+          "sortKey": "tp-499444c76920c562fb22b15eac1aea7fd9d704246d114bbaa2cf19f0849ad316"
+        },
+        {
+          "detail": {
+            "displayName": "tp-bbbc4f15ee00d53cdd5bfe8e8240b530ef14ddf333b8e25b4f0bc5f2a9372064",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-7211c0ffbe0ed91214dbd3b29337bd88b896b43e5496ecc9ede38d61bb2803c9",
+          "sortKey": "tp-7211c0ffbe0ed91214dbd3b29337bd88b896b43e5496ecc9ede38d61bb2803c9"
+        },
+        {
+          "detail": {
+            "displayName": "tp-8f6bb216c474645720ed9871f4358778a704befedb0c3e0250fe714b49a308d2",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-669e975189b67e997e86b9e7d901a88dce87e6d6ad73dd6b81046991d3714f12",
+          "sortKey": "tp-669e975189b67e997e86b9e7d901a88dce87e6d6ad73dd6b81046991d3714f12"
+        },
+        {
+          "detail": {
+            "displayName": "tp-7a9d8173609c7db1de4f55efe447e069d0004648b9cfe3bb650554a6746aaba5",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-d515aed1a829e9e7246272ede59bf21f54b89ed94451a1a12ef401bd8c1fdf5f",
+          "sortKey": "tp-d515aed1a829e9e7246272ede59bf21f54b89ed94451a1a12ef401bd8c1fdf5f"
+        },
+        {
+          "detail": {
+            "displayName": "tp-67e19452cdaf09191b5a9a69c599cd2390992fe32e983626f90b8bc036e0ce13",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-950291a4a76911fd57a8b7d50f555440f643517e5d0a7e6d4a44f1b239e6ff5c",
+          "sortKey": "tp-950291a4a76911fd57a8b7d50f555440f643517e5d0a7e6d4a44f1b239e6ff5c"
+        },
+        {
+          "detail": {
+            "displayName": "tp-3f55762850057294baa619bbbcdcf048720ebe2bafefb6c7e1678a665203191a",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-e81ef15c6bbb99cbfcec156ebace3738e0acbefd55eae0e357fffa03afcaf8e6",
+          "sortKey": "tp-e81ef15c6bbb99cbfcec156ebace3738e0acbefd55eae0e357fffa03afcaf8e6"
+        },
+        {
+          "detail": {
+            "displayName": "tp-383db1098076f9ed340223ae822267b03b9509ef3f3fad1a97e3e9e377cc5f09",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-8cd1bd6bc9b67593291eec9d5280fb9618e99628ed73c5dafe571a5d79b75334",
+          "sortKey": "tp-8cd1bd6bc9b67593291eec9d5280fb9618e99628ed73c5dafe571a5d79b75334"
+        },
+        {
+          "detail": {
+            "displayName": "tp-1e96e39da83cbe46eb79b8214d42bc07d8e2dfd049b8ff371950480fe0661a51",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-53653f1b886714f5cd92929f3892e9d6a1d4f804afda28eeefbded5540140178",
+          "sortKey": "tp-53653f1b886714f5cd92929f3892e9d6a1d4f804afda28eeefbded5540140178"
+        },
+        {
+          "detail": {
+            "displayName": "tp-1048bc2a93f009bf01a3c18a0250f98d70985459e684476735cc15e9c1d64d27",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-2e0b4ad6586e18e5bc125c3f1410d9745c60e8a6d1543ac82e850f349ff37db8",
+          "sortKey": "tp-2e0b4ad6586e18e5bc125c3f1410d9745c60e8a6d1543ac82e850f349ff37db8"
+        },
+        {
+          "detail": {
+            "displayName": "tp-a005bf1acc0a56aba0afd34751ccf7f0e0fed013e2e936d13c4d6e6ebc9efa54",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-613a91a942c5353b3e3481aab5c21fb852c97b560e4f741f65dd2f1b356daeb9",
+          "sortKey": "tp-613a91a942c5353b3e3481aab5c21fb852c97b560e4f741f65dd2f1b356daeb9"
+        },
+        {
+          "detail": {
+            "displayName": "tp-0f6ef6c19bd7f3bf8a4ae10b6fb94f2ad15364d79e1e24e2fc925e9285b9e940",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-baaf9611334d42a678d8c205633513b64cf018e8ca8d07aa5ea681dc3949c12c",
+          "sortKey": "tp-baaf9611334d42a678d8c205633513b64cf018e8ca8d07aa5ea681dc3949c12c"
+        },
+        {
+          "detail": {
+            "displayName": "tp-1ec011247f921474a8690e3f60f7548fc441c5c128d078577fcb1de321343b71",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-15544ceb1af52ea4bf0c22695d6827e2cbaf77702bd2be7297b5a40ee70ff0f9",
+          "sortKey": "tp-15544ceb1af52ea4bf0c22695d6827e2cbaf77702bd2be7297b5a40ee70ff0f9"
+        },
+        {
+          "detail": {
+            "displayName": "tp-e1ce3fd8fb0803806f5ed307ec61c38982eab489463634bc605c2121e42c873e",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-be188fe5ac6648e037b926e070fc9c51073676082f2fc19b179c7c1248a5aa5a",
+          "sortKey": "tp-be188fe5ac6648e037b926e070fc9c51073676082f2fc19b179c7c1248a5aa5a"
+        },
+        {
+          "detail": {
+            "displayName": "tp-dfe36787e48eae38188440ac53159b673158085cdcd9a99ce53ba0b0da4d3524",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-130b64847a76dcbc6a47e5a0f4f030c787075d62b5700f755e05d048e66ebf1e",
+          "sortKey": "tp-130b64847a76dcbc6a47e5a0f4f030c787075d62b5700f755e05d048e66ebf1e"
+        },
+        {
+          "detail": {
+            "displayName": "tp-fe57952466c8ceeeb1d858f0912dccf23fa4ca975b21ed3811e87a68c7ae9742",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-d8d51492180e79e84a27df6d04849ec0a283695712993808b5c07fadefc03a35",
+          "sortKey": "tp-d8d51492180e79e84a27df6d04849ec0a283695712993808b5c07fadefc03a35"
+        },
+        {
+          "detail": {
+            "displayName": "tp-991e63a93b02042b9a274eb8cdac440a6c81c37e7dac6b52a650597a9dae1fb8",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-a7282ff12fddc077bb20879721840fd9b2c5b6c6441fe254e856755d3f5a4fe2",
+          "sortKey": "tp-a7282ff12fddc077bb20879721840fd9b2c5b6c6441fe254e856755d3f5a4fe2"
+        },
+        {
+          "detail": {
+            "displayName": "tp-1fd347ad88c347af6448af4306c7c604dd0f71baa68686918bb30ac7dce57cc9",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-3c19b7c556d73f6581d14b3ad50f0c2712e948d197f2f2e31c38e37844a19090",
+          "sortKey": "tp-3c19b7c556d73f6581d14b3ad50f0c2712e948d197f2f2e31c38e37844a19090"
+        },
+        {
+          "detail": {
+            "displayName": "tp-9ce102ce5c72a65d950af741e7ff5e2f1abe3a7856d0534534713de398b2fccd",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-c903dd18124a018d2750f2476eea37fa6cfb254378f4fdb0c5e116f6bdb4d770",
+          "sortKey": "tp-c903dd18124a018d2750f2476eea37fa6cfb254378f4fdb0c5e116f6bdb4d770"
+        },
+        {
+          "detail": {
+            "displayName": "tp-ac20a0b498275713d2750cc395840b23df5ea5ca57e4816599bba4fd562d6e09",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-86b40186d421cc852a3f6ad5bad8fc0a58b6d37d248320efeb5ab5bca7be621d",
+          "sortKey": "tp-86b40186d421cc852a3f6ad5bad8fc0a58b6d37d248320efeb5ab5bca7be621d"
+        },
+        {
+          "detail": {
+            "displayName": "tp-09d95a5eb989faa6ce342b9b7831e2b0488bfee394dbd773f8b41615ddcd2853",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-0b8399808543b2480094d0a43f872c86eaa2076864c7e7fbd20550231110dac3",
+          "sortKey": "tp-0b8399808543b2480094d0a43f872c86eaa2076864c7e7fbd20550231110dac3"
+        },
+        {
+          "detail": {
+            "displayName": "tp-f86a6ade5be20a090451d4b7f48a3459571ec04e7a50583d60fef83e651e2b47",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-84433ca8e622b6def59473af7d8bbfd9611f473daf10504757712577ff6c98e0",
+          "sortKey": "tp-84433ca8e622b6def59473af7d8bbfd9611f473daf10504757712577ff6c98e0"
+        },
+        {
+          "detail": {
+            "displayName": "tp-8e48fe7d34032d67fa2fa4732043a6459e22bc63acd7729ab976a8ee778ac00f",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-86d1f604c594a118c9cc10f5410d767def364dff20472d0d4df6263eecb0c9d5",
+          "sortKey": "tp-86d1f604c594a118c9cc10f5410d767def364dff20472d0d4df6263eecb0c9d5"
+        },
+        {
+          "detail": {
+            "displayName": "tp-5ed3a199f35ce3dc54cb9ddab9d516559f965cb593f20721ab84c27dd7ff51b6",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-1a9f7dcfb16728fab329750606ceec87fadd9550628abfea872a9c4e5faf32da",
+          "sortKey": "tp-1a9f7dcfb16728fab329750606ceec87fadd9550628abfea872a9c4e5faf32da"
+        },
+        {
+          "detail": {
+            "displayName": "tp-4e0c1ed749a0c33b0edddf4ca5c5ee3060f190ef250272ad29f40a56a642eb2f",
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-e908b417ad9009979208d21ba6f607081b5f46e8cb391ab2a25fed4d6a2deac8",
+          "sortKey": "tp-e908b417ad9009979208d21ba6f607081b5f46e8cb391ab2a25fed4d6a2deac8"
+        },
+        {
+          "detail": {
+            "entraRegisteredNotIntuneManagedCount": 82,
+            "source": "tp-1b74ed4ee024700713a0e3ffee87cb56f89cbc99953d34ddf86d40850593917a"
+          },
+          "identity": "tp-7ced79f4e53bc2cff5cab9201c5d676d2395f4f79cf75e7b0ce882fff1198c47",
+          "sortKey": "tp-7ced79f4e53bc2cff5cab9201c5d676d2395f4f79cf75e7b0ce882fff1198c47"
+        }
+      ],
+      "id": "TP.INT.0005",
+      "impact": "Medium",
+      "origin": null,
+      "reason": "0 of 13 Intune-managed device(s) and 67 of 95 Entra-registered device(s) have had no activity in over 90 days. 82 Entra-registered device(s) are not Intune-managed at all (population gap between the two datasets - see the gap: evidence entries).",
+      "references": {
+        "authorities": [
+          "https://learn.microsoft.com/en-us/intune/governance/configure-cleanup-rules",
+          "https://learn.microsoft.com/en-us/entra/identity/devices/manage-stale-devices"
+        ],
+        "cis": [],
+        "research": "docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#6-intune-operational-guidance"
+      },
+      "severity": "Medium",
+      "status": "Fail",
+      "title": "Devices inactive for more than 90 days"
+    }
+  ],
+  "generatedUtc": "2026-08-17T02:44:42.540Z",
+  "notices": {
+    "cisDisclaimer": null
+  },
+  "producer": {
+    "graphKit": "0.1.1",
+    "scoringModelVersion": "1.0",
+    "tenantPulse": "0.1.0"
+  },
+  "schemaVersion": "1.0",
+  "scores": {
+    "byCategory": {
+      "Entra.AuthenticationMethods": {
+        "earned": 12,
+        "percent": 36.4,
+        "possible": 33
+      },
+      "Entra.AuthorizationPolicy": {
+        "earned": 0,
+        "percent": 0,
+        "possible": 0
+      },
+      "Entra.ConditionalAccess": {
+        "earned": 22,
+        "percent": 52.4,
+        "possible": 42
+      },
+      "Entra.Consent": {
+        "earned": 0,
+        "percent": 0,
+        "possible": 0
+      },
+      "Entra.GuestAccess": {
+        "earned": 0,
+        "percent": 0,
+        "possible": 0
+      },
+      "Entra.Identity": {
+        "earned": 0,
+        "percent": 0,
+        "possible": 6
+      },
+      "Entra.PasswordProtection": {
+        "earned": 0,
+        "percent": 0,
+        "possible": 0
+      },
+      "Entra.PrivilegedRoles": {
+        "earned": 6,
+        "percent": 33.3,
+        "possible": 18
+      },
+      "Intune.Compliance": {
+        "earned": 12,
+        "percent": 100,
+        "possible": 12
+      },
+      "Intune.DeviceLifecycle": {
+        "earned": 0,
+        "percent": 0,
+        "possible": 3
+      },
+      "Intune.Enrollment": {
+        "earned": 10,
+        "percent": 100,
+        "possible": 10
+      },
+      "Intune.Updates": {
+        "earned": 3,
+        "percent": 100,
+        "possible": 3
+      }
+    },
+    "overall": {
+      "earned": 65,
+      "percent": 51.2,
+      "possible": 127
+    }
+  },
+  "tenant": "tp-5de2c5ec60e4e5da069c1774322ce0a7ea3aa14153a2419884aa2c876d6b3f5f"
+}

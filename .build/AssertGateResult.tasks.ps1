@@ -253,7 +253,30 @@
 # `./build.ps1 -Tasks test` total for this commit; all four tracking locations
 # bumped together in the SAME commit as these test changes, per the ratchet's
 # own rule.
-$script:tenantPulseGateMinimumTests = 1375
+# 1375 -> 1396 (Task 4.5 fix-round-of-the-fix-round, NEW-1/NEW-2/NEW-3 - a
+# leaked-PII CRITICAL and two Majors from re-review of the prior fix round):
+# +21 net new Its - SecretScan.tests.ps1's new item-8 possessive-name-shaped
+# displayName/deviceName check (6 unit Its: straight apostrophe, curly
+# apostrophe, deviceName variant, an already-pseudonymized value does NOT
+# fire, a false-positive guard for ordinary possessive prose outside a
+# displayName/deviceName key, plus the dedicated planted-PII regression proof
+# against docs/gates/_qa-fixtures/planted-pii-sample.json), docs/ added to
+# the repo-scan roots (its own new per-file Its, discovered dynamically - see
+# that Describe block's own -ForEach), and CheckCatalog.Tests.ps1's new
+# empty-References.Cis rejection It (NEW-3). 1396 is the real, measured
+# `./build.ps1 -Tasks test` total for this commit; all four tracking
+# locations bumped together in the SAME commit as these test changes, per
+# the ratchet's own rule.
+# 1396 -> 1399 (Task 4.5 merge-review fix round - HMAC-keyed pseudonym,
+# whole-document leak assertion, References.Cis ID-only format enforcement):
+# +3 net new Its - CheckCatalog.Tests.ps1's new prose-References.Cis
+# rejection It (the new ID-only regex enforcement) plus the discovery-time
+# per-file test cases the new tests/Fixtures/Checks/invalid/prose-cis/
+# bad.psd1 fixture and PROVENANCE.md entry add. 1399 is the real, measured
+# `./build.ps1 -Tasks test` total for this commit; all four tracking
+# locations bumped together in the SAME commit as these test changes, per
+# the ratchet's own rule.
+$script:tenantPulseGateMinimumTests = 1399
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

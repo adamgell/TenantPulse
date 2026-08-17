@@ -322,6 +322,30 @@ Describe 'Import-PulseCheckCatalog' {
             } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0025*References.Cis*must be a string array*'
         }
 
+        It 'throws "must not be empty" for an empty References.Cis array (Task 4.5 fix round, NEW-3 - present-but-empty is a contradiction, not a valid "no mapping" spelling; omit the key instead)' {
+            {
+                InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/empty-cis') {
+                    param($path)
+                    function Test-PulseFixtureRule { $true }
+                    Import-PulseCheckCatalog -Path $path
+                }
+            } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0026*References.Cis*must not be empty*'
+        }
+
+        It 'throws "does not match the required ID-only format" for a free-prose References.Cis element (merge-review fix - ID-only, no recommendation titles/descriptions)' {
+            # -ExpectedMessage below uses -like wildcard semantics, where [0] is a
+            # character-CLASS token (matches a single '0'), not literal brackets -
+            # backtick-escaped so the pattern actually requires the literal
+            # "References.Cis[0]" text the real error message contains.
+            {
+                InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/prose-cis') {
+                    param($path)
+                    function Test-PulseFixtureRule { $true }
+                    Import-PulseCheckCatalog -Path $path
+                }
+            } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0027*References.Cis`[0`]*does not match the required ID-only format*'
+        }
+
         It 'throws "is required" for a missing Rule.Expression when Rule.Type is Expression' {
             {
                 InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/missing-expression') {

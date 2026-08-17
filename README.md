@@ -107,9 +107,10 @@ or any other product.
 
 As of Phase 4 (Task 4.5), the check-descriptor schema supports an *optional, cite-only*
 `References.Cis` field - a bare "benchmark name + version, Rec. `<id>` (`<profile>`)" string,
-never CIS recommendation text (title/description/rationale/audit/remediation), which would pull
-this MIT-licensed catalog into CIS's incompatible CC BY-NC-SA license (see
-`docs/research/iha-v2/2026-08-15-cis-benchmarks-licensing.md` for the full licensing analysis).
+never a CIS recommendation's title or any of its description/rationale/audit/remediation text,
+which would pull this MIT-licensed catalog into CIS's incompatible CC BY-NC-SA license (see
+[docs/licensing/cis-cite-only.md](docs/licensing/cis-cite-only.md), this repo's own vendored
+licensing summary, for the full rule and the reasoning behind it).
 **No check in this module's 28-check catalog carries a `References.Cis` entry today** - the
 Phase 4 research this catalog was authored from cites ScuBA/CISA, Maester/EIDSCA, and Microsoft
 Learn exclusively, with zero verified CIS mappings. The wiring exists and is tested end to end
@@ -206,9 +207,10 @@ group-members dataset exists yet; several checks document this as a known limita
 silent gap), assignment verification for Intune policies (existence is checked, not whether a
 policy is actually assigned to any device), transitive/group-assigned role-assignment expansion
 for `TP.ENT.0021`'s privileged-role count (direct assignments only - documented in that check's
-own evidence text), `TP.ENT.0019`'s service-principal-only credential-hygiene note (application
-objects and service principals are both read, but evidence is capped to the top 50 worst
-offenders by design, not exhaustive), and a rendering format other than JSON.
+own evidence text), `TP.ENT.0019`'s scope (only `servicePrincipal` credentials are read - GraphKit
+0.1.1 has no `Application` type yet, so app-**registration** client secrets/certificates are not
+visible to this check at all until a future GraphKit release adds one; evidence is also capped to
+the top 50 worst offenders by design, not exhaustive), and a rendering format other than JSON.
 
 ## Development
 
