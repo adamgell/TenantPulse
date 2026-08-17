@@ -152,4 +152,10 @@
     dataProcessorServiceForWindowsFeaturesOnboarding = @{ Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
     intuneBrandingProfiles = @{ Type = 'IntuneBrandingProfile'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
     windowsFeatureUpdateProfiles = @{ Type = 'WindowsFeatureUpdateProfile'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 3.2 (TP.INT.0013): composite 4-call Graph fan-out (roleDefinitions ->
+    # roleAssignments -> roleAssignments/{id} -> groups/{id}), flattened to the per-group
+    # shape Test-PulseRbacGroupsProtected.ps1's own docstring documents. No released
+    # GraphKit descriptor exists for this composite walk.
+    intuneRbacGroupProtection = @{ Type = 'IntuneRbacGroupProtectionWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }

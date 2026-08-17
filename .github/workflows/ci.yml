@@ -611,10 +611,10 @@ jobs:
           $allowedSkips = if ($IsWindows) { 2 } else { 0 }
           # Task 3.2 schema round bumped 1142 -> 1148; TP.INT.0007 port bumped 1148 -> 1162;
           # TP.INT.0008 port bumped 1162 -> 1177; TP.INT.0009 port bumped 1177 -> 1191;
-          # TP.INT.0011 port bumped 1191 -> 1204; TP.INT.0012 port bumped 1204 -> 1217
-          # (.build/AssertGateResult.tasks.ps1's own -MinimumTests, which must be bumped
-          # together with this value).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1217 -AllowedSkips $allowedSkips -AllowNotRun 1
+          # TP.INT.0011 port bumped 1191 -> 1204; TP.INT.0012 port bumped 1204 -> 1217;
+          # TP.INT.0013 port bumped 1217 -> 1232 (.build/AssertGateResult.tasks.ps1's own
+          # -MinimumTests, which must be bumped together with this value).
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1232 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
