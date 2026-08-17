@@ -70,6 +70,14 @@
     policies does not count toward the union; `anyUnknownAssignment` is disclosed
     per-rule whenever true, regardless of overall status; the PARTIAL SCAN gap-disclosure
     prefix (TP.INT.0006 precedent) applies whenever -Artifact.Gaps is non-empty.
+    REDACTION WARN IS UNCONDITIONAL (Phase 3 whole-phase review fix, catalog-coherence
+    finding I1): the redacted-assigned-on-unsatisfied Warn gate previously also required
+    `$satisfiedRuleNames.Count -gt 0`, an undocumented extra condition that caused a
+    0-of-3-satisfied tenant carrying a present-but-redacted-assigned rule to Fail claiming
+    "not configured" for a value this check never actually managed to read - dishonest.
+    Aligned with sibling TP.INT.0031's (Test-PulseBitlockerCspSettingsPresentAndCorrect.ps1)
+    unconditional redaction-Warn: ANY redacted-assigned value on an unsatisfied rule Warns,
+    regardless of how many other rules are satisfied.
 
     ONLY 3 OF ~19 ASR RULES (this check's own research entry, carried through
     unconditionally): this is intentionally a floor, not full ASR coverage - Consulting
@@ -173,7 +181,7 @@ function Test-PulseAsrStandardProtectionRulesConfigured {
         return New-PulseFinding -Status Pass -Reason $reason
     }
 
-    if ($anyRedactedAssignedOnUnsatisfied -and $satisfiedRuleNames.Count -gt 0) {
+    if ($anyRedactedAssignedOnUnsatisfied) {
         $reason = "${gapDisclosure}$($unsatisfiedRules.Count) of 3 Standard Protection ASR rule(s) ($([string]::Join('; ', $unsatisfiedRules))) could not be confirmed - at least one is present on an assigned policy but its value is redacted and could not be read.${unknownDisclosure}"
         return New-PulseFinding -Status Warn -Reason $reason
     }

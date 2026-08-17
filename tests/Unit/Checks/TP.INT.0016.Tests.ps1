@@ -185,6 +185,16 @@ Describe 'TP.INT.0016 - Attack Surface Reduction "Standard Protection" baseline 
         $finding.reason | Should -Match 'redacted'
     }
 
+    It 'Warn (REDACTION HONESTY, ZERO SATISFIED): a rule value is redacted-assigned even when 0 of 3 rules are satisfied - never Fail claiming "not configured" for a value that could not be read' {
+        $rows = @(
+            (New-PulseAsrRuleRow -PolicyId 'p1' -DefinitionId $script:AsrDefinitionIds[0] -Redacted $true)
+        )
+        $finding = Invoke-PulseAsrCheckFixture -Rows $rows
+
+        $finding.status | Should -Be 'Warn'
+        $finding.reason | Should -Match 'redacted'
+    }
+
     It 'Warn (UNKNOWN-ASSIGNMENT HONESTY): unknown-assignment disclosure appears alongside a confident Pass' {
         $rows = @(New-PulseAllThreeRulesRows -PolicyId 'p1' -OptionSuffix 'block') + @(
             New-PulseAsrRuleRow -PolicyId 'p2' -DefinitionId $script:AsrDefinitionIds[0] -OptionSuffix 'block' -Assignments $null
