@@ -57,14 +57,22 @@ Describe 'ConvertTo-PulseSettingPresenceIndex' {
         ($entry.values | Where-Object { $_.canonicalValue -eq 'off' }).policyCount | Should -Be 1
     }
 
-    It 'REDACTION DISCIPLINE: a Sensitive/secret-classified row is presence-only - the value group carries redacted:true and canonicalValue:$null, never the raw value' {
+    It 'REDACTION DISCIPLINE: a Sensitive/secret-classified row is presence-only - the value group carries redacted:true and canonicalValue:$null, never the raw value (T3.4 fix round 1, IMPORTANT finding - the planted secret is now genuinely present in the row''s own -Value field, not pre-nulled by the fixture, so this test actually exercises the function''s OWN redaction discipline rather than trusting an upstream contract)' {
         $plantedSecret = 'PLANTED-presence-index-secret-zzz'
+        $nonSecretDisplayName = 'WiFi Pre-Shared Key Setting'
         $rows = @(
-            (New-PulseFixtureRow -PolicyId 'p1' -PolicyType 'deviceConfiguration' -DefId 'secret-def' -Value $null -Redacted $true -Assignments @([pscustomobject]@{ intent = $null; targetType = 'group'; groupId = 'g1'; filterId = $null; filterType = $null }))
+            # HOSTILE ROW: -Value carries the secret DESPITE -Redacted being $true -
+            # simulating a malformed/buggy upstream row (a real production row would
+            # already carry value:$null per T2.2/T2.3's own row-level contract, but THIS
+            # test must not rely on that upstream discipline to prove ITS OWN - a fail-
+            # closed function must discard the raw value whenever redacted:true is set,
+            # regardless of what garbage happens to still be sitting in .value).
+            # settingName carries an ORDINARY (non-secret) display name here, deliberately
+            # DIFFERENT from $plantedSecret - settingName is legitimate pass-through
+            # metadata, never itself redacted, so asserting it survives is a distinct,
+            # non-vacuous check from "the secret VALUE never leaks."
+            (New-PulseFixtureRow -PolicyId 'p1' -PolicyType 'deviceConfiguration' -DefId 'secret-def' -SettingName $nonSecretDisplayName -Value $plantedSecret -Redacted $true -Assignments @([pscustomobject]@{ intent = $null; targetType = 'group'; groupId = 'g1'; filterId = $null; filterType = $null }))
         )
-        # The raw row already carries value:$null (T2.2/T2.3's own row-level secret
-        # contract, upstream of this function) - proves this function never needs to see
-        # $plantedSecret to still report presence correctly.
         $result = InModuleScope TenantPulse -ArgumentList (, $rows) {
             param($rows)
             ConvertTo-PulseSettingPresenceIndex -Rows $rows
@@ -76,8 +84,15 @@ Describe 'ConvertTo-PulseSettingPresenceIndex' {
         $entry.values.Count | Should -Be 1
         $entry.values[0].redacted | Should -BeTrue
         $entry.values[0].canonicalValue | Should -BeNullOrEmpty
+        # Ordinary, non-secret metadata (settingName) DOES survive - proving redaction is
+        # surgical (the value group's canonicalValue only), not a blanket wipe of the
+        # whole entry.
+        $entry.settingName | Should -Be $nonSecretDisplayName
 
         $serialized = InModuleScope TenantPulse -ArgumentList $result { param($r) ConvertTo-PulseCanonicalJson -InputObject $r }
+        # The raw secret VALUE never appears anywhere in the serialized artifact - proven
+        # now against a row that genuinely carried the secret in its own -Value field
+        # (not a pre-nulled one), so this assertion is no longer vacuous.
         $serialized | Should -Not -Match ([regex]::Escape($plantedSecret))
     }
 
