@@ -37,15 +37,16 @@ BeforeAll {
         param(
             [AllowNull()]
             [object[]] $Conflicts,
-            [switch] $DatasetCollected = $true
+            [switch] $DatasetCollected = $true,
+            [object[]] $Gaps = @()
         )
 
         $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $keyPath = Join-Path $storeRoot '.opkey/operator.key'
 
         try {
-            $evaluation = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $Conflicts, ([bool] $DatasetCollected) {
-                param($storeRoot, $keyPath, $conflicts, $datasetCollected)
+            $evaluation = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $Conflicts, ([bool] $DatasetCollected), $Gaps {
+                param($storeRoot, $keyPath, $conflicts, $datasetCollected, $gaps)
 
                 $catalog = @(Import-PulseCheckCatalog)
                 $check = $catalog | Where-Object { $_.Id -eq 'TP.INT.0006' }
@@ -60,7 +61,7 @@ BeforeAll {
                 }
 
                 if ($null -ne $conflicts) {
-                    Publish-PulseConflictArtifact -Store $store -Conflicts $conflicts -Gaps @() -FamilyCount 1
+                    Publish-PulseConflictArtifact -Store $store -Conflicts $conflicts -Gaps $gaps -FamilyCount 1
                 }
 
                 Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
@@ -144,6 +145,43 @@ Describe 'TP.INT.0006 - Conflicting security-setting values across policies' {
         $entry.detail.settingName | Should -Be 'Setting for def-possible-1'
         $entry.detail.assignmentOverlap | Should -Be 'possible'
         @($entry.detail.values).Count | Should -Be 2
+    }
+
+    It 'Warn: a Partial artifact with zero conflicts and a non-empty Gaps array must never read as an unqualified Pass' {
+        $gaps = @([pscustomobject]@{ policyId = ''; reason = 'category:FamilyUnavailable;family:compliance' })
+
+        $finding = Invoke-PulseConflictCheckFixture -Conflicts @() -Gaps $gaps
+
+        $finding.status | Should -Be 'Warn'
+        $finding.reason | Should -Match 'compliance'
+        $finding.reason | Should -Not -Match 'No conflicting'
+    }
+
+    It 'Fail: a Partial artifact still Fails on a proven/possible conflict, but the Reason also discloses the gap' {
+        $gaps = @([pscustomobject]@{ policyId = ''; reason = 'category:FamilyUnavailable;family:deviceConfiguration' })
+        $conflicts = @((New-PulseConflictRecordFixture -DefinitionId 'def-possible-1' -Overlap 'possible'))
+
+        $finding = Invoke-PulseConflictCheckFixture -Conflicts $conflicts -Gaps $gaps
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'deviceConfiguration'
+    }
+
+    It 'Warn: a Partial artifact with only unknown conflicts also discloses the gap in Reason' {
+        $gaps = @([pscustomobject]@{ policyId = ''; reason = 'category:FamilyUnavailable;family:settingsCatalog' })
+        $conflicts = @((New-PulseConflictRecordFixture -DefinitionId 'def-unknown-1' -Overlap 'unknown' -OverlapReason 'assignments-deferred: awaiting GraphKit release'))
+
+        $finding = Invoke-PulseConflictCheckFixture -Conflicts $conflicts -Gaps $gaps
+
+        $finding.status | Should -Be 'Warn'
+        $finding.reason | Should -Match 'settingsCatalog'
+    }
+
+    It 'Pass still holds: an Expanded (not Partial) artifact with zero conflicts and zero gaps stays an unqualified Pass' {
+        $finding = Invoke-PulseConflictCheckFixture -Conflicts @() -Gaps @()
+
+        $finding.status | Should -Be 'Pass'
+        $finding.reason | Should -Match 'No conflicting'
     }
 
     It 'NotApplicable: no conflicts expansion entry at all (expansion was never run for this snapshot)' {

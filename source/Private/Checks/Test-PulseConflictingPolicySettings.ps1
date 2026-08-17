@@ -26,9 +26,23 @@
     longer matches what the manifest recorded" is a data-integrity failure that must never
     be reported as a confident finding of any kind).
 
+    POST-REVIEW FIX - GAPS ARE NEVER SILENTLY IGNORED: Get-PulseConflictArtifact's Status
+    'Available' covers BOTH a fully 'Expanded' artifact AND a 'Partial' one (some source
+    family could not be verified - see that function's own docstring). A Partial artifact
+    still carries -Gaps, but this rule used to never read it at all, so a zero-conflict
+    Partial artifact produced the exact same unqualified "no conflicts detected" Pass as a
+    fully Expanded one (empirically reproduced by review) - a reader had no way to know
+    part of the tenant's configuration surface was never scanned. Now: whenever Gaps is
+    non-empty, this rule NEVER emits a bare Pass - a zero-conflict Partial artifact
+    degrades Pass -> Warn, naming the unscanned families in the Reason. A conflict-bearing
+    Partial artifact keeps its normal Fail/Warn status (Gaps do not change WHICH status
+    applies) but its Reason is likewise annotated with the same gap disclosure, so a
+    reader always knows the scan was incomplete regardless of which status they are
+    looking at.
+
     RULE SEMANTICS (verbatim from this task's brief, never collapsing 'possible'/'unknown'
     into a false positive or a false negative):
-      - Pass: the artifact is Available and holds ZERO conflicts.
+      - Pass: the artifact is Available, fully Expanded (no Gaps), and holds ZERO conflicts.
       - Fail: at least one conflict has assignmentOverlap 'proven' or 'possible'.
       - Warn: at least one conflict exists, but NONE has assignmentOverlap 'proven' or
         'possible' (this covers both the literal "all conflicts are 'unknown'" case the
@@ -101,8 +115,32 @@ function Test-PulseConflictingPolicySettings {
     }
 
     $conflicts = @($artifact.Conflicts)
+    $gaps = @($artifact.Gaps)
+
+    $gapFamilyNames = [System.Collections.Generic.List[string]]::new()
+    foreach ($gap in $gaps) {
+        $gapReasonText = [string] $gap.reason
+        $familyMatch = [regex]::Match($gapReasonText, 'family:([^;]+)')
+        if ($familyMatch.Success) {
+            $gapFamilyNames.Add($familyMatch.Groups[1].Value) | Out-Null
+        } elseif (-not [string]::IsNullOrEmpty($gapReasonText)) {
+            $gapFamilyNames.Add($gapReasonText) | Out-Null
+        }
+    }
+    # PREFIX, not suffix (post-review fix): a finding Reason is capped at 500 characters
+    # further down this call chain (Protect-PulseReason, called from
+    # Invoke-PulseEvaluation) - the Fail/Warn sentences below already run close to that
+    # cap on their own, so an appended gap disclosure risked being silently truncated
+    # away exactly where a reader needed it most. Putting it FIRST guarantees the
+    # unscanned family names always survive the cap.
+    $gapDisclosure = if ($gapFamilyNames.Count -gt 0) {
+        "PARTIAL SCAN - $($gapFamilyNames.Count) family(ies) excluded ($([string]::Join(', ', $gapFamilyNames))), so a lower/zero conflict count here does not mean those families are conflict-free. "
+    } else { '' }
 
     if ($conflicts.Count -eq 0) {
+        if ($gaps.Count -gt 0) {
+            return New-PulseFinding -Status Warn -Reason "${gapDisclosure}No conflicts were detected among the families this snapshot was able to scan, but this is not an unqualified clean result."
+        }
         return New-PulseFinding -Status Pass -Reason 'No conflicting security-setting values were detected across the expanded Settings Catalog / configuration policy index for this snapshot.'
     }
 
@@ -114,10 +152,10 @@ function Test-PulseConflictingPolicySettings {
     $noneCount = @($conflicts | Where-Object { $_.assignmentOverlap -eq 'none' }).Count
 
     if ($provenCount -gt 0 -or $possibleCount -gt 0) {
-        $reason = "$($conflicts.Count) conflicting setting(s) found across policies, and assignment-scope overlap is confirmed or cannot be ruled out for $($provenCount + $possibleCount) of them ($provenCount proven, $possibleCount possible, $unknownCount unknown, $noneCount none) - per Microsoft's own guidance, Intune generates an error and applies NEITHER setting for a proven/possible conflict, so the intended configuration is not enforced on the affected devices until this is resolved (see Devices > Monitor > Configuration policy assignment failure)."
+        $reason = "${gapDisclosure}$($conflicts.Count) conflicting setting(s) found across policies, and assignment-scope overlap is confirmed or cannot be ruled out for $($provenCount + $possibleCount) of them ($provenCount proven, $possibleCount possible, $unknownCount unknown, $noneCount none) - per Microsoft's own guidance, Intune generates an error and applies NEITHER setting for a proven/possible conflict, so the intended configuration is not enforced on the affected devices until this is resolved (see Devices > Monitor > Configuration policy assignment failure)."
         return New-PulseFinding -Status Fail -Reason $reason -Evidence $evidence
     }
 
-    $reason = "$($conflicts.Count) conflicting setting(s) found across policies, but assignment-scope overlap could not be determined for any of them ($unknownCount unknown, $noneCount none) - see each conflict's own assignmentOverlapReason (typically assignments-deferred pending a GraphKit release) before treating this as safe; an overlap that later resolves to proven/possible means Intune will generate an error and enforce neither policy's value on the affected devices."
+    $reason = "${gapDisclosure}$($conflicts.Count) conflicting setting(s) found across policies, but assignment-scope overlap could not be determined for any of them ($unknownCount unknown, $noneCount none) - see each conflict's own assignmentOverlapReason (typically assignments-deferred pending a GraphKit release) before treating this as safe; an overlap that later resolves to proven/possible means Intune will generate an error and enforce neither policy's value on the affected devices."
     return New-PulseFinding -Status Warn -Reason $reason -Evidence $evidence
 }
