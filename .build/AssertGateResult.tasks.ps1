@@ -214,17 +214,35 @@
 # TP.ENT.0011.psd1/Test-PulseVoiceCallMethodDisabled.ps1/TP.ENT.0011.Tests.ps1 files.
 # 1252 is the real, measured ./build.ps1 -Tasks test total; all four tracking
 # locations bumped together in this commit.
-# 1252 -> 1325 (Task 4.4, TP.ENT.0017-0024 - 8 new ScuBA/CISA CA + role +
-# credential checks): +73 - new It cases across
-# tests/Unit/Checks/TP.ENT.001[7-9].Tests.ps1, TP.ENT.002[0-4].Tests.ps1
-# (44 new It cases across the 8 new check test files), +2 new It cases in
+# 1252 -> 1355 (Task 4.4, TP.ENT.0017-0024 - 8 new ScuBA/CISA CA + role +
+# credential checks): new It cases across tests/Unit/Checks/TP.ENT.001[7-9].
+# Tests.ps1, TP.ENT.002[0-4].Tests.ps1, +2 new It cases in
 # tests/Unit/Checks/ConvertTo-PulseCaPolicyView.Tests.ps1 (clientApplications
 # field, TP.ENT.0024's own dataset), +1 CheckCatalog.Tests.ps1 count-pin bump
 # (20 -> 28) plus per-file SecretScan.tests.ps1 growth for the 8 new
-# TP.ENT.00[17-24].psd1/Test-Pulse*.ps1/TP.ENT.00[17-24].Tests.ps1 files. 1325
-# is the real, measured ./build.ps1 -Tasks test total; all four tracking
-# locations bumped together in this commit.
-$script:tenantPulseGateMinimumTests = 1325
+# TP.ENT.00[17-24].psd1/Test-Pulse*.ps1/TP.ENT.00[17-24].Tests.ps1 files.
+# POST-REVIEW CORRECTION: the commit that introduced this cluster recorded
+# 1325 here, measured via an ad hoc FILTERED Invoke-Pester run rather than
+# the sanctioned `./build.ps1 -Tasks build,test` path - that ad hoc run both
+# undercounted (missed tests only the Sampler-bootstrapped module context
+# collects) and reported 4 false "failures" that do not occur under the real
+# pipeline. 1355 is the real, measured `./build.ps1 -Tasks test` total for
+# that same Task 4.4 commit set - the number this value should always have
+# been.
+# 1355 -> 1366 (Task 4.4 fix round - dual review F1-F5): F1/F2 red-then-green
+# tests added to tests/Unit/Checks/TP.ENT.0018.Tests.ps1 (custom-strength
+# evidence, excludeRoles subtraction, undocumented-exclusion note), F4
+# descriptor-pending NotApplicable cases added to TP.ENT.0022.Tests.ps1 (x2)
+# and TP.ENT.0023.Tests.ps1 (x1), F5 red-then-green unclassifiable-accessType
+# tests added to TP.ENT.0023.Tests.ps1 (x2). F3's relabeling of the cosmetic
+# "(PSObject shape)" It titles across TP.ENT.0017/0019/0021/0023.Tests.ps1
+# does not change the count; its genuine shape-neutrality case folded into
+# ConvertTo-PulseCaPolicyView.Tests.ps1's existing populated-clientApplications
+# It (loop, not a new It) likewise does not change the count. 1366 is the
+# real, measured `./build.ps1 -Tasks test` total for the fix-round commit;
+# all four tracking locations bumped together in the SAME commit as these
+# test changes, per the ratchet's own rule.
+$script:tenantPulseGateMinimumTests = 1366
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
