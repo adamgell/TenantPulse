@@ -231,14 +231,80 @@ hardware, and method.
   Phase 2b, which is where the real intent value (include/exclude) gets threaded through.
   Present in the shape now so 2b is a pure data-population change, not a schema change.
 
-## Phase 3 (T3.1-T3.3): complete
+## Phase 3 (T3.1-T3.6): engine and catalog work complete; T3.6 live gate honestly incomplete
 
 Task 3.1 shipped the Maester attribution shim and TP.INT.0006 (Intune device cleanup rule
-conflict check). Task 3.2 ported nine further Intune checks (TP.INT.0007-0009/0011-0015).
-Task 3.3 added twelve more (TP.INT.0019-0030), closing out the Intune-side catalog at 21
-`TP.INT` checks total (10 seed + 9 T3.2 + 12 T3.3, less two ids that never landed). See the
-commit history for per-task detail; this file's Phase 2 and Phase 4 sections carry the fuller
-narrative treatment for the phases either side of it.
+conflict check). Task 3.2 ported nine further Intune checks (TP.INT.0007-0009/0011-0015) and
+formally evaluated (and **BLOCKED**, not shipped) `TP.INT.0010` - Maester's "Intune diagnostic
+settings -> Audit Logs" check is an ARM call (`GET providers/microsoft.intune/diagnosticSettings`),
+not a Graph call, so GraphKit's Graph-only transport can never surface it via the ordinary
+descriptor-Pending mechanism. This is a genuine architecture gap needing a product decision
+(a dedicated ARM auth path, or permanent descope), not a missing-descriptor case, and it
+remains unresolved as of this task - see
+`docs/research/iha-v2/2026-08-16-phase3-intune-check-entries.md`'s TP.INT.0010 numbering-gap
+note. Task 3.3 added twelve more Intune checks (TP.INT.0019-0030) and imported research entries
+for TP.INT.0016/0017/0018 for record-completeness without implementing them yet.
+
+Phase 4 (T4.1-T4.5, its own section below) developed in parallel on a separate branch and
+merged into `main` at `99126f6` ("Phase 4 core Entra catalog into main (28->49 checks)"),
+after which Phase 3 work continued on the merged tree:
+
+- **Task 3.4** shipped `TP.INT.0031` (BitLocker CSP settings present and correct) and
+  `TP.INT.0016` (ASR Standard Protection rules configured), both settings-catalog-expansion-
+  powered checks (the first checks in this catalog to consume `Resolve-PulseSettingsCatalog
+  SnapshotExpansion`/the settings-presence-index rather than a typed dataset directly). A
+  dual-review fix round corrected `TP.INT.0016`'s `settingDefinitionId` strings against the
+  real corpus (`948150c`) and `TP.INT.0014`/`TP.INT.0031`'s BitLocker adjudication logic
+  (`5f2ee17`), plus added a permanent QA gate
+  (`tests/QA/SettingDefinitionCorpusCrossCheck.tests.ps1`, `b862e5f`) so a hard-coded
+  `settingDefinitionId` can never again drift from the corpus it's meant to match without the
+  suite catching it.
+  **Still BLOCKED, not shipped**: `TP.INT.0017` (App Control policy enforced) and
+  `TP.INT.0018` (Managed Installer rules paired with an enforcing App Control policy). Two
+  independent blockers, both confirmed (not merely suspected) as of the T3.5 dual-review fix
+  round: (1) `tests/Fixtures/SettingsCatalogCorpus/checked-definitions.json` has zero entries
+  matching App Control or Managed Installer, even though this repo's own live capture
+  (`scratch/live-27/snapshot/reference/settingDefinitions.json`) has 34 raw matching
+  `settingDefinitions` - so a `TP.INT.0016`-style settings-presence-index port has nothing to
+  key against in the corpus yet; and (2) App Control's `visibility:"template"` field, while
+  real and confirmed present in that same live capture, is undocumented anywhere in
+  Microsoft's published Graph API schema docs (re-confirmed live against the beta
+  `deviceManagementConfigurationPolicyTemplate` resource for this fix round) - a genuine
+  docs-vs-live-schema gap that a from-docs-only implementation can't safely paper over.
+- **Task 3.5** wired `Get-PulseCaExclusionContext` into `TP.ENT.0004`/`TP.ENT.0005` so both
+  checks surface honored Conditional Access group/user exclusions as evidence instead of
+  silently ignoring them (`36bf53e`), then a dual-review fix round hardened both checks
+  further: malformed-exclusion and group-exclusion-note evidence surfaced, and a
+  report-only-only exclusion (an exclusion that exists but grants no real enforcement gap)
+  now warns instead of passing silently (`ae5cc1d`). A final documentation-only fix round
+  corrected `TP.INT.0017`'s BLOCKED note (the App Control `visibility` fact was live-confirmed
+  in-repo all along, not "unconfirmed" as a prior pass claimed) and added the `TP.INT.0010`
+  numbering-gap note referenced above (`bbef1d1`, current `main` HEAD).
+
+**Catalog state at `bbef1d1`, verified against the live-built module
+(`Get-PulseCheckCatalog`)**: **51 checks total - 28 `TP.INT` + 23 `TP.ENT`.** Three checks
+remain genuinely BLOCKED and unshipped for the reasons above: `TP.INT.0010` (ARM-vs-Graph
+architecture gap), `TP.INT.0017`/`TP.INT.0018` (corpus + docs-schema gaps). Suite:
+1929/1929 tests, 0 failed, 0 errors (`./build.ps1 -Tasks build,test`, re-verified for this
+task).
+
+### Task 3.6 - Phase 3 live gate: NOT completed live-tenant-side
+
+This task's brief called for a full live assessment of all 51 checks against the Ivy24 lab
+tenant (fresh snapshot, full evaluation, reconciliation, `-FromSnapshot` byte-identity, a
+secret/PII sweep, and a scripted license/attribution audit), mirroring the T4.5 Phase 4 gate
+pattern (`docs/gates/phase4-ivy24-findings.redacted.json`, 28 checks). **The live-tenant
+portion did not run in this pass.** While preparing the run, the environment's own permission
+system denied a read of `~/.graphkit/profiles.json` (checking the `ivy24` profile's shape
+before invoking it) with an explicit "let the user decide" instruction; the agent stopped
+there rather than working around the denial, per this project's own operating rules. This is
+recorded here as an honest, explicit pending item rather than a run that didn't happen being
+implied to have happened - see the task's own report for the full timeline. What a live Task
+3.6 gate still needs, whenever it runs: all 51 checks producing a real status or an honest
+`NotApplicable` (with `TP.INT.0006` expected to `Fail` with real conflict evidence per the
+Phase 2 baseline), reconciliation against the 781-policy Phase 2 baseline (tenant may have
+drifted), the byte-identity check, the secret/PII sweep, and the scripted license/attribution
+audit (item 5 of the brief - see below for what could be done without live data).
 
 ## Phase 4: core Entra catalog (complete, Task 4.5 phase gate)
 

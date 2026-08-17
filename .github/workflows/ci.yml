@@ -692,7 +692,10 @@ jobs:
           # GroupExclusionNote completeness fold-in + report-only misreading-risk warning):
           # +8 - 4 new Its each in TP.ENT.0004.Tests.ps1 and TP.ENT.0005.Tests.ps1. See
           # .build/AssertGateResult.tasks.ps1's own accounting.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1929 -AllowedSkips $allowedSkips -AllowNotRun 1
+          #
+          # 1929 -> 1935 (Task 3.6: tests/QA/LicenseAttributionAudit.tests.ps1, the scripted
+          # license/attribution audit - 6 new Its, permanent suite member).
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1935 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

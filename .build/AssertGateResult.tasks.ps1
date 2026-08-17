@@ -452,10 +452,11 @@
 # TP.ENT.0004.Tests.ps1 and TP.ENT.0005.Tests.ps1) - malformed-account surfaced,
 # group-exclusion-resolution note surfaced (and its backward-compat absence when nothing
 # was declared), and the multi-identifier enforced/report-only/no-match/malformed hostile
-# case the adversarial reviewer named. 1929 is the real, measured
-# `./build.ps1 -Tasks build,test` total for this commit; both tracking locations bumped
+# case the adversarial reviewer named. 1935 is the real, measured
+# `./build.ps1 -Tasks build,test` total for this commit (Task 3.6: +6 from
+# tests/QA/LicenseAttributionAudit.tests.ps1); both tracking locations bumped
 # together in the same commit as these test changes, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1929
+$script:tenantPulseGateMinimumTests = 1935
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

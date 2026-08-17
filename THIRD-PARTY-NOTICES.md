@@ -49,6 +49,9 @@ naming exactly this).
   - `source/Data/Checks/TP.INT.0015.psd1` ("LAPS configuration policy meets minimum
     security bar", Task 3.2) - adapts the check logic behind Maester's `MT.1177`
     (`Test-MtIntuneLAPSConfiguration`).
+  - `source/Data/Checks/TP.INT.0016.psd1` ("Attack Surface Reduction 'Standard
+    Protection' baseline rules configured", Task 3.4) - adapts the check logic behind
+    Maester's `MT.1178`.
   - `source/Data/Checks/TP.INT.0019.psd1` ("Apple MDM Push (APNs) certificate valid for
     more than 30 days", Task 3.3) - adapts the check logic behind Maester's `MT.1092`
     (`Test-MtApplePushNotificationCertificate`).
