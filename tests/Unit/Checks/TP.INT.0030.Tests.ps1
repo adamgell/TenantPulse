@@ -48,10 +48,11 @@ BeforeAll {
     }
 
     function script:New-PulseFleetData {
-        param([int] $Compliant, [int] $Noncompliant)
+        param([int] $Compliant, [int] $Noncompliant, [int] $OtherState = 0, [string] $OtherStateValue = 'unknown')
         $rows = [System.Collections.Generic.List[object]]::new()
         for ($i = 0; $i -lt $Compliant; $i++) { $rows.Add([pscustomobject]@{ id = "c$i"; complianceState = 'compliant' }) }
         for ($i = 0; $i -lt $Noncompliant; $i++) { $rows.Add([pscustomobject]@{ id = "n$i"; complianceState = 'noncompliant' }) }
+        for ($i = 0; $i -lt $OtherState; $i++) { $rows.Add([pscustomobject]@{ id = "o$i"; complianceState = $OtherStateValue }) }
         return $rows.ToArray()
     }
 }
@@ -95,5 +96,65 @@ Describe 'TP.INT.0030 - Fleet compliance rate below acceptable threshold' {
             @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'd1' }) }
         )
         $finding.status | Should -Be 'Error'
+    }
+
+    Context 'hostile bucket adjudication (post-review HIGH fix): no non-compliant/non-noncompliant state silently counts as compliant' {
+        It '<State>: a material (5%) share never bare-Passes, even with a perfect verified-noncompliant rate of 0%' -TestCases @(
+            @{ State = 'conflict' }
+            @{ State = 'error' }
+            @{ State = 'inGracePeriod' }
+            @{ State = 'configManager' }
+            @{ State = 'unknown' }
+            @{ State = 'notEvaluated' }
+            @{ State = 'someFutureStateNotYetDocumented' }
+        ) {
+            param($State)
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0030' -Datasets @(
+                @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = (New-PulseFleetData -Compliant 19 -Noncompliant 0 -OtherState 1 -OtherStateValue $State) }
+            )
+            $finding.status | Should -Not -Be 'Pass'
+            $finding.status | Should -Be 'Warn'
+            $finding.evidence[0].detail.unverifiedDevices | Should -Be 1
+            $finding.evidence[0].detail.compliantDevices | Should -Be 19
+        }
+
+        It 'a single unverified device below the material 5% threshold does not escalate a fleet that would otherwise Pass' {
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0030' -Datasets @(
+                @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = (New-PulseFleetData -Compliant 99 -Noncompliant 0 -OtherState 1 -OtherStateValue 'unknown') }
+            )
+            $finding.status | Should -Be 'Pass'
+            $finding.evidence[0].detail.unverifiedDevices | Should -Be 1
+        }
+
+        It 'a mixed unverified breakdown (conflict + error + configManager) is disclosed in the Reason and evidence, never dropped' {
+            $rows = [System.Collections.Generic.List[object]]::new()
+            for ($i = 0; $i -lt 90; $i++) { $rows.Add([pscustomobject]@{ id = "c$i"; complianceState = 'compliant' }) }
+            $rows.Add([pscustomobject]@{ id = 'x1'; complianceState = 'conflict' })
+            $rows.Add([pscustomobject]@{ id = 'x2'; complianceState = 'error' })
+            $rows.Add([pscustomobject]@{ id = 'x3'; complianceState = 'configManager' })
+            $rows.Add([pscustomobject]@{ id = 'x4'; complianceState = 'configManager' })
+            $rows.Add([pscustomobject]@{ id = 'x5'; complianceState = 'inGracePeriod' })
+            $rows.Add([pscustomobject]@{ id = 'x6'; complianceState = 'inGracePeriod' })
+
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0030' -Datasets @(
+                @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = $rows.ToArray() }
+            )
+
+            $finding.status | Should -Be 'Warn'
+            $finding.evidence[0].detail.unverifiedDevices | Should -Be 6
+            $finding.evidence[0].detail.unverifiedStateBreakdown.conflict | Should -Be 1
+            $finding.evidence[0].detail.unverifiedStateBreakdown.error | Should -Be 1
+            $finding.evidence[0].detail.unverifiedStateBreakdown.configManager | Should -Be 2
+            $finding.evidence[0].detail.unverifiedStateBreakdown.inGracePeriod | Should -Be 2
+            $finding.reason | Should -Match 'unverified-or-unhealthy'
+        }
+
+        It 'Fail still wins over a material unverified share when the verified-noncompliant rate alone already exceeds 10%' {
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0030' -Datasets @(
+                @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = (New-PulseFleetData -Compliant 69 -Noncompliant 20 -OtherState 11 -OtherStateValue 'unknown') }
+            )
+            $finding.status | Should -Be 'Fail'
+            $finding.evidence[0].detail.unverifiedDevices | Should -Be 11
+        }
     }
 }

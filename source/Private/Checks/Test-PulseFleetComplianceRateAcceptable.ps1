@@ -25,14 +25,49 @@
     fleet already meets"), not a citation to a specific Microsoft SHALL/SHOULD document -
     the Consulting text says so explicitly rather than overclaiming Microsoft attribution.
 
+    THREE-BUCKET ADJUDICATION (post-review fix, HIGH finding): the FIRST version of this
+    rule only counted `complianceState -eq 'noncompliant'` toward the numerator - every
+    OTHER state (`unknown`, `inGracePeriod`, `conflict`, `error`, `configManager`, and any
+    future/unrecognized value) silently fell through uncounted, which means a device this
+    check cannot actually verify as compliant was treated exactly like a genuinely
+    compliant one (a fleet with 1/20 devices stuck in `unknown` Passed identically to a
+    perfectly compliant fleet - reviewer-probed, confirmed real). Every managedDevices row
+    is now classified into exactly one of three buckets, per Microsoft's own documented
+    Graph `complianceState` enum values:
+        - COMPLIANT bucket: `compliant` only - the one state that actually means "verified
+          compliant".
+        - NONCOMPLIANT bucket: `noncompliant` only - the one state that actually means
+          "verified noncompliant" (this is what the Fail/Warn rate below is computed
+          against, i.e. "rate computed against verified-compliant/verified-noncompliant",
+          never against a bucket this check cannot actually confirm).
+        - UNVERIFIED-OR-UNHEALTHY bucket: everything else - `conflict` (a policy conflict
+          prevented evaluation), `error` (evaluation itself failed), `inGracePeriod`
+          (device is mid-remediation, not yet definitively either state),
+          `configManager` (Configuration Manager co-management owns compliance for this
+          device, Intune's own complianceState is not authoritative for it), `unknown`,
+          AND any value this rule does not recognize at all (a genuinely future/undocumented
+          state) - fail-closed by construction: an unrecognized state is NEVER silently
+          folded into "compliant", it always lands in the bucket this check flags as
+          needing attention.
+    The unverified-or-unhealthy bucket's count/percentage is ALWAYS disclosed in the
+    Reason text regardless of Status, and a MATERIAL unverified share (>= 5% of the fleet,
+    the same threshold the noncompliant rate itself uses) escalates the finding to at least
+    Warn even when the verified-noncompliant rate alone is comfortably below 5% - a fleet
+    cannot bare-Pass on the strength of a bucket this check cannot actually verify.
+
     GRADUATED FINDING (per the research entry's own Notes): expressed as a Warn/Fail band
     rather than strict binary pass/fail, consistent with the evaluator's existing Rule-type
-    contract (Warn is a real, first-class Status here, not deferred to a future
-    thresholded rule-type) - Pass below 5% noncompliant, Warn 5%-10%, Fail above 10%.
+    contract (Warn is a real, first-class Status here, not deferred to a future thresholded
+    rule-type) - see the RULE section below for the exact band logic, now with two
+    independent escalation paths (verified-noncompliant rate, and material-unverified
+    share) rather than one.
 
-    FIELD-ABSENCE LENS: complianceState absent on an individual managedDevices row is
-    undecidable and throws - a large fleet scan is only as trustworthy as its per-row data,
-    and this check does not guess a fleet-wide rate from a dataset with unexplained gaps.
+    FIELD-ABSENCE LENS: complianceState absent (or present-$null) on an individual
+    managedDevices row is undecidable and throws - a large fleet scan is only as
+    trustworthy as its per-row data, and this check does not guess a fleet-wide rate from a
+    dataset with unexplained gaps. This is distinct from a PRESENT-but-unrecognized state
+    string, which is decidable (it lands in the unverified-or-unhealthy bucket, per the
+    fail-closed classification above) - only true absence throws.
 
     DETERMINISM: purely a ratio over the dataset already handed in - no wall-clock
     dependency of any kind.
@@ -54,8 +89,10 @@ function Test-PulseFleetComplianceRateAcceptable {
         return New-PulseFinding -Status NotApplicable -Reason 'No managed devices were returned for this tenant - there is no fleet for this check to evaluate a compliance rate over.'
     }
 
-    $reasonCounts = @{}
+    $compliantCount = 0
     $noncompliantCount = 0
+    $unverifiedCount = 0
+    $unverifiedStateCounts = @{}
 
     foreach ($device in $devices) {
         if (-not (Test-PulseRowPropertyPresent -Row $device -PropertyName 'complianceState') -or $null -eq $device.complianceState) {
@@ -63,31 +100,60 @@ function Test-PulseFleetComplianceRateAcceptable {
         }
 
         $state = [string] $device.complianceState
-        if ($state -eq 'noncompliant') {
+
+        if ($state -eq 'compliant') {
+            $compliantCount++
+        } elseif ($state -eq 'noncompliant') {
             $noncompliantCount++
-            if ($reasonCounts.ContainsKey($state)) { $reasonCounts[$state]++ } else { $reasonCounts[$state] = 1 }
+        } else {
+            # UNVERIFIED-OR-UNHEALTHY (fail-closed): conflict/error/inGracePeriod/
+            # configManager/unknown, AND any state this rule does not recognize at all -
+            # never silently folded into "compliant".
+            $unverifiedCount++
+            if ($unverifiedStateCounts.ContainsKey($state)) { $unverifiedStateCounts[$state]++ } else { $unverifiedStateCounts[$state] = 1 }
         }
     }
 
     $total = $devices.Count
-    $rate = [double] $noncompliantCount / [double] $total
-    $ratePercent = [System.Math]::Round($rate * 100, 1)
+    $noncompliantRate = [double] $noncompliantCount / [double] $total
+    $unverifiedRate = [double] $unverifiedCount / [double] $total
+    $noncompliantRatePercent = [System.Math]::Round($noncompliantRate * 100, 1)
+    $unverifiedRatePercent = [System.Math]::Round($unverifiedRate * 100, 1)
+
+    $unverifiedBreakdown = ($unverifiedStateCounts.Keys | Sort-Object | ForEach-Object { "$_=$($unverifiedStateCounts[$_])" }) -join ', '
+    $unverifiedClause = if ($unverifiedCount -gt 0) {
+        " $unverifiedCount of $total device(s) ($unverifiedRatePercent%) are in an unverified-or-unhealthy compliance state that cannot be confirmed as compliant ($unverifiedBreakdown)."
+    } else {
+        ''
+    }
 
     $evidence = @(
         @{
             Identity = 'fleet-compliance-rate'
-            Detail   = @{ totalDevices = $total; noncompliantDevices = $noncompliantCount; noncompliantRatePercent = $ratePercent }
+            Detail   = @{
+                totalDevices             = $total
+                compliantDevices         = $compliantCount
+                noncompliantDevices      = $noncompliantCount
+                noncompliantRatePercent  = $noncompliantRatePercent
+                unverifiedDevices        = $unverifiedCount
+                unverifiedRatePercent    = $unverifiedRatePercent
+                unverifiedStateBreakdown = $unverifiedStateCounts
+            }
             SortKey  = 'fleet-compliance-rate'
         }
     )
 
-    if ($rate -gt 0.10) {
-        return New-PulseFinding -Status Fail -Reason "$noncompliantCount of $total managed device(s) ($ratePercent%) are noncompliant, above the 10% threshold this check treats as an unacceptable fleet-health signal - review compliance policy configuration and top noncompliance reasons before layering additional Conditional Access enforcement on top." -Evidence $evidence
+    if ($noncompliantRate -gt 0.10) {
+        return New-PulseFinding -Status Fail -Reason "$noncompliantCount of $total managed device(s) ($noncompliantRatePercent%) are verified noncompliant, above the 10% threshold this check treats as an unacceptable fleet-health signal - review compliance policy configuration and top noncompliance reasons before layering additional Conditional Access enforcement on top.$unverifiedClause" -Evidence $evidence
     }
 
-    if ($rate -ge 0.05) {
-        return New-PulseFinding -Status Warn -Reason "$noncompliantCount of $total managed device(s) ($ratePercent%) are noncompliant, within this check's 5-10% approaching-threshold band - worth investigating before it grows further." -Evidence $evidence
+    if ($noncompliantRate -ge 0.05) {
+        return New-PulseFinding -Status Warn -Reason "$noncompliantCount of $total managed device(s) ($noncompliantRatePercent%) are verified noncompliant, within this check's 5-10% approaching-threshold band - worth investigating before it grows further.$unverifiedClause" -Evidence $evidence
     }
 
-    return New-PulseFinding -Status Pass -Reason "$noncompliantCount of $total managed device(s) ($ratePercent%) are noncompliant, below this check's 5% threshold." -Evidence $evidence
+    if ($unverifiedRate -ge 0.05) {
+        return New-PulseFinding -Status Warn -Reason "Verified-noncompliant devices are below this check's 5% threshold ($noncompliantCount of $total, $noncompliantRatePercent%), but a material share of the fleet cannot be verified either way:$unverifiedClause A fleet cannot be called healthy on the strength of a bucket this check cannot confirm - investigate the unverified state(s) before treating this as a clean Pass." -Evidence $evidence
+    }
+
+    return New-PulseFinding -Status Pass -Reason "$noncompliantCount of $total managed device(s) ($noncompliantRatePercent%) are verified noncompliant, below this check's 5% threshold.$unverifiedClause" -Evidence $evidence
 }
