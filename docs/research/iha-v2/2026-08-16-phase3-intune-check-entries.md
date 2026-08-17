@@ -315,8 +315,30 @@ Warn/Disabled/unconfigured.
   rule set entirely by policy A and another entirely by policy B still counts as a
   combined pass. Only 3 of Defender's ~19 ASR rules are checked (the "Standard
   Protection" subset); this is intentionally a floor, not full ASR coverage.
-- Task 3.3 scoping note: imported for record-completeness, not implemented in T3.3 - see
-  the T3.3 report.
+- Task 3.3 scoping note: **RESOLVED: implemented in T3.4** (`Test-PulseAsrStandardProtectionRulesConfigured.ps1`).
+  Implemented via Part A's settingPresenceIndex (`Data.Expansions = @('settingPresenceIndex')`),
+  not the template-family-filtered `configurationPolicies` fetch this entry originally
+  proposed - the settings-expansion layer answers the SAME "union across every ASR policy
+  in the tenant" question this entry's own Notes already call for, from data already
+  collected, without a second Graph fetch. Live-fetched
+  https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference
+  (2026-08-17, confirmed live) for the exact GUIDs of the three "Standard protection
+  rules": `56a863a9-875e-4185-98a7-b882c64b5ce5` (Block abuse of exploited vulnerable
+  signed drivers), `9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2` (Block credential stealing from
+  LSASS), `e6db77e5-3df2-4cf1-b95a-636979351e5b` (Block persistence through WMI event
+  subscription); and
+  https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-defender
+  (2026-08-17, confirmed live) for the Policy CSP node path,
+  `./Device/Vendor/MSFT/Policy/Config/Defender/AttackSurfaceReductionRules`. The Settings
+  Catalog `settingDefinitionId` string this check's map derives from that CSP path
+  (`device_vendor_msft_policy_config_defender_attacksurfacereductionrules`, one
+  GroupSettingCollection keyed per rule GUID) is **PENDING VERIFICATION against a live
+  tenant** - carried through from the documented CSP path using this module's own
+  established naming convention (see TP.INT.0014's own identical hedge for
+  `device_vendor_msft_bitlocker_systemdrivesencryptiontype`), not independently confirmed
+  against Ivy24's actual Settings Catalog schema from inside this task. See
+  `Test-PulseAsrStandardProtectionRulesConfigured.ps1`'s own docstring for the full
+  accounting.
 
 ## TP.INT.0017 — App Control for Business policy enforcing (not audit-only)
 
@@ -594,3 +616,40 @@ actually shipped in `Test-PulseFleetComplianceRateAcceptable.ps1` (`TP.INT.0030.
    default, not a Microsoft citation - this entry's own Authority/Origin bullets above are
    the SUPERSEDED original research claim, kept for record-completeness, not the shipped
    check's actual position.
+
+**TP.INT.0031 import (2026-08-17, Task 3.4 Part B):** imported from section C ("Setting-
+level checks on Phase 2 expansion rows") of the ORIGINAL Phase 3 research record
+(`/Users/Adam.Gell/repo/GraphKit/.claude/worktrees/intune-health-automation-v2-867eda/docs/research/iha-v2/2026-08-16-phase3-intune-check-entries.md`,
+read-only reference, not itself part of this repo) - the settings-expansion-index
+complement TP.INT.0014's own Consulting text and research entry already named as planned
+future work. Implemented via Part A's settingPresenceIndex artifact
+(`Data.Expansions = @('settingPresenceIndex')`), consuming
+`$Context.ArtifactReader.GetSettingPresenceIndex()` - never a raw Graph fetch, never the
+`configurationPolicies`-template-family pattern TP.INT.0014 itself uses.
+
+## TP.INT.0031 — BitLocker CSP settings present and correct across all Settings Catalog policies
+
+Across every expanded Settings Catalog policy (any creation path, not just the Endpoint
+Security blade), the BitLocker CSP `SystemDrivesEncryptionType` setting resolves to
+full-disk encryption on at least one policy this module can confirm is assigned.
+
+- Authority: https://learn.microsoft.com/en-us/windows/client-management/mdm/bitlocker-csp (live-fetched 2026-08-17, confirmed live) - complements Maester MT.1123 (TP.INT.0014)
+- Origin: none (practitioner judgment - extends MT.1123's template-scoped coverage using the settings-expansion layer)
+- Data: Part A's settingPresenceIndex artifact (`expanded/settingPresenceIndex.<sha256>.json`), filtered by definitionId `device_vendor_msft_bitlocker_systemdrivesencryptiontype` across every family (settingsCatalog/compliance/deviceConfiguration)
+- Severity rationale: Critical - same underlying risk as TP.INT.0014 (unencrypted disk at rest); severity is not lower just because the setting arrived through a different profile type.
+- Notes: **dedupe trap with TP.INT.0014** (carried through from the original research
+  entry) - this check and TP.INT.0014 are deliberately independent, non-suppressing
+  signals over the same underlying risk (TenantPulse's finding schema has no cross-check
+  suppression mechanism, same YAGNI-bounded scope as TP.INT.0006's own severity-escalation
+  note) - a tenant whose only qualifying policy went through the Endpoint Security blade
+  Passes both checks identically, which is intentional corroboration, not disagreement.
+  **SETTING IDENTITY PENDING VERIFICATION** (same hedge as TP.INT.0014's own): the
+  definitionId and its `_1` = Full-encryption option-id suffix are carried through
+  unchanged from TP.INT.0014's own composite descriptor, not independently re-derived or
+  re-verified against a live tenant's actual Settings Catalog schema from inside this
+  task - see `Test-PulseBitlockerCspSettingsPresentAndCorrect.ps1`'s own docstring.
+  **ASSIGNMENT-AWARE, beyond the original entry's own claim scope**: unlike TP.INT.0014
+  (which does not itself check assignment), this check additionally requires the
+  qualifying policy be confirmed ASSIGNED (Part A's own per-value `assignedPolicyCount`) -
+  a correct value on an unassigned policy Fails here, disclosed as such, since an
+  unassigned policy protects zero devices in practice.
