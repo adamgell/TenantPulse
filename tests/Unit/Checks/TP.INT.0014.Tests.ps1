@@ -95,6 +95,23 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         @($finding.evidence).Count | Should -Be 2
     }
 
+    It 'Error: a policy has no isFullDiskEncryption value - absent must never read as not-full-disk-encryption' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ policyId = 'p1'; policyName = 'BitLocker Unresolved' }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'isFullDiskEncryption'
+    }
+
+    It 'Fail still holds: present-$false alone is decidable and correctly Fails (not an Error)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ policyId = 'p1'; policyName = 'BitLocker Used-Space-Only'; isFullDiskEncryption = $false }) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
     It 'gate-degraded: NotApplicable when the dataset is Pending on a live tenant' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
             @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Skipped'; Reason = 'descriptor-pending: awaiting GraphKit release' }

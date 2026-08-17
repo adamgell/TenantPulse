@@ -43,6 +43,12 @@
     settings pushed through a generic Settings Catalog profile outside that blade. No
     double-counting risk exists WITHIN this check; the risk is a FUTURE check
     double-reporting the same policy this one already covers.
+
+    FIELD-ABSENCE LENS (POST-REVIEW FIX): an absent isFullDiskEncryption used to be read
+    the same as present-and-$false (both failed the -eq $true test and silently fell into
+    "not full-disk encryption"). Absent means the resolved suffix-matched boolean this
+    check's own dataset docstring describes was never produced for that policy row - this
+    rule cannot honestly reason about it, and now throws instead.
 #>
 
 function Test-PulseBitLockerFullDiskEncryption {
@@ -57,6 +63,12 @@ function Test-PulseBitLockerFullDiskEncryption {
     )
 
     $policies = @($Datasets.endpointSecurityDiskEncryptionPolicies)
+
+    foreach ($policy in $policies) {
+        if ($null -eq $policy.isFullDiskEncryption) {
+            throw "Test-PulseBitLockerFullDiskEncryption: Endpoint Security Disk Encryption policy '$($policy.policyName)' has no isFullDiskEncryption value - an absent value here is not decidable as 'not full-disk encryption', it means this rule cannot tell whether the resolved suffix-matched boolean was ever produced for this policy."
+        }
+    }
 
     $fullyEncrypted = @($policies | Where-Object { $_.isFullDiskEncryption -eq $true })
 
