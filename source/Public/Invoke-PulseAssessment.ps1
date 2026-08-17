@@ -53,18 +53,34 @@
         substituting each with its 'tp-...' pseudonym. Re-evaluating the same snapshot with
         -Redact is still byte-identical across runs, because the pseudonym HMAC is keyed
         and stable (Get-PulsePseudonym, Task 1.3) - "fresh redaction map" does not mean
-        "different output" for the same input snapshot and operator key. HONEST RESIDUAL:
-        -Redact substitutes evidence identities (and identity-defaulted sortKeys) only - a
-        rule-authored Reason or an engine Error reason is capped (Protect-PulseReason) but
-        never identity-substituted, so a raw identifier that leaks into free-text exception
-        or reason text (e.g. a UPN embedded in a caught error message) can still survive a
-        redacted report. Evidence Detail objects are NOT redacted at all, on top of that -
-        a rule author is free to put whatever fields it judges useful into Detail (e.g.
-        TP.INT.0005's deviceName), and -Redact does not attempt to identify or substitute
-        identity-shaped values inside them; only the Identity (and identity-defaulted
-        sortKey) field is substituted. Full reason/detail-text identity substitution is
-        future work, not part of this task - -Redact should be read as "identity fields are
-        pseudonymized", not "this report is fully de-identified".
+        "different output" for the same input snapshot and operator key.
+
+        DETAIL-KEY MECHANISM (Phase 3 closing fix series, item 4 - supersedes the earlier
+        "identity fields only" framing below, closing a live proof: a real Apple ID UPN
+        surfaced raw in rendered findings evidence Detail under -Redact, 2026-08-17,
+        TP.INT.0020/0021's appleIdentifier/organizationName detail keys): evidence Detail is
+        NOT blanket-redacted, and never will be - a rule author is free to put whatever
+        fields it judges useful into Detail (e.g. TP.INT.0005's deviceName), and most of
+        that is deliberately NOT identity-shaped (tenant-resource GUIDs and policy display
+        names stay unredacted by design). Instead, a rule MAY mark specific Detail keys as
+        identity-bearing on a per-evidence-entry basis via -RedactDetailKeys (a string
+        array naming the keys, e.g. `@('appleIdentifier')` - see New-PulseFinding's own
+        docstring for the full mechanism). Invoke-PulseEvaluation's redaction-map-building
+        step adds each marked-and-present raw Detail value to the SAME HMAC map an
+        evidence Identity is pseudonymized through, and Export-PulseJsonReport substitutes
+        it under -Redact using the identical lookup-and-substitute logic already applied to
+        identity/sortKey. A Detail value never marked this way is never added to the map
+        and is therefore never touched, regardless of what it looks like - this is an
+        explicit, per-check, per-key opt-in, not a scanner or heuristic. HONEST RESIDUAL,
+        narrowed but not eliminated by this fix: a rule-authored Reason or an engine Error
+        reason is still only capped (Protect-PulseReason), never identity-substituted, so a
+        raw identifier embedded in free-text exception or reason text can still survive a
+        redacted report; and a Detail key that carries a person-identifying value but has
+        not (yet) been marked by its rule's author is likewise still unredacted -
+        -RedactDetailKeys closes the specific gap this fix round audited and marked, not
+        every possible one. -Redact should be read as "identity fields, plus every Detail
+        key its own rule author has explicitly marked, are pseudonymized" - not "this
+        report is fully de-identified".
 
         Returns a summary object: { SnapshotPath; FindingsPath; ReportPaths; Scores;
         Coverage }. SnapshotPath is the store's root directory. FindingsPath is the

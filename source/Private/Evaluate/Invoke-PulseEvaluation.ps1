@@ -251,6 +251,39 @@ function Invoke-PulseEvaluation {
             if (-not $redactionMap.ContainsKey($item.Identity)) {
                 $redactionMap[$item.Identity] = Get-PulsePseudonym -Value $item.Identity -Key $operatorKey
             }
+
+            # REDACT-DETAIL-KEYS (Phase 3 closing fix series, item 4): a rule may mark
+            # specific Detail keys as identity-bearing (New-PulseFinding's own docstring)
+            # - for each marked key present in THIS entry's Detail with a non-null,
+            # non-empty value, the raw value goes into the SAME per-evaluation HMAC
+            # redaction map an evidence Identity would, so Export-PulseJsonReport's
+            # existing "substitute any raw value that is a key in the map" logic picks it
+            # up with no separate mechanism. Detail can be a Hashtable (the common
+            # rule-authoring idiom) or a PSCustomObject - both are read case-sensitively by
+            # exact key name, matching how the key was actually authored in Detail.
+            $detailKeys = @($item.RedactDetailKeys)
+            if ($detailKeys.Count -gt 0 -and $null -ne $item.Detail) {
+                foreach ($detailKey in $detailKeys) {
+                    $rawValue = $null
+                    $hasValue = $false
+                    if ($item.Detail -is [System.Collections.IDictionary]) {
+                        if ($item.Detail.Contains($detailKey)) {
+                            $rawValue = $item.Detail[$detailKey]
+                            $hasValue = $true
+                        }
+                    } elseif ($item.Detail.PSObject.Properties.Name -contains $detailKey) {
+                        $rawValue = $item.Detail.$detailKey
+                        $hasValue = $true
+                    }
+
+                    if ($hasValue -and $null -ne $rawValue -and -not [string]::IsNullOrEmpty([string] $rawValue)) {
+                        $rawValueText = [string] $rawValue
+                        if (-not $redactionMap.ContainsKey($rawValueText)) {
+                            $redactionMap[$rawValueText] = Get-PulsePseudonym -Value $rawValueText -Key $operatorKey
+                        }
+                    }
+                }
+            }
         }
 
         if ($evidenceItems.Count -gt 1) {

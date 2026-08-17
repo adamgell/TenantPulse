@@ -47,6 +47,14 @@
     path now attaches a corroborating per-row evidence summary too, matching
     Test-PulseStaleDevices.ps1's own precedent of never leaving a Pass evidence-empty when
     real per-row data already exists to corroborate it with.
+
+    REDACTION (Phase 3 closing fix series, item 4, live surprise 2): appleIdentifier is
+    the Apple ID (an email address, person-identifying) behind each token - marked via
+    every evidence row's RedactDetailKeys = @('appleIdentifier') so
+    Invoke-PulseAssessment -Redact pseudonymizes it in rendered output, closing a live
+    proof (a real Apple ID UPN surfaced raw in findings evidence Detail under -Redact
+    before this fix, 2026-08-17) that -Redact's identity/sortKey-only substitution missed
+    person-identifying values that live only in Detail.
 #>
 
 function Test-PulseAppleAdeTokensValid {
@@ -109,8 +117,8 @@ function Test-PulseAppleAdeTokensValid {
         # ('ade-token-<index>', 0-based) is guaranteed unique within one evaluation.
         $identity = if (Test-PulseRowPropertyPresent -Row $token -PropertyName 'id') { [string] $token.id } else { "ade-token-$index" }
         $row = @{
-            Identity = $identity
-            Detail   = @{
+            Identity         = $identity
+            Detail           = @{
                 appleIdentifier             = $token.appleIdentifier
                 tokenName                   = $token.tokenName
                 tokenExpirationDateTime     = $token.tokenExpirationDateTime
@@ -119,7 +127,14 @@ function Test-PulseAppleAdeTokensValid {
                 approachingExpiry           = $isApproaching
                 syncStale                   = $isSyncStale
             }
-            SortKey  = $identity
+            SortKey          = $identity
+            # REDACT-DETAIL-KEYS (Phase 3 closing fix series, item 4, live surprise 2):
+            # appleIdentifier is the tenant's Apple ID (an email address) behind this ADE
+            # token - a real one surfaced raw in rendered findings evidence Detail under
+            # -Redact before this fix (live-verified 2026-08-17). Marked here so
+            # Invoke-PulseEvaluation's -Redact path pseudonymizes it the same way an
+            # evidence Identity would be.
+            RedactDetailKeys = @('appleIdentifier')
         }
         $allRows.Add($row)
 

@@ -38,6 +38,18 @@
     path now attaches a corroborating per-row evidence summary too, matching
     Test-PulseStaleDevices.ps1's own precedent of never leaving a Pass evidence-empty when
     real per-row data already exists to corroborate it with.
+
+    REDACTION (Phase 3 closing fix series, item 4, live surprise 2 - audit judgment call):
+    organizationName can legitimately be a corporate/business name (not
+    person-identifying) OR the actual Managed Apple ID account holder's name for a
+    smaller/individually-administered tenant (person-identifying) - this check cannot
+    distinguish the two shapes from the field alone, and the live proof this fix closes
+    (a real Apple ID UPN surfacing raw in rendered evidence Detail under -Redact,
+    2026-08-17, TP.INT.0020/0021) treats both this field and TP.INT.0020's appleIdentifier
+    as the same risk class. Marked via every evidence row's
+    RedactDetailKeys = @('organizationName') - redacting a benign corporate name under
+    -Redact is a false positive with no real cost; leaving a person's name raw is not an
+    acceptable trade the other way.
 #>
 
 function Test-PulseAppleVppTokensValid {
@@ -101,8 +113,8 @@ function Test-PulseAppleVppTokensValid {
         # evaluation.
         $identity = if (Test-PulseRowPropertyPresent -Row $token -PropertyName 'id') { [string] $token.id } else { "vpp-token-$index" }
         $row = @{
-            Identity = $identity
-            Detail   = @{
+            Identity         = $identity
+            Detail           = @{
                 organizationName  = $token.organizationName
                 expirationDateTime = $token.expirationDateTime
                 lastSyncDateTime   = $token.lastSyncDateTime
@@ -110,7 +122,10 @@ function Test-PulseAppleVppTokensValid {
                 approachingExpiry  = $isApproaching
                 syncStale          = $isSyncStale
             }
-            SortKey  = $identity
+            SortKey          = $identity
+            # REDACT-DETAIL-KEYS (Phase 3 closing fix series, item 4, live surprise 2) -
+            # see this file's own docstring for the "person-shaped or not" judgment call.
+            RedactDetailKeys = @('organizationName')
         }
         $allRows.Add($row)
 

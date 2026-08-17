@@ -285,6 +285,73 @@ Describe 'Export-PulseJsonReport (private) - choke-point guard and sortKey redac
         $rendered.findings[0].evidence[0].identity | Should -Be $redactionMap['admin@contoso.onmicrosoft.com']
         $rendered.findings[0].evidence[0].sortKey | Should -Be '000-custom-sort-key'
     }
+
+    # Phase 3 closing fix series, item 4 (evidence-detail redaction, live surprise 2):
+    # -RedactionMap now also substitutes a Detail property whose CURRENT raw value is a
+    # key in the map (see this function's own docstring) - the map only ever carries an
+    # entry for a value a rule explicitly marked via RedactDetailKeys (New-PulseFinding's
+    # own docstring), so this test hand-builds a map carrying BOTH the evidence identity
+    # AND a marked Detail value ('alice@contoso.example') to exercise that substitution
+    # directly, without going through a full Invoke-PulseEvaluation run.
+    It 'redacts a Detail property whose raw value is a key in the redaction map, leaving an unmarked Detail property on the same entry untouched' {
+        $document = [pscustomobject]@{
+            schemaVersion = '1.0'
+            findings      = @(
+                [pscustomobject]@{
+                    id       = 'TP.ENT.9001'
+                    evidence = @(
+                        [pscustomobject]@{
+                            identity = 'row-1'
+                            detail   = [pscustomobject]@{ upn = 'alice@contoso.example'; deviceName = 'DESKTOP-FIXTURE' }
+                            sortKey  = 'row-1'
+                        }
+                    )
+                }
+            )
+        }
+        $redactionMap = @{
+            'row-1'                 = 'tp-1111111111111111111111111111111111111111111111111111111111111111'
+            'alice@contoso.example' = 'tp-2222222222222222222222222222222222222222222222222222222222222222'
+        }
+
+        $reportPath = InModuleScope TenantPulse -ArgumentList $document, $script:outputRoot, $redactionMap {
+            param($document, $outputRoot, $redactionMap)
+            Export-PulseJsonReport -Document $document -OutputPath $outputRoot -RedactionMap $redactionMap
+        }
+
+        $rendered = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+        $rendered.findings[0].evidence[0].detail.upn | Should -Be $redactionMap['alice@contoso.example']
+        $rendered.findings[0].evidence[0].detail.upn | Should -Not -Be 'alice@contoso.example'
+        $rendered.findings[0].evidence[0].detail.deviceName | Should -Be 'DESKTOP-FIXTURE'
+    }
+
+    It 'leaves every Detail property untouched (and raw) when -RedactionMap is not supplied at all' {
+        $document = [pscustomobject]@{
+            schemaVersion = '1.0'
+            findings      = @(
+                [pscustomobject]@{
+                    id       = 'TP.ENT.9001'
+                    evidence = @(
+                        [pscustomobject]@{
+                            identity = 'row-1'
+                            detail   = [pscustomobject]@{ upn = 'alice@contoso.example'; deviceName = 'DESKTOP-FIXTURE' }
+                            sortKey  = 'row-1'
+                        }
+                    )
+                }
+            )
+        }
+
+        $reportPath = InModuleScope TenantPulse -ArgumentList $document, $script:outputRoot {
+            param($document, $outputRoot)
+            Export-PulseJsonReport -Document $document -OutputPath $outputRoot
+        }
+
+        $rendered = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+        $rendered.findings[0].evidence[0].identity | Should -Be 'row-1'
+        $rendered.findings[0].evidence[0].detail.upn | Should -Be 'alice@contoso.example'
+        $rendered.findings[0].evidence[0].detail.deviceName | Should -Be 'DESKTOP-FIXTURE'
+    }
 }
 
 Describe 'Export-PulseReport - render-only' {

@@ -192,6 +192,21 @@ BeforeAll {
                 return New-PulseFinding -Status Pass
             }
 
+            # Phase 3 closing fix series, item 4 (evidence-detail redaction) - one marked
+            # key (upn), one unmarked key (deviceName) on the SAME evidence entry, so a
+            # single -Redact render exercises both "marked gets substituted" and
+            # "unmarked stays raw" at once.
+            function Test-PulseFixtureDetailRedactionRule {
+                param($Datasets)
+                return New-PulseFinding -Status Warn -Reason 'identity-bearing detail present' -Evidence @(
+                    @{
+                        Identity         = 'detail-redaction-row-1'
+                        Detail           = @{ upn = 'alice@contoso.example'; deviceName = 'DESKTOP-FIXTURE' }
+                        RedactDetailKeys = @('upn')
+                    }
+                )
+            }
+
             Invoke-PulseEvaluation -Store $Store -Checks $Checks -OperatorKeyPath $KeyPath
         }
     }
@@ -685,6 +700,30 @@ Describe 'Invoke-PulseEvaluation' {
         $evaluation.RedactionMap.Keys | Should -Contain 'zzz-last'
         $evaluation.RedactionMap['aaa-first'] | Should -Match '^tp-[0-9a-f]{64}$'
         $evaluation.RedactionMap['zzz-last'] | Should -Match '^tp-[0-9a-f]{64}$'
+    }
+
+    # Phase 3 closing fix series, item 4 (evidence-detail redaction) - RedactDetailKeys
+    # marks a Detail key's RAW VALUE for inclusion in the same HMAC redaction map an
+    # evidence Identity gets. The unmarked deviceName on the SAME row must NOT appear as
+    # a redaction map key - only the marked upn value.
+    It 'additionally adds a marked Detail key''s raw value to the RedactionMap, through the SAME HMAC scheme as an evidence identity, leaving an unmarked Detail key on the same row out of the map' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDetailRedactionRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.RedactionMap.Keys | Should -Contain 'detail-redaction-row-1'
+        $evaluation.RedactionMap.Keys | Should -Contain 'alice@contoso.example'
+        $evaluation.RedactionMap.Keys | Should -Not -Contain 'DESKTOP-FIXTURE'
+        $evaluation.RedactionMap['alice@contoso.example'] | Should -Match '^tp-[0-9a-f]{64}$'
+
+        # Deterministic, and drawn from the SAME per-evaluation operator key as the
+        # Identity pseudonym - not a second, differently-keyed mechanism.
+        $expectedPseudonym = InModuleScope TenantPulse -ArgumentList $script:keyPath {
+            param($keyPath)
+            $operatorKey = Get-PulseOperatorKey -KeyPath $keyPath
+            Get-PulsePseudonym -Value 'alice@contoso.example' -Key $operatorKey
+        }
+        $evaluation.RedactionMap['alice@contoso.example'] | Should -Be $expectedPseudonym
     }
 
     It 'never redacts evidence identities in the Document itself and never emits PSTypeName in the serialized findings JSON' {

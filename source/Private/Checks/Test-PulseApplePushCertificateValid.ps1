@@ -36,6 +36,14 @@
     or before the cutoff (already expired); Warn if it is after the cutoff but within 30
     days of it (approaching-expiry threshold, matching Maester's own 30-day framing); Pass
     otherwise.
+
+    REDACTION (Phase 3 closing fix series, item 4 audit finding): appleIdentifier is the
+    Apple ID (an email address, person-identifying) used to create/renew this
+    certificate - the SAME risk class as TP.INT.0020/0021's own appleIdentifier/
+    organizationName fields (the live proof that fix round closes: a real Apple ID UPN
+    surfacing raw in rendered evidence Detail under -Redact, 2026-08-17). Marked via the
+    evidence row's RedactDetailKeys = @('appleIdentifier') so Invoke-PulseAssessment
+    -Redact pseudonymizes it in rendered output.
 #>
 
 function Test-PulseApplePushCertificateValid {
@@ -77,9 +85,10 @@ function Test-PulseApplePushCertificateValid {
 
     $evidence = @(
         @{
-            Identity = if (Test-PulseRowPropertyPresent -Row $cert -PropertyName 'id') { [string] $cert.id } else { 'applePushNotificationCertificate' }
-            Detail   = @{ appleIdentifier = $cert.appleIdentifier; expirationDateTime = $cert.expirationDateTime }
-            SortKey  = 'applePushNotificationCertificate'
+            Identity         = if (Test-PulseRowPropertyPresent -Row $cert -PropertyName 'id') { [string] $cert.id } else { 'applePushNotificationCertificate' }
+            Detail           = @{ appleIdentifier = $cert.appleIdentifier; expirationDateTime = $cert.expirationDateTime }
+            SortKey          = 'applePushNotificationCertificate'
+            RedactDetailKeys = @('appleIdentifier')
         }
     )
 

@@ -25,9 +25,36 @@
     interpret) - no rule function or expression can ever construct an Error result.
 
     -Evidence accepts loosely-shaped input (hashtables or objects with Identity/Detail/
-    SortKey members, matched case-insensitively) and normalizes every entry to a plain
-    {Identity; Detail; SortKey} pscustomobject with SortKey defaulted to Identity when
-    omitted or blank, via the shared ConvertTo-PulseNormalizedEvidence helper (same file).
+    SortKey/RedactDetailKeys members, matched case-insensitively) and normalizes every
+    entry to a plain {Identity; Detail; SortKey; RedactDetailKeys} pscustomobject with
+    SortKey defaulted to Identity when omitted or blank and RedactDetailKeys defaulted to
+    an empty array when omitted, via the shared ConvertTo-PulseNormalizedEvidence helper
+    (same file).
+
+    REDACT-DETAIL-KEYS (Phase 3 closing fix series, item 4 - minimal contract extension):
+    an evidence entry MAY additionally carry -RedactDetailKeys, a string array naming
+    identity-bearing keys WITHIN that entry's own Detail (e.g. `@('appleIdentifier')`) -
+    for a value that is itself person-identifying (a UPN, email address, or person name)
+    but lives only inside Detail, never as the entry's own Identity, and so would
+    otherwise never be pseudonymized even under Invoke-PulseAssessment -Redact (which,
+    before this extension, only ever substituted evidence.identity/evidence.sortKey - see
+    Export-PulseJsonReport's own docstring). Invoke-PulseEvaluation's redaction-map-
+    building loop reads each entry's RedactDetailKeys and, for each named key present in
+    that entry's Detail with a non-null/non-empty value, adds THAT RAW VALUE to the SAME
+    per-evaluation HMAC redaction map an evidence Identity would be added to - one
+    map, one key derivation, no second pseudonymization mechanism. Export-PulseJsonReport
+    then substitutes any Detail property, on any evidence entry, whose CURRENT raw value
+    is a key in the redaction map (see that function's own docstring) - so a value never
+    marked via RedactDetailKeys is never added to the map in the first place and is
+    therefore never touched, regardless of what it looks like. Marking a key that does not
+    exist in that entry's Detail, or whose value is $null/empty, is a harmless no-op - this
+    function does not require the marked key to actually be present, since a rule may
+    reuse a fixed RedactDetailKeys array across evidence rows whose Detail shape varies
+    row to row (e.g. TP.INT.0021's organizationName, absent on some VPP token rows).
+    Judgment boundary this extension does NOT change: tenant-resource GUIDs and policy
+    display names stay unredacted (the documented -Redact boundary,
+    Invoke-PulseAssessment's own docstring); only actually person-identifying Detail
+    values (UPN/email/person-name/device-name-class) are candidates for marking.
     That helper is ALSO called directly by Invoke-PulseEvaluation against whatever a rule
     function actually returned - a rule is not obligated to build its result through
     New-PulseFinding, so the evaluator cannot trust that normalization already happened here
@@ -117,6 +144,7 @@ function ConvertTo-PulseNormalizedEvidence {
         $identity = $null
         $detail = $null
         $sortKey = $null
+        $redactDetailKeys = $null
 
         # Key/property matching is case-insensitive (PowerShell's default string -eq),
         # deliberately - a duck-typed RuleResult a rule author hand-builds without going
@@ -126,12 +154,14 @@ function ConvertTo-PulseNormalizedEvidence {
                 if ($key -eq 'Identity') { $identity = $item[$key] }
                 elseif ($key -eq 'Detail') { $detail = $item[$key] }
                 elseif ($key -eq 'SortKey') { $sortKey = $item[$key] }
+                elseif ($key -eq 'RedactDetailKeys') { $redactDetailKeys = $item[$key] }
             }
         } else {
             foreach ($propertyName in $item.PSObject.Properties.Name) {
                 if ($propertyName -eq 'Identity') { $identity = $item.$propertyName }
                 elseif ($propertyName -eq 'Detail') { $detail = $item.$propertyName }
                 elseif ($propertyName -eq 'SortKey') { $sortKey = $item.$propertyName }
+                elseif ($propertyName -eq 'RedactDetailKeys') { $redactDetailKeys = $item.$propertyName }
             }
         }
 
@@ -160,10 +190,26 @@ function ConvertTo-PulseNormalizedEvidence {
             }
         }
 
+        # RedactDetailKeys normalizes to a possibly-empty [string[]] - every non-null,
+        # non-empty element cast to [string]; a scalar single value (e.g. a bare string
+        # instead of an array) is wrapped the same way `@()` around any scalar always
+        # wraps it elsewhere in this codebase.
+        $normalizedRedactDetailKeys = @()
+        if ($null -ne $redactDetailKeys) {
+            $normalizedRedactDetailKeys = @(
+                foreach ($key in @($redactDetailKeys)) {
+                    if ($null -ne $key -and -not [string]::IsNullOrEmpty([string] $key)) {
+                        [string] $key
+                    }
+                }
+            )
+        }
+
         $normalized.Add([pscustomobject]@{
-            Identity = [string] $identity
-            Detail   = $detail
-            SortKey  = [string] $sortKey
+            Identity         = [string] $identity
+            Detail           = $detail
+            SortKey          = [string] $sortKey
+            RedactDetailKeys = $normalizedRedactDetailKeys
         })
     }
 

@@ -17,7 +17,7 @@
     a plain findings document, never on anything RedactionMap-shaped.
 
     -RedactionMap substitutes each finding's evidence[].identity value with its mapped
-    'tp-...' pseudonym (never .detail, never any other field), on a DEEP CLONE of -Document
+    'tp-...' pseudonym, on a DEEP CLONE of -Document
     (the same ConvertTo-PulseCanonicalJson -> ConvertFrom-Json round-trip clone pattern
     Add-PulseScores/ConvertTo-PulseClonedDatasets already establish elsewhere in this
     codebase) - -Document itself is never mutated in place, so a caller holding the
@@ -34,8 +34,23 @@
     Identity whenever no explicit SortKey is supplied (see that function's own docstring),
     so an untouched default sortKey is exactly as much of a raw-identity leak as the
     identity field would be. A sortKey that is genuinely a custom, non-identity value is
-    never a key in -RedactionMap (the map is built only from evidence Identity values) and
-    is therefore left untouched, correctly.
+    never a key in -RedactionMap (the map was, before the fix below, built only from
+    evidence Identity values) and is therefore left untouched, correctly.
+
+    evidence[].detail VALUES (Phase 3 closing fix series, item 4 - minimal contract
+    extension, live surprise 2): a rule may mark specific Detail keys as identity-bearing
+    via an evidence entry's own -RedactDetailKeys (see New-PulseFinding's own docstring
+    for the full mechanism) - Invoke-PulseEvaluation's redaction-map-building loop adds
+    each marked key's RAW VALUE to -RedactionMap under the exact same per-evaluation HMAC
+    scheme an evidence Identity gets. This function does not need to know which keys were
+    marked: for every Detail property on every evidence entry, if the property's CURRENT
+    raw value (cast to [string]) is itself a key in -RedactionMap, that value is replaced
+    with its mapped pseudonym, using the identical lookup-and-substitute pattern already
+    used for identity/sortKey above. A Detail value never marked via RedactDetailKeys was
+    never added to -RedactionMap in the first place (Invoke-PulseEvaluation only adds
+    marked-and-present values) and is therefore never a match here - this is a strict
+    widening of WHICH raw strings get substituted, never a behavior change for any value
+    that was not explicitly marked by the rule that produced it.
 
     CHOKE-POINT GUARD (post-review fix): -Document is rejected outright, before anything
     else, if its own top-level properties include a member literally named 'RedactionMap'
@@ -108,6 +123,21 @@ function Export-PulseJsonReport {
                 $sortKey = [string] $evidence.sortKey
                 if ($RedactionMap.ContainsKey($sortKey)) {
                     $evidence.sortKey = $RedactionMap[$sortKey]
+                }
+
+                # DETAIL VALUE SUBSTITUTION (Phase 3 closing fix series, item 4) - see this
+                # function's own docstring. $evidence.detail came back from
+                # ConvertFrom-PulseJsonPreservingStrings WITHOUT -AsHashtable, so it is a
+                # [pscustomobject] (or $null) here, never a Hashtable - property access is
+                # therefore always via .PSObject.Properties, not IDictionary.
+                if ($null -ne $evidence.detail -and $evidence.detail -is [pscustomobject]) {
+                    foreach ($detailProperty in @($evidence.detail.PSObject.Properties)) {
+                        if ($null -eq $detailProperty.Value) { continue }
+                        $detailValueText = [string] $detailProperty.Value
+                        if ($RedactionMap.ContainsKey($detailValueText)) {
+                            $detailProperty.Value = $RedactionMap[$detailValueText]
+                        }
+                    }
                 }
             }
         }
