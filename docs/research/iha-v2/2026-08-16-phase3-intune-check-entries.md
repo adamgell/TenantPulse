@@ -354,6 +354,30 @@ built-in controls selected or a non-empty uploaded XML payload.
   this check correctly, because audit-only policies provide zero real-world blocking.
   Empty-XML-upload is a second silent-failure mode.
 - Task 3.3 scoping note: imported for record-completeness, not implemented in T3.3.
+- **BLOCKED (2026-08-17, Task 3.5 fold-in from T3.4 review): still not implemented.** Two
+  separate open items, mirrored here from the prior review pass, neither resolved by this
+  task:
+  1. VISIBILITY OPEN QUESTION - live-fetched
+     https://learn.microsoft.com/en-us/graph/api/resources/intune-deviceconfigv2-devicemanagementconfigurationpolicytemplate?view=graph-rest-beta
+     (2026-08-17, confirmed live) for this task: the beta `deviceManagementConfigurationPolicyTemplate`
+     resource documents `templateFamily = endpointSecurityApplicationControl` as a real,
+     named enum member (confirming App Control's own template family, same filtering
+     approach this entry already uses), but documents **no `visibility` property anywhere
+     on that resource or its `settingTemplates` relationship**. Whatever a prior review
+     pass meant by a `"visibility":"template"` field for App Control specifically therefore
+     remains UNCONFIRMED against the published Graph schema - it is not resolvable from
+     Learn documentation alone and needs verification against a live tenant's actual
+     `configurationPolicies`/`deviceManagementConfigurationPolicyTemplate` response shape,
+     the same class of PENDING VERIFICATION hedge TP.INT.0016's own entry already carries
+     for its settingDefinitionId string.
+  2. CORPUS ABSENCE - `tests/Fixtures/SettingsCatalogCorpus/checked-definitions.json` (the
+     corpus TP.INT.0016's settings-presence-index port validates its settingDefinitionIds
+     against) has **zero entries matching App Control or Managed Installer** (confirmed by
+     direct search of the fixture file for this task) - so even a TP.INT.0016-style
+     settings-presence-index port has nothing to key against yet for either check. Both
+     items are genuine implementation BLOCKERS, not merely scoping deferrals like the
+     original "imported for record-completeness" note above - Task 3.5 leaves TP.INT.0017
+     unimplemented and does not touch TP.INT.0016's already-shipped consulting content.
 
 ## TP.INT.0018 — Managed Installer rules paired with an enforcing App Control policy
 
@@ -369,6 +393,11 @@ is itself in Enforce mode with an active control.
 - Notes: dependency trap - this check can only meaningfully pass if TP.INT.0017 also
   passes.
 - Task 3.3 scoping note: imported for record-completeness, not implemented in T3.3.
+- **BLOCKED (2026-08-17, Task 3.5 fold-in from T3.4 review): still not implemented,**
+  transitively blocked by both of TP.INT.0017's own open items above (the visibility open
+  question and the corpus absence apply identically here, since this check reads the same
+  `endpointSecurityApplicationControl` template family and depends on TP.INT.0017 passing
+  by its own "dependency trap" Note). No independent new blocker beyond TP.INT.0017's own.
 
 ## TP.INT.0019 — Apple MDM Push (APNs) certificate valid for more than 30 days
 

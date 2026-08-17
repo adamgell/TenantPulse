@@ -35,6 +35,22 @@
     RuleResult with a bad evidence entry must degrade that one check to Error, never crash
     the whole run).
 
+    EVIDENCE-CONSTRUCTION IDIOM (Task 3.5 fold-in decision, RECORDED): this codebase has two
+    idioms for building the -Evidence array a rule hands back - a hand-rolled
+    `@{ Identity = ...; Detail = @{ ... }; SortKey = ... }` hashtable literal (the majority
+    idiom, used throughout Task 3.3/3.4's Test-Pulse* rule functions and TP.ENT.0004/0005's
+    Task 3.5 exclusion-honoring evidence) versus routing each entry through a dedicated
+    ConvertTo-PulseMaesterEvidence-shaped helper before assembly. THE RULE: hand-rolled is
+    fine; a per-entry helper is optional, never required. ConvertTo-PulseNormalizedEvidence
+    above is the one and only place shape/validity is actually enforced - it accepts either
+    idiom identically (loosely-shaped, case-insensitive member matching, is the whole point)
+    - so a per-entry construction helper can only ever be sugar over an author's own
+    call site, never a correctness requirement. Do NOT mass-rewrite an existing, working,
+    tested rule function's evidence construction from one idiom to the other purely for
+    idiom purity - that is pure churn against a passing test suite for zero behavioral
+    gain. A new rule function is free to pick whichever idiom its author finds more
+    readable for that rule's own evidence shape.
+
     Deliberately carries PSTypeName 'TenantPulse.RuleResult': this object is an internal
     engine intermediate a rule function hands back to Invoke-PulseEvaluation, never
     serialized directly into the findings document (the evaluator extracts Status/Evidence/

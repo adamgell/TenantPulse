@@ -127,6 +127,15 @@ function Test-PulseFleetComplianceRateAcceptable {
         ''
     }
 
+    # NESTED-vs-FLATTENED DETAIL (Task 3.5 fold-in decision): unverifiedStateBreakdown is
+    # kept as a NESTED hashtable (state -> count), not flattened into sibling
+    # unverified.<state> keys on Detail. Rationale (one line, per the fold-in): the
+    # canonical JSON serializer (ConvertTo-PulseCanonicalJson) already key-sorts
+    # recursively at every object depth, so nesting costs nothing on the determinism this
+    # codebase requires everywhere - the only real trade-off is readability, and a reader
+    # (operator or renderer) scans "which unverified states, and how many of each" far more
+    # naturally as one grouped sub-object than as a flat bag of dynamically-named top-level
+    # keys mixed in with the other five fixed Detail fields above.
     $evidence = @(
         @{
             Identity = 'fleet-compliance-rate'
