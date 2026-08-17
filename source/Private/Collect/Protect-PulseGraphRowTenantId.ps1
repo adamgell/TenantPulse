@@ -19,14 +19,30 @@
     that surfaced the gap.
 
     Walks EVERY string value in the row tree - not just a fixed list of known-risky
-    property names - and replaces an exact case-insensitive match of -TenantId with
-    -Pseudonym. A fixed-field-name approach would need updating every time a new dataset
-    happens to surface the tenant id under a different property name (there is no
-    Graph-wide guarantee it will always be called principalOrganizationId or id); a
-    value-based scan catches it regardless of which field carries it, including inside a
-    nested object or an array element. Recurses into nested PSCustomObject/Hashtable
-    property values and every element of an array/collection value; leaves every
-    non-string, non-container value (numbers, booleans, $null, DateTime) untouched.
+    property names - and replaces every occurrence of -TenantId with -Pseudonym. A
+    fixed-field-name approach would need updating every time a new dataset happens to
+    surface the tenant id under a different property name (there is no Graph-wide
+    guarantee it will always be called principalOrganizationId or id); a value-based scan
+    catches it regardless of which field carries it, including inside a nested object or
+    an array element. Recurses into nested PSCustomObject/Hashtable property values and
+    every element of an array/collection value; leaves every non-string, non-container
+    value (numbers, booleans, $null, DateTime) untouched.
+
+    MATCHING SEMANTICS (T2.7 review clarification - stated explicitly here since it is
+    load-bearing and easy to get wrong reading the code alone): this is a
+    CASE-INSENSITIVE SUBSTRING match of the real -TenantId inside each string value
+    (`[string]::IndexOf(..., OrdinalIgnoreCase)` followed by `[regex]::Replace` on every
+    occurrence, not `-eq`/`-ceq` or an anchored `^...$` match) - a string value does NOT
+    need to equal the tenant id exactly to be redacted. A value CONTAINING the tenant id
+    as part of a longer string - e.g. a URL like
+    `https://login.microsoftonline.com/<tenantId>/oauth2/...`, or the real T2.7 live-gate
+    finding, an admin-configured OneDrive Known-Folder-Move policy value that happened to
+    embed the raw tenant GUID - is redacted at exactly the substring where it appears,
+    with the surrounding text left intact. By design, this is NARROWER than "looks like a
+    GUID": an ordinary policy/instance/device/group id that merely resembles a GUID, or
+    even a different tenant's id, is never touched, since it will not match -TenantId's
+    own specific value - only a genuine occurrence of THIS run's real tenant id, anywhere
+    it appears inside a string, is ever redacted.
 
     DELIBERATELY NOT in-place, unlike Remove-PulseGraphRowProvenance: this function returns
     brand-new cloned row objects rather than mutating -Data's own elements. Invoke-PulseCollection

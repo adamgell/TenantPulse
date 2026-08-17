@@ -146,7 +146,13 @@
 # pipeline (see task-2.7-report.md for the full live-gate accounting). Set to the REAL
 # total (1091), matching the module's own post-fix Pester run, not a headroom-padded
 # number - the gate IS the count.
-$script:tenantPulseGateMinimumTests = 1091
+# 1091 -> 1092 (Task 2.7 review round): +1 - a dedicated driver-level regression test
+# guarding -MaxParallel 4's real RunspacePool machinery directly (bypasses
+# Invoke-PulseSettingsCatalogExpansionPipeline.ps1's own forced -Sequential, added the
+# same review round, per the live-gate parallel-slowness finding - see that file's own
+# docstring), asserting byte-identity vs -Sequential over 24 captured-payload policies.
+# Set to the REAL total (1092), matching the module's own post-fix Pester run.
+$script:tenantPulseGateMinimumTests = 1092
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

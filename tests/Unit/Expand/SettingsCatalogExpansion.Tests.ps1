@@ -511,6 +511,49 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
         [System.Convert]::ToBase64String($parallelBytes) | Should -Be ([System.Convert]::ToBase64String($sequentialBytes))
     }
 
+    # T2.7 REGRESSION (omp review, this round): Invoke-PulseSettingsCatalogExpansionPipeline.ps1
+    # now FORCES -Sequential unconditionally for every real, live-tenant caller (see that
+    # file's own docstring - a live-gate finding, -MaxParallel 4 was pathologically slow
+    # against the real Ivy24 tenant). That means the production RunspacePool path has NO
+    # live caller left at all - this driver-level function is the ONLY place -MaxParallel
+    # machinery still runs for real, so it must stay regression-guarded HERE,
+    # independently of the pipeline, or a future refactor could silently let the
+    # RunspacePool code rot with nothing left exercising it. This test calls
+    # Invoke-PulseSettingsCatalogExpansion directly (bypassing the pipeline wrapper
+    # entirely, exactly as the pipeline's own forced-Sequential call site does NOT) with a
+    # larger (24-policy) captured-payload corpus than the P1-13 test above, to give the
+    # RunspacePool meaningfully more concurrent work to interleave.
+    It 'T2.7: -MaxParallel 4 against the driver directly (bypassing the pipeline''s forced -Sequential) stays byte-identical to -Sequential over 24 captured-payload policies' {
+        $index = New-TestDefinitionIndex
+        $policyIds = 1..24 | ForEach-Object { "22222222-2222-2222-2222-{0:D12}" -f $_ }
+        $policies = $policyIds | ForEach-Object { New-TestPolicy -Id $_ }
+
+        foreach ($id in $policyIds) {
+            $response = New-TestSettingsResponse -Value "t27-value-$id" -DefinitionId 'setting-a'
+            InModuleScope TenantPulse -ArgumentList $script:store, $id, $response {
+                param($store, $id, $response)
+                Write-PulseDataset -Store $store -Name "configurationPolicySettings-$id" -Data $response -ApiVersion 'beta' -Status 'Collected'
+            }
+        }
+
+        $sequentialSummary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $index {
+            param($store, $policies, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies -DefinitionIndex $index -Sequential -FromCapturedPayloads -Name 't27SeqRun'
+        }
+        $sequentialBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $script:store -Name 't27SeqRun'))
+
+        $parallelSummary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $index {
+            param($store, $policies, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies -DefinitionIndex $index -MaxParallel 4 -FromCapturedPayloads -Name 't27ParRun'
+        }
+        $parallelBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $script:store -Name 't27ParRun'))
+
+        $sequentialSummary.RowCount | Should -Be 24
+        $parallelSummary.RowCount | Should -Be 24
+        $parallelSummary.Status | Should -Be 'Expanded'
+        [System.Convert]::ToBase64String($parallelBytes) | Should -Be ([System.Convert]::ToBase64String($sequentialBytes))
+    }
+
     It 'WORKER-FAILURE CLASSIFICATION: a missing captured payload for one policy (of several) under a real parallel run gaps only that policy' {
         $index = New-TestDefinitionIndex
         $goodIds = 1..3 | ForEach-Object { "22222222-2222-2222-2222-{0:D12}" -f $_ }

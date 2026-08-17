@@ -243,13 +243,18 @@ function Invoke-PulseAssessment {
             $collectParams.ExcludeCheck = [string[]] @($fullCatalog | ForEach-Object { [string] $_.Id })
         }
 
-        # T2.7 default-flip fix: EXPLICITLY forward the boolean either way, not only when
-        # true. -ExpandSettings now defaults $true on THIS function too, so an operator
-        # passing -ExpandSettings:$false must have that $false actually reach
-        # Get-PulseTenantSnapshot - simply omitting the key here (the pre-flip behavior,
-        # correct when the only two states were "unset/false" and "true") would leave
-        # Get-PulseTenantSnapshot's OWN now-also-true default in force, silently defeating
-        # an explicit opt-out.
+        # T2.7 fix: EXPLICITLY forward the boolean either way, not only when true.
+        # -ExpandSettings still defaults to $false on both this function and
+        # Get-PulseTenantSnapshot - the on-by-default flip was evaluated and deliberately
+        # DEFERRED this task (see -ExpandSettings's own docstring on both functions for
+        # why). Forwarding unconditionally is the correct fix regardless of either
+        # default: the OLD code only ever SET $collectParams.ExpandSettings when
+        # $ExpandSettings was true, never explicitly forwarding $false - harmless while
+        # both default false (omitting the key and passing $false reach the same place),
+        # but it would have silently defeated an explicit -ExpandSettings:$false opt-out
+        # the moment either function's own default ever changes independently of the
+        # other. Forwarding .IsPresent unconditionally keeps that latent trap closed no
+        # matter what either default is.
         $collectParams.ExpandSettings = $ExpandSettings.IsPresent
 
         $store = Get-PulseTenantSnapshot @collectParams
