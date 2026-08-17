@@ -109,14 +109,16 @@ Roughly linear per-write growth (~0.42-0.47 ms per existing manifest entry), i.e
 write / O(n^2) total** as a snapshot's own manifest grows. `perftest`'s own committed
 regression (`tests/Perf/ScaleAndMemory.Tests.ps1`) is bounded to 200 writes from an empty
 store (18.04 s baseline, 27.5 s budget) rather than re-running the full curve up to 5,000 -
-doing so here would make `perftest` itself impractically slow (see the T2.7 report's own
-extrapolation).
+at the ~0.42-0.47 ms/entry growth rate measured above, extrapolating this O(n^2) curve out
+to a 5,000-dataset store would run the perf container itself for many minutes on every
+`perftest` invocation, which is not a workable regression-test cost for a characteristic
+this section already establishes analytically.
 
 **This is a real, production-relevant characteristic, not just a test-harness artifact**:
 `Invoke-PulseSettingsCatalogPolicy` calls `Write-PulseDataset` once per LIVE-fetched policy
 (the redacted raw `configurationPolicySettings-<id>` write), so a real tenant run pays this
-cost on every policy, growing as the run progresses. See the T2.7 report's own live-gate
-section for the real-tenant numbers this produced against Ivy24 (781 policies).
+cost on every policy, growing as the run progresses. See `docs/STATUS.md`'s own Phase 2
+live-gate section for the real-tenant numbers this produced against Ivy24 (781 policies).
 
 ## 4. Bounded-worker measurement: confirming `-MaxParallel 4`'s default
 

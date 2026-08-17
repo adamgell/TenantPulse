@@ -193,11 +193,35 @@ measured rate documented in `docs/spike/` (mean ~300ms/policy on the Ivy24 lab t
 budget your own run's wall time accordingly for a large policy count. See
 `docs/spike/2026-08-16-t27-perf-container.md` for the dedicated performance/scale/memory
 test container (`./build.ps1 -Tasks build,perftest`, not part of the default test run) and
-its own recorded numbers, including two genuine, documented scale characteristics this
-phase surfaced rather than hid: per-policy raw-dataset writes get slower as a snapshot's own
-manifest grows (an O(n)-per-write cost with no batching yet), and neither
-`Write-PulseDataset` nor `Read-PulseDataset` streams - both hold the full dataset in memory,
-which matters most for a very large `managedDevices`-shaped dataset.
+its own recorded numbers, including three genuine, documented scale characteristics this
+phase surfaced rather than hid:
+
+1. Per-policy raw-dataset writes get slower as a snapshot's own manifest grows (an
+   O(n)-per-write cost with no batching yet, confirmed against the real Ivy24 781-policy
+   run).
+2. Neither `Write-PulseDataset` nor `Read-PulseDataset` streams - both hold the full
+   dataset in memory (measured ~5.6-16x the serialized file size), which matters most for
+   a very large `managedDevices`-shaped dataset.
+3. The Settings Catalog and typed-policy expansion drivers (`Invoke-PulseSettingsCatalog
+   Expansion`/`Invoke-PulseTypedPolicyExpansion`) accumulate every row for every policy in
+   an in-memory list before merging, sorting, and publishing the family's `.jsonl` file -
+   a fragment-then-merge streaming path (writing and merging row fragments incrementally
+   instead of holding the whole family in memory at once) has not been built yet. At the
+   ~27 rows/policy the T2.7 perf container's own 5,000-policy synthetic corpus produces per
+   `settingDefinitionId` cycling, a realistic 5,000-policy tenant's Settings Catalog family
+   alone would hold on the order of 135,000 rows in memory at once during expansion -
+   budget accordingly for very large tenants until this streams.
+
+Separately, capturing the Settings Catalog definitions corpus (`Save-PulseSettingDefinition
+Corpus`, the per-tenant reference index every Settings Catalog row's `settingName`/
+`valueLabel` resolution depends on) has an honest measured peak of roughly **1.7 GB of
+managed heap** for one capture call against a corpus the size of Ivy24's (18,227
+definitions): ~1.2 GB is GraphKit's own response materialization, plus ~475 MB this
+module's own canonical-JSON serialization step adds on top before its mitigations (write
+canonical JSON to disk and release the string; hash the file's bytes on disk rather than a
+second in-memory copy). This number previously lived only in that function's own source
+comment - noted here because it is a real per-run memory floor an operator sizing a host for
+`-ExpandSettings` should plan for, independent of policy count.
 
 ## Development
 

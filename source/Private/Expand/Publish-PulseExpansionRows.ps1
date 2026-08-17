@@ -1,17 +1,21 @@
 <#
     Private: shared crash-consistent jsonl staging/hash/publish helper.
 
-    Extracted out of Invoke-PulseSettingsCatalogExpansion.ps1's own inline staging block
-    (T2.2) so Invoke-PulseTypedPolicyExpansion (T2.3) does not COPY that block's tricky
-    crash-safety sequencing - see the T2.2 file's own CRASH-CONSISTENT PUBLICATION and
-    TEMP/HASH CLEANUP docstring sections for the full fault-injection history this
-    sequencing defends against (old-manifest/new-bytes split-brain; orphaned .tmp files).
-    T2.2's OWN inline copy is left AS IS by this task, deliberately - it already has an
-    exhaustive, review-hardened test suite (SettingsCatalogExpansion.Tests.ps1) exercising
-    every one of those fault windows, and retrofitting it to call this shared helper is a
-    separate, higher-risk refactor this task does not need to take on. This function is the
-    ONE place that logic lives for every NEW producer from here on; T2.2's copy is flagged
-    as a future unification candidate, not touched.
+    Originally extracted out of Invoke-PulseSettingsCatalogExpansion.ps1's own inline
+    staging block (T2.2) so Invoke-PulseTypedPolicyExpansion (T2.3) did not COPY that
+    block's tricky crash-safety sequencing - see this file's own CRASH-CONSISTENT
+    PUBLICATION notes below for the fault-injection history this sequencing defends
+    against (old-manifest/new-bytes split-brain; orphaned .tmp files). T2.2's own inline
+    copy was left as a separate implementation at the time, deliberately, since it already
+    had an exhaustive, review-hardened test suite (SettingsCatalogExpansion.Tests.ps1)
+    exercising every one of those fault windows and retrofitting it onto this helper was
+    judged a separate, higher-risk refactor. That refactor has since landed (60c002f,
+    post-T2.3-review): Invoke-PulseSettingsCatalogExpansion's tail now also calls THIS
+    function for its own staging/hash/publish, so there is exactly ONE implementation of
+    this logic left in the module - every producer (T2.2's settings-catalog expansion,
+    T2.3's typed-policy expansion, and any future one) goes through this same function.
+    SettingsCatalogExpansion.Tests.ps1's fault-injection coverage still applies unchanged,
+    now exercising this shared code path instead of a duplicated inline one.
 
     Sorts -Rows deterministically on (policyId, settingPath, instanceId) via
     [string]::CompareOrdinal (never trusts caller ordering / worker completion order),

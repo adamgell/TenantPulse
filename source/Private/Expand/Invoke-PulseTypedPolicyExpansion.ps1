@@ -221,6 +221,10 @@ function Invoke-PulseTypedPolicyExpansion {
             $filterIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId'
             $filterTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType'
             $normalizedAssignments += [pscustomobject]@{
+                # intent (include/exclude) is structurally present but INTENTIONALLY left
+                # $null on every row this phase - Phase 2b is where the real value gets
+                # threaded through from the raw assignment payload, so 2b lands as a data
+                # population change against this already-shipped shape, not a schema change.
                 intent     = $null
                 targetType = $targetType
                 groupId    = if ($null -ne $groupIdRaw) { [string] $groupIdRaw } else { $null }

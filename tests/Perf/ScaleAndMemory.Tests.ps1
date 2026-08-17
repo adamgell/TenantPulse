@@ -79,8 +79,7 @@ BeforeAll {
     #     a real, non-trivial run-to-run variance (GC timing/generation boundaries and
     #     Pester's own harness overhead both plausible contributors) that a naive x1.5 off
     #     a single sample would not have covered; the budget below is the HIGHER of the two
-    #     measurements x1.5, not the first sample alone - see the T2.7 report's own
-    #     Findings section for the full accounting. serialized file 35.02MB either way
+    #     measurements x1.5, not the first sample alone. serialized file 35.02MB either way
     #     (delta ~5.6-11.9x file size - NOT the plan's informal "<=2x" streaming target;
     #     Write-PulseDataset materializes the full object graph, it does not stream - see
     #     this file's own docstring)
@@ -90,7 +89,9 @@ BeforeAll {
     #   200 sequential raw per-policy Write-PulseDataset calls (fresh store, 0 existing
     #     manifest entries at the start): 18.04s (~90ms/write average, growing with existing
     #     manifest size - see Set-PulseManifestEntry's own full-manifest-rewrite-per-call
-    #     shape, documented as a real O(n)-per-write/O(n^2)-total finding in the T2.7 report)
+    #     shape, an O(n)-per-write/O(n^2)-total characteristic documented in
+    #     docs/spike/2026-08-16-t27-perf-container.md section 3, with real-tenant numbers
+    #     from the Ivy24 781-policy live-gate run)
     $script:PulsePerfExpandBudgetSeconds = 691.0         # max(460.59, 265.34, 202.29) x 1.5, rounded up
     $script:PulsePerfConflictBudgetSeconds = 6.7          # max(4.16, 4.44, 3.45) x 1.5, rounded up
     $script:PulsePerfComputeMemoryBudgetMB = 306.3        # max(136.68, 204.17, 162.42) x 1.5
@@ -270,13 +271,13 @@ Describe 'Perf: 50,000-row managedDevices dataset write+read memory ceiling' {
 
             $result.ReadBackCount | Should -Be 50000
 
-            # MEASURED FINDING (see docs/spike's own table + T2.7 report): neither
-            # Write-PulseDataset nor Read-PulseDataset streams - both materialize the full
-            # object graph. The plan's own informal "<= 2x serialized size" framing is NOT
-            # met by the current implementation on either path (measured baseline: write
-            # ~5.6x, read ~16x the ~35MB serialized file) - this is a genuine, documented
-            # scale gap (see the T2.7 report's own Findings section), not something this
-            # task redesigns. The budgets below are the HONEST [measured] x 1.5 ceiling,
+            # MEASURED FINDING (see docs/spike/2026-08-16-t27-perf-container.md's own
+            # recorded table): neither Write-PulseDataset nor Read-PulseDataset streams -
+            # both materialize the full object graph. The plan's own informal "<= 2x
+            # serialized size" framing is NOT met by the current implementation on either
+            # path (measured baseline: write ~5.6x, read ~16x the ~35MB serialized file) -
+            # this is a genuine, documented scale gap, not something this task redesigns.
+            # The budgets below are the HONEST [measured] x 1.5 ceiling,
             # not the aspirational 2x - a regression beyond THIS still catches a real
             # worsening even though the underlying "streaming" target itself remains open
             # follow-up work.
@@ -298,12 +299,14 @@ Describe 'Perf: raw per-policy dataset write scaling (manifest growth characteri
     # per LIVE-fetched policy) pays this cost on every call, so it scales O(n) PER WRITE /
     # O(n^2) TOTAL in the number of datasets already in the store - confirmed empirically
     # (docs/spike's own table: ~90ms/write at 200 existing entries, ~282ms/write at 600).
-    # This Describe is deliberately bounded to a SMALL n (not 5,000 - seeQ this file's own
-    # docstring for why re-measuring the full quadratic curve up to 5,000 here would make
-    # `perftest` itself impractically slow) - it exists to catch a REGRESSION in the
+    # This Describe is deliberately bounded to a SMALL n (not 5,000 - see this file's own
+    # docstring above for why re-measuring the full quadratic curve up to 5,000 here would
+    # make `perftest` itself impractically slow) - it exists to catch a REGRESSION in the
     # per-write cost at a fixed, small scale, and to keep this characteristic visible in
-    # the test suite rather than only in a point-in-time doc. See the T2.7 report's own
-    # Findings section for the full accounting and the Phase 2b/3 follow-up recommendation.
+    # the test suite rather than only in a point-in-time doc. See
+    # docs/spike/2026-08-16-t27-perf-container.md section 3 for the full accounting,
+    # including real-tenant numbers from the Ivy24 781-policy live-gate run; the Phase
+    # 2b/3 follow-up (an incremental/append manifest write path) remains open.
     It 'writes 200 raw per-policy datasets sequentially within the recorded budget' {
         $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         try {

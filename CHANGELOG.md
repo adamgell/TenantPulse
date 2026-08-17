@@ -47,6 +47,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `generatedUtc` is pinned to the snapshot manifest's own `createdUtc` (never wall
   clock), so re-evaluating the same snapshot is byte-identical through
   `ConvertTo-PulseCanonicalJson`.
+- **Settings expansion (Phase 2, `-ExpandSettings`)**: `Get-PulseTenantSnapshot
+  -ExpandSettings` (and `Invoke-PulseAssessment -ExpandSettings`, a straight pass-through)
+  decomposes every policy TenantPulse can currently setting-expand into individual
+  canonical setting rows, on top of Phase 1's ordinary check-driven collection. Two typed
+  expansion drivers cover two different policy shapes: `Invoke-PulseSettingsCatalogExpansion`
+  walks the modern, definitionId-driven Settings Catalog (`configurationPolicies` +
+  `ConfigurationPolicySetting.ListBeta` per policy); `Invoke-PulseTypedPolicyExpansion`
+  covers compliance and legacy device configuration policies (`deviceCompliancePolicies`,
+  `deviceConfigurations`), the older polymorphic `@odata.type`-typed Graph resources,
+  decomposed via a hand-maintained property map (`source/Data/TypedPolicyMaps.psd1`) since
+  no Graph-side settings catalog exists for them. `-ExpandSettings` is **default-off,
+  deliberately**: the live gate against the Ivy24 lab tenant passed clean end to end, but
+  actually flipping the default surfaced two real, wider-blast-radius costs (a
+  `PSAvoidDefaultValueSwitchParameter` QA-gate lint failure, and at least two existing
+  `Get-PulseTenantSnapshot` unit tests asserting on the manifest shape a default-on flip
+  changes for every caller, not just opt-in ones) not appropriate to absorb under this same
+  task's time budget - flipping the default is real, scoped follow-up work, not done here.
+  Every expansion artifact is recorded in `manifest.expansions.<name>` and written to an
+  immutable, content-addressed file, never a fixed name: three row-producer "families"
+  (`settingsCatalog`, `compliance`, `deviceConfiguration`) each publish
+  `expanded/<name>.<sha256>.jsonl` (one canonical JSON object per line, row-schema v1), and
+  a single conflict-detection pass over every row from all three families publishes
+  `expanded/conflicts.<sha256>.json` - one JSON document naming every `settingDefinitionId`
+  that two or more policies disagree on, each with a four-state `assignmentOverlap` verdict
+  (`proven`/`possible`/`none`/`unknown`; see `FindingsSchema.md`'s "Settings expansion
+  artifacts" section for the exact schema). **The assignments-deferred split**: Settings
+  Catalog rows carry `assignments: null` in this core slice because
+  `ConfigurationPolicyAssignment.ListBeta` (the descriptor that would resolve which
+  devices/users a Settings Catalog policy actually targets) is not yet a released GraphKit
+  descriptor - any conflict involving such a row reports `assignmentOverlap: 'unknown'`
+  with an explicit `'assignments-deferred: awaiting GraphKit release'` reason rather than a
+  silently wrong verdict. Compliance and legacy device configuration policies do NOT have
+  this gap - their assignment descriptors (`DeviceCompliancePolicyAssignment.List`/
+  `DeviceConfigurationAssignment.List`) already shipped in GraphKit 0.1.1, so their rows
+  carry real assignment data today. Closing the Settings Catalog side is tracked as its own
+  follow-up slice ("Phase 2b"), not a silent limitation. A dedicated, serial perf container
+  (`tests/Perf/ScaleAndMemory.Tests.ps1`, run via `./build.ps1 -Tasks build,perftest`, never
+  part of the default test workflow) measures and budgets, at `[measured] x1.5` headroom, a
+  5,000-policy synthetic Settings Catalog expansion + conflict-detection compute pass
+  (mocked Graph), a 50,000-row `managedDevices` write+read memory ceiling, and raw
+  per-policy dataset write scaling - see `docs/spike/2026-08-16-t27-perf-container.md` for
+  the full recorded numbers, hardware, and method, and `docs/STATUS.md`'s own scale section
+  for the documented gaps it surfaced. **Live-gated against the Ivy24 lab tenant end to
+  end**: 781 Settings Catalog policies (`Partial`, 64 per-instance gaps, 0%
+  unresolved-name rate, 131 redacted secret values), 40 compliance policies (`Partial`, 6
+  gapped on an unmapped `@odata.type`), 15 device configuration policies (`Expanded`, zero
+  gaps, 8 redacted secret values), and conflict detection surfacing **165 real conflict
+  entries** across all three families (`assignmentOverlap` breakdown: `none`=8,
+  `possible`=34, `unknown`=123, the 123 all involving at least one assignments-deferred
+  Settings Catalog row) - not a zero-conflicts-by-luck outcome. `-FromSnapshot` re-derived
+  all four expansion artifacts byte-identical to the original run.
 
 ### Changed
 
@@ -204,6 +255,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only, silent by default) and `Invoke-PulseCollection` appends `(status unknown)` to the
   affected dataset's own Failed reason, so the weaker signal is visible in the artifact
   itself, not only an easily-missed console message.
+- **Raw tenant id reaching an expansion row artifact (Task 2.7 live-gate finding, Ivy24):**
+  a real Ivy24 policy's own OneDrive Known-Folder-Move opt-in setting legitimately carries
+  the tenant's own GUID as admin-entered configuration data (not a secret, not a GraphKit
+  provenance stamp) - and that raw GUID reached `expanded/settingsCatalog.<hash>.jsonl`
+  unredacted, because `Protect-PulseGraphRowTenantId` (Task 1.11's raw-dataset tenant-id
+  redaction walk) was wired into `Write-PulseDataset`'s raw writes but never into the Task
+  2.2/2.3 expansion-row publish path, which serializes independently via
+  `Publish-PulseExpansionRows`/`ConvertTo-PulseCanonicalJsonLine`. Fixed:
+  `Invoke-PulseSettingsCatalogExpansion` and `Invoke-PulseTypedPolicyExpansion` both now
+  redact their final merged+sorted row set through `Protect-PulseGraphRowTenantId`
+  immediately before publication, same fail-closed contract as the Task 1.11 call site (a
+  redaction failure throws rather than ever publishing an unredacted artifact). Re-run
+  against Ivy24 after the fix: clean, 848 files scanned, zero raw-tenant-id or literal
+  ProfileId hits.
 - `scripts/Publish-TenantPulsePackage.ps1`'s digest verification now compares every
   shipped file (`.psm1`, `.psd1`, `Data/**`, `en-US/**`) against a manifest of hashes
   recorded at test time (`output/testResults/tested-module-digest.txt`, written by the

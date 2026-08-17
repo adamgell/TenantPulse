@@ -233,10 +233,17 @@ embedded raw newlines, exactly one trailing LF per line including the last.
   "conflicts": [
     {
       "settingDefinitionId": "...",
-      "groups": [
+      "settingName": "..."|null,        // ordinal-minimum of every distinct resolved
+                                          // settingName seen for this defId; null only
+                                          // when no contributing row had a resolved name
+      "nameVariants": [ "..." , ... ]|null,  // every OTHER distinct resolved name seen for
+                                          // this defId (ordinal-sorted), when policies
+                                          // disagree on display name; null when there was
+                                          // zero or exactly one distinct name
+      "values": [
         { "canonicalValue": <typed value>|null, "redacted": true|false,
           "policies": [ { "policyId": "..."; "policyName": "..."|null }, ... ] }
-        // >= 2 groups per conflict entry, by construction (see below)
+        // >= 2 value records per conflict entry, by construction (see below)
       ],
       "assignmentOverlap": "proven" | "possible" | "none" | "unknown",
       "assignmentOverlapReason": "..."|null   // populated at least for 'unknown' -
@@ -244,21 +251,21 @@ embedded raw newlines, exactly one trailing LF per line including the last.
                                                 // release' for every core-slice
                                                 // settingsCatalog-involving conflict
     }
-    // sorted ordinally by settingDefinitionId; each entry's groups sorted by their own
-    // canonical-value text; each group's policies sorted by policyId
+    // sorted ordinally by settingDefinitionId; each entry's values sorted by their own
+    // canonical-value text; each value record's policies sorted by policyId
   ]
 }
 ```
 
 A `settingDefinitionId` becomes a conflict entry only when it has >= 2 distinct
-canonical-value groups collectively naming >= 2 distinct policy ids (one policy
+canonical-value records collectively naming >= 2 distinct policy ids (one policy
 disagreeing only with itself is not a conflict - see `ConvertTo-PulseConflictRecords`'s own
 docstring). **Zero conflicts found is a valid, `Expanded` outcome** - it means detection ran
 over every available family and found none, not that detection did not run; do not treat an
-empty `conflicts` array as suspicious on its own. `redacted: true` on a group means every
-row that contributed to it carried a secret value - the group's `canonicalValue` is always
-`null` in that case and the true value is never present anywhere in this document (see the
-module-wide SECRET CONTRACT). `assignmentOverlap` is the plan's four-state result:
+empty `conflicts` array as suspicious on its own. `redacted: true` on a value record means
+every row that contributed to it carried a secret value - that record's `canonicalValue` is
+always `null` in that case and the true value is never present anywhere in this document
+(see the module-wide SECRET CONTRACT). `assignmentOverlap` is the plan's four-state result:
 `'proven'` (every contributing policy's real assignment targets provably overlap),
 `'possible'` (cannot rule overlap out, but not proven either - e.g. a filter or an
 All-devices/All-users target is involved), `'none'` (every pair of contributing policies'

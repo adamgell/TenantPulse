@@ -193,7 +193,7 @@ scoped, doable follow-up work - not done here under this task's own time budget.
 (`tests/Perf/ScaleAndMemory.Tests.ps1`, run via `./build.ps1 -Tasks build,perftest`, never
 part of the default test workflow) measures and budgets ([measured] x1.5): a 5,000-policy
 synthetic Settings Catalog expansion + conflict-detection compute pass (mocked Graph,
-~202s/4300 rows), a 50,000-row `managedDevices` write+read memory ceiling, and raw
+~202s/5000 rows), a 50,000-row `managedDevices` write+read memory ceiling, and raw
 per-policy dataset write scaling. Two genuine, documented scale gaps surfaced (not fixed
 in this task, flagged for follow-up): `Write-PulseDataset`/`Read-PulseDataset` do not
 stream (materialize the full object graph - measured ~5.6-16x the serialized file size in
@@ -202,6 +202,19 @@ re-serializes the WHOLE manifest on every single dataset write (O(n) per write /
 total as a snapshot's own manifest grows - a real cost a live 781-policy run pays on every
 policy). See `docs/spike/2026-08-16-t27-perf-container.md` for the full recorded numbers,
 hardware, and method.
+
+**Ledger: deferred/not-yet-populated Phase 2 data, explicit not silent**:
+
+- An **expansion-summary dataset** (an aggregate-counts view across the settingsCatalog/
+  compliance/deviceConfiguration expansion families, for a consuming report/check) is
+  scoped but explicitly **deferred to Phase 3** - its consumer moved there, so there is
+  nothing in this phase that reads or emits it. Not present anywhere in a Phase 2 snapshot;
+  do not expect it before Phase 3.
+- Every typed-assignment record `Invoke-PulseTypedPolicyExpansion` normalizes
+  (`targetType`/`groupId`/`filterId`/`filterType`/`intent`) already carries an `intent`
+  field, structurally, but it is hard-coded `$null` on every row today - unpopulated until
+  Phase 2b, which is where the real intent value (include/exclude) gets threaded through.
+  Present in the shape now so 2b is a pure data-population change, not a schema change.
 
 ## Not yet done - one thing, an operator action, not code
 
