@@ -207,9 +207,12 @@ kind, plus a 4th, richly-nested example for groupSettingCollection):
 and every GUID, but NOT the actual setting VALUES carried inside `simpleSettingValue` /
 `simpleSettingCollectionValue` string content — free text an org chooses, not schema.**
 Code review caught one real leak this missed: `choicecollection-01.json` (the
-LocalUsersAndGroups "add to Administrators" example) carried `"value": "REDACTED-ADMIN-NAME"` —
-**this tenant's actual local-administrator account name**, not a placeholder. Fixed to
-`"LapsAdmin-Example"`.
+LocalUsersAndGroups "add to Administrators" example) carried a `"value"` holding
+**this tenant's actual local-administrator account name** (a single-initial + surname-style
+name, e.g. the shape `<Initial><Surname>Admin`), not a placeholder. Fixed to
+`"LapsAdmin-Example"`. (Redacted here, 2026-08-16, per the SecretScan hardening fix - see
+`tests/QA/SecretScan.tests.ps1`; this doc's own narrative value is preserved without
+reproducing the real account name.)
 
 **The rule going forward, for T2.1/T2.2 and any future fixture-making from a real tenant**:
 after GUID remapping and `Policy.*` scrubbing, walk every `simpleSettingValue.value` and
@@ -245,7 +248,7 @@ in round 2. **6 values across 4 fixtures** needed scrubbing in total, across bot
 
 | Fixture | Value found | `settingDefinitionId` | Scrubbed to | Caught in |
 |---|---|---|---|---|
-| `choicecollection-01.json` | `REDACTED-ADMIN-NAME` (real tenant local-admin account name) | `..._accessgroup_users` | `LapsAdmin-Example` | round 1 |
+| `choicecollection-01.json` | *[redacted 2026-08-16]* (real tenant local-admin account name, single-initial + surname style) | `..._accessgroup_users` | `LapsAdmin-Example` | round 1 |
 | `groupcollection-02-nested.json` | `REDACTED-FIXTURE-VALUE-01` (free-text `_organization` field) | `com.apple.webcontent-filter_organization` | `Sanitized Organization Name` | round 1 |
 | `groupcollection-02-nested.json` | `REDACTED-FIXTURE-VALUE-02` (free-text `_userdefinedname` field) | `com.apple.webcontent-filter_userdefinedname` | `Sanitized Content Filter Name` | round 1 |
 | `groupcollection-02-nested.json` (×6) + `simple-02.json` (×2) | `UBF8T346G9` (Apple code-signing Team ID, appearing both standalone and inside cert-requirement strings) | various `com.apple.servicemanagement_rules_item_rulevalue` | `EXAMPLETEAMID9` (scrubbed out of caution per the review's explicit "certificate subjects" category, even though this specific value is Microsoft's own public, tenant-invariant Apple Team ID — see judgment call below) | round 1 |
@@ -354,6 +357,7 @@ Import-Module GraphKit -RequiredVersion 0.1.1
   sampled roots; do not build on it as a general rule (§5).
 - **Value-level sanitization**: setting VALUES (not just policy names/GUIDs) can carry real
   tenant identity — see the value-scrub rule added to §6 after review caught a real leak
-  (`REDACTED-ADMIN-NAME`, this tenant's actual local-admin account name). Any future fixture-making
-  from a real tenant must walk `simpleSettingValue`/`simpleSettingCollectionValue` strings,
-  not just `Policy.*` fields and GUIDs.
+  (this tenant's actual local-admin account name, redacted here 2026-08-16 - see §6's own
+  redaction note). Any future fixture-making from a real tenant must walk
+  `simpleSettingValue`/`simpleSettingCollectionValue` strings, not just `Policy.*` fields
+  and GUIDs.

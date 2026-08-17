@@ -4,8 +4,9 @@
     on every developer machine via `./build.ps1 -Tasks test`, with no network access and no
     third-party binary required.
 
-    Scans source/ and tests/ (text-shaped files: .ps1/.psm1/.psd1/.psc1/.pssc/.md/.txt/
-    .json/.csv/.xml) for:
+    Scans source/, tests/, scripts/, docs/, .build/, and a fixed set of repo-root files
+    (text-shaped files: .ps1/.psm1/.psd1/.psc1/.pssc/.md/.txt/.json/.csv/.xml/.yml/.yaml -
+    see "ROOTS" below for the full root list and its own history) for:
         1. a GUID-looking id sitting near a real-looking (non-Microsoft/GitHub) domain -
            the classic "leaked real tenant id + tenant domain" shape.
         2. a bearer-token-shaped JWT ('eyJ...' header/payload pair).
@@ -14,6 +15,20 @@
            SQL-style Server=/Data Source=...Password=... in EITHER key order, or a URL
            with embedded userinfo credentials).
         5. a Shared Access Signature (SAS) token query parameter ([?&]sig=/[?&]se=...).
+        8. a person-name-style device/account name (Task 3.2 fix-round finding 7, added
+           after docs/ was brought into scope and immediately surfaced a REAL example
+           already sitting in this repo - see docs/spike/2026-08-16-settings-catalog-
+           spike.md's own git history for the redaction): a single-capital-INITIAL glued
+           directly onto a Capitalized surname-shaped word (two adjacent capital letters,
+           e.g. 'WL' in 'REDACTED-ADMIN-NAME', 'JS' in 'JSmith'), followed by one of a small,
+           deliberately narrow set of device/role/account suffix words (Admin, Laptop,
+           Desktop, PC, Workstation, User, Account, Device), glued directly or via a
+           hyphen - the exact "<Initial><Surname><Role>" / "<Initial><Surname>-<Device>"
+           shape a real local-admin account name or asset-tag device name takes. See
+           Get-PulseSecretScanViolations' own item-8 comment for why the double-capital-
+           initial requirement keeps this from firing on an ordinary capitalized compound
+           word this codebase uses constantly (e.g. 'Global-Admin', a real Entra role
+           name, not a person).
         7. a DIGEST-BASED banned-identifier check: the Ivy24 lab tenant's real Entra tenant
            GUID (leaked into tests/Unit/Snapshot.Tests.ps1 and
            tests/Unit/Get-PulseTenantSnapshot.Tests.ps1 by Task 1.11's live-gate work,
@@ -442,6 +457,29 @@ BeforeAll {
         # URLs use regardless of which resource they were minted for.
         if ($Content -match '(?i)[?&](sig|se)=[A-Za-z0-9%._~+/=-]{16,}') {
             $violations.Add("$RelativePath : SAS-token-shaped query parameter found ([?&]sig=/[?&]se=...).")
+        }
+
+        # 8. Person-name-style device/account name (Task 3.2 fix-round finding 7): the
+        # exact shape a real leak already took in this repo (a spike doc under docs/ - not
+        # scanned at all before this same fix round - carried a real tenant's actual
+        # local-admin account name, a single-CAPITAL-INITIAL-glued-to-a-Capitalized-
+        # surname token ending in a device/account/role word, e.g. the 'REDACTED-ADMIN-NAME'-class
+        # shape). The pattern requires TWO adjacent capital letters (the initial glued
+        # directly onto the start of a Capitalized word - 'WL' in 'REDACTED-ADMIN-NAME', 'JS' in
+        # 'JSmith') followed by 2+ lowercase letters, then one of a small, deliberately
+        # narrow set of device/role/account suffix words, with an optional hyphen before
+        # the suffix ('JSmith-Laptop' vs 'REDACTED-ADMIN-NAME' glued). This is DELIBERATELY narrower
+        # than a general PascalCase/CamelCase detector: an ordinary two-capital
+        # abbreviation-led identifier this codebase uses constantly (e.g. 'Global-Admin', a
+        # genuine Entra ROLE name, not a person) does not match, because 'Global' has only
+        # ONE leading capital - the double-capital-initial requirement is what actually
+        # narrows this to the "initial+surname" naming shape rather than firing on every
+        # capitalized compound word followed by one of these suffixes. Verified against the
+        # whole repo tree at the time this check was added: zero matches after the one real
+        # leak this was written to catch was redacted (see git history for
+        # docs/spike/2026-08-16-settings-catalog-spike.md).
+        foreach ($nameMatch in [regex]::Matches($Content, '\b[A-Z][A-Z][a-z]{2,}-?(?:Admin|Laptop|Desktop|PC|Workstation|User|Account|Device)\b')) {
+            $violations.Add("$RelativePath : person-name-style device/account name found ('$($nameMatch.Value)') - looks like a real <Initial><Surname><Role> or <Initial><Surname>-<DeviceType> account/device name, not a synthetic placeholder.")
         }
 
         # 7. DIGEST-BASED banned identifier (hygiene-rule rework - see this file's own
@@ -879,6 +917,81 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
 
             $violations.Count | Should -Be 2
         }
+
+        It 'flags a "REDACTED-ADMIN-NAME"-class person-name-style device/account name (glued initial+surname+role, no hyphen)' {
+            # The exact real-leak shape this item exists to catch - see this same fix
+            # round's redaction of docs/spike/2026-08-16-settings-catalog-spike.md, which
+            # carried this tenant's actual local-admin account name in this shape.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content 'the LocalUsersAndGroups value was REDACTED-ADMIN-NAME in the raw fixture' `
+                -RelativePath 'docs/Fake.md' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'person-name-style device/account name'
+            $violations[0] | Should -Match 'REDACTED-ADMIN-NAME'
+        }
+
+        It 'flags a "JSmith-Laptop"-class person-name-style device name (initial+surname, hyphenated device suffix)' {
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content 'device inventory export: JSmith-Laptop was last seen online yesterday' `
+                -RelativePath 'docs/Fake.md' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'person-name-style device/account name'
+            $violations[0] | Should -Match 'JSmith-Laptop'
+        }
+
+        It 'does NOT flag "Global-Admin" - a genuine Entra role name, not a person-name-style identifier (false-positive guard)' {
+            # 'Global' has only ONE leading capital letter - the double-capital-initial
+            # requirement is exactly what keeps this check from firing on every
+            # capitalized-word-plus-role-suffix compound the codebase legitimately uses.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content 'a standing, human, forever-Global-Admin is the scenario this check flags' `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations | Should -BeNullOrEmpty
+        }
+
+        It 'planted-pattern self-test: a "REDACTED-ADMIN-NAME"/"JSmith-Laptop"-class name written to a REAL temp file under docs/ (a scanned root) is caught end to end via the real file-read path' {
+            # Not a -Content unit test like the ones above - this proves the file
+            # actually has to live under a SCANNED root and be read off disk exactly the
+            # way the real gate below does (Get-Content -Raw), not just that the
+            # in-memory regex fires. The temp file is created, scanned, and deleted
+            # within this one It - it is never left behind for git to see, so this test
+            # plants and detects the pattern without itself becoming a tracked leak.
+            $localProjectPath = "$($PSScriptRoot)\..\.." | Convert-Path
+            $docsRoot = Join-Path $localProjectPath 'docs'
+            $tempFileName = "secretscan-planted-test-$([guid]::NewGuid().ToString('N')).md"
+            $tempFilePath = Join-Path $docsRoot $tempFileName
+
+            try {
+                Set-Content -LiteralPath $tempFilePath -Value @(
+                    '# Planted PII fixture (deleted immediately by the test that wrote it)'
+                    ''
+                    'Local admin account: REDACTED-ADMIN-NAME'
+                    'Device name: JSmith-Laptop'
+                ) -Encoding UTF8
+
+                $content = Get-Content -LiteralPath $tempFilePath -Raw
+                $violations = @(Get-PulseSecretScanViolations `
+                    -Content $content `
+                    -RelativePath "docs/$tempFileName" `
+                    -AllowedGuid @() `
+                    -SafeDomainSuffix @())
+
+                $violations.Count | Should -Be 2 -Because ($violations -join "`n")
+                ($violations -join "`n") | Should -Match 'REDACTED-ADMIN-NAME'
+                ($violations -join "`n") | Should -Match 'JSmith-Laptop'
+            } finally {
+                Remove-Item -LiteralPath $tempFilePath -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     Context 'Get-PulseControlByteViolations (unit-tested against synthetic byte arrays)' {
@@ -913,19 +1026,30 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
         $projectPath = "$($PSScriptRoot)\..\.." | Convert-Path
         $textExtensions = @('.ps1', '.psm1', '.psd1', '.psc1', '.pssc', '.md', '.txt', '.json', '.csv', '.xml', '.yml', '.yaml')
 
-        # ROOTS (post-review fix, item 28): previously only source/ and tests/ were
-        # scanned - scripts/ (the publish script, which handles an API key end to end) and
-        # the repo-root build/CI/doc surface (build.ps1, build.yaml, README.md,
-        # CHANGELOG.md, .github/workflows/ci.yml) were never scanned at all, even though
-        # every one of them is exactly the kind of file a secret or PII value could land in
-        # by accident (a pasted example token in a doc, a hardcoded value in a workflow
-        # file). Extended to cover all of them, while still excluding output/ (build
-        # artifacts, never hand-authored) and tests/QA/ (this scanner's own code, reviewed
-        # by hand - see the exclusion note elsewhere in this file).
+        # ROOTS (post-review fix, item 28; extended again Task 3.2 fix-round finding 7):
+        # previously only source/ and tests/ were scanned - scripts/ (the publish script,
+        # which handles an API key end to end) and the repo-root build/CI/doc surface
+        # (build.ps1, build.yaml, README.md, CHANGELOG.md, .github/workflows/ci.yml) were
+        # never scanned at all, even though every one of them is exactly the kind of file
+        # a secret or PII value could land in by accident (a pasted example token in a
+        # doc, a hardcoded value in a workflow file). Extended to cover all of them.
+        # docs/ (research notes, spike write-ups - free-form prose is exactly where a
+        # pasted real device/tenant name is most likely to land) and .build/ (the
+        # Sampler/Invoke-Build task files under .build/*.tasks.ps1 - committed automation
+        # code, same risk class as scripts/) were STILL missing after that pass; this is
+        # every currently-committed top-level content root except .github/ (covered via
+        # its one explicit ci.yml file only, not recursively - the rest of .github/ has no
+        # content today) and output/ (build artifacts, gitignored, never hand-authored).
+        # COORDINATION NOTE: the phase-4 branch (TenantPulse-phase4) independently lands a
+        # similar SecretScan roots extension - whichever implementation is stricter (more
+        # roots/patterns covered) wins at merge; this is not a conflict to resolve by
+        # picking one side, only by taking the union.
         $recurseRoots = @(
             (Join-Path $projectPath 'source')
             (Join-Path $projectPath 'tests')
             (Join-Path $projectPath 'scripts')
+            (Join-Path $projectPath 'docs')
+            (Join-Path $projectPath '.build')
         ) | Where-Object { Test-Path -LiteralPath $_ -PathType Container }
 
         $explicitRootFiles = @(
