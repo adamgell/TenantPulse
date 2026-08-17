@@ -40,8 +40,24 @@ function Test-PulseBrandingProfileCustomized {
 
     $defaultProfile = @($profiles | Where-Object { $_.isDefaultProfile -eq $true }) | Select-Object -First 1
 
-    $defaultDisplayName = if ($defaultProfile) { [string] $defaultProfile.displayName } else { $null }
-    $defaultPrivacyUrl = if ($defaultProfile) { [string] $defaultProfile.privacyUrl } else { $null }
+    $defaultDisplayName = $null
+    $defaultPrivacyUrl = $null
+    if ($defaultProfile) {
+        # FIELD-ABSENCE LENS: absent means the PROPERTY ITSELF IS MISSING (never
+        # collected/never survived the response shape) - that must never silently read as
+        # "not customized". A property that IS present, whether $null or an empty string,
+        # is a genuinely decidable "the org left this blank" signal - Graph itself returns
+        # $null for an unset displayName/privacyUrl on a real tenant, and treating that as
+        # unreadable would make this rule throw on the single most common real shape.
+        if (-not (Test-PulseRowPropertyPresent -Row $defaultProfile -PropertyName 'displayName')) {
+            throw "Test-PulseBrandingProfileCustomized: the default branding profile row has no displayName property at all - absent is not decidable as 'not customized', it means this field was never collected."
+        }
+        if (-not (Test-PulseRowPropertyPresent -Row $defaultProfile -PropertyName 'privacyUrl')) {
+            throw "Test-PulseBrandingProfileCustomized: the default branding profile row has no privacyUrl property at all - absent is not decidable as 'not customized', it means this field was never collected."
+        }
+        $defaultDisplayName = [string] $defaultProfile.displayName
+        $defaultPrivacyUrl = [string] $defaultProfile.privacyUrl
+    }
     $defaultIsCustomized = -not ([string]::IsNullOrEmpty($defaultDisplayName)) -or -not ([string]::IsNullOrEmpty($defaultPrivacyUrl))
 
     $evidence = ConvertTo-PulseMaesterEvidence -Rows $profiles -IdentityProperty 'id' -SortKeyProperty 'displayName' -DetailProperties @('displayName', 'privacyUrl', 'isDefaultProfile')

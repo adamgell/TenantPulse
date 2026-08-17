@@ -99,6 +99,44 @@ Describe 'TP.INT.0011 - Default branding profile customized' {
         $finding.status | Should -Be 'Error'
     }
 
+    It 'Error: the default profile row has no displayName property at all (absent, not decidable)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
+            @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'default'; isDefaultProfile = $true; privacyUrl = '' }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'displayName'
+    }
+
+    It 'Error: the default profile row has no privacyUrl property at all (absent, not decidable)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
+            @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'default'; isDefaultProfile = $true; displayName = '' }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'privacyUrl'
+    }
+
+    It 'Fail still holds: present-but-$null on both fields is decidable and correctly Fails (not an Error)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
+            @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'default'; isDefaultProfile = $true; displayName = $null; privacyUrl = $null }) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Pass (documented verbatim Maester port, pinned): no row has isDefaultProfile at all, Count>1 falls back to Pass' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
+            @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'p1'; displayName = ''; privacyUrl = '' }
+                [pscustomobject]@{ id = 'p2'; displayName = ''; privacyUrl = '' }
+            ) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $finding.reason | Should -Match 'at least one custom'
+    }
+
     It 'gate-degraded: NotApplicable when the dataset is Pending on a live tenant' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
             @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Skipped'; Reason = 'descriptor-pending: awaiting GraphKit release' }
