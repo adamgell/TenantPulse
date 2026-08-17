@@ -141,13 +141,16 @@ BeforeAll {
         '22222222-0000-4000-8000-000000000001' # TypedPolicy fixture: deviceConfiguration-windows10Custom
         '22222222-0000-4000-8000-000000000002' # TypedPolicy fixture: deviceConfiguration-windowsUpdateForBusiness
         '22222222-0000-4000-8000-000000000003' # TypedPolicy fixture: deviceConfiguration-sharedPC
-        # Task 4.4 - built-in Microsoft authentication STRENGTH policy ids (public,
+        # Task 4.4 - built-in Microsoft authentication STRENGTH policy id (public,
         # tenant-stable, documented at learn.microsoft.com/entra/identity/authentication/
-        # concept-authentication-strengths) - see
+        # concept-authentication-strengths, which documents EXACTLY THREE built-in
+        # strengths: MFA, Passwordless MFA, Phishing-resistant MFA) - see
         # source/Private/Checks/Test-PulsePrivilegedRolesPhishingResistantMfa.ps1's own
-        # docstring for both id variants.
+        # docstring. Post-review fix: an earlier draft of this allowlist also carried a
+        # fabricated '...0005' id Microsoft does not document anywhere - removed, not
+        # merely unused, since a stale allowlist entry for a non-existent constant is
+        # itself a latent correctness bug waiting to mask a real leak of that same shape.
         '00000000-0000-0000-0000-000000000004' # built-in "Phishing-resistant MFA" strength
-        '00000000-0000-0000-0000-000000000005' # built-in phishing-resistant strength variant (cert-based auth)
         # Task 4.4 - synthetic test-fixture principal ids (repeated-digit pattern, never a
         # real tenant identifier), same by-value convention as the TypedPolicy fixture ids
         # above - each sits within 200 characters of a dotted PowerShell property-path

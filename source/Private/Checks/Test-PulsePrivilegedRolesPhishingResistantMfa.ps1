@@ -8,34 +8,51 @@
     DELIBERATELY DISTINCT FROM TP.ENT.0005 (per that check's own research entry Notes - do
     not merge): TP.ENT.0005 accepts EITHER builtInControls 'mfa' OR any bound
     authenticationStrength as satisfying "MFA required". THIS check accepts ONLY a bound
-    authenticationStrength whose id is one of the built-in phishing-resistant-capable
-    strengths - builtInControls 'mfa' alone (which still permits SMS/voice/TOTP as the
-    second factor) never satisfies this, higher, bar. A tenant can pass TP.ENT.0005 while
-    failing this check; that divergence is the whole point of keeping both checks.
+    authenticationStrength whose id is the built-in phishing-resistant strength -
+    builtInControls 'mfa' alone (which still permits SMS/voice/TOTP as the second factor)
+    never satisfies this, higher, bar. A tenant can pass TP.ENT.0005 while failing this
+    check; that divergence is the whole point of keeping both checks.
 
-    BUILT-IN STRENGTH IDS (Microsoft-documented, stable across every Entra tenant - see this
-    check's own References.Authorities):
+    BUILT-IN STRENGTH ID (Microsoft-documented, stable across every Entra tenant - see this
+    check's own References.Authorities, concept-authentication-strengths, which documents
+    EXACTLY THREE built-in strengths: MFA, Passwordless MFA, and Phishing-resistant MFA -
+    no fourth/fifth id is documented anywhere; post-review fix, an earlier draft of this
+    check also allowlisted a fabricated '...0005' id that Microsoft does not document -
+    removed):
         '00000000-0000-0000-0000-000000000004' - "Phishing-resistant MFA" (FIDO2, Windows
                                                     Hello for Business, certificate-based
                                                     auth multifactor)
-        '00000000-0000-0000-0000-000000000005' - "Phishing-resistant MFA strength" variant
-                                                    some tenants see for certificate-based
-                                                    auth (single-factor, still
-                                                    phishing-resistant) - included as an
-                                                    honest, documented allow-list entry
-                                                    rather than silently narrowing to just
-                                                    the first id.
-    HONEST LIMITATION: a tenant-DEFINED custom authentication strength built from
-    phishing-resistant combinations (FIDO2/certificate-based/Windows Hello) has its own,
-    non-well-known id - this check cannot recognize a custom strength without resolving it
-    against `v1.0/policies/authenticationStrengthPolicies` (the research entry's own
-    Entra.AuthenticationStrengths.List candidate descriptor), which is not wired into this
-    check's Data.Datasets. A tenant relying exclusively on a correctly-built custom
-    phishing-resistant strength will read as a Fail here - a known, documented gap, not a
-    silent one. Future work: resolve custom strength ids the same way
-    ConvertTo-PulseCaPolicyView's own -Context.AuthenticationStrengthDisplayNames mechanism
-    already anticipates for DISPLAY NAMES (it does not currently attempt to classify a
-    custom strength's underlying allowedCombinations as phishing-resistant).
+
+    CUSTOM STRENGTHS ARE INTENTIONALLY NOT AUTO-TRUSTED (post-review, Medium): a
+    tenant-DEFINED custom authentication strength built from phishing-resistant
+    combinations (FIDO2/certificate-based/Windows Hello) has its own, non-well-known id -
+    this check cannot verify without resolving it against
+    `v1.0/policies/authenticationStrengthPolicies` (the research entry's own
+    Entra.AuthenticationStrengths.List candidate descriptor, not wired into this check's
+    Data.Datasets) whether a custom strength's allowedCombinations actually are
+    phishing-resistant, as opposed to a custom strength built from weaker methods that
+    merely LOOKS deliberate. A policy binding ANY non-built-in authenticationStrength id is
+    therefore NEVER counted toward role coverage - but it is not silently dropped either:
+    every such policy is surfaced in evidence (Detail.classification =
+    'custom-or-unrecognized-strength'), on both the Pass and Fail path, so an operator
+    reviewing the finding sees it and can manually confirm whether it is actually
+    phishing-resistant. A tenant relying exclusively on a correctly-built custom
+    phishing-resistant strength still reads as a Fail here - a known, documented gap, not a
+    silent one.
+
+    ROLE COVERAGE SUBTRACTS EXCLUSIONS (post-review, Medium fix - was a false-Pass bug): an
+    includeAll-or-includeRoles policy's own conditions.users.excludeRoles is subtracted
+    from what that policy covers before computing the union - a policy that targets "All
+    users" (or explicitly includes Global Administrator) but ALSO excludes the Global
+    Administrator role template id does NOT cover Global Administrator; the earlier
+    implementation ignored excludeRoles entirely and could read a role as covered when an
+    enforced policy explicitly carved it back out, a false Pass on this Critical check.
+    conditions.users.excludeUsers/excludeGroups are handled the same way TP.ENT.0017
+    handles them: not subtracted from ROLE coverage (excluding a specific user does not
+    un-cover the ROLE - a different, still-covered admin in that role keeps the role
+    covered), but any excluded identifier on a covering policy that is not declared in the
+    operator's break-glass/service-account context is surfaced as an informational note in
+    Reason, not a Fail - matching TP.ENT.0017's own convention exactly.
 
     Reuses the same 9-role minimum and role-template-id join TP.ENT.0005 already
     established (Microsoft's own how-to-policy-phish-resistant-admin-mfa doc) - role
@@ -48,7 +65,10 @@ function Test-PulsePrivilegedRolesPhishingResistantMfa {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)]
-        [hashtable] $Datasets
+        [hashtable] $Datasets,
+
+        [Parameter()]
+        [hashtable] $Context = @{}
     )
 
     $requiredAdminRoles = [ordered]@{
@@ -63,42 +83,91 @@ function Test-PulsePrivilegedRolesPhishingResistantMfa {
         '966707d0-3269-4727-9be2-8c3a10f19b9d' = 'Password Administrator'
     }
 
-    $phishingResistantStrengthIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($id in @('00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000005')) {
-        $phishingResistantStrengthIds.Add($id) | Out-Null
-    }
+    $builtInPhishingResistantStrengthId = '00000000-0000-0000-0000-000000000004'
 
     $views = @(@($Datasets.conditionalAccessPolicies) | ConvertTo-PulseCaPolicyView)
 
-    $isPhishingResistant = {
+    # Classifies a view's bound authenticationStrength (if any): 'none' (no strength
+    # bound), 'builtin' (the one documented built-in phishing-resistant strength id), or
+    # 'custom' (any other bound id - never auto-trusted, see this file's own CUSTOM
+    # STRENGTHS docstring section).
+    $classifyStrength = {
         param($view)
         $strength = $view.grants.authenticationStrength
-        if ($null -eq $strength -or [string]::IsNullOrEmpty([string] $strength.id)) { return $false }
-        return $phishingResistantStrengthIds.Contains([string] $strength.id)
+        if ($null -eq $strength -or [string]::IsNullOrEmpty([string] $strength.id)) { return 'none' }
+        if ([string] $strength.id -eq $builtInPhishingResistantStrengthId) { return 'builtin' }
+        return 'custom'
     }
 
-    $coveringPolicies = @($views | Where-Object {
-        $_.state -eq 'enforced' -and (& $isPhishingResistant $_) -and (($_.conditions.users.includeRoles.Count -gt 0) -or $_.conditions.users.includeAll)
+    $candidatePolicies = @($views | Where-Object {
+        $_.state -eq 'enforced' -and (($_.conditions.users.includeRoles.Count -gt 0) -or $_.conditions.users.includeAll)
     })
+
+    $coveringPolicies = @()
+    $customStrengthPolicies = @()
+    foreach ($policy in $candidatePolicies) {
+        $classification = & $classifyStrength $policy
+        if ($classification -eq 'builtin') {
+            $coveringPolicies += $policy
+        } elseif ($classification -eq 'custom') {
+            $customStrengthPolicies += $policy
+        }
+    }
 
     $coveredRoleIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($policy in $coveringPolicies) {
-        if ($policy.conditions.users.includeAll) {
-            foreach ($roleId in $requiredAdminRoles.Keys) { $coveredRoleIds.Add([string] $roleId) | Out-Null }
-            continue
-        }
-        foreach ($roleId in @($policy.conditions.users.includeRoles)) {
+        $excludeRoles = [System.Collections.Generic.HashSet[string]]::new([string[]] @($policy.conditions.users.excludeRoles), [System.StringComparer]::OrdinalIgnoreCase)
+
+        $grantedRoleIds = if ($policy.conditions.users.includeAll) { @($requiredAdminRoles.Keys) } else { @($policy.conditions.users.includeRoles) }
+        foreach ($roleId in $grantedRoleIds) {
+            if ($excludeRoles.Contains([string] $roleId)) { continue }
             $coveredRoleIds.Add([string] $roleId) | Out-Null
         }
     }
 
     $missingRoles = @($requiredAdminRoles.GetEnumerator() | Where-Object { -not $coveredRoleIds.Contains($_.Key) })
 
-    if ($missingRoles.Count -eq 0) {
-        $evidence = @($coveringPolicies | ForEach-Object { @{ Identity = $_.id; Detail = @{ displayName = $_.displayName; authenticationStrengthId = $_.grants.authenticationStrength.id } } })
-        return New-PulseFinding -Status Pass -Reason "All 9 of Microsoft's minimum admin roles are covered by an enforced Conditional Access policy requiring a phishing-resistant authentication strength." -Evidence $evidence
+    # Undocumented excludeUsers/excludeGroups note - same convention as TP.ENT.0017: never
+    # fails the check, just surfaces identifiers excluded from a covering policy that are
+    # not in the operator-declared break-glass/service-account context.
+    $exclusionContext = Get-PulseCaExclusionContext -Context $Context -Datasets $Datasets
+    $documentedExclusions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in @($exclusionContext.ExcludedIdentifiers)) { $documentedExclusions.Add([string] $id) | Out-Null }
+    $undocumentedExclusionCount = 0
+    foreach ($policy in $coveringPolicies) {
+        foreach ($excludedId in @($policy.conditions.users.excludeUsers)) {
+            if (-not $documentedExclusions.Contains([string] $excludedId)) { $undocumentedExclusionCount++ }
+        }
     }
 
-    $evidence = @($missingRoles | ForEach-Object { @{ Identity = $_.Key; Detail = @{ roleDisplayName = $_.Value } } })
-    return New-PulseFinding -Status Fail -Reason "$($missingRoles.Count) of Microsoft's 9 minimum admin roles are not covered by any enforced Conditional Access policy requiring a phishing-resistant authentication strength (generic MFA - builtInControls 'mfa' alone - does not satisfy this check; see TP.ENT.0005 for that lower bar)." -Evidence $evidence
+    $customEvidence = @($customStrengthPolicies | ForEach-Object {
+        @{
+            Identity = $_.id
+            Detail   = @{
+                displayName            = $_.displayName
+                classification         = 'custom-or-unrecognized-strength'
+                authenticationStrengthId = $_.grants.authenticationStrength.id
+                note                   = 'Bound authenticationStrength id is not the documented built-in phishing-resistant strength - not automatically trusted as phishing-resistant; review manually against policies/authenticationStrengthPolicies.'
+            }
+        }
+    })
+
+    if ($missingRoles.Count -eq 0) {
+        $evidence = @($coveringPolicies | ForEach-Object { @{ Identity = $_.id; Detail = @{ displayName = $_.displayName; authenticationStrengthId = $_.grants.authenticationStrength.id } } }) + $customEvidence
+        $reason = "All 9 of Microsoft's minimum admin roles are covered by an enforced Conditional Access policy requiring the built-in phishing-resistant authentication strength."
+        if ($undocumentedExclusionCount -gt 0) {
+            $reason += " $undocumentedExclusionCount excluded identifier(s) on the covering policy/policies are not in the operator-declared break-glass/service-account list - confirm those exclusions are intentional."
+        }
+        if ($customStrengthPolicies.Count -gt 0) {
+            $reason += " $($customStrengthPolicies.Count) additional polic$(if ($customStrengthPolicies.Count -eq 1) { 'y binds' } else { 'ies bind' }) a custom/unrecognized authentication strength - not counted toward coverage, see evidence."
+        }
+        return New-PulseFinding -Status Pass -Reason $reason -Evidence $evidence
+    }
+
+    $missingEvidence = @($missingRoles | ForEach-Object { @{ Identity = $_.Key; Detail = @{ roleDisplayName = $_.Value } } })
+    $reason = "$($missingRoles.Count) of Microsoft's 9 minimum admin roles are not covered by any enforced Conditional Access policy requiring the built-in phishing-resistant authentication strength (generic MFA - builtInControls 'mfa' alone - does not satisfy this check; see TP.ENT.0005 for that lower bar)."
+    if ($customStrengthPolicies.Count -gt 0) {
+        $reason += " $($customStrengthPolicies.Count) polic$(if ($customStrengthPolicies.Count -eq 1) { 'y binds' } else { 'ies bind' }) a custom/unrecognized authentication strength - not counted toward coverage without manual verification, see evidence."
+    }
+    return New-PulseFinding -Status Fail -Reason $reason -Evidence ($missingEvidence + $customEvidence)
 }
