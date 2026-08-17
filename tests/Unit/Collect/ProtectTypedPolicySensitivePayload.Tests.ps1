@@ -472,3 +472,88 @@ Describe 'Protect-PulseTypedPolicyNestedElement - FAIL CLOSED (task-2.3-review r
         $serialized | Should -Not -Match ([regex]::Escape($plantedObjectValue))
     }
 }
+
+# Phase 3 whole-phase review, security walk finding 7 (IMPORTANT): the map-scoped gap - an
+# UNMAPPED @odata.type row (or a row with no @odata.type at all) previously passed through
+# COMPLETELY unredacted, including any complex/nested property that could carry a secret
+# string this module simply has no map entry to classify. RED-THEN-GREEN: these tests were
+# run against the pre-fix Protect-PulseTypedPolicyRow (unmapped types return $Row
+# unchanged) and failed - confirmed the fixtures actually exercise the new structural
+# fallback, not just restate it.
+Describe 'Protect-PulseTypedPolicyRow - UNMAPPED @odata.type structural fallback (Phase 3 whole-phase review, security walk finding 7)' {
+    It 'a DEEPLY-NESTED planted secret inside an unmapped-type complex property is conservatively redacted, not written raw' {
+        $plantedSecret = 'PLANTED-unmapped-type-deep-secret'
+        $row = [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.someFutureUnmappedType'
+            id            = 'x1'
+            displayName   = 'Some Future Policy'
+            omaSettings   = @(
+                [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.omaSettingString'
+                    omaUri        = './x'
+                    value         = $plantedSecret
+                }
+            )
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $row {
+            param($row)
+            Protect-PulseTypedPolicyRow -Row $row -TypeMap @{}
+        }
+
+        # Scalar metadata survives unredacted.
+        $result.id | Should -Be 'x1'
+        $result.displayName | Should -Be 'Some Future Policy'
+        # The complex omaSettings property (contains a string leaf) is conservatively
+        # redacted wholesale, with a redactionNote distinguishing it from the map-driven
+        # {redacted:true} marker.
+        $result.omaSettings.redacted | Should -BeTrue
+        $result.omaSettings.redactionNote | Should -Match 'unmapped'
+        ($result | ConvertTo-Json -Depth 10 -Compress) | Should -Not -Match ([regex]::Escape($plantedSecret))
+    }
+
+    It 'end-to-end via Protect-PulseTypedPolicySensitivePayload (deviceConfigurations dataset): the SAME planted secret never reaches raw disk cleartext' {
+        $plantedSecret = 'PLANTED-unmapped-type-e2e-secret'
+        $row = [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.someFutureUnmappedType'
+            id            = 'x2'
+            omaSettings   = @(
+                [pscustomobject]@{ '@odata.type' = '#microsoft.graph.omaSettingString'; omaUri = './y'; value = $plantedSecret }
+            )
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $row, $script:typedPolicyMaps {
+            param($row, $maps)
+            Protect-PulseTypedPolicySensitivePayload -Data @($row) -DatasetName 'deviceConfigurations' -TypedPolicyMaps $maps
+        }
+
+        ($result[0] | ConvertTo-Json -Depth 10 -Compress) | Should -Not -Match ([regex]::Escape($plantedSecret))
+    }
+
+    It 'a complex property containing NO string leaf anywhere (e.g. a purely-numeric array) passes through unredacted - conservative, not blanket' {
+        $row = [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.someFutureUnmappedType'
+            id            = 'x3'
+            retryCounts   = @(1, 2, 3)
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $row {
+            param($row)
+            Protect-PulseTypedPolicyRow -Row $row -TypeMap @{}
+        }
+
+        $result.retryCounts | Should -Be @(1, 2, 3)
+    }
+
+    It 'a row with NO @odata.type at all (no complex properties) still returns the ORIGINAL reference - no unnecessary allocation' {
+        $row = [pscustomobject]@{ id = 'x4'; displayName = 'No type at all' }
+
+        $isSameReference = InModuleScope TenantPulse -ArgumentList $row {
+            param($row)
+            $result = Protect-PulseTypedPolicyRow -Row $row -TypeMap @{}
+            [object]::ReferenceEquals($row, $result)
+        }
+
+        $isSameReference | Should -BeTrue
+    }
+}

@@ -30,13 +30,26 @@
     dataset->policyType mapping below - this is the one honest gap in this fix, called out
     here rather than implied to be more general than it is.
 
-    UNMAPPED @odata.type WITHIN A MAPPED DATASET: a row whose own `@odata.type` has no
-    entry in the relevant TypedPolicyMaps.psd1 sub-map (the identical "collected, not
-    setting-expanded" situation Invoke-PulseTypedPolicyExpansion.ps1 gaps) is passed
-    through UNCHANGED here too, for the same reason - there is no known Sensitive
-    classification for a shape this module has no property map for. This is consistent
-    with (not a regression relative to) the expansion walk's own behavior: neither layer
-    can redact what it has no classification for.
+    UNMAPPED @odata.type WITHIN A MAPPED DATASET - STRUCTURAL FALLBACK (Phase 3
+    whole-phase review, security walk finding 7 - CORRECTED, was: "passed through
+    unchanged"): a row whose own `@odata.type` has no entry in the relevant
+    TypedPolicyMaps.psd1 sub-map (the identical "collected, not setting-expanded"
+    situation Invoke-PulseTypedPolicyExpansion.ps1 gaps) no longer writes raw to disk
+    unconditionally - there is still no KNOWN Sensitive classification for a shape this
+    module has no property map for, but this pass now applies a conservative STRUCTURAL
+    fallback instead of a blind pass-through: any top-level COMPLEX property (an
+    object/array, never a bare scalar) that contains at least one string leaf anywhere
+    inside it is redacted wholesale (Protect-PulseTypedPolicyRowUnmappedConservative,
+    below), carrying its own `redactionNote` distinct from the map-driven `{redacted:true}`
+    marker. Scalar metadata (displayName/id/version/etc.) and complex-but-provably-
+    string-free shapes (e.g. a numeric array) still pass through unredacted - this closes
+    the gap where a genuinely unmapped type's omaSettings[]-shaped (or similarly nested)
+    secret string wrote to datasets/deviceConfigurations.json in cleartext, without
+    resorting to a banned secret-bearing-PROPERTY-NAME allowlist (this module's own
+    structural-classification-only rule, matching Protect-PulseSettingsCatalogSecretPayload's
+    approach). The EXPANSION layer's own gapping behavior (Invoke-PulseTypedPolicyExpansion.ps1
+    still skips an unmapped type's settings ENTIRELY rather than emitting a partial row) is
+    UNCHANGED by this fix - only the RAW dataset write this file governs is affected.
 
     SHAPE NEUTRALITY: every raw-row read goes through the shared
     Get-PulseSettingsCatalogValueProperty/Test-PulseSettingsCatalogNode accessors (works
@@ -86,6 +99,127 @@ $script:PulseTypedPolicyRedactionDatasetMap = @{
 
 function New-PulseRedactedMarker {
     return [pscustomobject]@{ redacted = $true }
+}
+
+function New-PulseUnmappedConservativeRedactedMarker {
+    # Distinguishable from the map-driven New-PulseRedactedMarker by its own extra
+    # redactionNote field - a reader can tell "this module has a real Sensitive
+    # classification and redacted by design" apart from "this module has NO classification
+    # for this type at all and redacted conservatively because it could not prove the
+    # complex value was safe" (Phase 3 whole-phase review, security walk finding 7).
+    return [pscustomobject]@{ redacted = $true; redactionNote = 'unmapped @odata.type - conservatively redacted (complex property, string leaf present)' }
+}
+
+function Test-PulseTypedPolicyComplexValue {
+    <#
+        Private helper (security walk finding 7): $true for any shape this module cannot
+        treat as a leaf scalar - IDictionary, a custom PSObject (real Graph rows/nested
+        objects, never a boxed primitive - PowerShell's own `-is [PSObject]` test is
+        already used this way throughout this file), or any other IEnumerable that is not
+        a bare string. Everything else (string/int/bool/datetime/$null/enum) is a scalar.
+    #>
+    param($Value)
+
+    if ($null -eq $Value) { return $false }
+    if ($Value -is [string]) { return $false }
+    if ($Value -is [System.Collections.IDictionary]) { return $true }
+    if ($Value -is [System.Management.Automation.PSObject]) { return $true }
+    if ($Value -is [System.Collections.IEnumerable]) { return $true }
+    return $false
+}
+
+function Test-PulseTypedPolicyContainsStringLeaf {
+    <#
+        Private helper (security walk finding 7): $true if -Value is itself a string, or
+        recursively contains a string leaf anywhere inside an IDictionary/PSObject/
+        IEnumerable structure. Used to decide whether an unmapped type's complex property
+        could plausibly carry a secret string (the shape every real Sensitive leaf this
+        module has ever mapped - omaSettings[].value and friends - actually takes) versus
+        a purely non-string complex shape (e.g. a numeric array) that is conservatively
+        left alone rather than redacted for no real benefit.
+    #>
+    param($Value)
+
+    if ($null -eq $Value) { return $false }
+    if ($Value -is [string]) { return $true }
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($v in $Value.Values) {
+            if (Test-PulseTypedPolicyContainsStringLeaf -Value $v) { return $true }
+        }
+        return $false
+    }
+    if ($Value -is [System.Management.Automation.PSObject]) {
+        foreach ($property in @($Value.PSObject.Properties)) {
+            if (Test-PulseTypedPolicyContainsStringLeaf -Value $property.Value) { return $true }
+        }
+        return $false
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        foreach ($item in $Value) {
+            if (Test-PulseTypedPolicyContainsStringLeaf -Value $item) { return $true }
+        }
+        return $false
+    }
+    return $false
+}
+
+function Protect-PulseTypedPolicyRowUnmappedConservative {
+    <#
+        Private helper (security walk finding 7): the structural fail-closed fallback for
+        a row whose own @odata.type has no TypedPolicyMaps.psd1 entry (or no @odata.type
+        at all) - see this file's own UNMAPPED @odata.type docstring section for the full
+        boundary this closes. A known secret-bearing PROPERTY NAME set is deliberately NOT
+        used here (name-pattern matching is banned by project rule) - instead, every
+        COMPLEX top-level property (see Test-PulseTypedPolicyComplexValue) that contains at
+        least one string leaf anywhere inside it (see Test-PulseTypedPolicyContainsStringLeaf)
+        is redacted WHOLESALE via New-PulseUnmappedConservativeRedactedMarker. Scalar
+        metadata (displayName/id/version/etc.) and complex-but-provably-string-free shapes
+        (e.g. a numeric array) pass through unchanged - this is conservative, not a
+        blanket wipe of every unmapped row. No unnecessary clone/allocation when nothing on
+        the row is complex at all (mirrors Protect-PulseTypedPolicyRow's own
+        $anyRedactionPossible short-circuit).
+    #>
+    param($Row)
+
+    if ($Row -is [System.Collections.IDictionary]) {
+        $anyComplex = $false
+        foreach ($key in @($Row.Keys)) {
+            if (Test-PulseTypedPolicyComplexValue -Value $Row[$key]) { $anyComplex = $true; break }
+        }
+        if (-not $anyComplex) { return $Row }
+
+        $clone = [ordered]@{}
+        foreach ($key in @($Row.Keys)) {
+            $value = $Row[$key]
+            $clone[$key] = if ((Test-PulseTypedPolicyComplexValue -Value $value) -and (Test-PulseTypedPolicyContainsStringLeaf -Value $value)) {
+                New-PulseUnmappedConservativeRedactedMarker
+            } else { $value }
+        }
+        return $clone
+    }
+
+    if ($Row -is [System.Management.Automation.PSObject]) {
+        $properties = @($Row.PSObject.Properties)
+        $anyComplex = $false
+        foreach ($property in $properties) {
+            if (Test-PulseTypedPolicyComplexValue -Value $property.Value) { $anyComplex = $true; break }
+        }
+        if (-not $anyComplex) { return $Row }
+
+        $clone = [pscustomobject]@{}
+        foreach ($property in $properties) {
+            $value = $property.Value
+            $newValue = if ((Test-PulseTypedPolicyComplexValue -Value $value) -and (Test-PulseTypedPolicyContainsStringLeaf -Value $value)) {
+                New-PulseUnmappedConservativeRedactedMarker
+            } else { $value }
+            Add-Member -InputObject $clone -NotePropertyName $property.Name -NotePropertyValue $newValue
+        }
+        return $clone
+    }
+
+    # Neither shape - nothing structured to walk; return unchanged (same "unrecognized
+    # container shape passes through" rule this file applies elsewhere).
+    return $Row
 }
 
 function Protect-PulseTypedPolicyNestedElement {
@@ -243,7 +377,13 @@ function Protect-PulseTypedPolicyRow {
     $odataType = if ($null -ne $odataTypeRaw) { [string] $odataTypeRaw } else { $null }
 
     if ([string]::IsNullOrEmpty($odataType) -or -not $TypeMap.Contains($odataType)) {
-        return $Row
+        # STRUCTURAL FAIL-CLOSED FOR UNMAPPED TYPES (Phase 3 whole-phase review, security
+        # walk finding 7): previously returned $Row completely unchanged - the map-scoped
+        # gap where an unmapped-type row's complex properties (where omaSettings[].value-
+        # class secrets live) wrote raw to disk. See Protect-PulseTypedPolicyRowUnmapped
+        # Conservative's own docstring for the conservative redaction rule now applied
+        # here instead.
+        return Protect-PulseTypedPolicyRowUnmappedConservative -Row $Row
     }
 
     $typeEntry = $TypeMap[$odataType]
