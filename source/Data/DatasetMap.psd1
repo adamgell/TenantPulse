@@ -157,4 +157,33 @@
     # endpoints, the same "single dataset, many checks read different slices" pattern
     # authenticationMethodsPolicy already uses for TP.ENT.0006/0008.
     directorySettings = @{ Type = 'DirectorySetting'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 4.4 (ScuBA/CISA CA + role + credential checks) - servicePrincipals: GET
+    # /servicePrincipals (v1.0), backs TP.ENT.0019's service-principal half of app
+    # credential hygiene. CONFIRMED against the real installed GraphKit 0.1.1 catalog
+    # (Get-GraphOperation -List: Type='ServicePrincipal' Operation='List' ApiVersion='v1.0',
+    # ThrottleClass=Read, ReplayPolicy=Safe) - not marked Pending. The Graph
+    # servicePrincipal entity returns passwordCredentials/keyCredentials by default (no
+    # $select needed) so this single List call is sufficient for TP.ENT.0019's evaluation.
+    #
+    # HONEST GAP, NOT SILENTLY DROPPED: GraphKit 0.1.1's catalog has NO 'Application' Type
+    # at all (confirmed the same way, Get-GraphOperation -List) - app-REGISTRATION credential
+    # hygiene (v1.0/applications, the other half of TP.ENT.0019's research entry) cannot be
+    # collected yet and is not declared here. See the T4.4 report for the exact requested
+    # descriptor (Entra.Applications.Credentials.List) to ride into a future GraphKit
+    # release; TP.ENT.0019 ships evaluating service principals only until it does, with that
+    # scope named explicitly in the check's own docstring/consulting text.
+    servicePrincipals = @{ Type = 'ServicePrincipal'; Operation = 'List'; ApiVersion = 'v1.0' }
+
+    # Task 4.4 - PIM (TP.ENT.0022): NEITHER RoleAssignmentScheduleInstance NOR
+    # RoleEligibilityScheduleInstance exists as a Type in the installed GraphKit 0.1.1
+    # catalog (confirmed via Get-GraphOperation -List). Both Pending - see the T4.4 report
+    # for the exact requested descriptor shapes.
+    roleAssignmentScheduleInstances  = @{ Type = 'RoleAssignmentScheduleInstance'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    roleEligibilityScheduleInstances = @{ Type = 'RoleEligibilityScheduleInstance'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 4.4 - cross-tenant access (TP.ENT.0023): no CrossTenantAccessPolicy Type exists
+    # in the installed GraphKit 0.1.1 catalog (confirmed via Get-GraphOperation -List).
+    # Pending - see the T4.4 report for the exact requested descriptor shape.
+    crossTenantAccessPolicyDefault = @{ Type = 'CrossTenantAccessPolicy'; Operation = 'GetDefault'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }
