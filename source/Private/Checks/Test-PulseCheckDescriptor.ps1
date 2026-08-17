@@ -28,6 +28,21 @@
     with a raw error instead of an aggregated one) and passes the same hashtable into
     every descriptor's validation call. $null means "no map available yet" and the
     cross-check is skipped for every descriptor.
+
+    Data.Expansions (Task 3.2): a descriptor's artifact-dependency declaration is no
+    longer just Data.Datasets - a check whose real input is a compact expansion artifact
+    (e.g. expanded/conflicts.json, never a raw Graph dataset - see TP.INT.0006) declares
+    that via Data.Expansions instead of inventing a dummy Data.Datasets entry a rule never
+    reads (the wart TP.INT.0006 carried until this task). Both fields are now OPTIONAL
+    individually (a check may declare only Datasets, only Expansions, or - after this
+    task - both), but Data.Datasets and Data.Expansions MAY NOT BOTH BE EMPTY: a check
+    with neither declares no artifact input at all, which is never a valid check. Every
+    Data.Expansions name is cross-checked against a small, hardcoded KNOWN-ARTIFACT
+    REGISTRY (currently just 'conflicts' - the one expansion family that exists) rather
+    than the dataset map's live cross-check, since expansion artifacts are not
+    GraphKit-collected datasets and have no DatasetMap.psd1 entry to check against; a
+    future expansion family (a "future family name" per the task brief) is added to this
+    same registry, not to the dataset map.
 #>
 
 function Test-PulseCheckDescriptor {
@@ -66,6 +81,11 @@ function Test-PulseCheckDescriptor {
     # but not a [string] (e.g. an array, a number, a hashtable). Returns the validated
     # string, or $null if the field is missing/blank/wrong-typed, so callers only run
     # further pattern/enum checks against a confirmed real string.
+    # Known-artifact registry (Task 3.2): the only expansion artifact names a
+    # Data.Expansions entry may legally name today. Growing this to a second family later
+    # means adding its name here, nowhere else - see this file's own top-level docstring.
+    $knownExpansionArtifacts = @('conflicts')
+
     function Test-PulseScalarStringField {
         param(
             [hashtable] $Container,
@@ -107,10 +127,17 @@ function Test-PulseCheckDescriptor {
             [hashtable] $Container,
             [string] $Key,
             [string] $FieldPath,
-            [switch] $AllowEmpty
+            [switch] $AllowEmpty,
+            # AllowMissing (Task 3.2): the key may be absent from $Container entirely
+            # without an "is required" error - the caller treats absence the same as an
+            # empty array. Used for Data.Datasets/Data.Expansions, which are now each
+            # individually optional (see this file's own docstring) - unlike every other
+            # caller of this function, which still requires the key to be present.
+            [switch] $AllowMissing
         )
 
         if (-not $Container.ContainsKey($Key)) {
+            if ($AllowMissing) { return [string[]] @() }
             $errors.Add("${Label}: ${FieldPath}: is required.")
             return $null
         }
@@ -173,14 +200,40 @@ function Test-PulseCheckDescriptor {
         $errors.Add("${Label}: Impact: '$impact' is not one of: $($validEffortImpact -join '|').")
     }
 
-    # Data.Datasets / Data.Gates
+    # Data.Datasets / Data.Expansions / Data.Gates
     $datasets = $null
     if (-not $Descriptor.ContainsKey('Data') -or $Descriptor.Data -isnot [hashtable]) {
         $errors.Add("${Label}: Data: is required and must be a hashtable.")
     } else {
         $data = $Descriptor.Data
-        $datasets = Test-PulseStringArrayField -Container $data -Key 'Datasets' -FieldPath 'Data.Datasets'
+
+        # Both individually optional now (Task 3.2) - neither call adds an "is required"
+        # error just for being absent; AllowEmpty means an explicitly-present-but-empty
+        # array is not an error EITHER, since "both empty" is checked once, together,
+        # below, with its own combined error message rather than two separate
+        # "must not be empty" errors that would misdescribe the actual rule.
+        $datasets = Test-PulseStringArrayField -Container $data -Key 'Datasets' -FieldPath 'Data.Datasets' -AllowEmpty -AllowMissing
+        $expansions = Test-PulseStringArrayField -Container $data -Key 'Expansions' -FieldPath 'Data.Expansions' -AllowEmpty -AllowMissing
         Test-PulseStringArrayField -Container $data -Key 'Gates' -FieldPath 'Data.Gates' -AllowEmpty | Out-Null
+
+        foreach ($name in @($expansions)) {
+            if ($knownExpansionArtifacts -notcontains $name) {
+                $errors.Add("${Label}: Data.Expansions: artifact '$name' is not a known expansion artifact (known: $($knownExpansionArtifacts -join '|')).")
+            }
+        }
+
+        # Combined non-emptiness rule (Task 3.2, replaces the old standalone
+        # "Data.Datasets: must not be empty"): a check with NEITHER a dataset NOR an
+        # expansion artifact input declares no data source at all, which is never valid -
+        # but an empty Data.Datasets is perfectly fine on its own when Data.Expansions
+        # covers it (TP.INT.0006's own post-migration shape), and vice versa. $datasets/
+        # $expansions can be $null here only if Test-PulseStringArrayField already
+        # reported a TYPE error for that field (e.g. a scalar instead of an array) - @()
+        # around a $null coerces to a zero-count array so this check still fires (a type
+        # error alone does not silently satisfy the non-emptiness rule).
+        if (@($datasets).Count -eq 0 -and @($expansions).Count -eq 0) {
+            $errors.Add("${Label}: Data: Datasets and Expansions may not both be empty - a check needs at least one artifact input.")
+        }
     }
 
     # Dataset map cross-check - $DatasetMap is $null until Task 1.5 lands DatasetMap.psd1

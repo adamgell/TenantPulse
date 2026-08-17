@@ -166,9 +166,11 @@
 # Context-boundary regression coverage in Evaluator.Tests.ps1 (4 tests: an Expression
 # rule never sees $Context.ArtifactReader or the prior $Context.Store, a Function rule's
 # in-place $Context mutation never corrupts a later check's own view) plus discovery
-# picking up the remainder via the structural QA suites. Set to the REAL total (1142),
-# matching the module's own post-fix Pester run.
-$script:tenantPulseGateMinimumTests = 1142
+# picking up the remainder via the structural QA suites. Set to the REAL total (1148,
+# Task 3.2's schema round: Data.Expansions validator coverage + the
+# Invoke-PulseEvaluation/Get-PulseCollectionManifest `@($null)` regression fix), matching
+# the module's own post-fix Pester run.
+$script:tenantPulseGateMinimumTests = 1148
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

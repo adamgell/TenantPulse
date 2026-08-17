@@ -97,7 +97,15 @@ function Get-PulseCollectionManifest {
     }
 
     foreach ($check in $Checks) {
-        $datasetNames = @($check.Data.Datasets)
+        # Data.Expansions (Task 3.2): an artifact-only check (e.g. TP.INT.0006) has no
+        # Data.Datasets at all, so $check.Data.Datasets is $null - `@($null)` wraps that
+        # into a one-element array containing $null rather than an empty array (see
+        # Invoke-PulseEvaluation's own identical fix/comment for the same PowerShell
+        # quirk). This collection manifest ignores Data.Expansions entirely, by design
+        # (expansion artifacts derive from the expansion pipeline post-collection, not
+        # from anything this manifest requests) - filtering the null here is what makes
+        # that "ignores" real rather than a crash.
+        $datasetNames = @($check.Data.Datasets) | Where-Object { -not [string]::IsNullOrEmpty($_) }
 
         foreach ($name in $datasetNames) {
             Resolve-Entry -Name $name -RequestedBy $check.Id

@@ -111,14 +111,14 @@ Describe 'Import-PulseCheckCatalog' {
         } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0012*References.Research*is required*'
     }
 
-    It 'throws naming the file, Id, property and "must not be empty" for empty Data.Datasets' {
+    It 'throws naming the file, Id, property and "may not both be empty" for empty Data.Datasets with no Data.Expansions (Task 3.2)' {
         {
             InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/empty-datasets') {
                 param($path)
                 function Test-PulseFixtureRule { $true }
                 Import-PulseCheckCatalog -Path $path
             }
-        } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0013*Data.Datasets*must not be empty*'
+        } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0013*Data*Datasets and Expansions may not both be empty*'
     }
 
     It 'throws naming the file, Id, property and "is not one of" for an unknown Rule.Type' {
@@ -521,5 +521,97 @@ Describe 'Test-PulseCheckDescriptor' {
         # asserting its ABSENCE guards against a validator that keeps evaluating a field
         # after its type prerequisite already failed.
         $joined | Should -Not -Match 'Rule\.Function'
+    }
+
+    Context 'Data.Expansions (Task 3.2)' {
+        BeforeAll {
+            # Base descriptor shape shared by every It below - everything EXCEPT Data,
+            # which each It overrides directly. Built once here (outer test scope, not
+            # inside InModuleScope) and threaded in via -ArgumentList since InModuleScope
+            # scriptblocks cannot see functions/variables defined in the caller's scope.
+            $script:baseDescriptorNoData = @{
+                Id         = 'TP.INT.0099'
+                Title      = 'Valid'
+                Category   = 'Intune.SettingsCatalog'
+                Severity   = 'Medium'
+                Effort     = 'Low'
+                Impact     = 'Low'
+                Rule       = @{ Type = 'Function'; Function = 'Test-PulseFixtureRule' }
+                Consulting = @{
+                    WhatItMeans  = 'x'
+                    WhyItMatters = 'x'
+                    Remediation  = @('x')
+                    PortalLinks  = @('https://intune.microsoft.com/')
+                }
+                References = @{ Research = 'docs/x.md#a'; Authorities = @('https://learn.microsoft.com/') }
+                Origin     = $null
+            }
+        }
+
+        It 'accepts a descriptor with Data.Expansions and no Data.Datasets at all (TP.INT.0006''s post-migration shape)' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData {
+                param($base)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{ Expansions = @('conflicts'); Gates = @() }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+            }
+            @($errors).Count | Should -Be 0
+        }
+
+        It 'accepts a descriptor with BOTH Data.Datasets and Data.Expansions populated' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData {
+                param($base)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{ Datasets = @('configurationPolicies'); Expansions = @('conflicts'); Gates = @() }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+            }
+            @($errors).Count | Should -Be 0
+        }
+
+        It 'reports "may not both be empty" when Data.Datasets is empty and Data.Expansions is absent' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData {
+                param($base)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{ Datasets = @(); Gates = @() }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+            }
+            (@($errors) -join "`n") | Should -Match 'Data: Datasets and Expansions may not both be empty'
+        }
+
+        It 'reports "may not both be empty" when both Data.Datasets and Data.Expansions are absent entirely' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData {
+                param($base)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{ Gates = @() }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+            }
+            (@($errors) -join "`n") | Should -Match 'Data: Datasets and Expansions may not both be empty'
+        }
+
+        It 'rejects an unknown Data.Expansions artifact name against the known-artifact registry' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData {
+                param($base)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{ Expansions = @('notARealArtifactFamily'); Gates = @() }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+            }
+            (@($errors) -join "`n") | Should -Match "Data.Expansions: artifact 'notARealArtifactFamily' is not a known expansion artifact"
+        }
+
+        It 'reports "must be a string array" for a scalar Data.Expansions, not a silent per-character iteration' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData {
+                param($base)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{ Expansions = 'conflicts'; Gates = @() }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+            }
+            (@($errors) -join "`n") | Should -Match ([regex]::Escape('Data.Expansions: must be a string array, got String.'))
+        }
     }
 }

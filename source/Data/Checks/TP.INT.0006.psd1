@@ -6,14 +6,16 @@
     Effort     = 'Medium'
     Impact     = 'Medium'
     Data       = @{
-        # ACCEPTED WART, one-off until T3.2 (plan amendment): 'configurationPolicies' is
-        # declared here only to satisfy the schema's non-empty-Datasets requirement - the
-        # rule (Test-PulseConflictingPolicySettings) never reads this dataset's rows; its
-        # real input is the expanded/conflicts.json artifact via $Context.ArtifactReader.
-        # T3.2 must introduce a proper Data.Expansions declaration shape instead of
-        # reusing Data.Datasets for a dataset a rule does not actually consume.
-        Datasets = @('configurationPolicies')
-        Gates    = @('Intune')
+        # Data.Expansions (Task 3.2): this check's real input is the expanded/
+        # conflicts.json artifact, read via $Context.ArtifactReader.GetConflictArtifact()
+        # - never a raw Graph dataset. Before T3.2 this field did not exist, so the
+        # descriptor declared a dummy Data.Datasets = @('configurationPolicies') purely
+        # to satisfy the old schema's non-empty-Datasets requirement, even though the
+        # rule function never read that dataset's rows (see Test-PulseConflictingPolicySettings.ps1's
+        # own now-corrected docstring). That wart is retired here: the schema now accepts
+        # an artifact-only declaration directly via Data.Expansions.
+        Expansions = @('conflicts')
+        Gates      = @('Intune')
     }
     Rule       = @{
         Type     = 'Function'

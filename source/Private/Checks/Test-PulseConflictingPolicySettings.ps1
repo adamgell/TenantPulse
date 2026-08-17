@@ -2,21 +2,16 @@
     Private: TP.INT.0006 rule function - conflicting security-setting values across two or
     more Settings Catalog / configuration policies (Task 3.1).
 
-    ARTIFACT, NOT A DATASET (see this task's own standing-constraint note): this check's
-    real input is Task 2.6's expanded/conflicts.json artifact, read via
-    $Context.ArtifactReader.GetConflictArtifact() (Invoke-PulseEvaluation's own opt-in
-    $Context wiring - see that function's own docstring, and New-PulseArtifactReader's own
-    docstring for why a rule receives this narrow, read-only accessor rather than a raw
-    $Store handle) - never a raw Graph dataset streamed row by row. Data.Datasets still
-    declares 'configurationPolicies' (a real, already-DatasetMap-registered, Read/Safe
-    dataset) purely to satisfy the descriptor schema's non-empty-Datasets requirement and
-    to give the engine SOME signal that Intune Settings Catalog data was collected for this
-    tenant at all - this check's OWN NotApplicable-vs-Pass/Warn/Fail decision is made
-    entirely from the conflicts artifact, not from that dataset's rows (which this rule
-    never reads). ACCEPTED WART, one-off until T3.2 (per the phase-3 plan amendment): a
-    proper Data.Expansions declaration shape belongs in the descriptor schema instead of
-    reusing Data.Datasets for a dataset the rule does not actually read - out of scope for
-    this task.
+    ARTIFACT, NOT A DATASET: this check's real input is Task 2.6's expanded/conflicts.json
+    artifact, read via $Context.ArtifactReader.GetConflictArtifact()
+    (Invoke-PulseEvaluation's own opt-in $Context wiring - see that function's own
+    docstring, and New-PulseArtifactReader's own docstring for why a rule receives this
+    narrow, read-only accessor rather than a raw $Store handle) - never a raw Graph
+    dataset streamed row by row. The descriptor (TP.INT.0006.psd1) declares this via
+    Data.Expansions = @('conflicts') (Task 3.2's schema field) rather than any
+    Data.Datasets entry - there is no dataset this rule reads at all, and none needs to be
+    declared for the schema's sake (the pre-T3.2 dummy 'configurationPolicies' Datasets
+    entry was retired when Data.Expansions shipped).
 
     FOUR-STATE DEGRADE (this task's own brief): when the conflicts artifact is not
     'Available' (no manifest.expansions.conflicts entry at all, or a recorded

@@ -389,7 +389,18 @@ function Invoke-PulseCheckEvaluation {
         }
     }
 
-    $datasetNames = @($Check.Data.Datasets)
+    # Data.Expansions (Task 3.2): Data.Datasets is now legitimately ABSENT for an
+    # artifact-only check (TP.INT.0006's post-migration shape) - $Check.Data.Datasets is
+    # then $null, and `@($null)` in PowerShell does NOT produce an empty array, it
+    # produces a ONE-ELEMENT array containing $null (an array subexpression around a
+    # scalar always wraps it, never unrolls a null scalar to zero elements). Left
+    # unguarded, the foreach below would iterate once with $name = $null and crash inside
+    # $manifestDatasets.ContainsKey($null) (ArgumentNullException) - a real regression
+    # this task's own TP.INT.0006 fixture tests caught. Filtering out $null/empty entries
+    # here keeps this loop's behavior identical to before Data.Expansions existed for
+    # every check that still declares real dataset names, while making "no Data.Datasets
+    # at all" behave the same as "Data.Datasets = @()" always has (zero iterations).
+    $datasetNames = @($Check.Data.Datasets) | Where-Object { -not [string]::IsNullOrEmpty($_) }
     $datasets = @{}
 
     foreach ($name in $datasetNames) {
