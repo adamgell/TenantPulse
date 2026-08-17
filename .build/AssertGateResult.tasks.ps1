@@ -472,7 +472,18 @@
 # five new root files added to $explicitRootFiles for finding 8 plus the README.md change
 # for finding 9). 1955 is the real, measured `./build.ps1 -Tasks build,test` total for
 # this wave; both tracking locations bumped together, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1956
+#
+# 1956 -> 1971 (Phase 3 closing fix series): net growth across a concurrent PS 7.4 compat
+# hotfix landed mid-series by another session (5d8a548/4e5cc58, IDictionary.Contains not
+# ContainsKey on manifest dictionaries) plus this series' own new coverage - item 2's
+# prevention-pair widening (SettingDefinitionCorpusCrossCheck.tests.ps1's user_vendor_msft_*
+# scope + Snapshot.Tests.ps1's datetime-culture regression) and its own new
+# MinimumTests-ratchet-sync standing gate, item 3's TP.INT.0028 ESP-projection fixture
+# split, and item 4's evidence-Detail-redaction regression coverage. 1971 is the real,
+# measured `./build.ps1 -Tasks build,test` total (verified on both PowerShell 7.6.5 and
+# 7.4.19) at the end of this series; all four tracking locations bumped together in the
+# same commit, per the ratchet's own rule.
+$script:tenantPulseGateMinimumTests = 1971
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

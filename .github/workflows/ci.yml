@@ -701,7 +701,14 @@ jobs:
           # per-file breakdown (I1/I2/I4 hostile+evidence Its, M1 Pass-evidence assertions,
           # the new unmapped-@odata.type structural-fallback Describe for security walk
           # finding 7, and SecretScan.tests.ps1 discovery growth).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1956 -AllowedSkips $allowedSkips -AllowNotRun 1
+          #
+          # 1956 -> 1971 (Phase 3 closing fix series): net growth across a concurrent PS 7.4
+          # compat hotfix landed mid-series (5d8a548/4e5cc58) plus this series' own new
+          # coverage (item 2's prevention-pair widening and MinimumTests-ratchet-sync
+          # standing gate, item 3's TP.INT.0028 ESP-projection fixtures, item 4's
+          # evidence-Detail-redaction regression coverage) - see
+          # .build/AssertGateResult.tasks.ps1's own accounting.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1971 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
