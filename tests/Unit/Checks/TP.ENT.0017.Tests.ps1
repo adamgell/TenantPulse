@@ -90,7 +90,7 @@ Describe 'TP.ENT.0017 - MFA required for all users by an enforced Conditional Ac
         $finding.evidence[0].detail.mfaMechanism | Should -Be 'builtInControls:mfa'
     }
 
-    It 'Pass: an enabled all-users policy using authenticationStrength (PSObject shape)' {
+    It 'Pass: an enabled all-users policy using authenticationStrength (value round-trips through a PSObject before Write-PulseDataset - cosmetic re: shape, the fixture harness always re-materializes to hashtable before the rule runs; see ConvertTo-PulseCaPolicyView.Tests.ps1 for genuine shape-neutrality coverage at the view layer)' {
         $policy = ConvertTo-PSObjectShape -Value (New-PulseAllUsersMfaPolicy -UseAuthenticationStrength)
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0017' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }

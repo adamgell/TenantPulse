@@ -94,7 +94,7 @@ Describe 'TP.ENT.0019 - service principal credential hygiene' {
         $finding.status | Should -Be 'Pass'
     }
 
-    It 'Fail: a password credential exceeds 180 days (PSObject shape)' {
+    It 'Fail: a password credential exceeds 180 days (value round-trips through a PSObject before Write-PulseDataset - cosmetic re: shape, the fixture harness always re-materializes to hashtable before the rule runs)' {
         $sp = ConvertTo-PSObjectShape -Value (New-PulseServicePrincipal -PasswordLifetimeDays 200)
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0019' -Datasets @(
             @{ Name = 'servicePrincipals'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($sp) }

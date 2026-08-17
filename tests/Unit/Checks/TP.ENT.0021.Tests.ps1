@@ -90,7 +90,7 @@ Describe 'TP.ENT.0021 - Fewer than 10 total privileged role assignments' {
         $finding.reason | Should -Match '^3 '
     }
 
-    It 'Fail: exactly 10 privileged assignments meets the threshold (PSObject shape)' {
+    It 'Fail: exactly 10 privileged assignments meets the threshold (values round-trip through PSObjects before Write-PulseDataset - cosmetic re: shape, the fixture harness always re-materializes to hashtable before the rule runs)' {
         $assignments = @(1..10 | ForEach-Object { ConvertTo-PSObjectShape -Value (New-PulseRoleAssignment -PrincipalId "u$_" -RoleDefinitionId $script:privilegedRoleId) })
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0021' -Datasets @(
             @{ Name = 'directoryRoleAssignments'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = $assignments }

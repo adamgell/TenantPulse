@@ -306,8 +306,8 @@ Describe 'ConvertTo-PulseCaPolicyView' {
         $result.session.signInFrequency | Should -Not -BeNullOrEmpty
     }
 
-    It 'flattens conditions.clientApplications (Task 4.4, TP.ENT.0024) into includeApplications/excludeApplications, distinct from conditions.apps' {
-        $raw = @{
+    It 'flattens conditions.clientApplications (Task 4.4, TP.ENT.0024) into includeApplications/excludeApplications, distinct from conditions.apps, in both shapes (post-review F3: this is the genuine shape-neutrality coverage - the populated case previously only ever exercised the hashtable shape)' {
+        $rawHashtable = @{
             id          = 'policy-workload'
             displayName = 'Workload Identity CA'
             state       = 'enabled'
@@ -315,14 +315,16 @@ Describe 'ConvertTo-PulseCaPolicyView' {
                 clientApplications = @{ includeApplications = @('11111111-1111-1111-1111-111111111111'); excludeApplications = @('22222222-2222-2222-2222-222222222222') }
             }
         }
-        $result = InModuleScope TenantPulse -ArgumentList $raw {
-            param($raw)
-            ConvertTo-PulseCaPolicyView -Policies $raw
-        }
+        foreach ($raw in @($rawHashtable, (ConvertTo-PSObjectShape -Value $rawHashtable))) {
+            $result = InModuleScope TenantPulse -ArgumentList $raw {
+                param($raw)
+                ConvertTo-PulseCaPolicyView -Policies $raw
+            }
 
-        $result.conditions.clientApplications.includeApplications | Should -Be @('11111111-1111-1111-1111-111111111111')
-        $result.conditions.clientApplications.excludeApplications | Should -Be @('22222222-2222-2222-2222-222222222222')
-        $result.conditions.apps.includeApplications.Count | Should -Be 0
+            $result.conditions.clientApplications.includeApplications | Should -Be @('11111111-1111-1111-1111-111111111111')
+            $result.conditions.clientApplications.excludeApplications | Should -Be @('22222222-2222-2222-2222-222222222222')
+            $result.conditions.apps.includeApplications.Count | Should -Be 0
+        }
     }
 
     It 'clientApplications null/empty-normalizes (never throws) when conditions.clientApplications is absent, in both shapes' {
