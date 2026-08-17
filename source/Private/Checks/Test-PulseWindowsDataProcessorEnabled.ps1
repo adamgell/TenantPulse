@@ -60,7 +60,7 @@ function Test-PulseWindowsDataProcessorEnabled {
     )
 
     if ($hasValidWindowsLicense -and $featuresEnabled) {
-        return New-PulseFinding -Status Pass -Reason 'The tenant has a valid qualifying Windows license AND has enabled Windows diagnostic data in processor configuration - the organization is the GDPR-defined controller for Windows diagnostic data from enrolled devices, and diagnostic-data-dependent Intune features (feature/driver/expedited update failure alerts, update compatibility reports) can function.' -Evidence $evidence
+        return New-PulseFinding -Status Pass -Reason 'The tenant has attested a qualifying Windows license AND enabled Windows diagnostic data in processor configuration - both toggles this check depends on are on, so the features each independently gates (compatibility/expedite update reports, driver/expedited/feature update failure alerts, and Remediations) are not blocked by this configuration.' -Evidence $evidence
     }
 
     if (-not $hasValidWindowsLicense -and -not $featuresEnabled) {
