@@ -151,3 +151,38 @@ until the RunspacePool/shared-state issue is understood and fixed; this task doe
 change `-MaxParallel`'s own default (still 4, and still correct/fast against
 `-FromCapturedPayloads` mocked data, which is what `perftest` and most of the existing unit
 suite exercise) but does NOT recommend relying on it for a live run today.
+
+(Historical record - left as originally written per Task 3.4 Part D's own decision:
+`-MaxParallel`/`-Sequential` were deleted entirely in that task, closing this section's own
+open recommendation by removing the RunspacePool path rather than fixing its shared-state
+issue - see `Invoke-PulseSettingsCatalogExpansion.ps1`'s own docstring for the measured
+deletion rationale. This section is a dated record of what was true when T2.7 measured it,
+not rewritten to match.)
+
+## 5. Task 3.4 Part A: setting-presence index build, over the SAME 5,000-row corpus
+
+**Method**: `Invoke-PulseSettingPresenceIndexBuild` called 3 times back-to-back, immediately
+after the SAME section 1 run's `Invoke-PulseSettingsCatalogExpansion`/
+`Invoke-PulseConflictDetection` calls, over the identical already-published
+settingsCatalog/conflicts family artifacts (50 distinct `settingDefinitionId`s across 5,000
+policies, cycling 3 values each) - no re-seed needed between samples, since the build is a
+pure read-and-fold pass with no side effect on its own inputs. Each sample gets its own
+forced-GC-before/measured-after memory delta and its own stopwatch, matching section 1's own
+"MAX of >=3 runs x1.5" methodology (isolating THIS step's own run-to-run variance from
+section 1's unrelated expand/conflict steps).
+
+Measured on this session's host - same hardware/PowerShell version as section 1's own
+baseline (Apple Silicon, 18 logical CPUs, 128 GB RAM, macOS 26.4, PowerShell 7.6.5):
+
+| Sample | Elapsed | Managed-heap delta | Definitions in the published index |
+|---|---|---|---|
+| MAX of 3 | 3.244 s | 116.23 MB | 50 |
+| **Budget (`MAX x1.5`)** | **4.9 s** | **174.5 MB** | - |
+
+For context, the SAME run's own section-1 steps measured 199.70 s (expand) / 4.13 s
+(conflict) / 159.73 MB (expand+conflict combined memory delta) - both comfortably inside
+their own existing, already-recorded budgets (691 s / 6.7 s / 306.3 MB), confirming Part A
+introduced no regression to the pre-existing expand/conflict steps. The index build itself
+is fast and low-memory relative to the walk that produces its OWN inputs (a single grouping
+pass over already-parsed rows, no Graph, no re-parsing of the raw jsonl) - well inside every
+budget on the first measured run, no optimization needed.

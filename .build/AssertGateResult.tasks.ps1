@@ -402,7 +402,19 @@
 # adds automatically. 1822 is the real, measured `./build.ps1 -Tasks build,test` total for
 # this commit; both tracking locations bumped together in the same commit as these test
 # changes, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1822
+# 1822 -> 1861 (Task 3.4 Part A, per-family setting-presence index): +39 - 26 new Its in
+# tests/Unit/Expand/SettingPresenceIndex.Tests.ps1 (the pure transform's grouping/
+# redaction/assignment-classification/determinism behavior, the driver's per-family
+# availability rules, the reader's four-way outcome, the ArtifactReader accessor, the
+# -FromSnapshot re-derivation wiring, and the Get-PulseTenantSnapshot -ExpandSettings
+# end-to-end call-site wiring), 1 new CheckCatalog.Tests.ps1 It (Data.Expansions accepts
+# 'settingPresenceIndex', the known-artifact registry's second entry), plus 12
+# discovery-time SecretScan.tests.ps1 per-file cases (secret-scan + control-byte check,
+# x6 new files: the 5 new source/Private/Expand/*.ps1 producer/reader/driver/publisher
+# files plus the new test file itself). 1861 is the real, measured
+# `./build.ps1 -Tasks build,test` total for this commit; both tracking locations bumped
+# together in the same commit as these test changes, per the ratchet's own rule.
+$script:tenantPulseGateMinimumTests = 1861
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

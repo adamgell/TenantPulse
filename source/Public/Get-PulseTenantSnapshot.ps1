@@ -272,6 +272,14 @@ function Get-PulseTenantSnapshot {
         # artifacts just produced above, never Graph. Same void-return discipline as the
         # two calls above - see this file's own docstring.
         $null = Invoke-PulseConflictDetection -Store $store -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
+
+        # Part A, T3.4: per-family setting-presence index - purely derived from the SAME
+        # family expansion jsonl artifacts, never Graph, same void-return discipline. Runs
+        # after conflict detection (not before/interleaved) for no dependency reason -
+        # both derive independently from the family artifacts - but to keep the family
+        # jsonl artifacts' own two derived-artifact consumers grouped together at the end
+        # of this block, matching the order they were added in.
+        $null = Invoke-PulseSettingPresenceIndexBuild -Store $store -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
     }
 
     return $store

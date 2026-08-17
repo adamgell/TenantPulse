@@ -6,28 +6,32 @@
     a rule far more reach than "read the conflicts artifact" ever needed).
 
     NO STORE HANDLE, NO SETTABLE PROPERTIES: the object this function returns carries
-    exactly one member, a ScriptMethod GetConflictArtifact() - no NoteProperty a caller
-    could reassign, no reference back to the live $Store object a caller could reach
-    through. -Store's Root/ManifestPath are read ONCE here, into ordinary local [string]
-    variables (`$frozenRoot`/`$frozenManifestPath`) that the returned method closes over via
-    GetNewClosure() - .NET strings are themselves immutable, so once captured there is no
-    operation a rule (or anything downstream) can perform on those two local copies that
-    would reach back into, or change, the real $Store object or any later check's view of
-    it. The method body reconstructs only the minimal {Root;ManifestPath} shape
-    Get-PulseConflictArtifact/Get-PulseSnapshotManifest actually read, from those frozen
-    copies - never from the original -Store parameter, which is not captured by the
-    closure at all.
+    exactly two members, ScriptMethods GetConflictArtifact() and (Part A, T3.4 addition)
+    GetSettingPresenceIndex() - no NoteProperty a caller could reassign, no reference back
+    to the live $Store object a caller could reach through. -Store's Root/ManifestPath are
+    read ONCE here, into ordinary local [string] variables (`$frozenRoot`/`$frozenManifestPath`)
+    that the returned methods close over via GetNewClosure() - .NET strings are themselves
+    immutable, so once captured there is no operation a rule (or anything downstream) can
+    perform on those two local copies that would reach back into, or change, the real
+    $Store object or any later check's view of it. Each method body reconstructs only the
+    minimal {Root;ManifestPath} shape Get-PulseConflictArtifact/Get-PulseSettingPresenceIndex/
+    Get-PulseSnapshotManifest actually read, from those frozen copies - never from the
+    original -Store parameter, which is not captured by either closure at all.
 
     FUNCTION-RULE-ONLY, BY CONSTRUCTION OF WHO CALLS THIS: only
     Invoke-PulseCheckEvaluation's Function-rule branch ever builds one of these (see that
     function's own docstring for why the Expression-sandbox path never receives one at
     all, even via $Context - it is stripped before the sandboxed runspace's Context clone
     is built). A rule function that receives $Context.ArtifactReader may only ever call the
-    read operation exposed here - there is no write path, no arbitrary-path read, no way to
-    reach the manifest.datasets tree or any other file under the store root this object
-    does not explicitly expose a method for. Growing this surface (a second artifact type,
-    say) means adding a second named ScriptMethod here, deliberately, not widening what the
-    existing one can reach.
+    read operations exposed here - there is no write path, no arbitrary-path read, no way
+    to reach the manifest.datasets tree or any other file under the store root this object
+    does not explicitly expose a method for. GROWING THIS SURFACE (Part A, T3.4, is the
+    second artifact type this docstring's own original wording anticipated - "a second
+    artifact type, say") means adding a second named ScriptMethod here, deliberately, not
+    widening what the existing one can reach - GetSettingPresenceIndex() below is built the
+    identical way GetConflictArtifact() already was: its own frozen closure, its own
+    already-resolved CommandInfo, no new surface shared between the two methods beyond the
+    same two frozen strings both were already closing over.
 #>
 
 function New-PulseArtifactReader {
@@ -53,6 +57,10 @@ function New-PulseArtifactReader {
     # entirely, since `&` on a CommandInfo runs it in ITS OWN bound module context
     # regardless of where the closure is later invoked from.
     $conflictArtifactCommand = Get-Command -Name 'Get-PulseConflictArtifact'
+    # Part A, T3.4 addition - resolved here for the identical reason
+    # $conflictArtifactCommand is: a bare name lookup from inside a ScriptMethod closure
+    # cannot find this module's own private function at the caller's (rule's) scope.
+    $settingPresenceIndexCommand = Get-Command -Name 'Get-PulseSettingPresenceIndex'
 
     $getConflictArtifact = {
         # Reconstructed from the FROZEN strings captured at New-PulseArtifactReader
@@ -64,8 +72,17 @@ function New-PulseArtifactReader {
         return & $conflictArtifactCommand -Store $frozenStoreShape
     }.GetNewClosure()
 
+    $getSettingPresenceIndex = {
+        # Same frozen-shape reconstruction as $getConflictArtifact above -
+        # Get-PulseSettingPresenceIndex/Get-PulseSnapshotManifest only ever read
+        # .Root/.ManifestPath too.
+        $frozenStoreShape = [pscustomobject]@{ Root = $frozenRoot; ManifestPath = $frozenManifestPath }
+        return & $settingPresenceIndexCommand -Store $frozenStoreShape
+    }.GetNewClosure()
+
     $reader = [pscustomobject]@{ PSTypeName = 'TenantPulse.ArtifactReader' }
     Add-Member -InputObject $reader -MemberType ScriptMethod -Name 'GetConflictArtifact' -Value $getConflictArtifact
+    Add-Member -InputObject $reader -MemberType ScriptMethod -Name 'GetSettingPresenceIndex' -Value $getSettingPresenceIndex
 
     return $reader
 }

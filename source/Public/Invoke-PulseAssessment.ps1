@@ -220,6 +220,10 @@ function Invoke-PulseAssessment {
         # Task 2.6 sibling: verify-or-rederive the conflicts artifact - from the family
         # jsonl artifacts already on disk, never Graph. See that function's own docstring.
         Resolve-PulseConflictSnapshotExpansion -Store $store
+        # Part A, T3.4 sibling: verify-or-rederive the setting-presence index - same
+        # verify-or-rederive-from-already-on-disk-family-artifacts decision. See that
+        # function's own docstring.
+        Resolve-PulseSettingPresenceIndexSnapshotExpansion -Store $store
     } else {
         $snapshotPath = Join-Path $resolvedOutputPath 'snapshot'
         $collectParams = @{

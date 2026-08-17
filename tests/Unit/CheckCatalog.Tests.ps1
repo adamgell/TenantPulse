@@ -622,6 +622,19 @@ Describe 'Test-PulseCheckDescriptor' {
             @($errors).Count | Should -Be 0
         }
 
+        # Part A, T3.4: 'settingPresenceIndex' grows the known-artifact registry to a
+        # second family - see Test-PulseCheckDescriptor.ps1's own docstring.
+        It 'accepts a descriptor with Data.Expansions naming settingPresenceIndex (Part A/T3.4''s second known artifact)' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData {
+                param($base)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{ Expansions = @('settingPresenceIndex'); Gates = @() }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+            }
+            @($errors).Count | Should -Be 0
+        }
+
         It 'accepts a descriptor with BOTH Data.Datasets and Data.Expansions populated' {
             $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData {
                 param($base)

@@ -38,11 +38,10 @@
     task - both), but Data.Datasets and Data.Expansions MAY NOT BOTH BE EMPTY: a check
     with neither declares no artifact input at all, which is never a valid check. Every
     Data.Expansions name is cross-checked against a small, hardcoded KNOWN-ARTIFACT
-    REGISTRY (currently just 'conflicts' - the one expansion family that exists) rather
-    than the dataset map's live cross-check, since expansion artifacts are not
-    GraphKit-collected datasets and have no DatasetMap.psd1 entry to check against; a
-    future expansion family (a "future family name" per the task brief) is added to this
-    same registry, not to the dataset map.
+    REGISTRY ('conflicts' and, since Part A/T3.4, 'settingPresenceIndex') rather than the
+    dataset map's live cross-check, since expansion artifacts are not GraphKit-collected
+    datasets and have no DatasetMap.psd1 entry to check against; a future expansion family
+    is added to this same registry, not to the dataset map.
 #>
 
 function Test-PulseCheckDescriptor {
@@ -81,10 +80,13 @@ function Test-PulseCheckDescriptor {
     # but not a [string] (e.g. an array, a number, a hashtable). Returns the validated
     # string, or $null if the field is missing/blank/wrong-typed, so callers only run
     # further pattern/enum checks against a confirmed real string.
-    # Known-artifact registry (Task 3.2): the only expansion artifact names a
-    # Data.Expansions entry may legally name today. Growing this to a second family later
-    # means adding its name here, nowhere else - see this file's own top-level docstring.
-    $knownExpansionArtifacts = @('conflicts')
+    # Known-artifact registry (Task 3.2; grown by Part A/T3.4): the only expansion artifact
+    # names a Data.Expansions entry may legally name today. 'settingPresenceIndex' is the
+    # second family (Part A/T3.4's per-family setting-presence index, consumed via
+    # $Context.ArtifactReader.GetSettingPresenceIndex() - see New-PulseArtifactReader.ps1's
+    # own docstring). Growing this further means adding its name here, nowhere else - see
+    # this file's own top-level docstring.
+    $knownExpansionArtifacts = @('conflicts', 'settingPresenceIndex')
 
     function Test-PulseScalarStringField {
         param(

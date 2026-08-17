@@ -100,6 +100,19 @@ BeforeAll {
     $script:PulsePerfWriteSecondsBudget = 53.0           # 35.10 x 1.5
     $script:PulsePerfReadSecondsBudget = 2.0             # 1.00 x 1.5 (rounded up)
     $script:PulsePerfManifestWriteBudgetSeconds = 27.5   # 18.04 x 1.5
+
+    # Part A, T3.4: setting-presence index build over the SAME 5,000-row corpus (50 distinct
+    # settingDefinitionIds), MAX of 3 back-to-back calls (see this Describe's own It for the
+    # exact methodology - isolated per-step measurement, not a fresh full-pipeline re-run
+    # per sample). Measured on this session's host (same hardware/PowerShell version as
+    # section 1's own baseline - see docs/spike/2026-08-16-t27-perf-container.md section 4
+    # for the full recorded table):
+    #   sample 1-3 MAX: 3.244 s, 116.23 MB managed-heap delta
+    #   (for comparison: the SAME run's own expand/conflict steps measured 199.70 s / 4.13 s
+    #   / 159.73 MB - both well inside their own existing, unchanged budgets, confirming
+    #   Part A introduced no regression to the expand/conflict steps themselves)
+    $script:PulsePerfIndexBudgetSeconds = 4.9    # 3.244 x 1.5, rounded up
+    $script:PulsePerfIndexMemoryBudgetMB = 174.5 # 116.23 x 1.5, rounded up
 }
 
 Describe 'Perf: 5,000-policy Settings Catalog expansion + conflict-detection compute (mocked Graph)' {
@@ -178,16 +191,50 @@ Describe 'Perf: 5,000-policy Settings Catalog expansion + conflict-detection com
                 $conflictSw.Stop()
 
                 $memAfter = [System.GC]::GetTotalMemory($false)
-                # --- MEASURED WINDOW ENDS HERE ---
+                # --- MEASURED WINDOW ENDS HERE (expand + conflict, UNCHANGED by Part A) ---
+
+                # --- Part A, T3.4: setting-presence index, ISOLATED measurement window.
+                # Invoke-PulseSettingPresenceIndexBuild is idempotent (re-publishes a fresh
+                # content-addressed generation file each call, over the SAME already-
+                # published settingsCatalog/conflicts family artifacts from above - no
+                # re-seed needed) - called 3 times back-to-back here, each with its own
+                # forced-GC before/after memory delta and its own stopwatch, taking the MAX
+                # of each independently, matching this file's own established "MAX of >=3
+                # runs x1.5" methodology (see this file's own BeforeAll docstring for why a
+                # single-sample budget previously flaked here) - cheaper to gather 3 real
+                # samples this way than 3 full fresh expand+conflict+index runs, and
+                # isolates THIS step's own variance from the (unrelated, unchanged) expand/
+                # conflict steps' own.
+                $indexSeconds = [System.Collections.Generic.List[double]]::new()
+                $indexMemoryDeltasMB = [System.Collections.Generic.List[double]]::new()
+                $indexDefinitionCount = 0
+                $indexStatus = $null
+                for ($sample = 1; $sample -le 3; $sample++) {
+                    [System.GC]::Collect(); [System.GC]::WaitForPendingFinalizers(); [System.GC]::Collect()
+                    $indexMemBefore = [System.GC]::GetTotalMemory($true)
+                    $indexSw = [System.Diagnostics.Stopwatch]::StartNew()
+                    $indexSummary = Invoke-PulseSettingPresenceIndexBuild -Store $store
+                    $indexSw.Stop()
+                    $indexMemAfter = [System.GC]::GetTotalMemory($false)
+
+                    $indexSeconds.Add($indexSw.Elapsed.TotalSeconds) | Out-Null
+                    $indexMemoryDeltasMB.Add(($indexMemAfter - $indexMemBefore) / 1MB) | Out-Null
+                    $indexStatus = $indexSummary.Status
+                    $indexDefinitionCount = $indexSummary.DefinitionCount
+                }
 
                 [pscustomobject]@{
-                    ExpandStatus     = $expandSummary.Status
-                    ExpandRowCount   = $expandSummary.RowCount
-                    ExpandSeconds    = $expandSw.Elapsed.TotalSeconds
-                    ConflictStatus   = $conflictSummary.Status
-                    ConflictCount    = $conflictSummary.ConflictCount
-                    ConflictSeconds  = $conflictSw.Elapsed.TotalSeconds
-                    MemoryDeltaMB    = ($memAfter - $memBefore) / 1MB
+                    ExpandStatus            = $expandSummary.Status
+                    ExpandRowCount          = $expandSummary.RowCount
+                    ExpandSeconds           = $expandSw.Elapsed.TotalSeconds
+                    ConflictStatus          = $conflictSummary.Status
+                    ConflictCount           = $conflictSummary.ConflictCount
+                    ConflictSeconds         = $conflictSw.Elapsed.TotalSeconds
+                    MemoryDeltaMB           = ($memAfter - $memBefore) / 1MB
+                    IndexStatus             = $indexStatus
+                    IndexDefinitionCount    = $indexDefinitionCount
+                    IndexMaxSeconds         = ($indexSeconds | Measure-Object -Maximum).Maximum
+                    IndexMaxMemoryDeltaMB   = ($indexMemoryDeltasMB | Measure-Object -Maximum).Maximum
                 }
             }
 
@@ -197,11 +244,15 @@ Describe 'Perf: 5,000-policy Settings Catalog expansion + conflict-detection com
             $result.ExpandRowCount | Should -Be 5000
             $result.ConflictStatus | Should -BeIn @('Expanded', 'Partial')
             $result.ConflictCount | Should -BeGreaterThan 0
+            $result.IndexStatus | Should -BeIn @('Expanded', 'Partial')
+            $result.IndexDefinitionCount | Should -BeGreaterThan 0
 
             # Budgets: see docs/spike/2026-08-16-t27-perf-container.md's recorded table.
             $result.ExpandSeconds | Should -BeLessThan $script:PulsePerfExpandBudgetSeconds
             $result.ConflictSeconds | Should -BeLessThan $script:PulsePerfConflictBudgetSeconds
             $result.MemoryDeltaMB | Should -BeLessThan $script:PulsePerfComputeMemoryBudgetMB
+            $result.IndexMaxSeconds | Should -BeLessThan $script:PulsePerfIndexBudgetSeconds
+            $result.IndexMaxMemoryDeltaMB | Should -BeLessThan $script:PulsePerfIndexMemoryBudgetMB
         } finally {
             Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
