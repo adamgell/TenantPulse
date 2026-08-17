@@ -438,11 +438,17 @@
 # call, the public Protect-PulseTypedPolicySensitivePayload entry point, an array-of-depth-
 # 3-elements case, and a hostile-scalar-at-depth-2 fail-closed case), plus discovery-time
 # SecretScan.tests.ps1 per-file cases for the 2 new files (the QA gate test file itself and
-# the new tests/Fixtures/SettingsCatalogCorpus/checked-definitions.json fixture). 1912 is
-# the real, measured `./build.ps1 -Tasks build,test` total for this commit; both tracking
-# locations bumped together in the same commit as these test changes, per the ratchet's own
-# rule.
-$script:tenantPulseGateMinimumTests = 1912
+# the new tests/Fixtures/SettingsCatalogCorpus/checked-definitions.json fixture). 1912 was
+# the real, measured `./build.ps1 -Tasks build,test` total for that commit.
+#
+# Task 3.5 (exclusion-context wiring, TP.ENT.0004/0005): 9 new Its (4 in
+# TP.ENT.0004.Tests.ps1, 3 in TP.ENT.0005.Tests.ps1, 2 in
+# Get-PulseCaExclusionContext.Tests.ps1) covering honored-exclusion evidence, the
+# enforced-vs-report-only split, and the "no -Context supplied" backward-compatibility
+# case. 1921 is the real, measured `./build.ps1 -Tasks build,test` total for this commit;
+# both tracking locations bumped together in the same commit as these test changes, per
+# the ratchet's own rule.
+$script:tenantPulseGateMinimumTests = 1921
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

@@ -24,15 +24,16 @@ BeforeAll {
     function script:Invoke-PulseCheckFixture {
         param(
             [Parameter(Mandatory)] [string] $CheckId,
-            [Parameter(Mandatory)] [hashtable[]] $Datasets
+            [Parameter(Mandatory)] [hashtable[]] $Datasets,
+            [hashtable] $Context = @{}
         )
 
         $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $keyPath = Join-Path $storeRoot '.opkey/operator.key'
 
         try {
-            $evaluation = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $CheckId, $Datasets {
-                param($storeRoot, $keyPath, $checkId, $datasets)
+            $evaluation = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $CheckId, $Datasets, $Context {
+                param($storeRoot, $keyPath, $checkId, $datasets, $context)
 
                 $catalog = @(Import-PulseCheckCatalog)
                 $check = $catalog | Where-Object { $_.Id -eq $checkId }
@@ -51,7 +52,7 @@ BeforeAll {
                     Write-PulseDataset @params
                 }
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -Context $context
             }
             return $evaluation.Document.findings[0]
         } finally {
@@ -60,15 +61,22 @@ BeforeAll {
     }
 
     function script:New-PulseMfaPolicy {
-        param([string] $DisplayName = 'MFA For Admins', [string] $State = 'enabled', [string[]] $IncludeRoles)
+        param(
+            [string] $DisplayName = 'MFA For Admins',
+            [string] $State = 'enabled',
+            [string[]] $IncludeRoles,
+            [string[]] $ExcludeUsers = @()
+        )
         [pscustomobject]@{
             id            = "ca-$DisplayName"
             displayName   = $DisplayName
             state         = $State
-            conditions    = [pscustomobject]@{ users = [pscustomobject]@{ includeRoles = $IncludeRoles } }
+            conditions    = [pscustomobject]@{ users = [pscustomobject]@{ includeRoles = $IncludeRoles; excludeUsers = $ExcludeUsers } }
             grantControls = [pscustomobject]@{ builtInControls = @('mfa') }
         }
     }
+
+    $script:adminGuid = '33333333-3333-3333-3333-333333333333'
 }
 
 Describe 'TP.ENT.0005 - MFA is required for admin roles by an enforced Conditional Access policy' {
@@ -158,5 +166,40 @@ Describe 'TP.ENT.0005 - MFA is required for admin roles by an enforced Condition
 
         $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Be 'permission-denied: Policy.Read.All'
+    }
+
+    # ---- Task 3.5: exclusion-context wiring (evidence only, never a Status input) ----
+
+    It 'no exclusion evidence at all when no -Context is supplied (existing evidence shape unchanged)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseMfaPolicy -IncludeRoles $script:allNineRoles) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $finding.evidence.Count | Should -Be 1
+    }
+
+    It 'Pass with honored-exclusion evidence: a declared break-glass account excluded from the enforced admin-MFA policy' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseMfaPolicy -IncludeRoles $script:allNineRoles -ExcludeUsers @($script:adminGuid)) }
+        ) -Context @{ BreakGlassAccounts = @($script:adminGuid) }
+
+        $finding.status | Should -Be 'Pass'
+        $exclusionEntry = $finding.evidence | Where-Object { $_.identity -eq $script:adminGuid }
+        $exclusionEntry | Should -Not -BeNullOrEmpty
+        $exclusionEntry.detail.excludedFromEnforcedMfaPolicies | Should -Contain 'MFA For Admins'
+        @($exclusionEntry.detail.excludedFromReportOnlyMfaPolicies).Count | Should -Be 0
+    }
+
+    It 'report-only exclusion is surfaced but distinguished from enforced honoring - never counted as protection' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0005' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseMfaPolicy -State 'enabledForReportingButNotEnforced' -IncludeRoles $script:allNineRoles -ExcludeUsers @($script:adminGuid)) }
+        ) -Context @{ BreakGlassAccounts = @($script:adminGuid) }
+
+        $finding.status | Should -Be 'Fail'
+        $exclusionEntry = $finding.evidence | Where-Object { $_.identity -eq $script:adminGuid }
+        $exclusionEntry | Should -Not -BeNullOrEmpty
+        @($exclusionEntry.detail.excludedFromEnforcedMfaPolicies).Count | Should -Be 0
+        $exclusionEntry.detail.excludedFromReportOnlyMfaPolicies | Should -Contain 'MFA For Admins'
     }
 }

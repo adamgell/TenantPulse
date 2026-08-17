@@ -30,6 +30,24 @@
     a role "covered" by includeRoles that is then carved back out by an exclusion would still
     read as covered. Future work, same class of limitation as TP.ENT.0003's group-exclusion
     gap.
+
+    EXCLUSION-CONTEXT WIRING (Task 3.5): same pattern as TP.ENT.0004's own wiring note -
+    consumes Get-PulseCaExclusionContext for ExcludedIdentifiers and records, as EVIDENCE
+    ONLY (never a Status input), which of THIS check's covering policies (the enabled,
+    MFA-requiring, role/'All'-scoped ones) and which report-only-shaped-but-not-enforced
+    equivalents actually exclude each declared identifier - split
+    excludedFromEnforcedMfaPolicies vs. excludedFromReportOnlyMfaPolicies, with the same
+    REPORT-ONLY-NEVER-COUNTS-AS-PROTECTION binding this check already applies to admin MFA
+    coverage itself. An excluded admin identity here is a DIFFERENT signal than TP.ENT.0003's
+    - it means that identity's admin role would not be forced through MFA by this policy set
+    (a break-glass account is deliberately excluded from MFA for exactly this reason; a
+    workaday admin excluded from a policy that is supposed to require MFA for its role is
+    worth an operator's attention, but this check does not fail on it - it only surfaces the
+    fact). Only 'conditionalAccessPolicies' is declared in this check's own Data.Datasets
+    (unchanged by this wiring), so -Datasets.directoryRoleAssignments is never present here
+    and ActiveGlobalAdmins is always empty - read defensively by Get-PulseCaExclusionContext
+    itself rather than added as a new required dataset (same field-absence rationale as
+    TP.ENT.0004's wiring note).
 #>
 
 function Test-PulseAdminMfaEnforced {
@@ -37,7 +55,10 @@ function Test-PulseAdminMfaEnforced {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)]
-        [hashtable] $Datasets
+        [hashtable] $Datasets,
+
+        [Parameter()]
+        [hashtable] $Context = @{}
     )
 
     # Microsoft's well-known, tenant-stable role template ids for the 9 named roles - see
@@ -86,6 +107,27 @@ function Test-PulseAdminMfaEnforced {
     }
 
     $enabledMfaPolicies = @($allPolicies | Where-Object { $_.state -eq 'enabled' -and (& $isMfaForRolesShape $_) })
+    $reportOnlyMfaPolicies = @($allPolicies | Where-Object { $_.state -eq 'enabledForReportingButNotEnforced' -and (& $isMfaForRolesShape $_) })
+
+    # Honored-exclusion evidence (additive, never a Status input - see docstring above).
+    $exclusionEvidence = @()
+    $exclusionContext = Get-PulseCaExclusionContext -Context $Context -Datasets $Datasets
+    $excludedIdentifiers = @($exclusionContext.ExcludedIdentifiers)
+    if ($excludedIdentifiers.Count -gt 0 -and ($enabledMfaPolicies.Count -gt 0 -or $reportOnlyMfaPolicies.Count -gt 0)) {
+        foreach ($identifier in $excludedIdentifiers) {
+            $enforcedNames = @($enabledMfaPolicies | Where-Object { @($_.conditions.users.excludeUsers) -contains $identifier } | ForEach-Object { [string] $_.displayName })
+            $reportOnlyNames = @($reportOnlyMfaPolicies | Where-Object { @($_.conditions.users.excludeUsers) -contains $identifier } | ForEach-Object { [string] $_.displayName })
+            if ($enforcedNames.Count -eq 0 -and $reportOnlyNames.Count -eq 0) { continue }
+            $exclusionEvidence += @{
+                Identity = $identifier
+                SortKey  = "exclusion:$identifier"
+                Detail   = @{
+                    excludedFromEnforcedMfaPolicies   = $enforcedNames
+                    excludedFromReportOnlyMfaPolicies = $reportOnlyNames
+                }
+            }
+        }
+    }
 
     $coveredRoleIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($policy in $enabledMfaPolicies) {
@@ -107,10 +149,10 @@ function Test-PulseAdminMfaEnforced {
     $missingRoles = @($requiredAdminRoles.GetEnumerator() | Where-Object { -not $coveredRoleIds.Contains($_.Key) })
 
     if ($missingRoles.Count -eq 0) {
-        $evidence = @($enabledMfaPolicies | ForEach-Object { @{ Identity = [string] $_.id; Detail = @{ displayName = $_.displayName; mfaMechanism = (& $getMfaMechanism $_) } } })
+        $evidence = @($enabledMfaPolicies | ForEach-Object { @{ Identity = [string] $_.id; Detail = @{ displayName = $_.displayName; mfaMechanism = (& $getMfaMechanism $_) } } }) + $exclusionEvidence
         return New-PulseFinding -Status Pass -Reason "All 9 of Microsoft's minimum admin roles are covered by MFA-requiring, enabled Conditional Access polic$(if ($enabledMfaPolicies.Count -eq 1) { 'y' } else { 'ies' })." -Evidence $evidence
     }
 
-    $evidence = @($missingRoles | ForEach-Object { @{ Identity = $_.Key; Detail = @{ roleDisplayName = $_.Value } } })
+    $evidence = @($missingRoles | ForEach-Object { @{ Identity = $_.Key; Detail = @{ roleDisplayName = $_.Value } } }) + $exclusionEvidence
     return New-PulseFinding -Status Fail -Reason "$($missingRoles.Count) of Microsoft's 9 minimum admin roles are not covered by any enabled, MFA-requiring Conditional Access policy." -Evidence $evidence
 }

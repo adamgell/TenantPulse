@@ -275,4 +275,36 @@ Describe 'Get-PulseCaExclusionContext' {
         @($result.ReportOnlyExclusions).Count | Should -Be 0
         $result.ReportOnlyExclusions.GetType().IsArray | Should -BeTrue
     }
+
+    # ---- Task 3.5: contract direction TP.ENT.0004/0005 rely on - only
+    # conditionalAccessPolicies is ever present in -Datasets for those two checks
+    # (directoryRoleAssignments is not in either check's own Data.Datasets), so this shape
+    # must resolve BreakGlassAccounts/ServiceAccounts into ExcludedIdentifiers correctly with
+    # ActiveGlobalAdmins gracefully empty - the exact call shape Test-PulseLegacyAuthBlocked
+    # and Test-PulseAdminMfaEnforced make. ----
+
+    It 'resolves declared exclusions into ExcludedIdentifiers with ActiveGlobalAdmins empty when -Datasets only carries conditionalAccessPolicies (TP.ENT.0004/0005 shape)' {
+        $context = @{ BreakGlassAccounts = @('11111111-1111-1111-1111-111111111111'); ServiceAccounts = @('22222222-2222-2222-2222-222222222222') }
+        $datasets = @{ conditionalAccessPolicies = @() }
+
+        $result = InModuleScope TenantPulse -ArgumentList $context, $datasets {
+            param($context, $datasets)
+            Get-PulseCaExclusionContext -Context $context -Datasets $datasets
+        }
+
+        @($result.ActiveGlobalAdmins).Count | Should -Be 0
+        $result.ExcludedIdentifiers | Should -Contain '11111111-1111-1111-1111-111111111111'
+        $result.ExcludedIdentifiers | Should -Contain '22222222-2222-2222-2222-222222222222'
+    }
+
+    It 'ExcludedIdentifiers is queryable by -contains against a policy excludeUsers entry - the exact match TP.ENT.0004/0005 evidence performs' {
+        $guid = '33333333-3333-3333-3333-333333333333'
+        $result = InModuleScope TenantPulse -ArgumentList $guid {
+            param($guid)
+            Get-PulseCaExclusionContext -Context @{ BreakGlassAccounts = @($guid) } -Datasets @{ conditionalAccessPolicies = @() }
+        }
+
+        $policyExcludeUsers = @($guid, 'some-other-guid')
+        ($policyExcludeUsers -contains $result.ExcludedIdentifiers[0]) | Should -BeTrue
+    }
 }
