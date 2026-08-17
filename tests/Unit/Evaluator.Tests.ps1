@@ -550,6 +550,35 @@ Describe 'Invoke-PulseEvaluation' {
         $first.Document.generatedUtc | Should -Be $second.Document.generatedUtc
     }
 
+    # Part E, T3.4 (manifest createdUtc culture-coercion fix, carried from the T3.3
+    # review): end-to-end proof that a 7-digit-fraction createdUtc survives, byte-identical,
+    # all the way from manifest.json through Get-PulseSnapshotManifest into BOTH
+    # generatedUtc (the findings document) and $Context.SnapshotCreatedUtc/
+    # EvaluationCutoffBase (what a staleness-style rule actually compares against) -
+    # regardless of the thread's current culture at evaluation time. Pre-fix, plain
+    # `ConvertFrom-Json -AsHashtable` parsed createdUtc into a [datetime], dropping the
+    # fraction to millisecond precision and formatting with the current thread culture the
+    # moment anything downstream cast it back to [string].
+    It 'preserves a 7-digit-fraction createdUtc byte-identically into generatedUtc and EvaluationCutoffBase, independent of thread culture' {
+        $sevenDigitCreatedUtc = '2026-08-17T00:00:00.0000001Z'
+        $rawManifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw
+        $rawManifest = $rawManifest -replace '"createdUtc"\s*:\s*"[^"]*"', ('"createdUtc":"' + $sevenDigitCreatedUtc + '"')
+        Set-Content -LiteralPath $script:store.ManifestPath -Value $rawManifest -NoNewline
+
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureCutoffBaseRule' }
+
+        $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('en-GB')
+            $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+        } finally {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+        }
+
+        $evaluation.Document.generatedUtc | Should -Be $sevenDigitCreatedUtc
+        $evaluation.Document.findings[0].reason | Should -Be "cutoff=$sevenDigitCreatedUtc|$sevenDigitCreatedUtc"
+    }
+
     It 'carries schemaVersion 1.0, scoringModelVersion 1.0, and null coverage/scores placeholders' {
         $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Expression'; Expression = '$true' }
 

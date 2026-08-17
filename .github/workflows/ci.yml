@@ -639,7 +639,13 @@ jobs:
           # is the REAL measured ./build.ps1 -Tasks build,test total for the merged tree
           # (set once, post-merge, per the merge review's ratchet step - not the sum of
           # the two branch totals, which double-counts the shared 991-1063 history).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1814 -AllowedSkips $allowedSkips -AllowNotRun 1
+          # 1814 -> 1818 (Task 3.4 Part E, manifest createdUtc culture-coercion fix): +4 -
+          # Get-PulseSnapshotStore/Get-PulseSnapshotManifest now route manifest.json through
+          # ConvertFrom-PulseJsonPreservingStrings (never plain ConvertFrom-Json, which
+          # auto-parses createdUtc into a culture-sensitive, precision-losing [datetime]) -
+          # see .build/AssertGateResult.tasks.ps1's own accounting, which must be bumped
+          # together with this value.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1818 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

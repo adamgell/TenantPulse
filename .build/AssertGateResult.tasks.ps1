@@ -365,7 +365,16 @@
 # set once post-merge per the merge review's ratchet step - not the sum of the
 # two branch totals (1465 + 1402), which would double-count the shared pre-1063
 # history and does not match this real post-merge count.
-$script:tenantPulseGateMinimumTests = 1814
+# 1814 -> 1818 (Task 3.4 Part E, manifest createdUtc culture-coercion fix): +4 - three new
+# Snapshot.Tests.ps1 Its (Get-PulseSnapshotStore opens a 7-digit-fraction manifest cleanly;
+# Get-PulseSnapshotManifest returns createdUtc byte-identical to source text; the read
+# round-trips identically under a forced day-first thread culture) plus one new
+# Evaluator.Tests.ps1 It (generatedUtc/EvaluationCutoffBase preserve the same 7-digit
+# fraction end-to-end through Invoke-PulseEvaluation, under a forced day-first culture).
+# 1818 is the real, measured `./build.ps1 -Tasks build,test` total for this commit; both
+# tracking locations (here and .github/workflows/ci.yml) bumped together in the same
+# commit as these test changes, per the ratchet's own rule.
+$script:tenantPulseGateMinimumTests = 1818
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

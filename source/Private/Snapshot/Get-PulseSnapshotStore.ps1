@@ -89,7 +89,17 @@ function Get-PulseSnapshotStore {
     }
 
     try {
-        $manifestContent = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        # CULTURE-COERCION FIX (Part E, T3.4): plain ConvertFrom-Json auto-parses any
+        # ISO-8601-looking string (createdUtc) into a real [datetime] - this function then
+        # re-casts it back to [string] at line ~140 below (for the TryParse guard), and
+        # [datetime] -> [string] formats with the CURRENT THREAD CULTURE at second
+        # precision, silently both mis-formatting on a non-invariant-culture host and
+        # dropping any sub-second fraction the source JSON carried. Routing through
+        # ConvertFrom-PulseJsonPreservingStrings keeps createdUtc (and every other string
+        # member) as the exact original JSON text, so the later [string] cast is a no-op
+        # and the InvariantCulture TryParse below sees the byte-identical source string.
+        $rawManifestJson = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop
+        $manifestContent = ConvertFrom-PulseJsonPreservingStrings -Json $rawManifestJson -Depth 64
     } catch {
         throw "Get-PulseSnapshotStore: '$manifestPath' could not be parsed as JSON - '$resolvedRoot' is not a valid snapshot root. $($_.Exception.Message)"
     }

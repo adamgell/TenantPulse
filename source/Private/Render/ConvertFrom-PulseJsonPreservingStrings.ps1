@@ -74,7 +74,15 @@ function ConvertFrom-PulseJsonElement {
         [int] $CurrentDepth,
 
         [Parameter(Mandatory)]
-        [int] $MaxDepth
+        [int] $MaxDepth,
+
+        # AsHashtable (Part E, T3.4): when set, an Object node builds an [ordered][hashtable]
+        # instead of a [pscustomobject] - the same shape ConvertFrom-Json -AsHashtable
+        # produces, needed by callers (Get-PulseSnapshotManifest) that mutate the parsed tree
+        # in place (Set-PulseManifestEntry). A [pscustomobject] tree is otherwise preferred
+        # (matches plain ConvertFrom-Json's own default shape) so every existing caller of
+        # this function that expects PSObject property access keeps working unchanged.
+        [switch] $AsHashtable
     )
 
     if ($CurrentDepth -gt $MaxDepth) {
@@ -85,14 +93,17 @@ function ConvertFrom-PulseJsonElement {
         ([System.Text.Json.JsonValueKind]::Object) {
             $ordered = [ordered] @{}
             foreach ($property in $Element.EnumerateObject()) {
-                $ordered[$property.Name] = ConvertFrom-PulseJsonElement -Element $property.Value -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth
+                $ordered[$property.Name] = ConvertFrom-PulseJsonElement -Element $property.Value -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth -AsHashtable:$AsHashtable
+            }
+            if ($AsHashtable) {
+                return $ordered
             }
             return [pscustomobject] $ordered
         }
         ([System.Text.Json.JsonValueKind]::Array) {
             $items = [System.Collections.Generic.List[object]]::new()
             foreach ($element in $Element.EnumerateArray()) {
-                $items.Add((ConvertFrom-PulseJsonElement -Element $element -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth)) | Out-Null
+                $items.Add((ConvertFrom-PulseJsonElement -Element $element -CurrentDepth ($CurrentDepth + 1) -MaxDepth $MaxDepth -AsHashtable:$AsHashtable)) | Out-Null
             }
             return , [object[]] @($items.ToArray())
         }
@@ -139,16 +150,30 @@ function ConvertFrom-PulseJsonPreservingStrings {
 
         [Parameter()]
         [ValidateRange(1, 1000)]
-        [int] $Depth = 64
+        [int] $Depth = 64,
+
+        # AsHashtable (Part E, T3.4 - manifest createdUtc culture-coercion fix): same
+        # "preserve every JSON string exactly, never let a date-looking string parse into
+        # [datetime]" contract this function already provides, but returning a mutable
+        # hashtable tree instead of a pscustomobject tree - the shape
+        # Get-PulseSnapshotManifest needs (Set-PulseManifestEntry mutates the parsed
+        # manifest in place). Both branches below stay behind the SAME cached feature-detect
+        # this function already used, so a caller opting into -AsHashtable gets the exact
+        # same 7.4-vs-7.5+ branch split, and the exact same test-forced-branch pattern this
+        # file's own test suite already exercises, as every existing non-hashtable caller.
+        [switch] $AsHashtable
     )
 
     if (Test-PulseConvertFromJsonSupportsDateKind) {
+        if ($AsHashtable) {
+            return ConvertFrom-Json -InputObject $Json -Depth $Depth -DateKind String -AsHashtable
+        }
         return ConvertFrom-Json -InputObject $Json -Depth $Depth -DateKind String
     }
 
     $document = [System.Text.Json.JsonDocument]::Parse($Json)
     try {
-        return ConvertFrom-PulseJsonElement -Element $document.RootElement -CurrentDepth 0 -MaxDepth $Depth
+        return ConvertFrom-PulseJsonElement -Element $document.RootElement -CurrentDepth 0 -MaxDepth $Depth -AsHashtable:$AsHashtable
     } finally {
         $document.Dispose()
     }

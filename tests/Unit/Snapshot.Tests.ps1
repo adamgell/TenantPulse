@@ -621,6 +621,116 @@ Describe 'Get-PulseSnapshotManifest' {
     }
 }
 
+# Part E, T3.4 (carried from the T3.3 review): manifest createdUtc culture-coercion fix.
+# Get-PulseSnapshotManifest used to call plain `ConvertFrom-Json -AsHashtable`, and
+# Get-PulseSnapshotStore used to call plain `ConvertFrom-Json` - both auto-parse any
+# ISO-8601-looking JSON string into a real [datetime], which every downstream consumer
+# then re-casts back to [string] (culture-sensitive, second-precision ToString()) instead
+# of ever seeing the original text. These tests are RED against the pre-fix code (a plain
+# ConvertFrom-Json/-AsHashtable read loses the 7-digit fraction and reformats with the
+# thread's current culture) and GREEN against the fix (ConvertFrom-PulseJsonPreservingStrings
+# keeps createdUtc as the exact source string all the way through).
+Describe 'Manifest createdUtc culture-coercion fix (Part E, T3.4)' {
+    BeforeEach {
+        $script:culturePreservingRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        New-Item -Path $script:culturePreservingRoot -ItemType Directory -Force | Out-Null
+        $script:culturePreservingManifestPath = Join-Path $script:culturePreservingRoot 'manifest.json'
+        # Hand-written manifest.json (same raw-write pattern the 'Get-PulseSnapshotStore'
+        # Describe block above already uses), createdUtc carrying a 7-digit fraction - the
+        # exact precision a real Microsoft Graph timestamp can carry, and the exact case
+        # [datetime]::ToString()'s default 'fff' (millisecond) formatting truncates.
+        $script:culturePreservingCreatedUtc = '2026-08-17T00:00:00.0000001Z'
+        Set-Content -LiteralPath $script:culturePreservingManifestPath -Value (
+            '{"schemaVersion":"1.0.0","createdUtc":"' + $script:culturePreservingCreatedUtc + '","tenant":"tp-abc123","producer":{},"datasets":{}}'
+        ) -NoNewline
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:culturePreservingRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'Get-PulseSnapshotStore opens a manifest with a 7-digit-fraction createdUtc without throwing (validates and preserves it, never round-trips through [datetime])' {
+        $opened = InModuleScope TenantPulse -ArgumentList $script:culturePreservingRoot {
+            param($root)
+            Get-PulseSnapshotStore -Path $root
+        }
+
+        $opened.ManifestPath | Should -Be $script:culturePreservingManifestPath
+    }
+
+    It 'Get-PulseSnapshotManifest returns createdUtc byte-identical to the source JSON text, exact character match, 7 fractional digits intact' {
+        $store = InModuleScope TenantPulse -ArgumentList $script:culturePreservingRoot {
+            param($root)
+            Get-PulseSnapshotStore -Path $root
+        }
+
+        $manifest = InModuleScope TenantPulse -ArgumentList $store {
+            param($store)
+            Get-PulseSnapshotManifest -Store $store
+        }
+
+        $manifest.createdUtc | Should -BeOfType [string]
+        $manifest.createdUtc | Should -Be $script:culturePreservingCreatedUtc
+    }
+
+    # CULTURE INDEPENDENCE (the actual regression this fix closes): forcing the CURRENT
+    # THREAD CULTURE to a day-first locale (en-GB: dd/MM/yyyy) proves createdUtc is carried
+    # through as a raw string, completely unaffected by thread culture, rather than being
+    # coerced into a [datetime] and later re-stringified with ToString() (which DOES depend
+    # on thread culture). The pre-fix code path would still "work" under en-GB for THIS
+    # particular assertion by coincidence (dd/MM and MM/dd agree when day and month are both
+    # single digits in some cases) - the decisive proof is the exact-string-match assertion
+    # above, which the pre-fix [datetime]-coercing code fails outright (it drops the 7-digit
+    # fraction and reformats to 'yyyy-MM-ddTHH:mm:ss' with no 'Z'/offset at all via a bare
+    # ToString() cast) regardless of culture. This test additionally proves that switching
+    # the thread culture around the read produces the identical result both times.
+    It 'round-trips identically regardless of the current thread culture (invariant, day-first-locale-safe)' {
+        $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        try {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('en-GB')
+
+            $store = InModuleScope TenantPulse -ArgumentList $script:culturePreservingRoot {
+                param($root)
+                Get-PulseSnapshotStore -Path $root
+            }
+            $manifestUnderDayFirstCulture = InModuleScope TenantPulse -ArgumentList $store {
+                param($store)
+                Get-PulseSnapshotManifest -Store $store
+            }
+
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+
+            $manifestUnderInvariantCulture = InModuleScope TenantPulse -ArgumentList $store {
+                param($store)
+                Get-PulseSnapshotManifest -Store $store
+            }
+
+            $manifestUnderDayFirstCulture.createdUtc | Should -Be $script:culturePreservingCreatedUtc
+            $manifestUnderInvariantCulture.createdUtc | Should -Be $script:culturePreservingCreatedUtc
+            $manifestUnderDayFirstCulture.createdUtc | Should -Be $manifestUnderInvariantCulture.createdUtc
+
+            # Every real consumer (Test-PulseStaleDevices, Test-PulseApplePushCertificateValid,
+            # Test-PulseCertificateConnectorsHealthy, ...) does exactly this: cast to
+            # [string], then parse with InvariantCulture/AdjustToUniversal - proving that
+            # round trip parses to the exact same instant regardless of what culture read
+            # the manifest.
+            $parsed = [datetime]::MinValue
+            $parseSucceeded = [datetime]::TryParse(
+                [string] $manifestUnderDayFirstCulture.createdUtc,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal,
+                [ref] $parsed
+            )
+            $parseSucceeded | Should -BeTrue
+            $parsed.Year | Should -Be 2026
+            $parsed.Month | Should -Be 8
+            $parsed.Day | Should -Be 17
+        } finally {
+            [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+        }
+    }
+}
+
 Describe 'Set-PulseManifestEntry' {
     BeforeEach {
         $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
