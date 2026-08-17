@@ -1,3 +1,16 @@
+<#
+    T3.4 dual-review fix round 1, CRITICAL/convergent finding: the original version of
+    this file used fabricated settingDefinitionIds (GUID-suffixed) and fabricated option
+    values (bare '1'/'2') that do not exist in Intune's real Settings Catalog schema. Every
+    definitionId and option-value string in this file is now taken VERBATIM from
+    scratch/live-27/snapshot/reference/settingDefinitions.json (the Phase 2 captured
+    corpus, 18,227 real definitions) - grep the definitionId strings below against that
+    file directly to re-verify; do not hand-edit them without re-checking the corpus.
+    RED-THEN-GREEN: these tests were run against the PRE-fix rule function (GUID-suffixed
+    defIds, bare-integer predicate) and failed - confirmed the fixtures actually exercise
+    the fix, not just restate it. See this task's own report for the failure transcript.
+#>
+
 BeforeAll {
     $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).ProviderPath
 
@@ -8,36 +21,45 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
-    $script:AsrRuleGuids = @(
-        '56a863a9-875e-4185-98a7-b882c64b5ce5'
-        '9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2'
-        'e6db77e5-3df2-4cf1-b95a-636979351e5b'
+    # CORPUS-VERIFIED (scratch/live-27/snapshot/reference/settingDefinitions.json,
+    # grep'd by line number - see this task's own report for the exact JSON fragments):
+    #   line 795166: "id": "...blockabuseofexploitedvulnerablesigneddrivers"
+    #   line 703138: "id": "...blockcredentialstealingfromwindowslocalsecurityauthoritysubsystem"
+    #   line 976658: "id": "...blockpersistencethroughwmieventsubscription"
+    # Each definition's own displayName is the human-readable rule name; the definitionId
+    # is a lowercase name-slug of that displayName, never a GUID.
+    $script:AsrDefinitionIds = @(
+        'device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers'
+        'device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockcredentialstealingfromwindowslocalsecurityauthoritysubsystem'
+        'device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockpersistencethroughwmieventsubscription'
     )
 
     function script:New-PulseAsrRuleRow {
         param(
             [string] $PolicyId,
-            [string] $Guid,
-            [string] $Value = '1',
+            [string] $DefinitionId,
+            # CORPUS-VERIFIED option itemIds: "<definitionId>_off"/"_block"/"_audit"/"_warn"
+            # - the FULL string is the option identity, never a bare integer.
+            [string] $OptionSuffix = 'block',
             [bool] $Redacted = $false,
             [AllowNull()] [object[]] $Assignments = @([pscustomobject]@{ intent = $null; targetType = 'group'; groupId = 'g1'; filterId = $null; filterType = $null })
         )
-        $defId = "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_$Guid"
+        $itemId = "${DefinitionId}_$OptionSuffix"
         [pscustomobject]@{
             schemaVersion = '1'; policyId = $PolicyId; policyType = 'settingsCatalog'; policyName = "Policy-$PolicyId"
             templateFamily = $null; isBaseline = $false
-            settingPath = $defId; settingDefinitionId = $defId
-            settingName = "ASR rule $Guid"; nameResolved = $true
-            instanceId = "$PolicyId/n:$defId"
-            value = if ($Redacted) { $null } else { $Value }
+            settingPath = $DefinitionId; settingDefinitionId = $DefinitionId
+            settingName = "ASR rule $DefinitionId"; nameResolved = $true
+            instanceId = "$PolicyId/n:$DefinitionId"
+            value = if ($Redacted) { $null } else { $itemId }
             valueLabel = $null; labelResolved = $false; redacted = $Redacted; valueState = $null; applicability = $null
             assignments = $Assignments
         }
     }
 
     function script:New-PulseAllThreeRulesRows {
-        param([string] $PolicyId = 'p1', [string] $Value = '1', [AllowNull()] [object[]] $Assignments = @([pscustomobject]@{ intent = $null; targetType = 'group'; groupId = 'g1'; filterId = $null; filterType = $null }))
-        return @($script:AsrRuleGuids | ForEach-Object { New-PulseAsrRuleRow -PolicyId $PolicyId -Guid $_ -Value $Value -Assignments $Assignments })
+        param([string] $PolicyId = 'p1', [string] $OptionSuffix = 'block', [AllowNull()] [object[]] $Assignments = @([pscustomobject]@{ intent = $null; targetType = 'group'; groupId = 'g1'; filterId = $null; filterType = $null }))
+        return @($script:AsrDefinitionIds | ForEach-Object { New-PulseAsrRuleRow -PolicyId $PolicyId -DefinitionId $_ -OptionSuffix $OptionSuffix -Assignments $Assignments })
     }
 
     function script:Invoke-PulseAsrCheckFixture {
@@ -79,8 +101,8 @@ Describe 'TP.INT.0016 - Attack Surface Reduction "Standard Protection" baseline 
         ($catalog | Where-Object { $_.Id -eq 'TP.INT.0016' }) | Should -Not -BeNullOrEmpty
     }
 
-    It 'Pass: all 3 Standard Protection rules Block on the SAME assigned policy' {
-        $rows = New-PulseAllThreeRulesRows -Value '1'
+    It 'Pass: all 3 Standard Protection rules Block (corpus-verified itemId) on the SAME assigned policy' {
+        $rows = New-PulseAllThreeRulesRows -OptionSuffix 'block'
         $finding = Invoke-PulseAsrCheckFixture -Rows $rows
 
         $finding.status | Should -Be 'Pass'
@@ -89,17 +111,17 @@ Describe 'TP.INT.0016 - Attack Surface Reduction "Standard Protection" baseline 
 
     It 'Pass: UNION across policies - rule 1 on policy A, rules 2+3 on policy B, still counts as a combined Pass' {
         $rows = @(
-            (New-PulseAsrRuleRow -PolicyId 'pA' -Guid $script:AsrRuleGuids[0] -Value '1')
-            (New-PulseAsrRuleRow -PolicyId 'pB' -Guid $script:AsrRuleGuids[1] -Value '2')
-            (New-PulseAsrRuleRow -PolicyId 'pB' -Guid $script:AsrRuleGuids[2] -Value '1')
+            (New-PulseAsrRuleRow -PolicyId 'pA' -DefinitionId $script:AsrDefinitionIds[0] -OptionSuffix 'block')
+            (New-PulseAsrRuleRow -PolicyId 'pB' -DefinitionId $script:AsrDefinitionIds[1] -OptionSuffix 'audit')
+            (New-PulseAsrRuleRow -PolicyId 'pB' -DefinitionId $script:AsrDefinitionIds[2] -OptionSuffix 'block')
         )
         $finding = Invoke-PulseAsrCheckFixture -Rows $rows
 
         $finding.status | Should -Be 'Pass'
     }
 
-    It 'Pass: Audit mode (value 2) also satisfies the rule, not just Block' {
-        $rows = New-PulseAllThreeRulesRows -Value '2'
+    It 'Pass: Audit mode (corpus-verified "_audit" itemId) also satisfies the rule, not just Block' {
+        $rows = New-PulseAllThreeRulesRows -OptionSuffix 'audit'
         $finding = Invoke-PulseAsrCheckFixture -Rows $rows
 
         $finding.status | Should -Be 'Pass'
@@ -114,8 +136,8 @@ Describe 'TP.INT.0016 - Attack Surface Reduction "Standard Protection" baseline 
 
     It 'Fail: 2 of 3 rules configured, 1 missing entirely' {
         $rows = @(
-            (New-PulseAsrRuleRow -PolicyId 'p1' -Guid $script:AsrRuleGuids[0] -Value '1')
-            (New-PulseAsrRuleRow -PolicyId 'p1' -Guid $script:AsrRuleGuids[1] -Value '1')
+            (New-PulseAsrRuleRow -PolicyId 'p1' -DefinitionId $script:AsrDefinitionIds[0] -OptionSuffix 'block')
+            (New-PulseAsrRuleRow -PolicyId 'p1' -DefinitionId $script:AsrDefinitionIds[1] -OptionSuffix 'block')
         )
         $finding = Invoke-PulseAsrCheckFixture -Rows $rows
 
@@ -123,22 +145,29 @@ Describe 'TP.INT.0016 - Attack Surface Reduction "Standard Protection" baseline 
         $finding.reason | Should -Match '1 of 3'
     }
 
-    It 'Fail: value 0 (Disabled) does not satisfy the rule' {
-        $rows = New-PulseAllThreeRulesRows -Value '0'
+    It 'Fail: corpus-verified "_off" itemId (Disabled) does not satisfy the rule' {
+        $rows = New-PulseAllThreeRulesRows -OptionSuffix 'off'
         $finding = Invoke-PulseAsrCheckFixture -Rows $rows
 
         $finding.status | Should -Be 'Fail'
     }
 
-    It 'Fail: value 6 (Warn) does not satisfy the rule (Standard Protection requires Block or Audit)' {
-        $rows = New-PulseAllThreeRulesRows -Value '6'
+    It 'Fail: corpus-verified "_warn" itemId does not satisfy the rule (Standard Protection requires Block or Audit)' {
+        $rows = New-PulseAllThreeRulesRows -OptionSuffix 'warn'
+        $finding = Invoke-PulseAsrCheckFixture -Rows $rows
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: a value that merely CONTAINS the definitionId as a substring (e.g. a sibling _perruleexclusions row) never satisfies - exact itemId match only' {
+        $rows = @(New-PulseAsrRuleRow -PolicyId 'p1' -DefinitionId $script:AsrDefinitionIds[0] -OptionSuffix 'perruleexclusions')
         $finding = Invoke-PulseAsrCheckFixture -Rows $rows
 
         $finding.status | Should -Be 'Fail'
     }
 
     It 'Fail: correct value exists but only on an unassigned policy - disclosed, never silently Passed' {
-        $rows = New-PulseAllThreeRulesRows -Value '1' -Assignments @()
+        $rows = New-PulseAllThreeRulesRows -OptionSuffix 'block' -Assignments @()
         $finding = Invoke-PulseAsrCheckFixture -Rows $rows
 
         $finding.status | Should -Be 'Fail'
@@ -147,8 +176,8 @@ Describe 'TP.INT.0016 - Attack Surface Reduction "Standard Protection" baseline 
 
     It 'Warn (REDACTION HONESTY): a rule''s value is present on an assigned policy but redacted - never Pass on a value that could not be read' {
         $rows = @(
-            (New-PulseAsrRuleRow -PolicyId 'p1' -Guid $script:AsrRuleGuids[0] -Value '1')
-            (New-PulseAsrRuleRow -PolicyId 'p1' -Guid $script:AsrRuleGuids[1] -Redacted $true)
+            (New-PulseAsrRuleRow -PolicyId 'p1' -DefinitionId $script:AsrDefinitionIds[0] -OptionSuffix 'block')
+            (New-PulseAsrRuleRow -PolicyId 'p1' -DefinitionId $script:AsrDefinitionIds[1] -Redacted $true)
         )
         $finding = Invoke-PulseAsrCheckFixture -Rows $rows
 
@@ -157,10 +186,9 @@ Describe 'TP.INT.0016 - Attack Surface Reduction "Standard Protection" baseline 
     }
 
     It 'Warn (UNKNOWN-ASSIGNMENT HONESTY): unknown-assignment disclosure appears alongside a confident Pass' {
-        $rows = @(
-            (New-PulseAllThreeRulesRows -PolicyId 'p1' -Value '1')
-            (New-PulseAsrRuleRow -PolicyId 'p2' -Guid $script:AsrRuleGuids[0] -Value '1' -Assignments $null)
-        ) | ForEach-Object { $_ }
+        $rows = @(New-PulseAllThreeRulesRows -PolicyId 'p1' -OptionSuffix 'block') + @(
+            New-PulseAsrRuleRow -PolicyId 'p2' -DefinitionId $script:AsrDefinitionIds[0] -OptionSuffix 'block' -Assignments $null
+        )
 
         $finding = Invoke-PulseAsrCheckFixture -Rows $rows
 
@@ -175,19 +203,8 @@ Describe 'TP.INT.0016 - Attack Surface Reduction "Standard Protection" baseline 
         $finding.reason | Should -Match 'expansions.settingPresenceIndex'
     }
 
-    It 'accepts a Settings-Catalog-choice-style suffixed value (definitionId plus _1) as satisfying, not just the bare integer' {
-        $guid = $script:AsrRuleGuids[0]
-        $defId = "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_$guid"
-        $rows = @($script:AsrRuleGuids | ForEach-Object {
-                New-PulseAsrRuleRow -PolicyId 'p1' -Guid $_ -Value "${defId}_1"
-            })
-        $finding = Invoke-PulseAsrCheckFixture -Rows $rows
-
-        $finding.status | Should -Be 'Pass'
-    }
-
     It 'produces the identical status and reason across two evaluations of the SAME snapshot (determinism)' {
-        $rows = New-PulseAllThreeRulesRows -Value '1'
+        $rows = New-PulseAllThreeRulesRows -OptionSuffix 'block'
         $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $keyPath = Join-Path $storeRoot '.opkey/operator.key'
         try {

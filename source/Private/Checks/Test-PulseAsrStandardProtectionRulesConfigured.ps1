@@ -20,39 +20,42 @@
     Data.Expansions = @('settingPresenceIndex') - never streams the underlying
     expanded/settingsCatalog.jsonl this index was built from.
 
-    RULE IDENTITY (live-fetched 2026-08-17, confirmed live -
-    https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference):
-    the three "Standard protection rules", by GUID:
-      - `56a863a9-875e-4185-98a7-b882c64b5ce5` - Block abuse of exploited vulnerable
-        signed drivers (Device)
-      - `9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2` - Block credential stealing from the
-        Windows local security authority subsystem (LSASS)
-      - `e6db77e5-3df2-4cf1-b95a-636979351e5b` - Block persistence through WMI event
-        subscription
-    These three GUIDs are Microsoft's own stable, documented rule identifiers (not
-    schema-version-dependent the way a Settings Catalog optionId suffix is) - HIGH
-    confidence, no hedge needed.
-
-    SETTING IDENTITY (PENDING VERIFICATION against a live tenant, same class of hedge
-    TP.INT.0014/TP.INT.0031 already carry for BitLocker): the Policy CSP path
-    `./Device/Vendor/MSFT/Policy/Config/Defender/AttackSurfaceReductionRules`
-    (live-fetched 2026-08-17, confirmed live -
-    https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-defender)
-    is a single GroupSettingCollection keyed per rule GUID in Settings Catalog, from
-    which this rule derives one settingDefinitionId per rule GUID following this module's
-    own established `device_vendor_msft_<csp path>` naming convention:
-    `device_vendor_msft_policy_config_defender_attacksurfacereductionrules_<guid>`. This
-    exact string has NOT been independently confirmed against a live tenant's actual
-    Settings Catalog schema from inside this task - whoever next re-baselines this check
-    against a real Ivy24 (or successor) snapshot should confirm it and drop this hedge.
-    VALUE MATCHING IS DELIBERATELY TOLERANT of two plausible representations given that
-    same uncertainty: Microsoft's own documented ASR rule state values are the bare
-    integers 0=Disabled/NotConfigured, 1=Block, 2=Audit, 6=Warn (stable, well-documented,
-    high confidence) - this rule accepts EITHER a bare `'1'`/`'2'` canonicalValue OR a
-    Settings-Catalog-choice-style suffixed value ending in `_1`/`_2` (matching the
-    `_<suffix>` optionId pattern TP.INT.0031's own BitLocker check already established),
-    so a schema surprise in EITHER direction does not silently misclassify a correctly
-    configured rule as absent.
+    RULE IDENTITY - CORRECTED (T3.4 whole-task dual review, fix round 1, CRITICAL/
+    convergent finding): the original authoring pass derived a GUID-suffixed
+    settingDefinitionId (`..._<rule-guid>`) by analogy with the Policy CSP node path,
+    marked PENDING VERIFICATION, and got it wrong - the review's own ground truth,
+    `scratch/live-27/snapshot/reference/settingDefinitions.json` (the Phase 2 captured
+    corpus, 18,227 real Settings Catalog definitions, available all along and not
+    consulted at original authoring time), shows the REAL definitionId is a lowercase
+    NAME-SLUG of the rule's own `displayName`, and the REAL option identifiers are FULL
+    itemId strings ending `_off`/`_block`/`_audit`/`_warn` - never a bare GUID suffix,
+    never a bare `_1`/`_2`. Exact corpus entries (grep'd by line number in that file,
+    quoted verbatim in this task's own report):
+      - `device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers`
+        (displayName "Block abuse of exploited vulnerable signed drivers (Device)") -
+        options include itemId
+        `..._blockabuseofexploitedvulnerablesigneddrivers_block` and `..._audit`. Each
+        option's own internal wire-format encoding (a SEPARATE JSON field inside the
+        catalog entry, describing the raw CSP payload the OMA-URI actually sends - not
+        what a policy row's resolved value carries) embeds the rule GUID
+        `56a863a9-875e-4185-98a7-b882c64b5ce5` in a `"<guid>=<state>"` string - confirming
+        Microsoft's own published GUID is still the correct rule identity, just not usable
+        as a settingDefinitionId/itemId suffix the way the original authoring pass
+        assumed; see this task's own report for the exact corpus JSON quoted verbatim.
+      - `device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockcredentialstealingfromwindowslocalsecurityauthoritysubsystem`
+        - options include `..._block`, `..._audit`, `..._warn`; wire-format GUID
+        `9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2`.
+      - `device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockpersistencethroughwmieventsubscription`
+        - options include `..._block`; wire-format GUID
+        `e6db77e5-3df2-4cf1-b95a-636979351e5b`.
+    A real Settings Catalog policy row's own resolved choice-setting value is the FULL
+    itemId string (e.g. `..._blockabuseofexploitedvulnerablesigneddrivers_block`),
+    matching this module's own established row-schema convention (T2.2's
+    ConvertTo-PulseSettingRows reads a choice setting's raw resolved value verbatim) -
+    never the option's own internal wire-format encoding described above, which is
+    catalog metadata, not what a policy row's own value carries. HIGH CONFIDENCE now
+    (corpus-verified, not carried-through guesswork) - the PENDING VERIFICATION hedge from
+    the original authoring pass is RETIRED for this check.
 
     UNION LOGIC (this check's own defining trait, from its research entry): each of the
     three rule GUIDs is resolved INDEPENDENTLY via Resolve-PulseSettingPresenceCriterion
@@ -88,10 +91,13 @@ function Test-PulseAsrStandardProtectionRulesConfigured {
         throw 'Test-PulseAsrStandardProtectionRulesConfigured: no $Context.ArtifactReader was supplied - this rule cannot read the settingPresenceIndex expansion artifact without it.'
     }
 
+    # CORPUS-VERIFIED definitionIds (T3.4 dual-review fix round 1) - name-slugs of the
+    # rule's own displayName, exactly as found in
+    # scratch/live-27/snapshot/reference/settingDefinitions.json - never a GUID suffix.
     $standardProtectionRules = [ordered]@{
-        '56a863a9-875e-4185-98a7-b882c64b5ce5' = 'Block abuse of exploited vulnerable signed drivers'
-        '9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2' = 'Block credential stealing from the Windows local security authority subsystem (LSASS)'
-        'e6db77e5-3df2-4cf1-b95a-636979351e5b' = 'Block persistence through WMI event subscription'
+        'device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockabuseofexploitedvulnerablesigneddrivers'                       = 'Block abuse of exploited vulnerable signed drivers'
+        'device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockcredentialstealingfromwindowslocalsecurityauthoritysubsystem' = 'Block credential stealing from the Windows local security authority subsystem (LSASS)'
+        'device_vendor_msft_policy_config_defender_attacksurfacereductionrules_blockpersistencethroughwmieventsubscription'                        = 'Block persistence through WMI event subscription'
     }
 
     $artifact = $Context.ArtifactReader.GetSettingPresenceIndex()
@@ -114,14 +120,6 @@ function Test-PulseAsrStandardProtectionRulesConfigured {
         "PARTIAL SCAN - $($gapFamilyNames.Count) family(ies) excluded ($([string]::Join(', ', $gapFamilyNames))), so this result does not cover those families' policies. "
     } else { '' }
 
-    $isBlockOrAudit = {
-        param($value)
-        $text = [string] $value
-        if ($text -eq '1' -or $text -eq '2') { return $true }
-        if ($text -like '*_1' -or $text -like '*_2') { return $true }
-        return $false
-    }
-
     $familyNames = @('settingsCatalog', 'compliance', 'deviceConfiguration')
     $unsatisfiedRules = [System.Collections.Generic.List[string]]::new()
     $satisfiedRuleNames = [System.Collections.Generic.List[string]]::new()
@@ -130,8 +128,18 @@ function Test-PulseAsrStandardProtectionRulesConfigured {
     $anyRedactedAssignedOnUnsatisfied = $false
     $anySatisfiedButUnassigned = $false
 
-    foreach ($guid in $standardProtectionRules.Keys) {
-        $definitionId = "device_vendor_msft_policy_config_defender_attacksurfacereductionrules_$guid"
+    foreach ($definitionId in $standardProtectionRules.Keys) {
+        # CORPUS-VERIFIED (see this file's own docstring): the satisfying values are the
+        # FULL itemId strings "<definitionId>_block"/"<definitionId>_audit" - never a bare
+        # integer, never a GUID suffix.
+        $blockOptionId = "${definitionId}_block"
+        $auditOptionId = "${definitionId}_audit"
+        $isBlockOrAudit = {
+            param($value)
+            $text = [string] $value
+            return $text -eq $blockOptionId -or $text -eq $auditOptionId
+        }.GetNewClosure()
+
         $ruleSatisfiedByAssigned = $false
         $ruleSatisfiedButUnassigned = $false
         $ruleRedactedAssigned = $false
@@ -148,9 +156,9 @@ function Test-PulseAsrStandardProtectionRulesConfigured {
         }
 
         if ($ruleSatisfiedByAssigned) {
-            $satisfiedRuleNames.Add($standardProtectionRules[$guid]) | Out-Null
+            $satisfiedRuleNames.Add($standardProtectionRules[$definitionId]) | Out-Null
         } else {
-            $unsatisfiedRules.Add($standardProtectionRules[$guid]) | Out-Null
+            $unsatisfiedRules.Add($standardProtectionRules[$definitionId]) | Out-Null
             if ($ruleRedactedAssigned) { $anyRedactedAssignedOnUnsatisfied = $true }
             if ($ruleSatisfiedButUnassigned) { $anySatisfiedButUnassigned = $true }
         }
