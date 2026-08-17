@@ -26,8 +26,17 @@
     References = @{
         Research    = 'docs/research/iha-v2/2026-08-16-phase3-intune-check-entries.md#tpint0014--bitlocker-full-disk-encryption-enforced-via-endpoint-security-policy'
         Authorities = @(
-            'https://learn.microsoft.com/en-us/intune/device-configuration/endpoint-security/ref-disk-encryption-settings'
+            # PRIMARY - carries the "Full encryption vs Used space only" behavioral claim
+            # this check's Consulting text makes (POST-REVIEW FIX: this claim was
+            # previously attributed to the deprecated page listed second below, which
+            # does not document the current Settings Catalog format's behavior).
             'https://learn.microsoft.com/en-us/windows/client-management/mdm/bitlocker-csp'
+            # SECONDARY, deprecated pre-June-2023 profile-format reference only - confirms
+            # this policy surface and its settings exist, but documents the OLDER profile
+            # format, not the current Settings Catalog format this check's rule function
+            # actually reads (see Test-PulseBitLockerFullDiskEncryption.ps1's own
+            # docstring for the same caveat).
+            'https://learn.microsoft.com/en-us/intune/device-configuration/endpoint-security/ref-disk-encryption-settings'
         )
     }
     Origin     = @{ Project = 'Maester'; Id = 'MT.1123'; License = 'MIT' }
