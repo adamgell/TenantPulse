@@ -288,6 +288,17 @@ the deprecated pre-June-2023 `ref-disk-encryption-settings` page also listed in 
 descriptor's Authorities - see that descriptor's own git history for the Authorities
 reorder/annotation that makes this explicit.
 
+DESIGN OPTION (M4, Phase 3 whole-phase review, catalog-coherence finding,
+documentation-only): TP.INT.0014's own dedicated templateFamily-filtered
+`configurationPolicies` fetch could instead be re-implemented to consume Part A's
+tenant-wide settingPresenceIndex artifact (the same one TP.INT.0031 already reads),
+filtered by `templateFamily = endpointSecurityDiskEncryption` - no extra Graph
+round-trip needed since the expansion already ran, and one fewer composite descriptor to
+wait on. This would trade away the current two-independent-collection-path
+corroboration value TP.INT.0014 and TP.INT.0031 provide today (see this entry's own
+Notes/dedupe-trap text above). Recorded here as a design option for whoever makes the
+eventual GraphKit-release decision, not a recommendation either way.
+
 ## TP.INT.0015 — LAPS configuration policy meets minimum security bar
 
 Whether at least one Windows LAPS Endpoint Security policy (`templateFamily
@@ -650,6 +661,14 @@ Microsoft Edge, Windows 365), at least one instance exists, carries assignments,
   `configurationPolicies` with `templateReference` is current for v1 of this check.
   Per-setting drift vs. baseline default is explicitly out of scope for v1
   (assigned-and-current only) - deferred to Phase 5 baseline-diffing.
+- BACKLOG (M2, Phase 3 whole-phase review, catalog-coherence finding, documentation-only):
+  a tenant with ZERO security baselines of any tracked family gets a quiet NotApplicable
+  from this check today, and this check's own docstring frames that as deferred to "a
+  future 'no baseline deployed at all' check" - no such check exists anywhere in this
+  catalog yet. This is a real, currently-open coverage hole (a tenant that has never
+  deployed ANY security baseline is silently invisible to this whole check family), not a
+  completed hand-off - candidate for a future authoring pass, out of this fix round's own
+  scope.
 
 ## TP.INT.0030 — Fleet compliance rate below acceptable threshold
 

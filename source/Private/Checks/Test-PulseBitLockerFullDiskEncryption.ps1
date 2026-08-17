@@ -81,6 +81,21 @@
     "not full-disk encryption"). Absent means the resolved suffix-matched boolean this
     check's own dataset docstring describes was never produced for that policy row - this
     rule cannot honestly reason about it, and now throws instead.
+
+    DESIGN OPTION FOR THE GRAPHKIT RELEASE DECISION (Phase 3 whole-phase review,
+    catalog-coherence finding M4, documentation-only): this check's own templateFamily-
+    filtered `configurationPolicies` fetch is a narrower, more targeted collection path
+    than TP.INT.0031's approach (Test-PulseBitlockerCspSettingsPresentAndCorrect.ps1),
+    which instead reads Part A's tenant-wide settingPresenceIndex artifact (no extra
+    Graph round-trip, since the expansion already ran). An alternative worth recording for
+    whoever makes the eventual GraphKit-release call: this check COULD be re-implemented
+    to consume settingPresenceIndex filtered by templateFamily=endpointSecurityDiskEncryption
+    instead of its own dedicated fetch - trading its current independent-collection-path
+    corroboration value (see DEDUPE NOTE above; TP.INT.0014 and TP.INT.0031 currently
+    agree from two genuinely different sources) for one fewer Graph dependency and one
+    less composite descriptor to wait on. This is a design option, not a recommendation -
+    the corroboration value of two independent paths may be worth keeping. See this
+    check's own research entry for the same note.
 #>
 
 function Test-PulseBitLockerFullDiskEncryption {

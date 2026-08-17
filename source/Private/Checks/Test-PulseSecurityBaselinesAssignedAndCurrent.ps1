@@ -64,6 +64,16 @@
     (unassigned is the more urgent half per the research entry's own severity rationale,
     but both conditions fail together rather than being split into separate severities);
     Pass otherwise.
+
+    ZERO-BASELINES NA DEFERS TO A NONEXISTENT CHECK (Phase 3 whole-phase review,
+    catalog-coherence finding M2, documentation-only): the "future 'no baseline deployed
+    at all' check" referenced above does not exist anywhere in this catalog today - a
+    tenant with zero security baselines configured currently gets a quiet NotApplicable
+    and no other check ever flags that absence as a gap. This is a real, currently-open
+    coverage hole, not a completed hand-off; tracked as a backlog candidate in this
+    check's own research entry (docs/research/iha-v2/2026-08-16-phase3-intune-check-
+    entries.md, TP.INT.0029 section) rather than fixed here, since authoring a new check
+    is out of this fix round's scope.
 #>
 
 function Test-PulseSecurityBaselinesAssignedAndCurrent {
