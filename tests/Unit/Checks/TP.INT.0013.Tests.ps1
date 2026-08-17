@@ -122,4 +122,57 @@ Describe 'TP.INT.0013 - Intune RBAC groups protected via RMAU or role-assignable
         $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Be 'descriptor-pending: awaiting GraphKit release'
     }
+
+    It 'Error: an unprotected row has a missing groupId - must throw, never silently vanish into a false Pass' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupDisplayName = 'App Admins'; isManagementRestricted = $false; isAssignableToRole = $false }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'groupId'
+    }
+
+    It 'Error: an unprotected row has an empty-string groupId - must throw, never silently vanish into a false Pass' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = ''; groupDisplayName = 'App Admins'; isManagementRestricted = $false; isAssignableToRole = $false }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'groupId'
+    }
+
+    It 'Error: a row is missing isManagementRestricted entirely - a failed sub-call must never read as verified unprotected' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g1'; groupDisplayName = 'App Admins'; isAssignableToRole = $false }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'isManagementRestricted'
+    }
+
+    It 'Error: a row is missing isAssignableToRole entirely - a failed sub-call must never read as verified unprotected' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g1'; groupDisplayName = 'App Admins'; isManagementRestricted = $false }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'isAssignableToRole'
+    }
+
+    It 'Error: isManagementRestricted is explicitly $null - absent, not decidable, must throw' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g1'; groupDisplayName = 'App Admins'; isManagementRestricted = $null; isAssignableToRole = $false }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'isManagementRestricted'
+    }
+
+    It 'Pass still holds: present-$false on both fields is decidable and correctly Fails (not a false Pass, not an Error)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g1'; groupDisplayName = 'App Admins'; isManagementRestricted = $false; isAssignableToRole = $false }) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
 }

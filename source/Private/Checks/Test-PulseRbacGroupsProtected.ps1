@@ -28,6 +28,16 @@
     $roleAssignmentsExpanded still satisfies "$unprotectedGroups.Count -eq 0" - a tenant
     with no Intune RBAC role assignments using groups at all has nothing to protect, which
     is a real Pass, not a skip).
+
+    FIELD-ABSENCE LENS (POST-REVIEW FIX): isManagementRestricted, isAssignableToRole, and
+    groupId are each read from a live, 4-call Graph fan-out - a failed sub-call in that
+    chain is exactly the kind of gap that must never silently read as "verified
+    unprotected". An absent (missing or $null) isManagementRestricted or
+    isAssignableToRole now throws (-> engine Error), never coerces to $false. Likewise a
+    row identified as unprotected with no groupId now throws instead of being silently
+    dropped - dropping it would have let a real unprotected group vanish into a false
+    Pass (empirically reproduced by review). Present-and-$false on either boolean remains
+    fully decidable and participates in the Fail path exactly as before.
 #>
 
 function Test-PulseRbacGroupsProtected {
@@ -45,12 +55,21 @@ function Test-PulseRbacGroupsProtected {
 
     $unprotectedByGroupId = [ordered]@{}
     foreach ($row in $rows) {
-        $isManagementRestricted = ($row.isManagementRestricted -eq $true)
-        $isAssignableToRole = ($row.isAssignableToRole -eq $true)
+        if ($null -eq $row.isManagementRestricted) {
+            throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has no isManagementRestricted value - this rule's input is a 4-call Graph fan-out and an absent value here means a sub-call failed or returned an unreadable shape, not that the group is unprotected. Refusing to read absence as unprotected."
+        }
+        if ($null -eq $row.isAssignableToRole) {
+            throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has no isAssignableToRole value - this rule's input is a 4-call Graph fan-out and an absent value here means a sub-call failed or returned an unreadable shape, not that the group is unprotected. Refusing to read absence as unprotected."
+        }
+
+        $isManagementRestricted = ([bool] $row.isManagementRestricted -eq $true)
+        $isAssignableToRole = ([bool] $row.isAssignableToRole -eq $true)
         if ($isManagementRestricted -or $isAssignableToRole) { continue }
 
         $groupId = [string] $row.groupId
-        if ([string]::IsNullOrEmpty($groupId)) { continue }
+        if ([string]::IsNullOrEmpty($groupId)) {
+            throw "Test-PulseRbacGroupsProtected: an unprotected row (roleDefinitionName '$($row.roleDefinitionName)') has no groupId value - this row cannot be identified or deduplicated, and silently dropping it would let an unprotected group vanish into a false Pass. Refusing to skip it."
+        }
         if (-not $unprotectedByGroupId.Contains($groupId)) {
             $unprotectedByGroupId[$groupId] = $row
         }
