@@ -49,7 +49,7 @@ Describe 'Resolve-PulseSettingsCatalogSnapshotExpansion (P1-11)' {
             param($store, $policy, $index, $response)
             Write-PulseDataset -Store $store -Name 'configurationPolicies' -Data @($policy) -ApiVersion 'beta' -Status 'Collected'
             Write-PulseDataset -Store $store -Name 'configurationPolicySettings-policy-1' -Data $response -ApiVersion 'beta' -Status 'Collected'
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -Sequential -FromCapturedPayloads
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -FromCapturedPayloads
         }
 
         $beforeManifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw
@@ -127,7 +127,7 @@ Describe 'Resolve-PulseSettingsCatalogSnapshotExpansion (P1-11)' {
             param($store, $policy, $response, $index, $rawDefinitions)
             Write-PulseDataset -Store $store -Name 'configurationPolicies' -Data @($policy) -ApiVersion 'beta' -Status 'Collected'
             Write-PulseDataset -Store $store -Name 'configurationPolicySettings-policy-stale-fail' -Data $response -ApiVersion 'beta' -Status 'Collected'
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -Sequential -FromCapturedPayloads
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -FromCapturedPayloads
 
             $canonical = ConvertTo-PulseCanonicalJson -InputObject $rawDefinitions
             $tempPath = Join-Path $store.ReferencePath 'settingDefinitions.tmp'
@@ -165,7 +165,7 @@ Describe 'Resolve-PulseSettingsCatalogSnapshotExpansion (P1-11)' {
             param($store, $policy, $response, $index, $rawDefinitions)
             Write-PulseDataset -Store $store -Name 'configurationPolicies' -Data @($policy) -ApiVersion 'beta' -Status 'Collected'
             Write-PulseDataset -Store $store -Name 'configurationPolicySettings-policy-3' -Data $response -ApiVersion 'beta' -Status 'Collected'
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -Sequential -FromCapturedPayloads
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -FromCapturedPayloads
 
             $canonical = ConvertTo-PulseCanonicalJson -InputObject $rawDefinitions
             $tempPath = Join-Path $store.ReferencePath 'settingDefinitions.tmp'

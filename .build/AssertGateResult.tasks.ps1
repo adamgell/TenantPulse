@@ -374,7 +374,22 @@
 # 1818 is the real, measured `./build.ps1 -Tasks build,test` total for this commit; both
 # tracking locations (here and .github/workflows/ci.yml) bumped together in the same
 # commit as these test changes, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1818
+#
+# 1818 -> 1816 (Task 3.4 Part D, RunspacePool parallel path DELETED from
+# Invoke-PulseSettingsCatalogExpansion - a DROP, not a raise): -MaxParallel and -Sequential
+# are gone; sequential is the only path left. Two multi-worker byte-identity Its retired
+# outright (SettingsCatalogExpansion.Tests.ps1's 'a real -MaxParallel 4 run over captured
+# payloads is byte-identical to -Sequential' and its T2.7 24-policy sibling) - both asserted
+# a RunspacePool run matched a sequential run's bytes, and there is no second code path left
+# for either assertion to compare against; a third It in the same Describe (WORKER-FAILURE
+# CLASSIFICATION, real behavior beyond byte-identity) was KEPT, converted off -MaxParallel
+# onto the same sequential call every sibling test in the file already uses. Net: -2 tests,
+# 0 coverage lost beyond the now-meaningless byte-identity comparisons themselves. 1816 is
+# the real, measured `./build.ps1 -Tasks build,test` total for this commit; both tracking
+# locations bumped together in the same commit as these test changes, per the ratchet's own
+# rule. A DROPPING total is expected and correct here, not a regression - see this task's
+# own report for the full retired-test inventory.
+$script:tenantPulseGateMinimumTests = 1816
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

@@ -34,10 +34,10 @@
          definitions index back from the `settingDefinitions` reference
          (Get-PulseReferenceData, hash-verified, then rebuilt into the compact index via
          Get-PulseSettingDefinitionIndex - the reference file holds the full raw corpus,
-         never the index itself). Runs -Sequential (this path only ever re-derives from
-         data already durably on disk; there is no Graph latency to amortize with a worker
-         pool here, and -Sequential keeps this call's own behavior simple and directly
-         testable without a runspace pool).
+         never the index itself). Runs sequentially - Invoke-PulseSettingsCatalogExpansion
+         has no other path any more (Part D, T3.4 deleted its RunspacePool alternative); this
+         call site never had to force anything here in the first place, since this path only
+         ever re-derives from data already durably on disk with no Graph latency to amortize.
 
     BEST-EFFORT, NEVER ABORTS THE ASSESSMENT: any failure in this function's own pipeline
     (a missing/corrupt configurationPolicies dataset, a missing/corrupt settingDefinitions
@@ -120,7 +120,7 @@ function Resolve-PulseSettingsCatalogSnapshotExpansion {
         $definitionIndex = Get-PulseSettingDefinitionIndex -Data $rawDefinitions
 
         $null = Invoke-PulseSettingsCatalogExpansion -Store $Store -Context $null -Policies $policies `
-            -DefinitionIndex $definitionIndex -FromCapturedPayloads -Sequential
+            -DefinitionIndex $definitionIndex -FromCapturedPayloads
     } catch {
         # Rider fix (b): a previously-verified-stale Expanded/Partial entry that we just
         # attempted (and failed) to replace must not be left claiming a status that no

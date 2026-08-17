@@ -170,7 +170,7 @@ Describe 'Perf: 5,000-policy Settings Catalog expansion + conflict-detection com
                 $memBefore = [System.GC]::GetTotalMemory($true)
 
                 $expandSw = [System.Diagnostics.Stopwatch]::StartNew()
-                $expandSummary = Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies.ToArray() -DefinitionIndex $index -Sequential -FromCapturedPayloads
+                $expandSummary = Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies.ToArray() -DefinitionIndex $index -FromCapturedPayloads
                 $expandSw.Stop()
 
                 $conflictSw = [System.Diagnostics.Stopwatch]::StartNew()

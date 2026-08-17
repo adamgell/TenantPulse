@@ -74,7 +74,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy {
             param($store, $context, $policy)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $null -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $null
         }
 
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
@@ -93,7 +93,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $summary.Status | Should -Be 'Expanded'
@@ -141,7 +141,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $goodPolicy, $badPolicy, $index {
             param($store, $context, $goodPolicy, $badPolicy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($goodPolicy, $badPolicy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($goodPolicy, $badPolicy) -DefinitionIndex $index
         }
 
         $summary.Status | Should -Be 'Partial'
@@ -180,7 +180,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $rawDatasetContent = Get-Content -LiteralPath (Join-Path $script:store.DatasetsPath 'configurationPolicySettings-policy-secret.json') -Raw
@@ -218,7 +218,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index, $tenantId, $pseudonym {
             param($store, $context, $policy, $index, $tenantId, $pseudonym)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential `
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index `
                 -TenantId $tenantId -Pseudonym $pseudonym
         }
 
@@ -247,7 +247,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         # unknown shape -> redacted AND a gap (Partial), per the shared classifier's
@@ -271,7 +271,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policyA, $policyB, $index {
             param($store, $context, $policyA, $policyB, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policyA, $policyB) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policyA, $policyB) -DefinitionIndex $index
         }
 
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Parameters.id -eq 'shared-id' }
@@ -291,7 +291,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $goodPolicy, $emptyPolicy, $index {
             param($store, $context, $goodPolicy, $emptyPolicy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($goodPolicy, $emptyPolicy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($goodPolicy, $emptyPolicy) -DefinitionIndex $index
         }
 
         $summary.Status | Should -Be 'Partial'
@@ -308,7 +308,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $goodPolicy, $whitespacePolicy, $index {
             param($store, $context, $goodPolicy, $whitespacePolicy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($goodPolicy, $whitespacePolicy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($goodPolicy, $whitespacePolicy) -DefinitionIndex $index
         }
 
         $summary.Status | Should -Be 'Partial'
@@ -335,7 +335,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
@@ -356,7 +356,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policyA, $policyB, $index {
             param($store, $context, $policyA, $policyB, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policyA, $policyB) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policyA, $policyB) -DefinitionIndex $index
         }
         $forwardBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $script:store))
 
@@ -365,7 +365,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         try {
             InModuleScope TenantPulse -ArgumentList $store2, $script:context, $policyA, $policyB, $index {
                 param($store2, $context, $policyA, $policyB, $index)
-                Invoke-PulseSettingsCatalogExpansion -Store $store2 -Context $context -Policies @($policyB, $policyA) -DefinitionIndex $index -Sequential
+                Invoke-PulseSettingsCatalogExpansion -Store $store2 -Context $context -Policies @($policyB, $policyA) -DefinitionIndex $index
             }
             $reversedBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $store2))
 
@@ -384,14 +384,14 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { throw 'must not be called on -FromCapturedPayloads' }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $policy, $index {
             param($store, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -Sequential -FromCapturedPayloads
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -FromCapturedPayloads
         }
 
         $summary.Status | Should -Be 'Expanded'
@@ -406,7 +406,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $index {
             param($store, $context, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @() -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @() -DefinitionIndex $index
         }
 
         $summary.Status | Should -Be 'Expanded'
@@ -429,7 +429,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policyZ, $policyA, $index {
             param($store, $context, $policyZ, $policyA, $index)
             # deliberately supplied in Z-then-A order
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policyZ, $policyA) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policyZ, $policyA) -DefinitionIndex $index
         }
 
         $summary.Gaps.Count | Should -Be 2
@@ -452,7 +452,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         {
             InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
                 param($store, $context, $policy, $index)
-                Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+                Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
             }
         } | Should -Throw
 
@@ -462,7 +462,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
     }
 }
 
-Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, no mocks)' {
+Describe 'Invoke-PulseSettingsCatalogExpansion - sequential-only (Part D, T3.4: RunspacePool -MaxParallel path deleted)' {
     BeforeEach {
         $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $script:store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
@@ -475,86 +475,25 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
         Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    # P1-13 (adopted permanently, per the review): a REAL -MaxParallel worker-pool run
-    # against -FromCapturedPayloads (no Graph call needed - no mock required, so this
-    # actually exercises the RunspacePool path a Mock-based test structurally cannot) must
-    # produce a BYTE-IDENTICAL artifact to a -Sequential run over the same captured data.
-    It 'a real -MaxParallel 4 run over captured payloads is byte-identical to -Sequential' {
-        $index = New-TestDefinitionIndex
-        $policyIds = 1..8 | ForEach-Object { "11111111-1111-1111-1111-{0:D12}" -f $_ }
-        $policies = $policyIds | ForEach-Object { New-TestPolicy -Id $_ }
-
-        # Seed captured raw datasets directly (no Graph call anywhere in this test).
-        foreach ($id in $policyIds) {
-            $response = New-TestSettingsResponse -Value "value-$id" -DefinitionId 'setting-a'
-            InModuleScope TenantPulse -ArgumentList $script:store, $id, $response {
-                param($store, $id, $response)
-                Write-PulseDataset -Store $store -Name "configurationPolicySettings-$id" -Data $response -ApiVersion 'beta' -Status 'Collected'
-            }
-        }
-
-        $sequentialSummary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $index {
-            param($store, $policies, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies -DefinitionIndex $index -Sequential -FromCapturedPayloads -Name 'seqRun'
-        }
-        $sequentialBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $script:store -Name 'seqRun'))
-
-        $parallelSummary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $index {
-            param($store, $policies, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies -DefinitionIndex $index -MaxParallel 4 -FromCapturedPayloads -Name 'parRun'
-        }
-        $parallelBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $script:store -Name 'parRun'))
-
-        $sequentialSummary.RowCount | Should -Be 8
-        $parallelSummary.RowCount | Should -Be 8
-        $parallelSummary.Status | Should -Be 'Expanded'
-        [System.Convert]::ToBase64String($parallelBytes) | Should -Be ([System.Convert]::ToBase64String($sequentialBytes))
-    }
-
-    # T2.7 REGRESSION (omp review, this round): Invoke-PulseSettingsCatalogExpansionPipeline.ps1
-    # now FORCES -Sequential unconditionally for every real, live-tenant caller (see that
-    # file's own docstring - a live-gate finding, -MaxParallel 4 was pathologically slow
-    # against the real Ivy24 tenant). That means the production RunspacePool path has NO
-    # live caller left at all - this driver-level function is the ONLY place -MaxParallel
-    # machinery still runs for real, so it must stay regression-guarded HERE,
-    # independently of the pipeline, or a future refactor could silently let the
-    # RunspacePool code rot with nothing left exercising it. This test calls
-    # Invoke-PulseSettingsCatalogExpansion directly (bypassing the pipeline wrapper
-    # entirely, exactly as the pipeline's own forced-Sequential call site does NOT) with a
-    # larger (24-policy) captured-payload corpus than the P1-13 test above, to give the
-    # RunspacePool meaningfully more concurrent work to interleave.
-    It 'T2.7: -MaxParallel 4 against the driver directly (bypassing the pipeline''s forced -Sequential) stays byte-identical to -Sequential over 24 captured-payload policies' {
-        $index = New-TestDefinitionIndex
-        $policyIds = 1..24 | ForEach-Object { "22222222-2222-2222-2222-{0:D12}" -f $_ }
-        $policies = $policyIds | ForEach-Object { New-TestPolicy -Id $_ }
-
-        foreach ($id in $policyIds) {
-            $response = New-TestSettingsResponse -Value "t27-value-$id" -DefinitionId 'setting-a'
-            InModuleScope TenantPulse -ArgumentList $script:store, $id, $response {
-                param($store, $id, $response)
-                Write-PulseDataset -Store $store -Name "configurationPolicySettings-$id" -Data $response -ApiVersion 'beta' -Status 'Collected'
-            }
-        }
-
-        $sequentialSummary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $index {
-            param($store, $policies, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies -DefinitionIndex $index -Sequential -FromCapturedPayloads -Name 't27SeqRun'
-        }
-        $sequentialBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $script:store -Name 't27SeqRun'))
-
-        $parallelSummary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $index {
-            param($store, $policies, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies -DefinitionIndex $index -MaxParallel 4 -FromCapturedPayloads -Name 't27ParRun'
-        }
-        $parallelBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $script:store -Name 't27ParRun'))
-
-        $sequentialSummary.RowCount | Should -Be 24
-        $parallelSummary.RowCount | Should -Be 24
-        $parallelSummary.Status | Should -Be 'Expanded'
-        [System.Convert]::ToBase64String($parallelBytes) | Should -Be ([System.Convert]::ToBase64String($sequentialBytes))
-    }
-
-    It 'WORKER-FAILURE CLASSIFICATION: a missing captured payload for one policy (of several) under a real parallel run gaps only that policy' {
+    # RETIRED (Part D, T3.4 - ledger record): two multi-worker byte-identity tests used to
+    # live here -
+    #   'a real -MaxParallel 4 run over captured payloads is byte-identical to -Sequential'
+    #   'T2.7: -MaxParallel 4 against the driver directly (bypassing the pipeline''s forced
+    #    -Sequential) stays byte-identical to -Sequential over 24 captured-payload policies'
+    # - both asserting a real RunspacePool worker-pool run produced byte-identical output to
+    # a sequential run over the same captured-payload corpus. Both are deleted, not
+    # skipped: the RunspacePool path they exercised no longer exists in the product code
+    # (see Invoke-PulseSettingsCatalogExpansion's own docstring for the measured deletion
+    # rationale - per-runspace ~20s token acquisition, a runspace-local throttle
+    # coordinator, and an Import-Module table race that only survived 2 of 6 concurrent
+    # pooled runspace opens even with -Force), so there is no second code path left for
+    # either test to compare against; a sequential-vs-sequential "byte-identity" assertion
+    # would prove nothing these tests' many sibling sequential-path Its don't already
+    # cover. The test BELOW this comment (WORKER-FAILURE CLASSIFICATION) covered real
+    # behavior beyond byte-identity - gap classification for one missing captured payload
+    # among several policies - so it is KEPT, converted to the sequential call every other
+    # test in this file already uses, rather than deleted.
+    It 'WORKER-FAILURE CLASSIFICATION: a missing captured payload for one policy (of several) gaps only that policy' {
         $index = New-TestDefinitionIndex
         $goodIds = 1..3 | ForEach-Object { "22222222-2222-2222-2222-{0:D12}" -f $_ }
         $missingId = '22222222-2222-2222-2222-999999999999'
@@ -571,7 +510,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $index {
             param($store, $policies, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies -DefinitionIndex $index -MaxParallel 4 -FromCapturedPayloads
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies -DefinitionIndex $index -FromCapturedPayloads
         }
 
         $summary.Status | Should -Be 'Partial'
@@ -588,7 +527,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $summary.Status | Should -Be 'NotExpanded'
@@ -611,7 +550,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $summary.Status | Should -Be 'Expanded'
@@ -632,7 +571,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
         {
             InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
                 param($store, $context, $policy, $index)
-                Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+                Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
             }
         } | Should -Throw '*not a read-only descriptor*'
 
@@ -648,7 +587,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $summary.Status | Should -Be 'NotExpanded'
@@ -664,7 +603,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
         # not a Get-GraphOperation-related failure.
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $policy, $index {
             param($store, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -Sequential -FromCapturedPayloads
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($policy) -DefinitionIndex $index -FromCapturedPayloads
         }
 
         $summary.Gaps[0].reason | Should -Match 'CapturedPayloadMissing'
@@ -697,7 +636,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion -MaxParallel (real worker pool, n
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         # A depth-budget-exceeded gap (from the WALKER itself) is fine at exactly the
@@ -740,7 +679,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
@@ -762,7 +701,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $fixture.Policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
@@ -784,7 +723,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $fixture.Policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
@@ -804,7 +743,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
@@ -823,7 +762,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
-            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index -Sequential
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
         }
 
         $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store

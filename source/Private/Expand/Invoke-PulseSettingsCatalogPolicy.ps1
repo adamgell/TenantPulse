@@ -2,15 +2,17 @@
     Private: fetch (or re-read), redact, and walk ONE policy's Settings Catalog payload.
 
     Extracted as its own top-level module function (rather than a closure nested inside
-    Invoke-PulseSettingsCatalogExpansion) for exactly one reason: the parallel worker-pool
-    path in that function runs this per-policy unit inside a SEPARATE runspace via a
-    RunspacePool, and only functions that are part of a module's own function table -
-    which a nested closure is NOT, it exists only for the lifetime of the enclosing call -
-    survive being invoked from a different runspace that re-imports the module by path (see
-    Invoke-PulseSettingsCatalogExpansion's own WORKER POOL docstring section). Both the
-    sequential and parallel paths call this exact same function - there is only ONE
-    implementation of "how a policy is fetched, redacted, walked and classified" regardless
-    of which path ran it.
+    Invoke-PulseSettingsCatalogExpansion) ORIGINALLY for a RunspacePool-specific reason: a
+    deleted parallel worker-pool path in that function used to run this per-policy unit
+    inside a SEPARATE runspace, and only functions that are part of a module's own function
+    table - which a nested closure is NOT, it exists only for the lifetime of the enclosing
+    call - survive being invoked from a different runspace that re-imports the module by
+    path. Part D (T3.4) deleted that RunspacePool path entirely (see
+    Invoke-PulseSettingsCatalogExpansion's own docstring for the measured rationale) -
+    Invoke-PulseSettingsCatalogExpansion's now-sole sequential loop is the only caller left
+    - but the extraction itself is kept: this is still the one implementation of "how a
+    policy is fetched, redacted, walked and classified," worth keeping independently
+    testable and readable on its own.
 
     Returns { PolicyId; Rows=[rowSchemaV1...]; Gap=<structured string>|$null } - never
     throws for an ordinary fetch/read/walk failure (those become -Gap); a genuine

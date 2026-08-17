@@ -114,26 +114,21 @@ function Invoke-PulseSettingsCatalogExpansionPipeline {
 
         $definitionIndex = Save-PulseSettingDefinitionCorpus -Store $Store -Context $Context
 
-        # -Sequential FORCED here (T2.7 live-gate finding - NOT the same as this function's
-        # own -Sequential-unset default, which would let Invoke-PulseSettingsCatalogExpansion
-        # fall through to its own -MaxParallel 4 RunspacePool path): live against the real
-        # Ivy24 tenant, -MaxParallel 4 did not complete a 20-policy slice within 9m35s
-        # (killed) while the identical slice completed -Sequential in 2.30s (0.12s/policy -
-        # even better than the T2.0 spike's own 300ms mean). Root cause not fully
-        # established within this task, but the RunspacePool path re-imports GraphKit into
-        # each worker's own isolated runspace (see that function's own WORKER POOL
-        # docstring), which plausibly means GraphKit's token cache and
-        # GraphThrottleCoordinator state are NOT shared across workers - four independently
-        # unaware workers hammering the same tenant with no shared adaptive backoff is a
-        # credible explanation for severe real throttling. See
-        # docs/spike/2026-08-16-t27-perf-container.md's own section 4 for the full
-        # measurement. -Sequential here is a deliberate SAFE DEFAULT for the one caller that
-        # ever runs against a REAL, live tenant - Invoke-PulseSettingsCatalogExpansion's own
-        # -MaxParallel default (4) is UNCHANGED and still exercised directly by its own test
-        # suite and by -FromCapturedPayloads callers, where the RunspacePool path is fast
-        # and byte-identical to sequential (no live Graph calls to be starved of shared
-        # throttle state). Revisit once the RunspacePool/shared-state root cause is fixed.
-        $null = Invoke-PulseSettingsCatalogExpansion -Store $Store -Context $Context -Policies $policies -DefinitionIndex $definitionIndex -Sequential `
+        # SEQUENTIAL, UNCONDITIONALLY (Part D, T3.4 - historical note, was "-Sequential
+        # FORCED here" against a -MaxParallel-capable driver): this caller used to force
+        # Invoke-PulseSettingsCatalogExpansion's own -Sequential switch because, live
+        # against the real Ivy24 tenant, that function's RunspacePool -MaxParallel 4 path
+        # did not complete a 20-policy slice within 9m35s (killed) while the identical
+        # slice completed sequentially in 2.30s (0.12s/policy - even better than the T2.0
+        # spike's own 300ms mean). See docs/spike/2026-08-16-t27-perf-container.md's own
+        # section 4 for the full measurement, and that function's own docstring for the
+        # measured root-cause accounting (per-runspace token acquisition, runspace-local
+        # throttle state, Import-Module races) that led to deleting the RunspacePool path
+        # entirely rather than just leaving it defaulted off. Sequential is now the ONLY
+        # path Invoke-PulseSettingsCatalogExpansion has - there is no longer a switch to
+        # force here, and this call site is unchanged in behavior, only in that the choice
+        # is no longer expressible any other way.
+        $null = Invoke-PulseSettingsCatalogExpansion -Store $Store -Context $Context -Policies $policies -DefinitionIndex $definitionIndex `
             -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
     } catch {
         # OUTER FAILURE BOUNDARY - see this file's own docstring: never let an unexpected

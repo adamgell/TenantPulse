@@ -645,7 +645,17 @@ jobs:
           # auto-parses createdUtc into a culture-sensitive, precision-losing [datetime]) -
           # see .build/AssertGateResult.tasks.ps1's own accounting, which must be bumped
           # together with this value.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1818 -AllowedSkips $allowedSkips -AllowNotRun 1
+          #
+          # 1818 -> 1816 (Task 3.4 Part D, RunspacePool parallel path DELETED from
+          # Invoke-PulseSettingsCatalogExpansion - a DROP, not a raise): -MaxParallel and
+          # -Sequential are gone; sequential is the only path left. Two multi-worker
+          # byte-identity Its retired outright (both asserted a RunspacePool run matched a
+          # sequential run's bytes, and there is no second code path left to compare
+          # against); one sibling It covering real behavior beyond byte-identity was kept,
+          # converted onto the sequential call every other test in its file already uses.
+          # See .build/AssertGateResult.tasks.ps1's own accounting for the full retirement
+          # note - a DROPPING total here is expected and correct, not a regression.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1816 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

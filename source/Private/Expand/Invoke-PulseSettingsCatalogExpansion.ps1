@@ -26,18 +26,17 @@
     raw-dataset owner" invariant, enforced structurally before any Graph call or dataset
     write can happen, not discovered after the fact.
 
-    WORKER DRAIN (P0-5 review fix - reproduced: an EndInvoke exception on one handle
-    propagated out of the whole foreach, orphaning every later handle undisposed and
-    aborting the run before publication). Every handle is tagged with its own PolicyId.
-    EVERY handle is drained (EndInvoke attempted, Dispose'd) regardless of any other
-    handle's outcome - a per-handle try/catch/finally, not one try wrapping the whole
-    drain loop. A handle is additionally inspected for InvocationStateInfo.State (must be
-    'Completed') and Streams.Error (must be empty) even when EndInvoke itself did not
-    throw - a worker that wrote non-terminating errors but still returned SOMETHING is not
-    trusted. Result cardinality is checked too: Invoke-PulseSettingsCatalogPolicy always
-    returns exactly ONE object; anything else (0, or more than 1, from a pipeline-flattening
-    surprise) gaps that policy (category ResultCardinalityMismatch) rather than trusting a
-    partial/ambiguous result.
+    WORKER DRAIN (P0-5 review fix, ORIGINALLY written against the RunspacePool path deleted
+    in Part D/T3.4 - an EndInvoke exception on one handle propagated out of the whole
+    foreach, orphaning every later handle undisposed and aborting the run before
+    publication; kept here as a per-policy try/catch/continue in the now-sole sequential
+    loop below, same spirit: one policy's unexpected exception must not abort every other
+    policy already collected). Result cardinality is still checked at the layer below this
+    one: Invoke-PulseSettingsCatalogPolicy always returns exactly ONE object per call; that
+    contract no longer needs re-verifying here now that there is only one caller of it left
+    (the RunspacePool path's own EndInvoke/Streams.Error/InvocationStateInfo inspection,
+    which existed because pooled-runspace failures could not otherwise be observed, went
+    with it).
 
     DUPLICATE ROW IDENTITIES (P1-7 review fix): ConvertTo-PulseSettingRows itself now
     THROWS on an internal instanceId collision (see its own docstring) rather than
@@ -85,17 +84,47 @@
     inferred from path existence after the fact. The IncrementalHash is disposed in its own
     try/finally regardless of whether GetHashAndReset() was ever reached.
 
-    WORKER POOL (-MaxParallel, default 4) vs -Sequential: -Sequential (or -MaxParallel -le
-    1, or a policy list with 1 or fewer ELIGIBLE policies) processes every policy in a plain
-    foreach loop - the path every unit test in this module exercises via Mock/Should-
-    Invoke. The parallel path (-MaxParallel -gt 1) is REAL production code - a bounded
-    RunspacePool sized [1, MaxParallel] - but its own Get-GraphObject calls are outside
-    what a same-runspace Mock can observe (see the WORKER DRAIN section above and the
-    per-handle PolicyId tagging it depends on). MERGE ORDER NEVER DEPENDS ON WORKER
-    COMPLETION ORDER - every row carries its own (policyId, settingPath, instanceId) and
-    the merge sorts explicitly on that ordinal triple via [string]::CompareOrdinal, so a
-    shuffled completion order produces a byte-identical final file to a sequential run over
-    the same input.
+    SEQUENTIAL-ONLY (Part D, T3.4 - RunspacePool parallel path DELETED): every policy is
+    processed in a plain foreach loop now - there is no other path. This function used to
+    offer a -MaxParallel worker pool (a bounded RunspacePool sized [1, MaxParallel]) as an
+    alternative to -Sequential; both parameters are gone. MERGE ORDER STILL NEVER DEPENDS ON
+    ANY PARTICULAR COMPLETION ORDER - every row carries its own (policyId, settingPath,
+    instanceId) and the merge still sorts explicitly on that ordinal triple via
+    [string]::CompareOrdinal (see below), so this function's own output contract (one
+    deterministic file regardless of how the rows were produced) is unchanged by the
+    deletion - only how they get produced changed.
+
+    WHY THE RUNSPACEPOOL PATH IS GONE, NOT JUST DEFAULTED-OFF (measured rationale, T3.4):
+    it had exactly one caller left with -MaxParallel actually enabled by the time this
+    task ran - this driver's OWN test suite - and every real production call site
+    (Invoke-PulseSettingsCatalogExpansionPipeline.ps1, Resolve-
+    PulseSettingsCatalogSnapshotExpansion.ps1) already forced -Sequential, for reasons
+    measured directly against the real Ivy24 tenant during T2.7's live-gate round:
+      - -MaxParallel 4 did not complete a 20-policy slice within 9m35s (killed) against the
+        live tenant, while the identical slice completed -Sequential in 2.30s
+        (~0.12s/policy) - not a marginal difference, a functional regression.
+      - Per-runspace GraphKit token acquisition cost ~20s EACH - every pooled runspace re-
+        authenticated independently rather than sharing the parent runspace's already-
+        warm token, because RunspacePool session state does not share GraphKit's
+        connection-level state across runspaces by construction.
+      - The pool's own throttle coordination was RUNSPACE-LOCAL, not shared - each worker
+        tracked Graph throttle state independently, so the pool as a whole had no single
+        coherent view of how hard it was hitting the API, undermining the exact adaptive-
+        throttle behavior GraphKit provides everywhere else in this module.
+      - Import-Module race: each pooled runspace does its own `$sessionState.ImportPSModule`
+        of the already-loaded GraphKit/TenantPulse modules at pool-open time; even with
+        -Force on that import, only 2 of 6 concurrent runspace opens survived cleanly in
+        repeated measurement - a module-table race this module does not own and cannot fix
+        from inside a RunspacePool's own import path.
+    Keeping a second, materially slower and less reliable code path alive - fully exercised
+    only by its own tests, never by a real caller - was pure maintenance liability: every
+    future change to the per-policy walk had to be correct on BOTH the foreach loop and the
+    RunspacePool script-block copy of the same call, and only the foreach half was ever
+    covered by anything resembling real usage. Invoke-GraphBatch's own $batch fan-out
+    (GraphKit's server-side batching, not a client-side runspace pool) is the sanctioned
+    future scale lever if a fan-out speedup is ever needed again (Phase 2b) - it shares one
+    connection/token and one throttle coordinator by construction, which is exactly the
+    class of problem the RunspacePool path could never solve from the client side.
 
     -DefinitionIndex $null (definitions corpus unavailable): writes manifest.expansions.<Name>
     'NotExpanded' with reason 'definitions corpus unavailable' and makes NO Graph call at
@@ -298,13 +327,6 @@ function Invoke-PulseSettingsCatalogExpansion {
         [string] $Name = 'settingsCatalog',
 
         [Parameter()]
-        [ValidateRange(1, 64)]
-        [int] $MaxParallel = 4,
-
-        [Parameter()]
-        [switch] $Sequential,
-
-        [Parameter()]
         [switch] $FromCapturedPayloads,
 
         [Parameter()]
@@ -413,108 +435,36 @@ function Invoke-PulseSettingsCatalogExpansion {
         $eligiblePolicies.Add([pscustomobject]@{ Policy = $policy; PolicyId = $rawId }) | Out-Null
     }
 
-    $isSequential = $Sequential.IsPresent -or $MaxParallel -le 1 -or $eligiblePolicies.Count -le 1
-
-    if ($isSequential) {
-        foreach ($eligible in $eligiblePolicies) {
-            $policy = $eligible.Policy
-            $rawDatasetName = "$rawDatasetPrefix$($eligible.PolicyId)"
-            try {
-                $result = Invoke-PulseSettingsCatalogPolicy -Store $Store -Policy $policy -Context $Context -DefinitionIndex $DefinitionIndex `
-                    -FromCapturedPayloads $FromCapturedPayloads.IsPresent -RawDatasetName $rawDatasetName `
-                    -TenantId $TenantId -Pseudonym $Pseudonym
-            } catch {
-                # WORKER DRAIN applies to the sequential path too (P0-5's own spirit): an
-                # unexpected exception from one policy must not skip publication of every
-                # policy already collected.
-                Write-Verbose "Invoke-PulseSettingsCatalogExpansion: unexpected exception processing policy '$($eligible.PolicyId)': $($_.Exception.Message)"
-                $gapEntries.Add([pscustomobject]@{ policyId = $eligible.PolicyId; reason = 'category:WorkerException' }) | Out-Null
-                continue
-            }
-            foreach ($row in $result.Rows) { $allRows.Add($row) | Out-Null }
-            if ($result.Gap) {
-                $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
-                $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
-            }
-        }
-    } else {
-        # PARALLEL PATH - real RunspacePool, not unit-tested via Mock (see docstring).
-        $sessionState = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
-        $graphKitModule = Get-Module -Name GraphKit
-        $tenantPulseModule = Get-Module -Name TenantPulse
-        if ($graphKitModule) { $sessionState.ImportPSModule(@($graphKitModule.Path)) }
-        if ($tenantPulseModule) { $sessionState.ImportPSModule(@($tenantPulseModule.Path)) }
-
-        $pool = [runspacefactory]::CreateRunspacePool(1, $MaxParallel, $sessionState, $Host)
-        $pool.Open()
-
-        # Invoke-PulseSettingsCatalogPolicy is PRIVATE (not Export-ModuleMember'd), so a
-        # plain call by name inside the pooled runspace's own script would fail even though
-        # that runspace imported TenantPulse - `& $module { ... }` runs the inner
-        # scriptblock inside that runspace's own freshly-imported TenantPulse module
-        # instance's scope, where the private function is a real, callable member.
-        $scriptBlock = {
-            param($Store, $Policy, $Context, $DefinitionIndex, $FromCapturedPayloads, $RawDatasetName, $TenantId, $Pseudonym)
-            $module = Get-Module -Name TenantPulse
-            & $module {
-                param($Store, $Policy, $Context, $DefinitionIndex, $FromCapturedPayloads, $RawDatasetName, $TenantId, $Pseudonym)
-                Invoke-PulseSettingsCatalogPolicy -Store $Store -Policy $Policy -Context $Context -DefinitionIndex $DefinitionIndex `
-                    -FromCapturedPayloads $FromCapturedPayloads -RawDatasetName $RawDatasetName -TenantId $TenantId -Pseudonym $Pseudonym
-            } $Store $Policy $Context $DefinitionIndex $FromCapturedPayloads $RawDatasetName $TenantId $Pseudonym
-        }
-
-        # WORKER DRAIN (P0-5): every handle is tagged with its own PolicyId up front, and
-        # EVERY handle is drained regardless of any other handle's outcome.
-        $handles = [System.Collections.Generic.List[object]]::new()
+    # FORMER FORK POINT (Part D, T3.4): this used to branch on -Sequential/-MaxParallel into
+    # either this plain foreach or a bounded RunspacePool worker-pool path. The RunspacePool
+    # path is deleted, not merely defaulted off - see this file's own docstring
+    # ("WHY THE RUNSPACEPOOL PATH IS GONE") for the measured rationale: ~20s/runspace token
+    # acquisition, a runspace-local (not shared) throttle coordinator, and an Import-Module
+    # table race that only survived 2 of 6 concurrent pooled runspace opens even with
+    # -Force. Every real caller already forced -Sequential before this deletion; only this
+    # function's own test suite ever exercised -MaxParallel for real. Invoke-GraphBatch's
+    # $batch fan-out (GraphKit's server-side batching) is the sanctioned future scale lever
+    # if fan-out speed is ever needed again (Phase 2b) - it shares one connection/token and
+    # one throttle coordinator by construction, unlike a client-side RunspacePool.
+    foreach ($eligible in $eligiblePolicies) {
+        $policy = $eligible.Policy
+        $rawDatasetName = "$rawDatasetPrefix$($eligible.PolicyId)"
         try {
-            foreach ($eligible in $eligiblePolicies) {
-                $rawDatasetName = "$rawDatasetPrefix$($eligible.PolicyId)"
-                $ps = [powershell]::Create()
-                $ps.RunspacePool = $pool
-                [void] $ps.AddScript($scriptBlock).AddArgument($Store).AddArgument($eligible.Policy).AddArgument($Context).AddArgument($DefinitionIndex).AddArgument($FromCapturedPayloads.IsPresent).AddArgument($rawDatasetName).AddArgument($TenantId).AddArgument($Pseudonym)
-                $handles.Add([pscustomobject]@{ PolicyId = $eligible.PolicyId; PowerShell = $ps; Handle = $ps.BeginInvoke() }) | Out-Null
-            }
-
-            foreach ($h in $handles) {
-                try {
-                    $results = @($h.PowerShell.EndInvoke($h.Handle))
-
-                    $hasStreamErrors = $h.PowerShell.Streams.Error.Count -gt 0
-                    $completedCleanly = $h.PowerShell.InvocationStateInfo.State -eq [System.Management.Automation.PSInvocationState]::Completed
-
-                    if ($hasStreamErrors -or -not $completedCleanly) {
-                        foreach ($streamError in $h.PowerShell.Streams.Error) {
-                            Write-Verbose "Invoke-PulseSettingsCatalogExpansion: worker for policy '$($h.PolicyId)' reported: $($streamError.ToString())"
-                        }
-                        $gapEntries.Add([pscustomobject]@{ policyId = $h.PolicyId; reason = 'category:WorkerException' }) | Out-Null
-                        continue
-                    }
-
-                    if ($results.Count -ne 1) {
-                        $gapEntries.Add([pscustomobject]@{ policyId = $h.PolicyId; reason = 'category:ResultCardinalityMismatch' }) | Out-Null
-                        continue
-                    }
-
-                    $result = $results[0]
-                    foreach ($row in $result.Rows) { $allRows.Add($row) | Out-Null }
-                    if ($result.Gap) {
-                        $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
-                        $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
-                    }
-                } catch {
-                    # A terminating exception out of EndInvoke itself (the worker's OWN
-                    # script threw, or the pool/runspace faulted) must not escape this loop
-                    # and orphan every later handle (P0-5's reproduced defect) - gap this
-                    # ONE policy and keep draining.
-                    Write-Verbose "Invoke-PulseSettingsCatalogExpansion: EndInvoke failed for policy '$($h.PolicyId)': $($_.Exception.Message)"
-                    $gapEntries.Add([pscustomobject]@{ policyId = $h.PolicyId; reason = 'category:WorkerException' }) | Out-Null
-                } finally {
-                    $h.PowerShell.Dispose()
-                }
-            }
-        } finally {
-            $pool.Close()
-            $pool.Dispose()
+            $result = Invoke-PulseSettingsCatalogPolicy -Store $Store -Policy $policy -Context $Context -DefinitionIndex $DefinitionIndex `
+                -FromCapturedPayloads $FromCapturedPayloads.IsPresent -RawDatasetName $rawDatasetName `
+                -TenantId $TenantId -Pseudonym $Pseudonym
+        } catch {
+            # WORKER DRAIN applies here too (P0-5's own spirit, preserved from the deleted
+            # parallel path): an unexpected exception from one policy must not skip
+            # publication of every policy already collected.
+            Write-Verbose "Invoke-PulseSettingsCatalogExpansion: unexpected exception processing policy '$($eligible.PolicyId)': $($_.Exception.Message)"
+            $gapEntries.Add([pscustomobject]@{ policyId = $eligible.PolicyId; reason = 'category:WorkerException' }) | Out-Null
+            continue
+        }
+        foreach ($row in $result.Rows) { $allRows.Add($row) | Out-Null }
+        if ($result.Gap) {
+            $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+            $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
         }
     }
 

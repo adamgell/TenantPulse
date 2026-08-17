@@ -33,12 +33,14 @@
     a Graph round-trip and keeps the gap category unambiguous (a policy is never double-
     gapped for both UnmappedType and AssignmentFetchFailed).
 
-    SEQUENTIAL BY DESIGN (unlike T2.2's -MaxParallel worker pool): compliance/legacy
-    configuration policy counts are typically an order of magnitude smaller than Settings
-    Catalog policy counts (T2.0's own spike measured 781 Settings Catalog policies on
-    Ivy24; deviceCompliancePolicies/deviceConfigurations are usually tens, not hundreds) -
-    a bounded worker pool's added complexity is not worth taking on for this task. Revisit
-    if T2.7's live gate measures otherwise.
+    SEQUENTIAL BY DESIGN (unlike T2.2's -MaxParallel worker pool, since deleted entirely -
+    see Invoke-PulseSettingsCatalogExpansion's own docstring for the measured T3.4
+    rationale): compliance/legacy configuration policy counts are typically an order of
+    magnitude smaller than Settings Catalog policy counts (T2.0's own spike measured 781
+    Settings Catalog policies on Ivy24; deviceCompliancePolicies/deviceConfigurations are
+    usually tens, not hundreds) - a bounded worker pool's added complexity was never worth
+    taking on for this driver, and by T3.4 it was not worth keeping for Settings Catalog
+    either.
 
     STRUCTURED GAP REASONS ONLY (T2.2's P0-3 lesson, carried forward): every -Gap this
     driver records is a small, closed {category[:reason]} token - never a raw caught
