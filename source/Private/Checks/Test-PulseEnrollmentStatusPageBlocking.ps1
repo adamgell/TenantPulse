@@ -25,9 +25,25 @@
 
     FIELD-ABSENCE LENS: `assignments` absent is treated as zero assignments, same
     documented narrow exception as TP.INT.0026 (a relationship-shaped property, not an
-    ambiguous scalar). `allowDeviceUseOnInstallFailure` absent on an existing ESP row is
-    undecidable and throws - unlike `assignments`, this is a scalar the rule needs a
-    concrete boolean for.
+    ambiguous scalar). `allowDeviceUseOnInstallFailure` absent is handled by the
+    RESOLVED-LIVE rule immediately below - a scalar the rule needs a concrete boolean for,
+    but its absence has a known, benign live cause that gets its own explicit outcome
+    rather than a bare throw.
+
+    RESOLVED-LIVE (2026-08-17): live-verified against a real tenant's
+    DeviceEnrollmentConfiguration/List response - the endpoint returns TRIMMED
+    windows10EnrollmentCompletionPageConfiguration rows on the LIST shape: 9 properties
+    total, with `allowDeviceUseOnInstallFailure` (and `showInstallationProgress`) simply
+    not projected onto it at all. This is a property of the LIST endpoint's projection,
+    not a per-tenant configuration difference, so it is either absent from every ESP row
+    in a collection or present on every one - never a real mix. Rule: `allowDeviceUseOnInstallFailure`
+    absent from EVERY ESP row = NotApplicable, Reason naming the projection limitation and
+    the fix it implies (a per-object GET descriptor returning the FULL
+    windows10EnrollmentCompletionPageConfiguration shape - not available yet, tracked as a
+    future G-batch item, not solved here). Absent from SOME but not all ESP rows in the
+    SAME evaluation remains the genuine anomaly the pre-fix code already treated it as (if
+    the projection limitation explained the absence it would be absent from every row
+    uniformly, never some-but-not-others) - that mixed case still throws.
 
     RULE: zero ESP profiles = NotApplicable (skip - no ESP configured at all, a real and
     not-uncommon tenant state). Otherwise Pass if at least one ASSIGNED ESP profile has
@@ -63,15 +79,30 @@ function Test-PulseEnrollmentStatusPageBlocking {
         return New-PulseFinding -Status NotApplicable -Reason 'No Enrollment Status Page (ESP) profile is configured for this tenant - there is nothing for this check to evaluate.'
     }
 
+    # RESOLVED-LIVE (2026-08-17): count rows where allowDeviceUseOnInstallFailure is
+    # present vs absent BEFORE deciding anything - absent from every row is the known,
+    # benign List-endpoint projection limitation (NotApplicable); absent from some but not
+    # all is a genuine anomaly (still throws). See this file's own docstring.
+    $presentCount = 0
+    foreach ($esp in $espRows) {
+        if ((Test-PulseRowPropertyPresent -Row $esp -PropertyName 'allowDeviceUseOnInstallFailure') -and $null -ne $esp.allowDeviceUseOnInstallFailure) {
+            $presentCount++
+        }
+    }
+
+    if ($presentCount -eq 0) {
+        return New-PulseFinding -Status NotApplicable -Reason "The live DeviceEnrollmentConfiguration/List endpoint returned $($espRows.Count) Enrollment Status Page (ESP) profile(s), none carrying allowDeviceUseOnInstallFailure - a known projection limitation of that LIST endpoint (it returns a trimmed windows10EnrollmentCompletionPageConfiguration shape), not a tenant configuration gap. Evaluating the blocking toggle requires a per-object GET of each ESP profile, which this check does not yet perform."
+    }
+
+    if ($presentCount -ne $espRows.Count) {
+        throw "Test-PulseEnrollmentStatusPageBlocking: $($espRows.Count - $presentCount) of $($espRows.Count) windows10EnrollmentCompletionPageConfiguration row(s) are missing allowDeviceUseOnInstallFailure while the rest carry it - a mixed shape the known List-endpoint projection limitation does not explain (it is either absent from every row or present on every row, never a genuine mix)."
+    }
+
     $rows = [System.Collections.Generic.List[object]]::new()
     $hasBlockingAssigned = $false
 
     for ($index = 0; $index -lt $espRows.Count; $index++) {
         $esp = $espRows[$index]
-
-        if (-not (Test-PulseRowPropertyPresent -Row $esp -PropertyName 'allowDeviceUseOnInstallFailure') -or $null -eq $esp.allowDeviceUseOnInstallFailure) {
-            throw 'Test-PulseEnrollmentStatusPageBlocking: a windows10EnrollmentCompletionPageConfiguration row is missing allowDeviceUseOnInstallFailure.'
-        }
 
         $assignments = @()
         if ((Test-PulseRowPropertyPresent -Row $esp -PropertyName 'assignments') -and $null -ne $esp.assignments) {

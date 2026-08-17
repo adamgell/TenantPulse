@@ -101,10 +101,43 @@ Describe 'TP.INT.0028 - Enrollment Status Page configured with blocking failure 
         $finding.status | Should -Be 'NotApplicable'
     }
 
-    It 'Error: allowDeviceUseOnInstallFailure is absent on an ESP row (field-absence lens)' {
+    # RESOLVED-LIVE (2026-08-17): the live DeviceEnrollmentConfiguration/List endpoint
+    # returns TRIMMED windows10EnrollmentCompletionPageConfiguration rows - 9 properties,
+    # with allowDeviceUseOnInstallFailure (and showInstallationProgress) simply not
+    # projected onto the list shape. When the property is absent from EVERY ESP row this
+    # is that known, benign projection limitation, not an anomaly - NotApplicable, not
+    # Error. See this check's own docstring RESOLVED-LIVE note and
+    # docs/research/iha-v2/2026-08-16-phase3-intune-check-entries.md's TP.INT.0028 section.
+    It 'NotApplicable (not Error): allowDeviceUseOnInstallFailure is absent from EVERY ESP row - the live List-endpoint projection limitation' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
             @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
                 [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP' }
+            ) }
+        )
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'projection'
+    }
+
+    It 'NotApplicable (not Error): property absent from ALL of TWO ESP rows - still the projection limitation, not a mixed anomaly' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
+            @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP One' }
+                [pscustomobject]@{ id = 'esp2'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP Two' }
+            ) }
+        )
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'projection'
+    }
+
+    # The mixed case is the genuine anomaly the throw still exists for: if the projection
+    # limitation explained absence, it would be absent from EVERY row uniformly, never
+    # some-but-not-others. Some-but-not-others means the rows are not uniformly shaped and
+    # deserves the loud failure, unchanged from before this fix.
+    It 'Error: allowDeviceUseOnInstallFailure is absent on SOME but not all ESP rows (mixed - genuine anomaly, not the projection limitation)' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
+            @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP One'; allowDeviceUseOnInstallFailure = $false; assignments = @([pscustomobject]@{ id = 'a1' }) }
+                [pscustomobject]@{ id = 'esp2'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP Two' }
             ) }
         )
         $finding.status | Should -Be 'Error'

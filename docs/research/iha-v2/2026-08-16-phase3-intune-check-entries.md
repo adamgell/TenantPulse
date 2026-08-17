@@ -640,6 +640,28 @@ blocking equivalent).
   sub-timeouts and app/profile block-lists; this check asserts the top-level blocking
   toggle only, not full ESP depth-of-config assessment.
 
+**RESOLVED-LIVE (2026-08-17):** what actually shipped diverges from this entry in two
+ways, both superseded by `Test-PulseEnrollmentStatusPageBlocking.ps1`'s own docstring:
+
+1. Dataset - NOT the beta-only endpoint this entry assumed. The already-released v1.0
+   `DeviceEnrollmentConfiguration`/`List` descriptor carries the ESP resource type and its
+   `allowDeviceUseOnInstallFailure` property; TP.INT.0028 shares the same
+   `deviceEnrollmentConfigurations` v1.0 dataset as TP.INT.0025, filtered to
+   `#microsoft.graph.windows10EnrollmentCompletionPageConfiguration` rows.
+2. LIVE PROJECTION LIMITATION (live-verified against a real tenant, 2026-08-17): that same
+   v1.0 List endpoint returns TRIMMED windows10EnrollmentCompletionPageConfiguration rows
+   - 9 properties total, with `allowDeviceUseOnInstallFailure` (and
+   `showInstallationProgress`) simply absent from every row, not a per-tenant
+   configuration state. The check now treats `allowDeviceUseOnInstallFailure` absent from
+   EVERY ESP row as this known, benign List-endpoint projection limitation -
+   `NotApplicable`, with a Reason naming it - rather than the Error a bare "field missing"
+   throw would have produced against every real tenant this check runs against.
+   `allowDeviceUseOnInstallFailure` absent from SOME but not all ESP rows in the same
+   evaluation remains a genuine anomaly (the projection limitation is uniform across a
+   collection, never a real per-row mix) and still throws. Evaluating the actual blocking
+   toggle against a live tenant requires a per-object GET of each ESP profile (the full
+   shape is not trimmed there) - not implemented yet, tracked as a future G-batch item.
+
 ## TP.INT.0029 — Security baselines assigned and not on a deprecated version
 
 For each Intune security baseline family in use (Windows, Defender for Endpoint,
