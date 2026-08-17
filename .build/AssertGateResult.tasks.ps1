@@ -169,7 +169,13 @@
 # picking up the remainder via the structural QA suites. Set to the REAL total (1259,
 # Task 3.2's TP.INT.0015 port round, closing the batch), matching the module's own
 # post-fix Pester run.
-$script:tenantPulseGateMinimumTests = 1259
+# 1259 -> 1300 (Task 3.2 fix-round, two merged reviews): +41 across field-absence-lens
+# hostile fixtures (TP.INT.0013 RBAC/0011 branding/0014 BitLocker/0015 LAPS), TP.INT.0006
+# Partial-artifact-gap fixtures, Get-PulseCollectionManifest @($null)-guard regression
+# coverage, and SecretScan's docs/.build roots extension plus its new person-name
+# device-name heuristic (including a real-file planted-pattern self-test). Set to the
+# REAL total, matching the module's own post-fix Pester run.
+$script:tenantPulseGateMinimumTests = 1300
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
