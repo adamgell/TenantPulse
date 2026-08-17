@@ -12,19 +12,35 @@
     the underlying expanded/settingsCatalog.jsonl this index was built from (checks NEVER
     stream jsonl - the standing rule Part A's whole index exists to satisfy).
 
-    SETTING IDENTITY (PENDING VERIFICATION, same hedge as TP.INT.0014's own): the BitLocker
-    CSP `SystemDrivesEncryptionType` node
-    (https://learn.microsoft.com/en-us/windows/client-management/mdm/bitlocker-csp,
-    live-fetched 2026-08-17, confirmed live) maps to Settings Catalog
-    settingDefinitionId `device_vendor_msft_bitlocker_systemdrivesencryptiontype`, and its
-    "Full encryption" choice option resolves to the compound option id
-    `device_vendor_msft_bitlocker_systemdrivesencryptiontype_1` (the `_1` suffix Maester's
-    own MT.1123 implementation reads, per TP.INT.0014's own docstring/research entry) -
-    this is the EXACT SAME definitionId and suffix TP.INT.0014's own composite descriptor
-    already carries with the identical hedge, reused here rather than re-derived, so the
-    two checks can never silently disagree about what "full encryption" means. Neither
-    value has been independently re-verified against a live tenant's actual Settings
-    Catalog schema from inside this task.
+    SETTING IDENTITY - CORRECTED (T3.4 whole-task dual review, fix round 1,
+    CRITICAL-ADJUDICATION finding, corpus-verified against
+    scratch/live-27/snapshot/reference/settingDefinitions.json, 18,227 real definitions):
+    the original authoring pass matched `device_vendor_msft_bitlocker_systemdrivesencryptiontype`
+    ITSELF against option `_1`, assuming that IS the Full-vs-Used-space-only choice. The
+    corpus proves this wrong. Two DISTINCT settings are involved, parent/child:
+      - PARENT, `device_vendor_msft_bitlocker_systemdrivesencryptiontype` (displayName
+        "Enforce drive encryption type on operating system drives", `uxBehavior:
+        "toggle"`) is a plain ON/OFF ENABLEMENT TOGGLE: `..._0` = "Disabled", `..._1` =
+        "Enabled" - "Enabled" means only "this policy governs SOME encryption-type
+        choice," nothing about Full-vs-Used-space-only.
+      - CHILD, `device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name`
+        (displayName "Select the encryption type:") carries the ACTUAL choice: `..._0` =
+        "Allow user to choose (default)", `..._1` = "Full encryption", `..._2` = "Used
+        Space Only encryption". The corpus's own dependency graph
+        (`dependentOn`/`dependedOnBy`) proves this child setting can NEVER appear in a
+        policy's configuration without the parent already being "Enabled" on that
+        IDENTICAL policy - a Settings Catalog structural constraint, not a convention this
+        module invented.
+    This check therefore targets the CHILD definitionId's `_1` option
+    (`device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name_1`)
+    ALONE - checking the child alone is both necessary and sufficient, since its own
+    corpus-proven dependency on the parent already guarantees "Enabled" on the same policy
+    whenever the child has any value at all; a second, independent parent-side check would
+    add no certainty this dependency does not already provide. See
+    Test-PulseBitLockerFullDiskEncryption.ps1's own docstring (TP.INT.0014) for the
+    identical corrected understanding, applied there too. HIGH CONFIDENCE now
+    (corpus-verified) - the PENDING VERIFICATION hedge from the original authoring pass is
+    RETIRED for this check.
 
     HONESTY STATES (this task's own brief, shared by every Part B check via
     Resolve-PulseSettingPresenceCriterion.ps1 - see that file's own docstring for the full
@@ -84,8 +100,10 @@ function Test-PulseBitlockerCspSettingsPresentAndCorrect {
         throw 'Test-PulseBitlockerCspSettingsPresentAndCorrect: no $Context.ArtifactReader was supplied - this rule cannot read the settingPresenceIndex expansion artifact without it.'
     }
 
-    $script:PulseBitlockerSystemDrivesEncryptionTypeDefinitionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype'
-    $script:PulseBitlockerFullEncryptionOptionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_1'
+    # CORPUS-VERIFIED (see this file's own docstring): the CHILD dropdown setting, not the
+    # parent enablement toggle, carries the actual Full-vs-Used-space-only choice.
+    $script:PulseBitlockerSystemDrivesEncryptionTypeDefinitionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+    $script:PulseBitlockerFullEncryptionOptionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name_1'
 
     $artifact = $Context.ArtifactReader.GetSettingPresenceIndex()
 

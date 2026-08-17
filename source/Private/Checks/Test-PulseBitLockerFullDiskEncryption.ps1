@@ -7,21 +7,53 @@
     deviceManagement/configurationPolicies filtered to
     templateReference/templateFamily eq 'endpointSecurityDiskEncryption', THEN each
     matching policy's settings walked (.../configurationPolicies('{id}')/settings) and
-    inspected for the BitLocker CSP's system-drive encryption-type setting
-    (device_vendor_msft_bitlocker_systemdrivesencryptiontype and its child dropdown) -
-    Maester's own function reads the resolved choice value's suffix (`_1` = Full
-    encryption) directly off the raw setting row. No released GraphKit descriptor performs
-    this templateFamily-filtered list + per-policy settings fan-out as a single composite
-    operation. DatasetMap.psd1 declares 'endpointSecurityDiskEncryptionPolicies'
-    Pending=$true, holding the ALREADY-RESOLVED per-policy shape ({policyId, policyName,
-    isFullDiskEncryption:[bool]}) a future composite descriptor would need to produce -
-    this rule deliberately does NOT re-implement Maester's own opaque suffix-matching
-    (`_1`/`_2` on a choice value) itself, since that matching is schema-version-dependent
-    and the research entry's own Notes explicitly call for verifying it against a live
-    tenant's actual settings-catalog schema before shipping - something this task cannot
-    do without Ivy24 access from inside a rule function. Whoever builds the composite
-    descriptor resolves that suffix-matching once, centrally, and hands this rule a plain
-    boolean.
+    inspected for the BitLocker CSP's system-drive encryption-type setting. No released
+    GraphKit descriptor performs this templateFamily-filtered list + per-policy settings
+    fan-out as a single composite operation. DatasetMap.psd1 declares
+    'endpointSecurityDiskEncryptionPolicies' Pending=$true, holding the ALREADY-RESOLVED
+    per-policy shape ({policyId, policyName, isFullDiskEncryption:[bool]}) a future
+    composite descriptor would need to produce - this rule deliberately does NOT
+    re-implement the suffix-matching itself; whoever builds the composite descriptor
+    resolves it once, centrally, and hands this rule a plain boolean.
+
+    SETTING IDENTITY - CORRECTED (T3.4 whole-task dual review, fix round 1,
+    CRITICAL-ADJUDICATION finding; corpus-verified against
+    scratch/live-27/snapshot/reference/settingDefinitions.json, 18,227 real definitions,
+    grep'd by line number): the earlier docstring here (and TP.INT.0031's own original
+    authoring pass) both assumed `device_vendor_msft_bitlocker_systemdrivesencryptiontype`
+    ITSELF carries the Full-vs-Used-space-only choice, with `_1` meaning "Full encryption."
+    The corpus proves this wrong - TWO DISTINCT settings are involved, in a parent/child
+    dependency relationship:
+      - PARENT, `device_vendor_msft_bitlocker_systemdrivesencryptiontype`
+        (displayName "Enforce drive encryption type on operating system drives",
+        `uxBehavior: "toggle"`) is a plain ON/OFF ENABLEMENT TOGGLE, NOT the encryption
+        type itself: options are `..._0` = "Disabled", `..._1` = "Enabled" - "Enabled"
+        here means "this policy governs SOME encryption-type choice", nothing about
+        Full-vs-Used-space-only. The corpus's own `options[]` entry for `..._1`:
+        `"itemId": "device_vendor_msft_bitlocker_systemdrivesencryptiontype_1",
+        "name": "Enabled", "optionValue": {"value": 1}` - `dependedOnBy` names the CHILD
+        setting below as required once this option is selected.
+      - CHILD, `device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name`
+        (displayName "Select the encryption type:") is the setting that ACTUALLY carries
+        Full-vs-Used-space-only, and only exists in a policy's configuration when the
+        PARENT is set to "Enabled" (its own `dependentOn` names
+        `device_vendor_msft_bitlocker_systemdrivesencryptiontype_1` as a required parent
+        selection - a Settings Catalog structural constraint, not a convention this module
+        invented: a dependent child setting cannot be present in a policy's configuration
+        without its parent's enabling option also being selected on the SAME policy).
+        Its own three options: `..._0` = "Allow user to choose (default)", `..._1` =
+        "Full encryption", `..._2` = "Used Space Only encryption".
+    CONCLUSION: "Full encryption enforced" means the CHILD resolves to
+    `device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name_1`
+    - checking the CHILD ALONE is both necessary and sufficient (not merely "likely
+    requiring parent-enabled AND child-full", per the review's own initial framing): the
+    corpus's own dependency graph proves a policy can never carry a value for the child
+    settingDefinitionId without the parent already being "Enabled" on that identical
+    policy, so a second, independent parent-side check adds no additional certainty this
+    dependency does not already guarantee. Any future composite descriptor (or
+    TP.INT.0031's own settings-expansion consumer) that resolves
+    isFullDiskEncryption/matches this defId must target the CHILD's `_1` option, never the
+    parent's.
 
     RULE (ported - live-verified against
     https://learn.microsoft.com/en-us/intune/device-configuration/endpoint-security/ref-disk-encryption-settings,

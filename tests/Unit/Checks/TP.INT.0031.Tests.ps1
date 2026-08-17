@@ -1,3 +1,17 @@
+<#
+    T3.4 dual-review fix round 1, CRITICAL-ADJUDICATION finding: the original version of
+    this file exercised the PARENT toggle setting
+    (device_vendor_msft_bitlocker_systemdrivesencryptiontype, option "_1" = "Enabled" - an
+    ON/OFF toggle, NOT the encryption-type choice). Corpus-verified
+    (scratch/live-27/snapshot/reference/settingDefinitions.json, lines 1426577/774570 -
+    see this task's own report for the full JSON fragments): the REAL Full-vs-Used-space-
+    only choice lives on the CHILD setting,
+    device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name,
+    whose own option "_1" = "Full encryption". Every fixture below now targets the CHILD
+    definitionId. RED-THEN-GREEN: run against the pre-fix (parent-defId) rule function,
+    these tests fail - confirmed, see this task's own report for the failure transcript.
+#>
+
 BeforeAll {
     $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).ProviderPath
 
@@ -8,23 +22,51 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
+    # CORPUS-VERIFIED (settingDefinitions.json line 774570's own "id" field).
+    $script:BitlockerChildDefinitionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+    # CORPUS-VERIFIED (settingDefinitions.json line 1426577's own "id" field) - the PARENT
+    # enablement toggle, used only by the "parent alone is not sufficient" regression test
+    # below; every other fixture targets the CHILD.
+    $script:BitlockerParentDefinitionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype'
+
     function script:New-PulseBitlockerRow {
         param(
             [string] $PolicyId,
             [string] $PolicyType = 'settingsCatalog',
-            [string] $Value = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_1',
+            # CORPUS-VERIFIED (settingDefinitions.json line 774570 area): the CHILD
+            # dropdown's own three options - "..._0" = Allow user to choose, "..._1" =
+            # Full encryption, "..._2" = Used Space Only encryption.
+            [string] $Value = "$($script:BitlockerChildDefinitionId)_1",
             [bool] $Redacted = $false,
             [AllowNull()] [object[]] $Assignments = @([pscustomobject]@{ intent = $null; targetType = 'group'; groupId = 'g1'; filterId = $null; filterType = $null })
         )
         [pscustomobject]@{
             schemaVersion = '1'; policyId = $PolicyId; policyType = $PolicyType; policyName = "Policy-$PolicyId"
             templateFamily = $null; isBaseline = $false
-            settingPath = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype'
-            settingDefinitionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype'
-            settingName = 'SystemDrivesEncryptionType'; nameResolved = $true
-            instanceId = "$PolicyId/n:device_vendor_msft_bitlocker_systemdrivesencryptiontype"
+            settingPath = $script:BitlockerChildDefinitionId
+            settingDefinitionId = $script:BitlockerChildDefinitionId
+            settingName = 'Select the encryption type:'; nameResolved = $true
+            instanceId = "$PolicyId/n:$($script:BitlockerChildDefinitionId)"
             value = if ($Redacted) { $null } else { $Value }
             valueLabel = $null; labelResolved = $false; redacted = $Redacted; valueState = $null; applicability = $null
+            assignments = $Assignments
+        }
+    }
+
+    function script:New-PulseBitlockerParentEnabledRow {
+        param(
+            [string] $PolicyId,
+            [AllowNull()] [object[]] $Assignments = @([pscustomobject]@{ intent = $null; targetType = 'group'; groupId = 'g1'; filterId = $null; filterType = $null })
+        )
+        [pscustomobject]@{
+            schemaVersion = '1'; policyId = $PolicyId; policyType = 'settingsCatalog'; policyName = "Policy-$PolicyId"
+            templateFamily = $null; isBaseline = $false
+            settingPath = $script:BitlockerParentDefinitionId
+            settingDefinitionId = $script:BitlockerParentDefinitionId
+            settingName = 'Enforce drive encryption type on operating system drives'; nameResolved = $true
+            instanceId = "$PolicyId/n:$($script:BitlockerParentDefinitionId)"
+            value = "$($script:BitlockerParentDefinitionId)_1"
+            valueLabel = $null; labelResolved = $false; redacted = $false; valueState = $null; applicability = $null
             assignments = $Assignments
         }
     }
@@ -101,12 +143,27 @@ Describe 'TP.INT.0031 - BitLocker CSP settings present and correct across all Se
         $finding.reason | Should -Match 'could be confirmed as assigned'
     }
 
-    It 'Fail: wrong value (used-space-only) on an assigned policy' {
-        $rows = @(New-PulseBitlockerRow -PolicyId 'p1' -Value 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_2')
+    It 'Fail: wrong value (corpus-verified "_2" = Used Space Only encryption) on an assigned policy' {
+        $rows = @(New-PulseBitlockerRow -PolicyId 'p1' -Value "$($script:BitlockerChildDefinitionId)_2")
         $finding = Invoke-PulseBitlockerCheckFixture -Rows $rows
 
         $finding.status | Should -Be 'Fail'
         $finding.reason | Should -Match 'never resolves to Full encryption'
+    }
+
+    It 'Fail: "Allow user to choose" (corpus-verified "_0", the child''s own default) does not satisfy the rule' {
+        $rows = @(New-PulseBitlockerRow -PolicyId 'p1' -Value "$($script:BitlockerChildDefinitionId)_0")
+        $finding = Invoke-PulseBitlockerCheckFixture -Rows $rows
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'ADJUDICATION PROOF: the PARENT toggle alone ("Enabled", no child row) never satisfies - the parent is an on/off toggle, not the encryption-type choice' {
+        $rows = @(New-PulseBitlockerParentEnabledRow -PolicyId 'p1')
+        $finding = Invoke-PulseBitlockerCheckFixture -Rows $rows
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'not found'
     }
 
     It 'Warn (REDACTION HONESTY): value present on an assigned policy but redacted - never Pass on a value that could not be read' {
@@ -160,11 +217,11 @@ Describe 'TP.INT.0031 - BitLocker CSP settings present and correct across all Se
                 $rows = @([pscustomobject]@{
                         schemaVersion = '1'; policyId = 'p1'; policyType = 'settingsCatalog'; policyName = 'P1'
                         templateFamily = $null; isBaseline = $false
-                        settingPath = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype'
-                        settingDefinitionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype'
-                        settingName = 'SystemDrivesEncryptionType'; nameResolved = $true
-                        instanceId = 'p1/n:device_vendor_msft_bitlocker_systemdrivesencryptiontype'
-                        value = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_1'
+                        settingPath = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+                        settingDefinitionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+                        settingName = 'Select the encryption type:'; nameResolved = $true
+                        instanceId = 'p1/n:device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+                        value = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name_1'
                         valueLabel = $null; labelResolved = $false; redacted = $false; valueState = $null; applicability = $null
                         assignments = @([pscustomobject]@{ intent = $null; targetType = 'group'; groupId = 'g1'; filterId = $null; filterType = $null })
                     })
