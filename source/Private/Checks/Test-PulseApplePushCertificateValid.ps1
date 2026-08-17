@@ -11,8 +11,11 @@
     CLAIM (live-verified against
     https://learn.microsoft.com/en-us/intune/device-enrollment/apple/create-mdm-push-certificate,
     fetched for this check - the original research entry's own Authority URL
-    (.../intune-service/enrollment/apple-mdm-push-certificate-get) 404s; this is the
-    correct, canonical URL): "The Apple MDM push certificate is valid for 365 days... Once
+    (.../intune-service/enrollment/apple-mdm-push-certificate-get) is SUPERSEDED and
+    redirects here rather than hard-404ing (corrected post-review, dual-review fix round -
+    an earlier draft of this note overstated it as a 404; see the research entry's own
+    RESOLVED (2026-08-17) note); this is the correct, canonical redirect-target URL): "The
+    Apple MDM push certificate is valid for 365 days... Once
     the certificate expires, there is a 30-day grace period to renew it" and it "must" be
     renewed "with the same Apple account you used to create it." A lapsed renewal forces
     devices through re-enrollment. 30-day threshold matches Maester's own hardcoded warning

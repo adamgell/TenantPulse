@@ -365,6 +365,18 @@ iOS/iPadOS/macOS MDM management) has more than 30 days remaining before expirati
   soon") - render as a separate finding, not folded into the expiry message. Threshold
   (30) is hardcoded in Maester; keep it configurable rather than baking it in.
 
+**RESOLVED (2026-08-17):** the Authority URL above,
+`.../intune-service/enrollment/apple-mdm-push-certificate-get`, was originally reported (in
+`Test-PulseApplePushCertificateValid.ps1`'s own docstring and the T3.3 report) as returning
+a hard 404. A dual-review re-fetch found this is inaccurate: the URL REDIRECTS to the live,
+current page (`https://learn.microsoft.com/en-us/intune/device-enrollment/apple/create-mdm-push-certificate`,
+the URL this check's own Authorities already cite) rather than hard-404ing. The shipped
+descriptor's citation is unaffected either way (it already points at the live,
+redirect-target URL, not the redirecting one), but the "404" characterization itself was
+wrong and is corrected here to "superseded/redirects" - distinct from TP.INT.0020's,
+TP.INT.0023's, and TP.INT.0024's own original Authority URLs, all three of which were
+re-verified as genuine hard 404s and are left as originally reported.
+
 ## TP.INT.0020 — Apple Automated Device Enrollment tokens valid and syncing
 
 Every configured Apple ADE (Automated Device Enrollment, formerly DEP) token has more
