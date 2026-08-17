@@ -1,0 +1,6 @@
+{
+  "_purpose": "QA fixture ONLY (Task 4.5 fix round, NEW-2) - a deliberately planted, entirely synthetic possessive-name-shaped displayName, proving tests/QA/SecretScan.tests.ps1's item-8 check actually fires on the exact shape that leaked in docs/gates/phase4-ivy24-findings.redacted.json's first cut. This file is EXCLUDED from the real Secret/PII scan gate's sweep (see that gate's own docs/gates/_qa-fixtures/ exclusion) and is instead scanned directly by one dedicated It in SecretScan.tests.ps1 that asserts a violation IS found. No real tenant, device, or person is referenced anywhere in this file.",
+  "detail": {
+    "displayName": "Taylor's Test-Device"
+  }
+}

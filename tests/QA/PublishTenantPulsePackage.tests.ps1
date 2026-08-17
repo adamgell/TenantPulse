@@ -11,11 +11,14 @@
         <fixture>/output/module/TenantPulse/<version>/TenantPulse.psm1
         <fixture>/output/testResults/NUnitXml_*.xml + PesterObject_*.xml
 
-    The NUnit/PesterObject test-result fixture is fabricated (not a real 713+ test Pester
+    The NUnit/PesterObject test-result fixture is fabricated (not a real 1800+ test Pester
     run) with just enough shape - root attributes, one Passed test-suite, an empty
     Containers list - to satisfy Assert-GateResult.ps1's own whole-result gate, so these
     tests stay fast and independent of the real suite while still exercising the actual
-    gate script the publish script actually calls.
+    gate script the publish script actually calls. `total` below MUST track whatever
+    -MinimumTests the copied Publish-TenantPulsePackage.ps1 actually passes to the gate
+    (see that script's own $script:tenantPulseGateMinimumTests-tracking comment) - it is a
+    fabricated count, not a real one, so nothing else re-derives it automatically.
 
     Focus: the digest-comparison logic (the one check that turns "publish only the
     already-tested artifact" from a procedural rule into something enforced) and the
@@ -86,11 +89,13 @@ BeforeAll {
         finally { $archive.Dispose() }
 
         # A fabricated but gate-passing NUnit result + sibling PesterObject CLIXML, so
-        # Assert-GateResult.ps1's own whole-result checks pass without a real 713-test run.
+        # Assert-GateResult.ps1's own whole-result checks pass without a real 1800-test run.
+        # total="1800" tracks scripts/Publish-TenantPulsePackage.ps1's own -MinimumTests
+        # value (see this file's own header docstring) - bump both together.
         $resultPath = Join-Path $testResultsDir "NUnitXml_TenantPulse_v$Version.Fixture.xml"
         $nunitXml = @"
 <?xml version="1.0" encoding="utf-8"?>
-<test-results name="TenantPulse $Version" total="713" failures="0" errors="0" skipped="0">
+<test-results name="TenantPulse $Version" total="1800" failures="0" errors="0" skipped="0">
   <test-suite type="TestFixture" name="Fixture" result="Passed">
     <results>
       <test-case name="fixture test" result="Success" />

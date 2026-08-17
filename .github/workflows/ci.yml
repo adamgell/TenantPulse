@@ -607,7 +607,9 @@ jobs:
           # AllowedSkips is platform-aware: exactly two tests skip BY DESIGN on Windows
           # (Identity key-file 0600 / key-dir 0700 POSIX-permission tests, $IsWindows-gated
           # since Phase 1) - first exercised when the matrix first went green-capable.
-          # Everywhere else the zero-skip rule stands.
+          # Everywhere else the zero-skip rule stands. Phase 4's branch history hardcoded
+          # -AllowedSkips 0, which would have broken the Windows leg of this same matrix -
+          # this platform-aware form is preserved across the Phase 4 merge.
           $allowedSkips = if ($IsWindows) { 2 } else { 0 }
           # Task 3.2 schema round bumped 1142 -> 1148; TP.INT.0007 port bumped 1148 -> 1162;
           # TP.INT.0008 port bumped 1162 -> 1177; TP.INT.0009 port bumped 1177 -> 1191;
@@ -616,8 +618,28 @@ jobs:
           # TP.INT.0015 port bumped 1245 -> 1259, closing the T3.2 batch;
           # Task 3.2 fix-round (two merged reviews) bumped 1259 -> 1300
           # (.build/AssertGateResult.tasks.ps1's own -MinimumTests, which must be bumped
-          # together with this value).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1465 -AllowedSkips $allowedSkips -AllowNotRun 1
+          # together with this value). Main side then continued: Task 3.3 TP.INT.0019-0030
+          # (12 checks) plus its own review-fix round bumped 1300 -> 1465.
+          #
+          # Phase 4 (phase4/t4.1-normalization) ran the same counter forward on its own
+          # line, in parallel: 991 -> 1011 (task-2.3-review C1 round 2) and 1011 -> 1063
+          # (Task 2.6, conflict detection - artifact only); 1063 -> 1092 (Task 4.1, Entra
+          # normalization layer + shared exclusion context - 29 new tests); 1092 -> 1112
+          # (Task 4.1 post-review fixes - 20 new tests); 1112 -> 1126 -> 1140 -> 1154 ->
+          # 1169 -> 1181 -> 1193 (Task 4.2, EIDSCA port wave 1 - TP.ENT.0006/0008/0012/
+          # 0013/0015/0016, one step per cluster commit); 1193 -> 1195 -> 1199 -> 1201 ->
+          # 1215 -> 1227 -> 1240 -> 1252 -> 1355 -> 1366 (Task 4.3 wave 2, TP.ENT.0013
+          # CP03/CP04, TP.ENT.0015 PR02/PR03/PR05/PR06, TP.ENT.0016 ST09, then
+          # TP.ENT.0007/0009/0010/0011 new checks, then Task 4.4 TP.ENT.0017-0024 - 8 new
+          # ScuBA/CISA CA + role + credential checks); through to 1402 at Task 4.5's
+          # dual-review fix round. See .build/AssertGateResult.tasks.ps1's own per-cluster
+          # accounting for both lineages' full breakdowns.
+          #
+          # This merge (Phase 4 into main) reconciles both lineages: the value below (1800)
+          # is the REAL measured ./build.ps1 -Tasks build,test total for the merged tree
+          # (set once, post-merge, per the merge review's ratchet step - not the sum of
+          # the two branch totals, which double-counts the shared 991-1063 history).
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1800 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

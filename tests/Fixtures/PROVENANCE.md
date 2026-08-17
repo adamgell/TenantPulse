@@ -24,6 +24,10 @@ or a third-party source without attribution. One line per fixture file.
 - `tests/Fixtures/Checks/invalid/scalar-datasets/bad.psd1` — synthetic
 - `tests/Fixtures/Checks/invalid/scalar-authorities/bad.psd1` — synthetic
 - `tests/Fixtures/Checks/invalid/empty-authorities/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/scalar-cis/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/empty-cis/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/prose-cis/bad.psd1` — synthetic
+- `tests/Fixtures/Checks/invalid/lowercase-cis/bad.psd1` — synthetic
 - `tests/Fixtures/Checks/invalid/missing-expression/bad.psd1` — synthetic
 - `tests/Fixtures/Checks/invalid/bad-effort/bad.psd1` — synthetic
 - `tests/Fixtures/Checks/invalid/bad-impact/bad.psd1` — synthetic

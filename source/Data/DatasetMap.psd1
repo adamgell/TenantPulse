@@ -213,4 +213,61 @@
     mobileThreatDefenseConnectors = @{ Type = 'MobileThreatDefenseConnector'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
     windowsAutopilotDeploymentProfiles = @{ Type = 'WindowsAutopilotDeploymentProfile'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
     securityBaselinesAssignedAndCurrent = @{ Type = 'SecurityBaselineAssignedAndCurrentWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 4.2 (EIDSCA port, wave 1) - G-batch descriptor need. This Type/Operation pair
+    # does not resolve against the installed GraphKit 0.1.1 catalog (confirmed via
+    # Get-GraphOperation -List at implementation time: no AuthorizationPolicy Type exists
+    # in the catalog at all) - Pending per this file's own header mechanism, so
+    # TP.ENT.0012 gets an honest descriptor-pending NotApplicable at evaluation time
+    # instead of being skipped from the catalog. See the T4.2 report for the exact
+    # requested-descriptor shape to ride into the next GraphKit release.
+    #
+    # authorizationPolicy: single-object read, GET /policies/authorizationPolicy (beta) -
+    # backs TP.ENT.0012 (AP01/AP04-AP10/AP14).
+    authorizationPolicy = @{ Type = 'AuthorizationPolicy'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 4.2 (EIDSCA port, wave 1) - second G-batch descriptor need. This Type/Operation
+    # pair also does not resolve against the installed GraphKit 0.1.1 catalog (confirmed
+    # via Get-GraphOperation -List: no DirectorySetting Type exists in the catalog at
+    # all) - Pending for the same reason as authorizationPolicy above.
+    #
+    # directorySettings: LIST (not a parameterized per-setting Get, correcting the T4.2
+    # research entries' speculation of an `Entra.DirectorySettings.Values` descriptor
+    # "parameterized on settingName") - GET /settings (beta) returns every directorySetting
+    # object the tenant has ever explicitly customized, each carrying its own templateId
+    # and a values[] array of {name;value} pairs. ONE List call backs TP.ENT.0013 (CP01,
+    # first consumer) and its later siblings TP.ENT.0015 (PR01)/TP.ENT.0016 (ST08) - they
+    # read different (name) entries out of the SAME collection, not three different
+    # endpoints, the same "single dataset, many checks read different slices" pattern
+    # authenticationMethodsPolicy already uses for TP.ENT.0006/0008.
+    directorySettings = @{ Type = 'DirectorySetting'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 4.4 (ScuBA/CISA CA + role + credential checks) - servicePrincipals: GET
+    # /servicePrincipals (v1.0), backs TP.ENT.0019's service-principal half of app
+    # credential hygiene. CONFIRMED against the real installed GraphKit 0.1.1 catalog
+    # (Get-GraphOperation -List: Type='ServicePrincipal' Operation='List' ApiVersion='v1.0',
+    # ThrottleClass=Read, ReplayPolicy=Safe) - not marked Pending. The Graph
+    # servicePrincipal entity returns passwordCredentials/keyCredentials by default (no
+    # $select needed) so this single List call is sufficient for TP.ENT.0019's evaluation.
+    #
+    # HONEST GAP, NOT SILENTLY DROPPED: GraphKit 0.1.1's catalog has NO 'Application' Type
+    # at all (confirmed the same way, Get-GraphOperation -List) - app-REGISTRATION credential
+    # hygiene (v1.0/applications, the other half of TP.ENT.0019's research entry) cannot be
+    # collected yet and is not declared here. See the T4.4 report for the exact requested
+    # descriptor (Entra.Applications.Credentials.List) to ride into a future GraphKit
+    # release; TP.ENT.0019 ships evaluating service principals only until it does, with that
+    # scope named explicitly in the check's own docstring/consulting text.
+    servicePrincipals = @{ Type = 'ServicePrincipal'; Operation = 'List'; ApiVersion = 'v1.0' }
+
+    # Task 4.4 - PIM (TP.ENT.0022): NEITHER RoleAssignmentScheduleInstance NOR
+    # RoleEligibilityScheduleInstance exists as a Type in the installed GraphKit 0.1.1
+    # catalog (confirmed via Get-GraphOperation -List). Both Pending - see the T4.4 report
+    # for the exact requested descriptor shapes.
+    roleAssignmentScheduleInstances  = @{ Type = 'RoleAssignmentScheduleInstance'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    roleEligibilityScheduleInstances = @{ Type = 'RoleEligibilityScheduleInstance'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 4.4 - cross-tenant access (TP.ENT.0023): no CrossTenantAccessPolicy Type exists
+    # in the installed GraphKit 0.1.1 catalog (confirmed via Get-GraphOperation -List).
+    # Pending - see the T4.4 report for the exact requested descriptor shape.
+    crossTenantAccessPolicyDefault = @{ Type = 'CrossTenantAccessPolicy'; Operation = 'GetDefault'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 }

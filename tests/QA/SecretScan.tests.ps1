@@ -130,6 +130,11 @@ BeforeAll {
         '29232cdf-9323-42fd-ade2-1d097af3e4de' # Exchange Administrator
         '729827e3-9c14-49f7-bb1b-9608f156bbb8' # Helpdesk Administrator
         '966707d0-3269-4727-9be2-8c3a10f19b9d' # Password Administrator
+        # Entra built-in DIRECTORY ROLE ids (public, tenant-stable, documented by
+        # Microsoft's authorizationPolicy.guestUserRoleId reference) - Task 4.2,
+        # source/Private/Checks/Test-PulseAuthorizationPolicyDefaults.ps1 (EIDSCA.AP07).
+        '2af84b1e-32c8-42b7-82bc-daa82404023b' # Restricted Guest User role (recommended)
+        '10dae51f-b6af-4016-8d66-8c2a99b929b3' # Guest User role (Microsoft's permissive default)
         # TenantPulse's own module manifest GUID (source/TenantPulse.psd1) - a public
         # package identifier, never a tenant id.
         'a2f6d0f0-6d0c-4a6b-9f7e-9c9e6f6c7c2f' # TenantPulse module GUID
@@ -151,6 +156,23 @@ BeforeAll {
         '22222222-0000-4000-8000-000000000001' # TypedPolicy fixture: deviceConfiguration-windows10Custom
         '22222222-0000-4000-8000-000000000002' # TypedPolicy fixture: deviceConfiguration-windowsUpdateForBusiness
         '22222222-0000-4000-8000-000000000003' # TypedPolicy fixture: deviceConfiguration-sharedPC
+        # Task 4.4 - built-in Microsoft authentication STRENGTH policy id (public,
+        # tenant-stable, documented at learn.microsoft.com/entra/identity/authentication/
+        # concept-authentication-strengths, which documents EXACTLY THREE built-in
+        # strengths: MFA, Passwordless MFA, Phishing-resistant MFA) - see
+        # source/Private/Checks/Test-PulsePrivilegedRolesPhishingResistantMfa.ps1's own
+        # docstring. Post-review fix: an earlier draft of this allowlist also carried a
+        # fabricated '...0005' id Microsoft does not document anywhere - removed, not
+        # merely unused, since a stale allowlist entry for a non-existent constant is
+        # itself a latent correctness bug waiting to mask a real leak of that same shape.
+        '00000000-0000-0000-0000-000000000004' # built-in "Phishing-resistant MFA" strength
+        # Task 4.4 - synthetic test-fixture principal ids (repeated-digit pattern, never a
+        # real tenant identifier), same by-value convention as the TypedPolicy fixture ids
+        # above - each sits within 200 characters of a dotted PowerShell property-path
+        # token (e.g. 'conditions.clientApplications', 'detail.exempt') the domain-shaped
+        # heuristic cannot distinguish from a real domain.
+        '22222222-2222-2222-2222-222222222222' # ConvertTo-PulseCaPolicyView.Tests.ps1 synthetic excludeApplications id
+        '33333333-3333-3333-3333-333333333333' # TP.ENT.0022.Tests.ps1 synthetic ServiceAccounts principal id
     )
 
     # Reference/documentation domains that appear throughout Consulting.PortalLinks and
@@ -513,6 +535,44 @@ BeforeAll {
             }
         }
 
+        # 8. Possessive-name-shaped displayName/deviceName VALUE (Task 4.5 fix round -
+        # docs/gates/phase4-ivy24-findings.redacted.json's first cut leaked real live-
+        # tenant device names, several in the personal-device-naming shape
+        # "<Name>'s <device type>" - the actual leaked values are NOT reproduced here,
+        # deliberately; see docs/gates/README.md's "Incident note" for the same
+        # reasoning). Deliberately scoped tightly to a JSON `"displayName"`/
+        # `"deviceName"` key immediately followed by a capitalized-word + possessive-'s
+        # value (straight OR curly apostrophe, Graph commonly returns the curly one)
+        # rather than a bare "any word ending in 's" scan across the whole file: this
+        # codebase's own prose is FULL of legitimate possessive proper nouns ("GraphKit's
+        # own...", "CIS's non-member terms", "Maester's MIT license", "ScuBA's SHALL
+        # tier") that a content-wide possessive-apostrophe check would flag on every file
+        # in the repo. Scoping the pattern to the exact JSON shape a live Graph
+        # device/policy row's displayName field takes keeps this to the one real leak
+        # class it exists to catch, not a repo-wide false-positive generator. This is a
+        # HEURISTIC, deliberately narrower than a general PII scanner (it does not catch
+        # a non-possessive person-derived name - those are caught, in this repo's own
+        # committed artifacts, by the exhaustive scripted scrub in
+        # scripts/Protect-PulseGateArtifact.ps1 instead, not by this pattern-based gate) -
+        # see this file's own ACCEPTED RESIDUALS section.
+        # \x27 (straight apostrophe) / ’ (curly right-single-quote - the shape Graph
+        # actually returns) as .NET regex Unicode escapes, NOT literal quote characters,
+        # in this single-quoted PowerShell string - PowerShell's own tokenizer treats a
+        # raw U+2019 character as a smart-quote string delimiter (verified empirically: a
+        # literal curly quote embedded in a single-quoted string terminates the string
+        # early and breaks parsing), so the ASCII-only \uXXXX spelling is required here,
+        # not just stylistic.
+        # -cmatch, NOT -match (merge-review fix - found while extending
+        # Protect-PulseGateArtifact.ps1's own equivalent pattern): PowerShell's -match
+        # operator is CASE-INSENSITIVE by default, so `[A-Z]` in an -match pattern does
+        # NOT actually require an uppercase letter. -cmatch makes the whole pattern
+        # (including the literal "displayName"/"deviceName" key text, always exact-case
+        # in real JSON) case-sensitive, matching this check's own stated "capitalized
+        # proper noun" intent for real.
+        if ($Content -cmatch '"(?:displayName|deviceName)"\s*:\s*"[^"]*[A-Z][a-zA-Z]+[\x27\u2019]s\b') {
+            $violations.Add("$RelativePath : possessive-name-shaped displayName/deviceName value found (e.g. a synthetic `"Taylor's Test-Device`" shape) - looks like a real, person-derived device name, not a synthetic placeholder.")
+        }
+
         return $violations.ToArray()
     }
 
@@ -819,6 +879,69 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
             $violations[0] | Should -Match 'SAS-token-shaped'
         }
 
+        It 'flags a possessive-name-shaped displayName value (straight apostrophe)' {
+            # Entirely synthetic - not a real device/person name (Task 4.5 remediation
+            # round 2: the FIRST version of this test used a real leaked possessive
+            # device name as its fixture, which is the same disclosure class this whole
+            # check exists to catch. Every fixture in this Describe block is synthetic.)
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content '{"displayName": "Morgan''s Test-Laptop"}' `
+                -RelativePath 'docs/gates/fake.json' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'possessive-name-shaped'
+        }
+
+        It 'flags a possessive-name-shaped displayName value (curly apostrophe, the shape Graph actually returns)' {
+            # Entirely synthetic, same reasoning as the straight-apostrophe case above.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "{`"displayName`": `"Jordan`u{2019}s Test-Phone`"}" `
+                -RelativePath 'docs/gates/fake.json' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'possessive-name-shaped'
+        }
+
+        It 'flags a possessive-name-shaped deviceName value' {
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content '{"deviceName": "Taylor''s Test-Device"}' `
+                -RelativePath 'docs/gates/fake.json' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations.Count | Should -Be 1
+            $violations[0] | Should -Match 'possessive-name-shaped'
+        }
+
+        It 'does NOT flag an already-pseudonymized displayName value' {
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content '{"displayName": "tp-55d5f5d1fb977edb7209c8e3a2c631abbc40242edeff61f3081f1507e4fb4235"}' `
+                -RelativePath 'docs/gates/fake.json' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations | Should -BeNullOrEmpty
+        }
+
+        It 'does NOT flag ordinary repo prose using a possessive proper noun outside a displayName/deviceName key (false-positive guard)' {
+            # The exact shape this check deliberately does NOT catch - "GraphKit's own
+            # documentation", "CIS's non-member terms", "Maester's MIT license" and
+            # similar possessive proper nouns are all over this repo's own comments/docs;
+            # scoping the pattern to a JSON displayName/deviceName key (see this check's
+            # own comment) is what keeps this test green.
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "See GraphKit's own documentation and CIS's non-member terms for details." `
+                -RelativePath 'README.md' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix @())
+
+            $violations | Should -BeNullOrEmpty
+        }
+
         It 'Get-PulseTokenDigest is deterministic and matches an independently-computed SHA-256[0:32] for a non-secret example token' {
             # Not a secret - any known string works to prove the MECHANISM
             # (tokenize -> lowercase -> SHA-256 -> first-32-hex) is wired correctly. The
@@ -1026,7 +1149,9 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
         $projectPath = "$($PSScriptRoot)\..\.." | Convert-Path
         $textExtensions = @('.ps1', '.psm1', '.psd1', '.psc1', '.pssc', '.md', '.txt', '.json', '.csv', '.xml', '.yml', '.yaml')
 
-        # ROOTS (post-review fix, item 28; extended again Task 3.2 fix-round finding 7):
+        # ROOTS (post-review fix, item 28; extended again Task 3.2 fix-round finding 7;
+        # docs/ added again independently by Task 4.5 fix round, NEW-2 - both lineages
+        # landed the same docs/ extension for the same underlying reason, see below):
         # previously only source/ and tests/ were scanned - scripts/ (the publish script,
         # which handles an API key end to end) and the repo-root build/CI/doc surface
         # (build.ps1, build.yaml, README.md, CHANGELOG.md, .github/workflows/ci.yml) were
@@ -1040,10 +1165,24 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
         # every currently-committed top-level content root except .github/ (covered via
         # its one explicit ci.yml file only, not recursively - the rest of .github/ has no
         # content today) and output/ (build artifacts, gitignored, never hand-authored).
-        # COORDINATION NOTE: the phase-4 branch (TenantPulse-phase4) independently lands a
-        # similar SecretScan roots extension - whichever implementation is stricter (more
-        # roots/patterns covered) wins at merge; this is not a conflict to resolve by
-        # picking one side, only by taking the union.
+        #
+        # docs/ ADDED (Task 4.5 fix round, NEW-2, independently on the phase4 branch):
+        # docs/gates/phase4-ivy24-findings.redacted.json - a committed live-tenant
+        # artifact - leaked real PII (person-derived device names) because docs/ was never
+        # in this gate's scan roots at all; the gap was found by a downstream reviewer, not
+        # by this suite. Scanning docs/ closes exactly that class going forward.
+        # docs/gates/_qa-fixtures/ is excluded from the sweep the same way tests/QA/ is -
+        # it deliberately holds a PLANTED violation (see the dedicated It below) that would
+        # otherwise fail this very gate.
+        #
+        # MERGE RECONCILIATION: both TenantPulse-phase4 and main independently extended
+        # these roots (main added .build/ in its own item-28-followup pass; phase4 added
+        # docs/ plus the docs/gates/_qa-fixtures/ exclusion in its own Task 4.5 fix round).
+        # Neither implementation is a strict subset of the other, so this merge takes the
+        # union of both: source/, tests/, scripts/, docs/, and .build/ as recurse roots,
+        # plus the docs/gates/_qa-fixtures/ exclusion below and both sides' planted
+        # self-tests (the person-name device heuristic's own Its above, and the
+        # possessive-name-shaped planted-PII proof below).
         $recurseRoots = @(
             (Join-Path $projectPath 'source')
             (Join-Path $projectPath 'tests')
@@ -1065,7 +1204,8 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
                 Where-Object {
                     $textExtensions -contains $_.Extension -and
                     ($_.FullName -replace '\\', '/') -notmatch '/tests/QA/' -and
-                    ($_.FullName -replace '\\', '/') -notmatch '(^|/)output/'
+                    ($_.FullName -replace '\\', '/') -notmatch '(^|/)output/' -and
+                    ($_.FullName -replace '\\', '/') -notmatch '/docs/gates/_qa-fixtures/'
                 }) + $explicitRootFiles
         )
 
@@ -1083,7 +1223,8 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
             (Get-ChildItem -Path $recurseRoots -Recurse -File |
                 Where-Object {
                     ($_.FullName -replace '\\', '/') -notmatch '/tests/QA/' -and
-                    ($_.FullName -replace '\\', '/') -notmatch '(^|/)output/'
+                    ($_.FullName -replace '\\', '/') -notmatch '(^|/)output/' -and
+                    ($_.FullName -replace '\\', '/') -notmatch '/docs/gates/_qa-fixtures/'
                 }) + $explicitRootFiles
         )
 
@@ -1117,5 +1258,23 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
         $violations = @(Get-PulseControlByteViolations -Bytes $bytes -RelativePath $RelativePath)
 
         $violations | Should -BeNullOrEmpty -Because ($violations -join "`n")
+    }
+
+    # PLANTED-PII PROOF (Task 4.5 fix round, NEW-2): docs/gates/_qa-fixtures/ is excluded
+    # from the sweep above (same reason tests/QA/ is - it deliberately holds a violation),
+    # so it needs its own direct assertion that the gate WOULD have caught it, closing the
+    # "the exclusion silently also hides a real future leak planted in the fixtures
+    # themselves" gap. This is the regression test for the exact leak class that shipped in
+    # docs/gates/phase4-ivy24-findings.redacted.json's first cut.
+    It 'catches the planted possessive-name-shaped PII in docs/gates/_qa-fixtures/planted-pii-sample.json (regression proof for the leak class this gate exists to catch)' {
+        $projectPath = "$($PSScriptRoot)\..\.." | Convert-Path
+        $fixturePath = Join-Path $projectPath 'docs/gates/_qa-fixtures/planted-pii-sample.json'
+        Test-Path -LiteralPath $fixturePath -PathType Leaf | Should -BeTrue -Because 'the planted-PII fixture itself must exist for this proof to mean anything'
+
+        $content = Get-Content -LiteralPath $fixturePath -Raw
+        $violations = @(Get-PulseSecretScanViolations -Content $content -RelativePath 'docs/gates/_qa-fixtures/planted-pii-sample.json' -AllowedGuid @() -SafeDomainSuffix @())
+
+        $violations.Count | Should -Be 1
+        $violations[0] | Should -Match 'possessive-name-shaped'
     }
 }

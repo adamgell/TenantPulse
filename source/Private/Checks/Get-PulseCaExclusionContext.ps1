@@ -1,8 +1,9 @@
 <#
     Private: build the shared "who is legitimately excluded from Conditional Access"
-    context that TP.ENT.0003/0004/0005 all consume (Phase 1 v1 stub - see the task brief).
+    context that every CA check consumes (Task 4.1 FULL REWORK - replaces the Task 1.9/
+    Phase 1 v1 stub; same public shape, three additions below).
 
-    Two sources are folded together into one flat, de-duplicated identifier set:
+    Three sources are folded together into one flat, de-duplicated identifier set:
 
         1. Operator-declared exclusions: -Context.BreakGlassAccounts and
            -Context.ServiceAccounts (see Resolve-PulseSelectionParams and
@@ -37,15 +38,109 @@
         well-known Global Administrator template id (stable across every Entra tenant,
         documented by Microsoft) is '62e90394-69f5-4237-9190-012177145e10'.
 
+        3. GUID CONTRACT ON DECLARED ACCOUNTS (Task 4.1, new - centralizes what
+           TP.ENT.0003/Test-PulseBreakGlassExcluded previously only applied to its own
+           BreakGlassAccounts, and ServiceAccounts never got at all): CA
+           conditions.users.excludeUsers/includeUsers hold GUID principal ids per the Graph
+           schema. A declared BreakGlassAccounts or ServiceAccounts entry that is not
+           GUID-shaped (a UPN, a display name, anything else) can never be matched against
+           excludeUsers - that is a DIFFERENT problem from "genuinely not excluded", and is
+           surfaced here as a Warn-not-Fail signal (MalformedDeclaredAccounts below) so
+           every consuming check gets this classification for free instead of
+           reimplementing its own GUID regex (TP.ENT.0003's own function previously did,
+           and only for BreakGlassAccounts). WARN-NOT-FAIL is a caller-facing convention,
+           not enforced here: this function only classifies and reports; a consuming
+           check's own Function rule decides what Status that classification produces (see
+           Test-PulseBreakGlassExcluded's own docstring for its Warn/Fail split). A
+           malformed identifier is EXCLUDED from ExcludedIdentifiers (unresolvable, so it
+           can never usefully match a policy's excludeUsers list) but is NEVER silently
+           dropped - it is always enumerated in MalformedDeclaredAccounts so a caller that
+           cares can still report it.
+
+        4. RESOLVED GROUP EXCLUSIONS (Task 4.1, new, HONEST LIMITATION carried forward, not
+           silent): every consuming check's own docstring up to now has documented the same
+           gap - exclusion matching only ever covers excludeUsers, never excludeGroups,
+           because resolving "is this account a MEMBER of this excluded group" needs a
+           group-membership dataset that does not exist in DatasetMap.psd1 yet
+           (descriptor-pending, no GraphKit descriptor wired up as of this task). This
+           function now names that gap in its OWN return shape (GroupExclusionsResolved /
+           GroupExclusionNote below) instead of leaving it as scattered prose in three
+           different consuming checks' docstrings - the shape is ready for a caller to
+           check `if ($context.GroupExclusionsResolved)` the moment a group-membership
+           dataset (e.g. `groupMembers`) actually ships; until then this function makes the
+           gap visible on every call rather than silently returning as if resolution had
+           been attempted and found nothing. -Datasets.groupMembers (WHEN present -
+           forward-compatible, not yet a real DatasetMap.psd1 entry) is expected to be a
+           `[string]groupId -> [string[]]memberPrincipalIds` map; if it is ever populated,
+           ResolvedGroupExclusions below is a flat, de-duplicated union of every member id
+           reachable through -Datasets.conditionalAccessPolicies' own excludeGroups lists
+           across ENABLED policies, folded into ExcludedIdentifiers same as every other
+           source.
+
+           ENFORCED VS. REPORT-ONLY GROUP EXCLUSIONS ARE KEPT SEPARATE (post-review, High):
+           ResolvedGroupExclusions above is deliberately ENABLED-POLICIES-ONLY - a
+           report-only policy's own excludeGroups list is real operator INTENT, but a
+           report-only policy locks nobody out (nothing is actually enforced), so an
+           account named only in a report-only policy's exclusion is not "protected from
+           CA lockout" in the sense TP.ENT.0003 asks about. Silently folding a
+           report-only-derived exclusion into ResolvedGroupExclusions/ExcludedIdentifiers
+           would OVERSTATE protection - a caller could read "excluded" and conclude the
+           account is safe from a policy that, being report-only, was never going to lock
+           it out in the first place, while ALSO wrongly suppressing a genuine gap on a
+           now-or-later-enforced policy that does not carry the same exclusion. This
+           function instead surfaces report-only-derived group exclusions in their OWN
+           field, ReportOnlyExclusions, below - real operator intent, visible to a caller
+           that wants it (e.g. a future check auditing "will this break-glass account be
+           silently exposed the moment this report-only policy is switched on"), but never
+           merged into the enforced-only ExcludedIdentifiers union. Same
+           GroupExclusionsResolved/-Datasets.groupMembers gating as ResolvedGroupExclusions
+           - both are always empty today for the identical descriptor-pending reason.
+
     Returns a single flat pscustomobject:
-        BreakGlassAccounts    - [string[]] as declared in -Context, unmodified.
-        ServiceAccounts       - [string[]] as declared in -Context, unmodified.
-        ActiveGlobalAdmins    - [string[]] distinct principalIds found by the heuristic
-                                above, ordinally sorted (deterministic ordering).
-        ExcludedIdentifiers   - [string[]] the de-duplicated union of all three lists
-                                above, ordinally sorted - the single list a check's
-                                Function rule actually wants to test CA policy
-                                excludeUsers/excludeGroups membership against.
+        BreakGlassAccounts        - [string[]] as declared in -Context, unmodified (same
+                                     as the Task 1.9 stub - includes malformed entries, a
+                                     consuming check that wants the raw declared list
+                                     unchanged still gets it here).
+        ServiceAccounts           - [string[]] as declared in -Context, unmodified.
+        ActiveGlobalAdmins        - [string[]] distinct principalIds found by the heuristic
+                                     above, ordinally sorted (deterministic ordering).
+        MalformedDeclaredAccounts - [string[]] the subset of BreakGlassAccounts and
+                                     ServiceAccounts combined that is not GUID-shaped -
+                                     ordinally sorted, de-duplicated. Empty when every
+                                     declared account is GUID-shaped (the common case).
+        GroupExclusionsResolved   - [bool] $true only when -Datasets.groupMembers was
+                                     present and non-null; $false (always, today) when it
+                                     was not - see point 4 above.
+        ResolvedGroupExclusions   - [string[]] member ids resolved through excludeGroups on
+                                     ENABLED (enforced) policies only, when
+                                     GroupExclusionsResolved is $true; always empty today
+                                     (see point 4 above) - never $null, so a caller can
+                                     @() -wrap unconditionally. Folded into
+                                     ExcludedIdentifiers below.
+        ReportOnlyExclusions      - [string[]] member ids resolved through excludeGroups on
+                                     'enabledForReportingButNotEnforced' policies only, when
+                                     GroupExclusionsResolved is $true; always empty today,
+                                     same reason. NEVER folded into ExcludedIdentifiers -
+                                     see ENFORCED VS. REPORT-ONLY GROUP EXCLUSIONS ARE KEPT
+                                     SEPARATE above for why merging it would overstate
+                                     protection. A caller specifically interested in
+                                     report-only exclusion intent reads this field by name.
+        GroupExclusionNote        - [string] a fixed, non-null explanation of the group-
+                                     exclusion gap when GroupExclusionsResolved is $false;
+                                     $null when it is $true. Exists so "group exclusions
+                                     were not resolved" is a value a caller can read and
+                                     surface, not a silence a caller has to already know to
+                                     expect.
+        ExcludedIdentifiers        - [string[]] the de-duplicated union of BreakGlassAccounts,
+                                     ServiceAccounts, ActiveGlobalAdmins, and
+                                     ResolvedGroupExclusions, ordinally sorted (deterministic
+                                     ordering) - UNCHANGED from the Task 1.9 stub's own
+                                     contract: still includes a malformed (non-GUID)
+                                     declared account, same as before this rework, so no
+                                     existing consumer that reads ExcludedIdentifiers
+                                     changes behavior. MalformedDeclaredAccounts is an
+                                     ADDITIVE classification field, not a filter applied to
+                                     this list.
 
     Consuming checks decide for themselves how to MATCH ExcludedIdentifiers against a CA
     policy's own exclusion lists (excludeUsers holds ids or UPNs depending on tenant
@@ -63,6 +158,9 @@ function Get-PulseCaExclusionContext {
         [Parameter()]
         [hashtable] $Datasets = @{}
     )
+
+    # Graph principal-id GUID shape, e.g. '11111111-2222-3333-4444-555555555555'.
+    $guidPattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 
     $breakGlass = @()
     if ($Context -and $Context.ContainsKey('BreakGlassAccounts') -and $null -ne $Context.BreakGlassAccounts) {
@@ -110,18 +208,97 @@ function Get-PulseCaExclusionContext {
         [System.Array]::Sort($activeGlobalAdmins, [System.StringComparer]::Ordinal)
     }
 
+    # GUID CONTRACT (point 3 above): classify, don't filter ExcludedIdentifiers -
+    # BreakGlassAccounts/ServiceAccounts/ExcludedIdentifiers all keep carrying a malformed
+    # entry unchanged from the Task 1.9 stub's own contract; this is purely additive.
+    $malformed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in (@($breakGlass) + @($serviceAccounts))) {
+        if ($id -and ([string] $id) -notmatch $guidPattern) {
+            $malformed.Add([string] $id) | Out-Null
+        }
+    }
+    $malformedDeclaredAccounts = [string[]] @($malformed)
+    [System.Array]::Sort($malformedDeclaredAccounts, [System.StringComparer]::Ordinal)
+
+    # RESOLVED GROUP EXCLUSIONS (point 4 above): forward-compatible shape only - no
+    # DatasetMap.psd1 entry backs -Datasets.groupMembers yet (descriptor-pending), so this
+    # branch is dead in every real collection today and GroupExclusionsResolved is always
+    # $false. It stays real, exercised code (not a stub the whole way down) so the moment a
+    # group-membership dataset ships, wiring it into -Datasets.groupMembers is the only
+    # change needed here.
+    # Resolves the flat, de-duplicated, ordinally-sorted union of group-member ids reachable
+    # through every policy's excludeGroups list whose own `state` equals -PolicyState -
+    # shared by both the enforced ($resolvedGroupExclusions, -PolicyState 'enabled') and
+    # report-only ($reportOnlyExclusions, -PolicyState 'enabledForReportingButNotEnforced')
+    # resolutions below so the two can never independently drift on how a group is matched
+    # to its members. Kept as two SEPARATE call sites/output fields rather than one merged
+    # set - see this file's own ENFORCED VS. REPORT-ONLY GROUP EXCLUSIONS ARE KEPT SEPARATE
+    # docstring section for why merging would overstate protection.
+    function Resolve-GroupExclusionUnion {
+        param(
+            [hashtable] $Datasets,
+            [string] $PolicyState
+        )
+
+        $excludedGroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        if ($Datasets.ContainsKey('conditionalAccessPolicies') -and $null -ne $Datasets.conditionalAccessPolicies) {
+            foreach ($policy in @($Datasets.conditionalAccessPolicies)) {
+                if ($policy.state -ne $PolicyState) { continue }
+                foreach ($groupId in @($policy.conditions.users.excludeGroups)) {
+                    if ($groupId) { $excludedGroupIds.Add([string] $groupId) | Out-Null }
+                }
+            }
+        }
+
+        $memberUnion = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $groupMembers = $Datasets.groupMembers
+        foreach ($groupId in $excludedGroupIds) {
+            if ($groupMembers -is [System.Collections.IDictionary] -and $groupMembers.Contains($groupId)) {
+                foreach ($memberId in @($groupMembers[$groupId])) {
+                    if ($memberId) { $memberUnion.Add([string] $memberId) | Out-Null }
+                }
+            }
+        }
+
+        $result = [string[]] @($memberUnion)
+        [System.Array]::Sort($result, [System.StringComparer]::Ordinal)
+        # Comma-protects the array return - see ConvertTo-PulseCaPolicyView's own
+        # ARRAY-RETURN UNROLLING TRAP docstring for why an unprotected `return $arr` would
+        # silently collapse a zero- or one-element result.
+        return , $result
+    }
+
+    $groupExclusionsResolved = $false
+    $resolvedGroupExclusions = @()
+    $reportOnlyExclusions = @()
+    $groupExclusionNote = 'Group-based exclusion (excludeGroups membership) cannot be resolved: no group-membership dataset is collected yet (descriptor-pending). Only excludeUsers-based exclusion is verifiable today.'
+
+    if ($Datasets -and $Datasets.ContainsKey('groupMembers') -and $null -ne $Datasets.groupMembers) {
+        $groupExclusionsResolved = $true
+        $groupExclusionNote = $null
+
+        $resolvedGroupExclusions = Resolve-GroupExclusionUnion -Datasets $Datasets -PolicyState 'enabled'
+        $reportOnlyExclusions = Resolve-GroupExclusionUnion -Datasets $Datasets -PolicyState 'enabledForReportingButNotEnforced'
+    }
+
     $union = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($id in $breakGlass) { if ($id) { $union.Add([string] $id) | Out-Null } }
     foreach ($id in $serviceAccounts) { if ($id) { $union.Add([string] $id) | Out-Null } }
     foreach ($id in $activeGlobalAdmins) { if ($id) { $union.Add([string] $id) | Out-Null } }
+    foreach ($id in $resolvedGroupExclusions) { if ($id) { $union.Add([string] $id) | Out-Null } }
 
     $excludedIdentifiers = [string[]] @($union)
     [System.Array]::Sort($excludedIdentifiers, [System.StringComparer]::Ordinal)
 
     return [pscustomobject]@{
-        BreakGlassAccounts    = $breakGlass
-        ServiceAccounts       = $serviceAccounts
-        ActiveGlobalAdmins    = $activeGlobalAdmins
-        ExcludedIdentifiers   = $excludedIdentifiers
+        BreakGlassAccounts        = $breakGlass
+        ServiceAccounts           = $serviceAccounts
+        ActiveGlobalAdmins        = $activeGlobalAdmins
+        MalformedDeclaredAccounts = $malformedDeclaredAccounts
+        GroupExclusionsResolved   = $groupExclusionsResolved
+        ResolvedGroupExclusions   = $resolvedGroupExclusions
+        ReportOnlyExclusions      = $reportOnlyExclusions
+        GroupExclusionNote        = $groupExclusionNote
+        ExcludedIdentifiers       = $excludedIdentifiers
     }
 }

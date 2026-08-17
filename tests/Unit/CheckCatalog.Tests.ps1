@@ -39,6 +39,8 @@ Describe 'Import-PulseCheckCatalog' {
         $result[0].Title | Should -Not -BeNullOrEmpty
         $result[0].Data.Datasets | Should -Contain 'conditionalAccessPolicies'
         $result[1].Origin.Project | Should -Be 'Maester'
+        # Optional cite-only References.Cis (Task 4.5) passes through unchanged.
+        $result[0].References.Cis | Should -Be @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)')
     }
 
     It 'does not throw and yields zero descriptors for an empty catalog directory' {
@@ -68,11 +70,28 @@ Describe 'Import-PulseCheckCatalog' {
             Import-PulseCheckCatalog
         }
 
-        @($result).Count | Should -Be 31
+        # Merged catalog is the union of both lineages: 10 Phase 1 seed checks + Task
+        # 3.2's TP.INT.0006-0009/0011-0015 (9) + Task 3.3's TP.INT.0019-0030 (12) +
+        # the Phase 4 Entra catalog TP.ENT.0001-0013/0015-0024 (23, TP.ENT.0014 never
+        # landed) = 49. Count is pinned to the actual on-disk file count, not this
+        # arithmetic - see source/Data/Checks/*.psd1.
+        @($result).Count | Should -Be 49
         $ids = @($result | ForEach-Object { $_.Id })
         $ids | Should -Contain 'TP.ENT.0001'
         $ids | Should -Contain 'TP.INT.0005'
         $ids | Should -Contain 'TP.INT.0006'
+        $ids | Should -Contain 'TP.ENT.0006'
+        $ids | Should -Contain 'TP.ENT.0007'
+        $ids | Should -Contain 'TP.ENT.0008'
+        $ids | Should -Contain 'TP.ENT.0009'
+        $ids | Should -Contain 'TP.ENT.0010'
+        $ids | Should -Contain 'TP.ENT.0011'
+        $ids | Should -Contain 'TP.ENT.0012'
+        $ids | Should -Contain 'TP.ENT.0013'
+        $ids | Should -Contain 'TP.ENT.0015'
+        $ids | Should -Contain 'TP.ENT.0016'
+        $ids | Should -Contain 'TP.ENT.0017'
+        $ids | Should -Contain 'TP.ENT.0024'
 
         # Ordinal-sorted by Id regardless of on-disk filename order (same contract the
         # 'valid' fixture test above already exercises).
@@ -293,6 +312,50 @@ Describe 'Import-PulseCheckCatalog' {
                     Import-PulseCheckCatalog -Path $path
                 }
             } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0022*References.Authorities*must not be empty*'
+        }
+
+        It 'throws "must be a string array" for a scalar References.Cis (Task 4.5, optional field validated only when present)' {
+            {
+                InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/scalar-cis') {
+                    param($path)
+                    function Test-PulseFixtureRule { $true }
+                    Import-PulseCheckCatalog -Path $path
+                }
+            } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0025*References.Cis*must be a string array*'
+        }
+
+        It 'throws "must not be empty" for an empty References.Cis array (Task 4.5 fix round, NEW-3 - present-but-empty is a contradiction, not a valid "no mapping" spelling; omit the key instead)' {
+            {
+                InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/empty-cis') {
+                    param($path)
+                    function Test-PulseFixtureRule { $true }
+                    Import-PulseCheckCatalog -Path $path
+                }
+            } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0026*References.Cis*must not be empty*'
+        }
+
+        It 'throws "does not match the required ID-only format" for a free-prose References.Cis element (merge-review fix - ID-only, no recommendation titles/descriptions)' {
+            # -ExpectedMessage below uses -like wildcard semantics, where [0] is a
+            # character-CLASS token (matches a single '0'), not literal brackets -
+            # backtick-escaped so the pattern actually requires the literal
+            # "References.Cis[0]" text the real error message contains.
+            {
+                InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/prose-cis') {
+                    param($path)
+                    function Test-PulseFixtureRule { $true }
+                    Import-PulseCheckCatalog -Path $path
+                }
+            } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0027*References.Cis`[0`]*does not match the required ID-only format*'
+        }
+
+        It 'throws "does not match the required ID-only format" for a fully-lowercase CIS-shaped References.Cis element (merge-review Minor - the format check is case-sensitive by construction, so -notmatch''s case-insensitivity cannot silently readmit prose-cased strings)' {
+            {
+                InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'invalid/lowercase-cis') {
+                    param($path)
+                    function Test-PulseFixtureRule { $true }
+                    Import-PulseCheckCatalog -Path $path
+                }
+            } | Should -Throw -ExpectedMessage '*bad.psd1*TP.ENT.0028*References.Cis`[0`]*does not match the required ID-only format*'
         }
 
         It 'throws "is required" for a missing Rule.Expression when Rule.Type is Expression' {

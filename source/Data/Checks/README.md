@@ -24,7 +24,15 @@ matching this schema exactly:
   Consulting   = @{ WhatItMeans='...'; WhyItMatters='...'; Remediation=@('step...');
                     PortalLinks=@('https://entra.microsoft.com/...') }
   References   = @{ Research='docs/research/iha-v2/<file>#<anchor>'
-                    Authorities=@('https://learn.microsoft.com/...','MS.AAD.1.1v1') }
+                    Authorities=@('https://learn.microsoft.com/...','MS.AAD.1.1v1')
+                    Cis=@('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)') }
+                 # Cis is OPTIONAL - omit the key entirely unless you have verified a real
+                 # CIS Benchmark mapping for this check (see docs/licensing/cis-cite-only.md).
+                 # ID-ONLY, always: "<benchmark name> v<version>, Rec. <id> (<profile level>)"
+                 # and nothing else - never a recommendation's TITLE (titles ARE CIS's own
+                 # copyrighted expression, exactly like its Description/Rationale/Audit/
+                 # Remediation text) and never a claim that this check's result equals or
+                 # implies CIS Benchmark compliance.
   Origin       = $null                 # or @{ Project='Maester'; Id='MT.1105'; License='MIT' }
 }
 ```
@@ -72,6 +80,9 @@ Validation failures include:
 - empty `Data.Datasets` or `References.Authorities`
 - a dataset name in `Data.Datasets` not present in the shared dataset map (see below)
 - missing/empty `References.Research`
+- `References.Cis`, if the key is present at all (it is OPTIONAL and most checks omit it
+  entirely), not being a non-empty `[string[]]` (no blank elements) - same "wrong type" and
+  "empty array" rules as `References.Authorities`, just not required in the first place
 - any missing `Consulting` field (`WhatItMeans`, `WhyItMatters`, `Remediation`,
   `PortalLinks`)
 - the descriptor file itself failing to parse as a PowerShell data file

@@ -175,7 +175,197 @@
 # coverage, and SecretScan's docs/.build roots extension plus its new person-name
 # device-name heuristic (including a real-file planted-pattern self-test). Set to the
 # REAL total, matching the module's own post-fix Pester run.
-$script:tenantPulseGateMinimumTests = 1465
+# 1300 -> 1465 (Task 3.3, TP.INT.0019-0030 + its own dual-review fix round): the
+# Intune-side catalog's closing batch - 12 new checks plus their fix-round
+# regressions. 1465 was the real, measured `./build.ps1 -Tasks test` total on
+# main immediately before this Phase 4 merge.
+#
+# Phase 4 (phase4/t4.1-normalization) ran the same counter forward on its own
+# line, in parallel, starting from the same 1063 base:
+# 1063 -> 1092 (Phase 4 Task 4.1, Entra normalization layer + shared exclusion context):
+# +29 - the two new normalization-layer views (ConvertTo-PulseCaPolicyView: state-mapping
+# incl. absent/unrecognized-state throw, conditions/grants/session flattening, dual
+# hashtable/PSObject shape neutrality, -Context authenticationStrength displayName
+# fallback, pipeline array input - 14 It cases; ConvertTo-PulseAuthMethodView: methodId/
+# state normalization incl. absent/unrecognized-state throw, generic -settings fold,
+# includeTargets/excludeTargets normalization, dual shape neutrality, pipeline array input
+# - 8 It cases) plus the Get-PulseCaExclusionContext rework's own additive fields
+# (MalformedDeclaredAccounts GUID-contract classification, GroupExclusionsResolved/
+# ResolvedGroupExclusions/GroupExclusionNote forward-compatible group-exclusion shape - 7
+# It cases). TP.ENT.0003/0004/0005's own existing tests were left green, unmodified.
+# 1092 -> 1112 (Task 4.1 post-review fixes, four findings): +20 - Finding 1/Critical
+# (ARRAY-RETURN UNROLLING TRAP fix in both views' array-building helpers, comma-protecting
+# every return; 4 new dedicated sparse-fixture It cases in ConvertTo-PulseCaPolicyView.Tests.ps1
+# plus 2 in ConvertTo-PulseAuthMethodView.Tests.ps1 pinning the fix and its self-caught
+# sibling defect), Finding 2/High (Get-PulseCaExclusionContext's new ReportOnlyExclusions
+# field, kept separate from the enforced-only ExcludedIdentifiers union - 3 new It cases),
+# Finding 3/Important (one consolidated SHAPE NEUTRALITY It per view test file, looping
+# every named fixture through both hashtable and PSObject materializations - 2 new It
+# cases, one per file), Finding 4/Low (ConvertTo-PulseAuthMethodView's -settings bag sorted
+# ordinally before insertion, independent of raw response property order - 1 new It case).
+# TP.ENT.0003 source+tests remain byte-identical (verified via `git diff` against the
+# reviewed commit) - merge-order condition still satisfied.
+# 1112 (declared floor) -> 1126 (Task 4.2, TP.ENT.0006 - EIDSCA AF01-AF06 FIDO2 method
+# configuration cluster, first of Phase 4's wave-1 EIDSCA port): 8 new It cases in
+# tests/Unit/Checks/TP.ENT.0006.Tests.ps1 (catalog self-check + Pass x2 shapes + Fail x4 +
+# gate-degraded). This cluster adds no new dataset (reuses the already-released
+# authenticationMethodsPolicy dataset), so ReadOnly.tests.ps1/SecretScan.tests.ps1's own
+# -ForEach-driven case counts do not grow here. 1126 is the real, measured
+# ./build.ps1 -Tasks test total at this commit, not merely 1112+8 - the declared floor was
+# already below the suite's actual size before this change.
+# 1126 -> 1140 (Task 4.2, TP.ENT.0008 - EIDSCA AM01-AM04/AM06/AM07/AM09/AM10 Microsoft
+# Authenticator method configuration cluster): +14, matching
+# tests/Unit/Checks/TP.ENT.0008.Tests.ps1's 8 new It cases plus real suite growth already
+# present before this commit's own measurement (same "1126 is measured, not merely
+# additive" note as above).
+# 1140 -> 1154 (Task 4.2, TP.ENT.0012 - EIDSCA AP01/AP04-AP10/AP14 default authorization
+# policy settings cluster): +14 - 7 new It cases in tests/Unit/Checks/TP.ENT.0012.Tests.ps1
+# (catalog self-check, Pass x2 shapes, Fail-default, Fail-single-property, Error/field-
+# absence, descriptor-pending NotApplicable), +1 new tests/QA/ReadOnly.tests.ps1 Pending-
+# dataset -ForEach case (source/Data/DatasetMap.psd1's new authorizationPolicy entry, first
+# Pending entry since GraphKit 0.1.1 dropped the previous six), and per-file
+# tests/QA/SecretScan.tests.ps1 -ForEach growth for the new/changed source+test files this
+# commit touched (TP.ENT.0012.psd1, Test-PulseAuthorizationPolicyDefaults.ps1,
+# TP.ENT.0012.Tests.ps1).
+# 1154 -> 1169 (Task 4.2, TP.ENT.0013 - EIDSCA CP01 group/team owner consent restriction):
+# +15 - 6 new It cases in tests/Unit/Checks/TP.ENT.0013.Tests.ps1, +1 new
+# ReadOnly.tests.ps1 Pending-dataset -ForEach case (directorySettings, this commit's new
+# DatasetMap.psd1 entry), the new shared Get-PulseDirectorySettingValue.ps1 helper's own
+# SecretScan.tests.ps1 per-file case, and per-file SecretScan growth for the remaining
+# new/changed files this commit touched.
+# 1169 -> 1181 (Task 4.2, TP.ENT.0015 - EIDSCA PR01 Password Protection mode): +12 - 6 new
+# It cases in tests/Unit/Checks/TP.ENT.0015.Tests.ps1 (reuses the directorySettings dataset
+# added with TP.ENT.0013, so no new ReadOnly.tests.ps1 -ForEach case here) plus per-file
+# SecretScan.tests.ps1 growth for the new/changed files this commit touched.
+# 1181 -> 1193 (Task 4.2, TP.ENT.0016 - EIDSCA ST08 guest group ownership restriction,
+# completes wave 1): +12 - 6 new It cases in tests/Unit/Checks/TP.ENT.0016.Tests.ps1 (also
+# reuses directorySettings, no new ReadOnly.tests.ps1 case) plus per-file
+# SecretScan.tests.ps1 growth for the new/changed files this commit touched. 1193 is the
+# real, measured ./build.ps1 -Tasks test total for the full T4.2 wave-1 diff, matching
+# .github/workflows/ci.yml's own -MinimumTests (POST-REVIEW FIX: ci.yml was missed across
+# all six of this wave's commits and still read 1112 - see the T4.2 report's corrected
+# test-summary section - it is bumped together with this value from this commit onward,
+# alongside scripts/Publish-TenantPulsePackage.ps1 and
+# tests/QA/PublishTenantPulsePackage.tests.ps1's fabricated-fixture total: FOUR tracking
+# locations total, not two, whenever this value moves).
+# 1193 -> 1195 (Task 4.3 wave 2, TP.ENT.0013 - EIDSCA CP03/CP04 UNVERIFIED-flag
+# resolution): net +3 It cases in tests/Unit/Checks/TP.ENT.0013.Tests.ps1 (2 new Fail
+# cases, 1 new Pass-shape assertion folded into the existing two Pass tests rather than
+# duplicated) plus per-file SecretScan.tests.ps1 growth for this commit's changed files.
+# 1195 -> 1199 (Task 4.3 wave 2, TP.ENT.0015 - EIDSCA PR02/PR03/PR05/PR06
+# UNVERIFIED-flag resolution): +4 net new It cases in tests/Unit/Checks/TP.ENT.0015.Tests.ps1
+# (4 new Fail cases covering PR02/PR03/PR05/PR06 independently) plus per-file
+# SecretScan.tests.ps1 growth for this commit's changed files.
+# 1199 -> 1201 (Task 4.3 wave 2, TP.ENT.0016 - EIDSCA ST09 UNVERIFIED-flag resolution,
+# with a corrected Claim polarity - see the research entry's own updated Notes): +2 net
+# new It cases in tests/Unit/Checks/TP.ENT.0016.Tests.ps1 (1 new Pass, 1 new Fail for
+# ST09) plus per-file SecretScan.tests.ps1 growth for this commit's changed files. 1201
+# is the real, measured ./build.ps1 -Tasks test total; all four tracking locations
+# bumped together in this commit per the standing RATCHET rule.
+# 1201 -> 1215 (Task 4.3 wave 2, TP.ENT.0007 - new check, EIDSCA AG01-AG03 general
+# settings, not part of T4.2's wave-1 port): +14 - 8 new It cases in
+# tests/Unit/Checks/TP.ENT.0007.Tests.ps1, +1 CheckCatalog.Tests.ps1 count-pin bump
+# (16 -> 17 catalog descriptors) plus per-file SecretScan.tests.ps1 growth for the new
+# TP.ENT.0007.psd1/Test-PulseAuthMethodsPolicyGeneralSettings.ps1/
+# TP.ENT.0007.Tests.ps1 files. 1215 is the real, measured ./build.ps1 -Tasks test
+# total; all four tracking locations bumped together in this commit.
+# 1215 -> 1227 (Task 4.3 wave 2, TP.ENT.0009 - new check, EIDSCA AS04 SMS sign-in
+# disabled): +12 - 6 new It cases in tests/Unit/Checks/TP.ENT.0009.Tests.ps1, +1
+# CheckCatalog.Tests.ps1 count-pin bump (17 -> 18) plus per-file SecretScan.tests.ps1
+# growth for the new TP.ENT.0009.psd1/Test-PulseSmsSignInMethodDisabled.ps1/
+# TP.ENT.0009.Tests.ps1 files. 1227 is the real, measured ./build.ps1 -Tasks test
+# total; all four tracking locations bumped together in this commit.
+# 1227 -> 1240 (Task 4.3 wave 2, TP.ENT.0010 - new check, EIDSCA AT01-AT02 Temporary
+# Access Pass): +13 - 7 new It cases in tests/Unit/Checks/TP.ENT.0010.Tests.ps1, +1
+# CheckCatalog.Tests.ps1 count-pin bump (18 -> 19) plus per-file SecretScan.tests.ps1
+# growth for the new TP.ENT.0010.psd1/Test-PulseTemporaryAccessPassConfigured.ps1/
+# TP.ENT.0010.Tests.ps1 files. 1240 is the real, measured ./build.ps1 -Tasks test
+# total; all four tracking locations bumped together in this commit.
+# 1240 -> 1252 (Task 4.3 wave 2, TP.ENT.0011 - new check, EIDSCA AV01 Voice call
+# disabled, completes wave 2): +12 - 6 new It cases in
+# tests/Unit/Checks/TP.ENT.0011.Tests.ps1, +1 CheckCatalog.Tests.ps1 count-pin bump
+# (19 -> 20) plus per-file SecretScan.tests.ps1 growth for the new
+# TP.ENT.0011.psd1/Test-PulseVoiceCallMethodDisabled.ps1/TP.ENT.0011.Tests.ps1 files.
+# 1252 is the real, measured ./build.ps1 -Tasks test total; all four tracking
+# locations bumped together in this commit.
+# 1252 -> 1355 (Task 4.4, TP.ENT.0017-0024 - 8 new ScuBA/CISA CA + role +
+# credential checks): new It cases across tests/Unit/Checks/TP.ENT.001[7-9].
+# Tests.ps1, TP.ENT.002[0-4].Tests.ps1, +2 new It cases in
+# tests/Unit/Checks/ConvertTo-PulseCaPolicyView.Tests.ps1 (clientApplications
+# field, TP.ENT.0024's own dataset), +1 CheckCatalog.Tests.ps1 count-pin bump
+# (20 -> 28) plus per-file SecretScan.tests.ps1 growth for the 8 new
+# TP.ENT.00[17-24].psd1/Test-Pulse*.ps1/TP.ENT.00[17-24].Tests.ps1 files.
+# POST-REVIEW CORRECTION: the commit that introduced this cluster recorded
+# 1325 here, measured via an ad hoc FILTERED Invoke-Pester run rather than
+# the sanctioned `./build.ps1 -Tasks build,test` path - that ad hoc run both
+# undercounted (missed tests only the Sampler-bootstrapped module context
+# collects) and reported 4 false "failures" that do not occur under the real
+# pipeline. 1355 is the real, measured `./build.ps1 -Tasks test` total for
+# that same Task 4.4 commit set - the number this value should always have
+# been.
+# 1355 -> 1366 (Task 4.4 fix round - dual review F1-F5): F1/F2 red-then-green
+# tests added to tests/Unit/Checks/TP.ENT.0018.Tests.ps1 (custom-strength
+# evidence, excludeRoles subtraction, undocumented-exclusion note), F4
+# descriptor-pending NotApplicable cases added to TP.ENT.0022.Tests.ps1 (x2)
+# and TP.ENT.0023.Tests.ps1 (x1), F5 red-then-green unclassifiable-accessType
+# tests added to TP.ENT.0023.Tests.ps1 (x2). F3's relabeling of the cosmetic
+# "(PSObject shape)" It titles across TP.ENT.0017/0019/0021/0023.Tests.ps1
+# does not change the count; its genuine shape-neutrality case folded into
+# ConvertTo-PulseCaPolicyView.Tests.ps1's existing populated-clientApplications
+# It (loop, not a new It) likewise does not change the count. 1366 is the
+# real, measured `./build.ps1 -Tasks test` total for the fix-round commit;
+# all four tracking locations bumped together in the SAME commit as these
+# test changes, per the ratchet's own rule.
+# 1366 -> 1375 (Task 4.5, CIS cross-references + phase gate): +9 net new Its -
+# References.Cis (optional, cite-only) descriptor validation coverage
+# (CheckCatalog.Tests.ps1: valid-fixture pass-through assertion folded into an
+# existing It, one new scalar-type-rejection It) and the CIS disclaimer
+# footer's both-directions wiring in Evaluator.Tests.ps1 (silent when no
+# finding cites CIS, fires when at least one does, fires regardless of finding
+# order, verbatim References.Cis pass-through, and the Hashtable/PSCustomObject
+# shape-neutral read of References.Cis). 1375 is the real, measured
+# `./build.ps1 -Tasks test` total for this commit; all four tracking locations
+# bumped together in the SAME commit as these test changes, per the ratchet's
+# own rule.
+# 1375 -> 1396 (Task 4.5 fix-round-of-the-fix-round, NEW-1/NEW-2/NEW-3 - a
+# leaked-PII CRITICAL and two Majors from re-review of the prior fix round):
+# +21 net new Its - SecretScan.tests.ps1's new item-8 possessive-name-shaped
+# displayName/deviceName check (6 unit Its: straight apostrophe, curly
+# apostrophe, deviceName variant, an already-pseudonymized value does NOT
+# fire, a false-positive guard for ordinary possessive prose outside a
+# displayName/deviceName key, plus the dedicated planted-PII regression proof
+# against docs/gates/_qa-fixtures/planted-pii-sample.json), docs/ added to
+# the repo-scan roots (its own new per-file Its, discovered dynamically - see
+# that Describe block's own -ForEach), and CheckCatalog.Tests.ps1's new
+# empty-References.Cis rejection It (NEW-3). 1396 is the real, measured
+# `./build.ps1 -Tasks test` total for this commit; all four tracking
+# locations bumped together in the SAME commit as these test changes, per
+# the ratchet's own rule.
+# 1396 -> 1399 (Task 4.5 merge-review fix round - HMAC-keyed pseudonym,
+# whole-document leak assertion, References.Cis ID-only format enforcement):
+# +3 net new Its - CheckCatalog.Tests.ps1's new prose-References.Cis
+# rejection It (the new ID-only regex enforcement) plus the discovery-time
+# per-file test cases the new tests/Fixtures/Checks/invalid/prose-cis/
+# bad.psd1 fixture and PROVENANCE.md entry add. 1399 was the real, measured
+# `./build.ps1 -Tasks test` total for that commit; all four tracking
+# locations bumped together in the SAME commit as these test changes, per
+# the ratchet's own rule.
+# 1399 -> 1402 (merge-review Minor - CIS format check made case-sensitive):
+# the -notmatch at Test-PulseCheckDescriptor.ps1's References.Cis format
+# check was case-INsensitive, so a fully-lowercase CIS-shaped string passed;
+# now -cnotmatch. +3: CheckCatalog.Tests.ps1's lowercase-bypass rejection It
+# plus the discovery-time per-file cases the new invalid/lowercase-cis/
+# bad.psd1 fixture and PROVENANCE.md entry add. 1402 is the real, measured
+# `./build.ps1 -Tasks test` total for this commit. 1402 was the real, measured
+# `./build.ps1 -Tasks test` total on phase4/t4.1-normalization immediately
+# before this Phase 4 merge.
+#
+# This merge (Phase 4 into main) reconciles both lineages: the value below (1800) is
+# the REAL measured ./build.ps1 -Tasks build,test total for the merged tree,
+# set once post-merge per the merge review's ratchet step - not the sum of the
+# two branch totals (1465 + 1402), which would double-count the shared pre-1063
+# history and does not match this real post-merge count.
+$script:tenantPulseGateMinimumTests = 1800
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
