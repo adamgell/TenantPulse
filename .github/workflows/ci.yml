@@ -617,7 +617,7 @@ jobs:
           # Task 3.2 fix-round (two merged reviews) bumped 1259 -> 1300
           # (.build/AssertGateResult.tasks.ps1's own -MinimumTests, which must be bumped
           # together with this value).
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1300 -AllowedSkips $allowedSkips -AllowNotRun 1
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1465 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

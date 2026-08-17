@@ -175,7 +175,7 @@
 # coverage, and SecretScan's docs/.build roots extension plus its new person-name
 # device-name heuristic (including a real-file planted-pattern self-test). Set to the
 # REAL total, matching the module's own post-fix Pester run.
-$script:tenantPulseGateMinimumTests = 1300
+$script:tenantPulseGateMinimumTests = 1465
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
