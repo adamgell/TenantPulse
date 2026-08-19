@@ -1,0 +1,241 @@
+<#
+    Private: collect the compact, group-keyed input for TP.INT.0013.
+
+    This is a TenantPulse-owned composite plan. GraphKit remains responsible for one
+    operation at a time: the two Intune RBAC list reads and one selected Group.Get read per
+    distinct member group. Every call receives the same resolved context and is made in
+    deterministic sequence; there is deliberately no generic Walk or parallel fan-out.
+
+    A child group failure is a structured collection gap. Rows from successful child reads
+    remain usable as a Partial outcome, while a run with no usable rows is Failed so the
+    evaluator cannot mistake an unresolved walk for an authoritative empty collection.
+#>
+
+function Invoke-PulseIntuneRbacGroupProtectionPlan {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject] $Context,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $Dataset,
+
+        [Parameter(Mandatory)]
+        [pscustomobject] $ManifestEntry,
+
+        [Parameter(Mandatory)]
+        [string] $ProfileId,
+
+        [Parameter(Mandatory)]
+        [string] $TenantPseudonym
+    )
+
+    $descriptorSpecs = @(
+        @{ Type = 'DeviceManagementRoleDefinition'; Operation = 'List'; ApiVersion = 'v1.0' }
+        @{ Type = 'DeviceManagementRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+        @{ Type = 'Group'; Operation = 'Get'; ApiVersion = 'v1.0' }
+    )
+
+    # Resolve and validate every released primitive before the first network call. A missing
+    # or unsafe descriptor is a module/package gate failure, not a child gap that can be
+    # partially evaluated.
+    foreach ($spec in $descriptorSpecs) {
+        Assert-PulseReadOnlyDescriptor -Type $spec.Type -Operation $spec.Operation -ApiVersion $spec.ApiVersion
+    }
+
+    $operations = @('List', 'List', 'Get')
+    $apiVersion = if ($ManifestEntry.PSObject.Properties['ApiVersion'] -and $ManifestEntry.ApiVersion) {
+        [string] $ManifestEntry.ApiVersion
+    } else {
+        'beta'
+    }
+
+    function New-RbacFailureOutcome {
+        param(
+            [Parameter(Mandatory)] [string] $Operation,
+            [Parameter(Mandatory)] [System.Management.Automation.ErrorRecord] $ErrorRecord
+        )
+
+        $failureClass = Get-PulseFailureClass -ErrorRecord $ErrorRecord
+        $normalizedFailureClass = switch ($failureClass) {
+            'PermissionDenied' { 'PermissionDenied'; break }
+            'AuthFailure' { 'AuthenticationFailed'; break }
+            default { 'ProviderFailed' }
+        }
+        $reasonCode = switch ($normalizedFailureClass) {
+            'PermissionDenied' { 'permission-denied'; break }
+            'AuthenticationFailed' { 'authentication-failed'; break }
+            default { 'provider-failed' }
+        }
+
+        return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
+            -FailureClass $normalizedFailureClass -ReasonCode $reasonCode `
+            -Detail @{ operation = $Operation } -Provider 'GraphKit' -ApiVersion $apiVersion `
+            -Operations $operations
+    }
+
+    $roleDefinitions = @()
+    try {
+        $roleDefinitions = @(Get-GraphObject -Context $Context -Type 'DeviceManagementRoleDefinition' -Operation 'List' -ErrorAction Stop)
+    } catch {
+        return New-RbacFailureOutcome -Operation 'DeviceManagementRoleDefinition.List' -ErrorRecord $_
+    }
+
+    $roleAssignments = @()
+    try {
+        $roleAssignments = @(Get-GraphObject -Context $Context -Type 'DeviceManagementRoleAssignment' -Operation 'List' -ErrorAction Stop)
+    } catch {
+        return New-RbacFailureOutcome -Operation 'DeviceManagementRoleAssignment.List' -ErrorRecord $_
+    }
+
+    $roleNamesById = @{}
+    foreach ($definition in $roleDefinitions) {
+        if ($null -eq $definition) { continue }
+
+        $definitionId = $null
+        $definitionName = $null
+        if ($definition -is [System.Collections.IDictionary]) {
+            if ($definition.Contains('id')) { $definitionId = [string] $definition['id'] }
+            if ($definition.Contains('displayName')) { $definitionName = [string] $definition['displayName'] }
+        } else {
+            if ($definition.PSObject.Properties['id']) { $definitionId = [string] $definition.id }
+            if ($definition.PSObject.Properties['displayName']) { $definitionName = [string] $definition.displayName }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($definitionId)) {
+            $roleNamesById[$definitionId] = if ([string]::IsNullOrWhiteSpace($definitionName)) { $definitionId } else { $definitionName }
+        }
+    }
+
+    # The ordered map is keyed case-insensitively so the same group is read once even if
+    # assignments use inconsistent casing. Each value is a case-insensitive set of role
+    # names, later rendered into one deterministic compact string for the check's existing
+    # roleDefinitionName field.
+    $groupRoleNames = [ordered]@{}
+    foreach ($assignment in $roleAssignments) {
+        if ($null -eq $assignment) { continue }
+
+        $roleDefinitionId = $null
+        $members = @()
+        if ($assignment -is [System.Collections.IDictionary]) {
+            if ($assignment.Contains('roleDefinitionId')) { $roleDefinitionId = [string] $assignment['roleDefinitionId'] }
+            if ($assignment.Contains('members')) { $members = @($assignment['members']) }
+        } else {
+            if ($assignment.PSObject.Properties['roleDefinitionId']) { $roleDefinitionId = [string] $assignment.roleDefinitionId }
+            if ($assignment.PSObject.Properties['members']) { $members = @($assignment.members) }
+        }
+
+        $roleName = if (-not [string]::IsNullOrWhiteSpace($roleDefinitionId) -and $roleNamesById.ContainsKey($roleDefinitionId)) {
+            [string] $roleNamesById[$roleDefinitionId]
+        } else {
+            $roleDefinitionId
+        }
+        if ([string]::IsNullOrWhiteSpace($roleName)) { $roleName = '(unknown role)' }
+
+        foreach ($member in $members) {
+            $groupId = $null
+            if ($member -is [System.Collections.IDictionary]) {
+                if ($member.Contains('id')) { $groupId = [string] $member['id'] }
+            } elseif ($member -is [string] -or $member -is [guid]) {
+                $groupId = [string] $member
+            } elseif ($null -ne $member -and $member.PSObject.Properties['id']) {
+                $groupId = [string] $member.id
+            }
+
+            if ([string]::IsNullOrWhiteSpace($groupId)) { continue }
+            if (-not $groupRoleNames.Contains($groupId)) {
+                $groupRoleNames[$groupId] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            }
+            $groupRoleNames[$groupId].Add($roleName) | Out-Null
+        }
+    }
+
+    $groupIds = [string[]] @($groupRoleNames.Keys)
+    if ($groupIds.Count -gt 1) {
+        [System.Array]::Sort($groupIds, [System.StringComparer]::OrdinalIgnoreCase)
+    }
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $gaps = [System.Collections.Generic.List[object]]::new()
+    foreach ($groupId in $groupIds) {
+        $groupRows = @()
+        try {
+            $groupRows = @(Get-GraphObject -Context $Context -Type 'Group' -Operation 'Get' -Parameters @{ id = $groupId } -ErrorAction Stop)
+        } catch {
+            $failureClass = Get-PulseFailureClass -ErrorRecord $_
+            $normalizedFailureClass = switch ($failureClass) {
+                'PermissionDenied' { 'PermissionDenied'; break }
+                'AuthFailure' { 'AuthenticationFailed'; break }
+                default { 'ProviderFailed' }
+            }
+            $reasonCode = switch ($normalizedFailureClass) {
+                'PermissionDenied' { 'permission-denied'; break }
+                'AuthenticationFailed' { 'authentication-failed'; break }
+                default { 'provider-failed' }
+            }
+            $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass $normalizedFailureClass `
+                    -ReasonCode $reasonCode -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
+            continue
+        }
+
+        if ($groupRows.Count -ne 1 -or $null -eq $groupRows[0]) {
+            $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
+            continue
+        }
+
+        $group = $groupRows[0]
+        $propertyNames = if ($group -is [System.Collections.IDictionary]) {
+            @($group.Keys | ForEach-Object { [string] $_ })
+        } else {
+            @($group.PSObject.Properties.Name)
+        }
+        $hasRestricted = $propertyNames -contains 'isManagementRestricted'
+        $hasAssignable = $propertyNames -contains 'isAssignableToRole'
+        $restricted = if ($hasRestricted) { if ($group -is [System.Collections.IDictionary]) { $group['isManagementRestricted'] } else { $group.isManagementRestricted } } else { $null }
+        $assignable = if ($hasAssignable) { if ($group -is [System.Collections.IDictionary]) { $group['isAssignableToRole'] } else { $group.isAssignableToRole } } else { $null }
+        if (-not $hasRestricted -or -not $hasAssignable -or $null -eq $restricted -or $null -eq $assignable) {
+            $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
+            continue
+        }
+
+        $displayName = if ($group -is [System.Collections.IDictionary]) {
+            if ($group.Contains('displayName')) { [string] $group['displayName'] } else { $groupId }
+        } elseif ($group.PSObject.Properties['displayName']) {
+            [string] $group.displayName
+        } else {
+            $groupId
+        }
+        $roleNames = [string[]] @($groupRoleNames[$groupId])
+        if ($roleNames.Count -gt 1) {
+            [System.Array]::Sort($roleNames, [System.StringComparer]::OrdinalIgnoreCase)
+        }
+        $rows.Add([pscustomobject][ordered]@{
+                roleDefinitionName    = ($roleNames -join ', ')
+                groupId               = $groupId
+                groupDisplayName      = $displayName
+                isManagementRestricted = $restricted
+                isAssignableToRole    = $assignable
+            })
+    }
+
+    $rowArray = $rows.ToArray()
+    $gapArray = $gaps.ToArray()
+    if ($gapArray.Count -eq 0) {
+        return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Collected' -Rows $rowArray -Gaps @() `
+            -ReasonCode 'collected' -Detail @{ groupCount = $rowArray.Count } -Provider 'GraphKit' `
+            -ApiVersion $apiVersion -Operations $operations
+    }
+    if ($rowArray.Count -gt 0) {
+        return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Partial' -Rows $rowArray -Gaps $gapArray `
+            -ReasonCode 'partial' -Detail @{ groupCount = $rowArray.Count; gapCount = $gapArray.Count } `
+            -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
+    }
+
+    return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gapArray `
+        -FailureClass 'ProviderFailed' -ReasonCode 'provider-failed' `
+        -Detail @{ gapCount = $gapArray.Count } -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
+}

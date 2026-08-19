@@ -12,15 +12,16 @@ BeforeAll {
     function script:Invoke-PulseCheckFixture {
         param(
             [Parameter(Mandatory)] [string] $CheckId,
-            [Parameter(Mandatory)] [hashtable[]] $Datasets
+            [Parameter(Mandatory)] [hashtable[]] $Datasets,
+            [Parameter()] $GateProvider = @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
         )
 
         $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $keyPath = Join-Path $storeRoot '.opkey/operator.key'
 
         try {
-            $evaluation = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $CheckId, $Datasets {
-                param($storeRoot, $keyPath, $checkId, $datasets)
+            $evaluation = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $CheckId, $Datasets, $GateProvider {
+                param($storeRoot, $keyPath, $checkId, $datasets, $gateProvider)
 
                 $catalog = @(Import-PulseCheckCatalog)
                 $check = $catalog | Where-Object { $_.Id -eq $checkId }
@@ -35,11 +36,11 @@ BeforeAll {
                         Status     = $d.Status
                     }
                     if ($d.ContainsKey('Data')) { $params.Data = $d.Data }
+                    if ($d.ContainsKey('Gaps')) { $params.Gaps = $d.Gaps }
                     if ($d.ContainsKey('Reason')) { $params.Reason = $d.Reason }
                     Write-PulseDataset @params
                 }
-
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider $gateProvider
             }
             return $evaluation.Document.findings[0]
         } finally {
@@ -174,5 +175,18 @@ Describe 'TP.INT.0013 - Intune RBAC groups protected via RMAU or role-assignable
         )
 
         $finding.status | Should -Be 'Fail'
+    }
+    
+    It 'NotApplicable: a failed group lookup with no rows never becomes an empty-result Pass' {
+        $gap = InModuleScope TenantPulse {
+            New-PulseCollectionGap -Scope 'group:g1' -FailureClass 'PermissionDenied' -ReasonCode 'permission-denied' `
+                -Detail @{ groupId = 'g1' } -Operation 'Get' -ApiVersion 'v1.0'
+        }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Failed'; Reason = 'provider-failed'; Gaps = @($gap) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'provider-failed'
     }
 }
