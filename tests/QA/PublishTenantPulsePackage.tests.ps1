@@ -224,6 +224,21 @@ Describe 'Publish-TenantPulsePackage: pack-first-then-verify digest check' {
             finally { $archive.Dispose() }
         }
 
+        $tokens = $parseErrors = $null
+        $publisherAst = [System.Management.Automation.Language.Parser]::ParseFile(
+            $script:realScriptPath,
+            [ref] $tokens,
+            [ref] $parseErrors
+        )
+        $parseErrors.Count | Should -Be 0
+        $compareCommands = @($publisherAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -eq 'Compare-Object'
+        }, $true))
+        $compareCommands.Count | Should -Be 1
+        $compareCommands[0].Extent.Text | Should -Match '\-CaseSensitive\b'
+
         $result = Invoke-PulsePublishScript -Fixture $script:fixture
 
         $result.ExitCode | Should -Not -Be 0
