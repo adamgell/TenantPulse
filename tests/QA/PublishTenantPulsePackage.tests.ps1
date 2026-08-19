@@ -194,6 +194,18 @@ Describe 'Publish-TenantPulsePackage: pack-first-then-verify digest check' {
         $result.Output | Should -Match 'unrecorded\.txt'
         $result.Output | Should -Match 'digest'
     }
+    It 'refuses when the tested digest path differs from the built path only by case' {
+        $script:fixture = New-PulsePublishFixture
+        $digestManifestPath = Join-Path $script:fixture.FixtureRoot 'output/testResults/tested-module-digest.txt'
+        $digestLine = (Get-Content -LiteralPath $digestManifestPath -Raw) -replace '^TenantPulse\.psm1', 'tenantpulse.psm1'
+        Set-Content -LiteralPath $digestManifestPath -Value $digestLine -NoNewline -Encoding utf8
+
+        $result = Invoke-PulsePublishScript -Fixture $script:fixture
+
+        $result.ExitCode | Should -Not -Be 0
+        $result.Output | Should -Match 'tenantpulse\.psm1'
+    }
+
 
 
     It 'refuses when no tested-module digest manifest is present at all' {

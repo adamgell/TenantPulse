@@ -242,7 +242,7 @@ else {
             Sort-Object
     )
     $recordedBuiltFiles = @($digestManifest.Keys | Sort-Object)
-    $fileSetDifferences = @(Compare-Object -ReferenceObject $recordedBuiltFiles -DifferenceObject $currentBuiltFiles)
+    $fileSetDifferences = @(Compare-Object -ReferenceObject $recordedBuiltFiles -DifferenceObject $currentBuiltFiles -CaseSensitive)
     if ($fileSetDifferences.Count -ne 0) {
         $differenceSummary = ($fileSetDifferences | ForEach-Object { "$($_.SideIndicator):$($_.InputObject)" }) -join ', '
         throw "The built module file set differs from the tested-module digest manifest. Unrecorded or missing file(s): $differenceSummary. Re-run ./build.ps1 -Tasks pack then ./build.ps1 -Tasks test, in that order, then publish."
