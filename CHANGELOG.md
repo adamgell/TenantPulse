@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Exact GraphKit runtime contract (TenantPulse 0.1.2 candidate).** The module manifest now requires exactly GraphKit `0.2.2`; `RequiredModules.psd1` remains the separate restore-time `0.2.2` pin. Source, built manifest, and candidate package are checked independently. Published TenantPulse `0.1.1` remains immutable and is not republished.
+- **R1 outcome/composite plans (2026-08-19).** Provider outcome/gate/partial-aware
+  infrastructure and sequential TenantPulse-owned plans for Intune RBAC,
+  endpoint-security BitLocker/LAPS, security baselines, and the Windows data processor are
+  implemented and focused-tested. Their five `DatasetMap.psd1` entries remain `Pending`:
+  the RBAC live shape lacks the role-definition relationship, the Windows processor lacks an
+  official Microsoft GET/application-permission contract and a GraphKit descriptor, and the
+  endpoint-security/security-baseline composite live gates were not completed. See
+  `docs/STATUS.md` for the exact dispositions and recheck gates.
+- **Deterministic package handoff, not publication.** TenantPulse candidate `0.1.2` passed
+  pack-then-test on macOS PowerShell 7.6.5 (2123 tests, 0 failed, 0 errors, 0 skipped,
+  0 NotRun); its 400414-byte package SHA-256 is
+  `AA724B1031C564CA85591DD1ACB51D968759D0198D79CA78A1FE5D260BF81368`, and the publisher
+  dry-run verified all 59 shipped files. It consumes the unchanged exact GraphKit `0.2.2`
+  contract. The stable GraphKit `0.2.2` producer passed its packed-build gate (753 tests,
+  0 failed, 0 errors, 0 skipped); package SHA-256 and tested-module digest are recorded in
+  `docs/STATUS.md`. These are local deterministic results only: CI has not run, TenantPulse
+  `0.1.2` is unpublished, and R1 did not publish either package.
 
 ## [0.1.1] - 2026-08-19
 

@@ -51,8 +51,8 @@ these; every one of them ships detailed comment-based help.
 
 TenantPulse reads whichever datasets the checks you run declare - the checks shipped in
 Phase 1 read Conditional Access policies, Intune device/compliance/configuration data,
-authentication methods policy, Autopilot devices, domains, and (once released) security
-defaults, directory role assignments, and Entra device data. Every one of those reads is a
+authentication methods policy, Autopilot devices, domains, security defaults, directory role
+assignments, and Entra device data. Every one of those reads is a
 **read-only, application-permission Graph call** resolved through GraphKit's own descriptor
 catalog - TenantPulse does not declare its own separate permission list, it inherits
 whichever `Microsoft Graph` application permissions the GraphKit profile's app registration
@@ -166,7 +166,17 @@ constitute a claim of CIS Benchmark compliance."*
   collect require
 - PSGallery access (or an internal mirror) to install TenantPulse and GraphKit
 
-GraphKit `0.2.2` and TenantPulse `0.1.1` are published on PSGallery. Published TenantPulse `0.1.1` used minimum-version dependency semantics; current source is the unpublished `0.1.2` candidate, which requires exact GraphKit `0.2.2`. The twelve GET/List datasets that were Pending on GraphKit `0.1.1` remain live. See `docs/STATUS.md` for live-gate evidence and current candidate status.
+GraphKit `0.2.2` is the stable producer published before R1. Published TenantPulse `0.1.1`
+remains the historical consumer artifact; current source is the unpublished `0.1.2`
+candidate, which requires exact GraphKit `0.2.2`. The twelve GET/List datasets that were
+Pending on GraphKit `0.1.1` remain live.
+
+R1's outcome model and TenantPulse-owned sequential composite plans are implemented in
+current source and deterministically verified through the local packed candidate gate, but
+the five composite/data-processor paths remain `Pending` and are not cut over or live
+verified: `TP.INT.0009`, `TP.INT.0013`, `TP.INT.0014`, `TP.INT.0015`, and `TP.INT.0029`.
+CI has not run for these branches. See `docs/STATUS.md` for the exact package evidence,
+controlled live observations, and the remaining operator/recheck gates.
 
 ## Catalog scope - what this is and isn't, honestly
 

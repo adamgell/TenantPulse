@@ -4,6 +4,40 @@ This is internal development/task narrative, moved out of README.md (post-review
 README.md is meant to read as a PSGallery landing page, not an implementation log). Nothing
 here is required to install or use TenantPulse; see README.md for that.
 
+## R1 outcome/composite handoff (2026-08-19)
+
+R1's provider-outcome/gate/partial-aware collection infrastructure and the TenantPulse-owned
+sequential composite plans are implemented in source and focused-tested. The five
+`DatasetMap.psd1` entries below deliberately remain `Pending`; implementation and local
+deterministic package evidence are not the same claim as CI, live cutover, or publication.
+The implementation details and focused-test source of truth are the plan files under
+`source/Private/Collect/`, the check descriptors under `source/Data/Checks/`, and
+`source/Data/DatasetMap.psd1`. No pending flag was removed.
+
+| Dataset/check | R1 disposition |
+|---|---|
+| `dataProcessorServiceForWindowsFeaturesOnboarding` / `TP.INT.0009` | A controlled read through GraphKit 0.2.2 returned the singleton and native Boolean fields, but Microsoft Learn has no official GET/application-permission contract and GraphKit 0.2.2 has no matching descriptor. Retain `Pending`; recheck when Microsoft publishes that contract or GraphKit ships the exact `Singleton.Default` descriptor, then repeat the read-only probe. |
+| `intuneRbacGroupProtection` / `TP.INT.0013` | Released primitive reads succeeded, but the observed role-assignment response lacked the role-definition relationship needed to preserve role names. Retain `Pending`; cut over only after an evidence-backed released primitive or supported response expansion supplies that relationship. |
+| `endpointSecurityDiskEncryptionPolicies` / `TP.INT.0014` | The provider/composite plan is implemented and focused-tested, but its exact package/live gate was not completed. Retain `Pending`; do not describe BitLocker as live or default cut over. |
+| `endpointSecurityLapsPolicies` / `TP.INT.0015` | The provider/composite plan is implemented and focused-tested, but its exact package/live gate was not completed. Retain `Pending`; do not describe LAPS as live or default cut over. |
+| `securityBaselinesAssignedAndCurrent` / `TP.INT.0029` | The provider/composite plan is implemented and focused-tested, but its exact package/live gate was not completed. Retain `Pending`; do not describe security baselines as live or default cut over. |
+
+**Package handoff and evidence boundary.** GraphKit `0.2.2` is the stable producer released
+before R1; its macOS PowerShell 7.6.5 pack-then-test passed with 753 tests, 0 failed, 0
+errors, and 0 skipped. The tested `GraphKit.0.2.2.nupkg` is 201749 bytes with SHA-256
+`F3D707D7CCCCE95BC64F2A310752F269393F244EF8BFBB5C3F8605CD3D6315F3`, and the packaged
+`GraphKit.psm1` matches the tested build at SHA-256
+`EA2DC2C3C57C0E9F5F5766F30203A49C1FCC00622E66EA52E0136CEE2B197730`.
+
+TenantPulse `0.1.2` is an **unpublished candidate**, not a release. Its macOS PowerShell
+7.6.5 pack-then-test passed with 2123 tests, 0 failed, 0 errors, 0 skipped, and 0 NotRun.
+The candidate `TenantPulse.0.1.2.nupkg` is 400414 bytes with SHA-256
+`AA724B1031C564CA85591DD1ACB51D968759D0198D79CA78A1FE5D260BF81368`; the publisher
+dry-run verified all 59 shipped files against the tested-module digest manifest. The exact
+GraphKit `0.2.2` dependency is unchanged across TenantPulse source, build dependency,
+built module, and candidate package. These are local deterministic results only: CI has not
+run on either branch, and no package was published by R1.
+
 ## Phase 1 engine: complete
 
 Collection, evaluation, scoring, and the deterministic pseudonymized JSON report all work
