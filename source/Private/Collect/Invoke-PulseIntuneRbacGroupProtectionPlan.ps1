@@ -114,25 +114,63 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
     # names, later rendered into one deterministic compact string for the check's existing
     # roleDefinitionName field.
     $groupRoleNames = [ordered]@{}
+    $gaps = [System.Collections.Generic.List[object]]::new()
     foreach ($assignment in $roleAssignments) {
         if ($null -eq $assignment) { continue }
 
+        $assignmentId = $null
         $roleDefinitionId = $null
+        $roleDefinitionName = $null
         $members = @()
+        $roleDefinition = $null
         if ($assignment -is [System.Collections.IDictionary]) {
+            if ($assignment.Contains('id')) { $assignmentId = [string] $assignment['id'] }
             if ($assignment.Contains('roleDefinitionId')) { $roleDefinitionId = [string] $assignment['roleDefinitionId'] }
+            if ($assignment.Contains('roleDefinition')) { $roleDefinition = $assignment['roleDefinition'] }
             if ($assignment.Contains('members')) { $members = @($assignment['members']) }
         } else {
+            if ($assignment.PSObject.Properties['id']) { $assignmentId = [string] $assignment.id }
             if ($assignment.PSObject.Properties['roleDefinitionId']) { $roleDefinitionId = [string] $assignment.roleDefinitionId }
+            if ($assignment.PSObject.Properties['roleDefinition']) { $roleDefinition = $assignment.roleDefinition }
             if ($assignment.PSObject.Properties['members']) { $members = @($assignment.members) }
+        }
+
+        if ($null -ne $roleDefinition) {
+            if ($roleDefinition -is [System.Collections.IDictionary]) {
+                if ([string]::IsNullOrWhiteSpace($roleDefinitionId) -and $roleDefinition.Contains('id')) {
+                    $roleDefinitionId = [string] $roleDefinition['id']
+                }
+                if ($roleDefinition.Contains('displayName')) {
+                    $roleDefinitionName = [string] $roleDefinition['displayName']
+                }
+            } else {
+                if ([string]::IsNullOrWhiteSpace($roleDefinitionId) -and $roleDefinition.PSObject.Properties['id']) {
+                    $roleDefinitionId = [string] $roleDefinition.id
+                }
+                if ($roleDefinition.PSObject.Properties['displayName']) {
+                    $roleDefinitionName = [string] $roleDefinition.displayName
+                }
+            }
         }
 
         $roleName = if (-not [string]::IsNullOrWhiteSpace($roleDefinitionId) -and $roleNamesById.ContainsKey($roleDefinitionId)) {
             [string] $roleNamesById[$roleDefinitionId]
+        } elseif (-not [string]::IsNullOrWhiteSpace($roleDefinitionName)) {
+            $roleDefinitionName
         } else {
-            $roleDefinitionId
+            $null
         }
-        if ([string]::IsNullOrWhiteSpace($roleName)) { $roleName = '(unknown role)' }
+
+        # The released list shape can carry group members without carrying the role
+        # definition navigation. Do not turn that unresolved relationship into a plausible
+        # "(unknown role)" row: it is an assignment-scoped provider-data gap and no group
+        # lookup is attempted for that assignment.
+        if ($members.Count -gt 0 -and [string]::IsNullOrWhiteSpace($roleName)) {
+            $scopeId = if ([string]::IsNullOrWhiteSpace($assignmentId)) { 'unknown' } else { $assignmentId }
+            $gaps.Add((New-PulseCollectionGap -Scope "assignment:$scopeId" -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ assignmentId = $scopeId } -Operation 'List' -ApiVersion 'v1.0'))
+            continue
+        }
 
         foreach ($member in $members) {
             $groupId = $null
@@ -158,7 +196,6 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
     }
 
     $rows = [System.Collections.Generic.List[object]]::new()
-    $gaps = [System.Collections.Generic.List[object]]::new()
     foreach ($groupId in $groupIds) {
         $groupRows = @()
         try {

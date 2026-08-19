@@ -159,6 +159,22 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         $result.Outcome.Gaps[0].ReasonCode | Should -Be 'permission-denied'
     }
 
+    It 'records a missing role-definition relation as an assignment gap instead of an unknown-role row' {
+        $result = Invoke-RbacPlanFixture `
+            -RoleDefinitions @([pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }) `
+            -RoleAssignments @([pscustomobject]@{ id = 'assignment-a'; displayName = 'HD Team'; members = @('group-a') }) `
+            -Groups @{ 'group-a' = [pscustomobject]@{ id = 'group-a'; displayName = 'App Admins'; isManagementRestricted = $false; isAssignableToRole = $false } }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'assignment:assignment-a'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'List'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be 'invalid-provider-data'
+        @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'Group').Count | Should -Be 0
+    }
+
     It 'validates all released descriptors before making any Graph call' {
         $result = Invoke-RbacPlanFixture `
             -RoleDefinitions @() `
