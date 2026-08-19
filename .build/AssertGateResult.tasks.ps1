@@ -497,9 +497,9 @@
 # same-policy AND against live applicationcontrolv2 ids, presence-index
 # policyIds, corpus extension, catalog 51 -> 53. 2009 is the real, measured
 # `./build.ps1 -Tasks test` total on this tree.
-# 2009 -> 2014 (R0 source/release truth): +5 package-identity and exact GraphKit
-# dependency assertions across source, restore pin, built manifest, and nupkg.
-$script:tenantPulseGateMinimumTests = 2014
+# 2009 -> 2015 (R0 source/release truth): +6 package-identity and exact GraphKit
+# dependency assertions across source, restore pin, built manifest, nupkg, and publisher file-set proof.
+$script:tenantPulseGateMinimumTests = 2015
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
