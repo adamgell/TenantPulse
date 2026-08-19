@@ -74,9 +74,12 @@ function New-PulseCollectionOutcome {
         $FailureClass = $failureClassText
     }
 
-    $rowsValue = if ($null -eq $Rows) { , ([object[]]@()) } else { , ([object[]]@($Rows)) }
-    $gapsValue = if ($null -eq $Gaps) { , ([object[]]@()) } else { , ([object[]]@($Gaps)) }
-    $operationsValue = if ($null -eq $Operations) { , ([object[]]@()) } else { , ([object[]]@($Operations)) }
+    $rowsValue = [object[]]@()
+    if ($null -ne $Rows) { $rowsValue = [object[]]@($Rows) }
+    $gapsValue = [object[]]@()
+    if ($null -ne $Gaps) { $gapsValue = [object[]]@($Gaps) }
+    $operationsValue = [object[]]@()
+    if ($null -ne $Operations) { $operationsValue = [object[]]@($Operations) }
 
     foreach ($gap in $gapsValue) {
         if ($null -eq $gap) {
