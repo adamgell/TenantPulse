@@ -273,3 +273,13 @@ assignment targets is provably disjoint), or `'unknown'` (at least one contribut
 carries `assignments: null` - the deferred-assignments state every `settingsCatalog` row
 carries in the core slice, so overlap cannot be evaluated at all for any conflict that
 includes one).
+
+### `settingPresenceIndex` artifact (`expanded/settingPresenceIndex.<sha256>.json`)
+
+One JSON document, not jsonl. `families.<policyType>.<settingDefinitionId>.values[]`
+carries `policyCount` / `assignedPolicyCount` (original) plus `policyIds` /
+`assignedPolicyIds` (additive, ordinal-sorted distinct ids). Counts stay; the
+id arrays let a same-policy AND (TP.INT.0017/0018) intersect without streaming
+the underlying jsonl. A redacted value group still has `canonicalValue: null`
+and never carries the secret; its `policyIds` are presence-only.
+

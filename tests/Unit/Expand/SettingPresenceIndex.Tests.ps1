@@ -55,8 +55,33 @@ Describe 'ConvertTo-PulseSettingPresenceIndex' {
         $entry.values.Count | Should -Be 2
         ($entry.values | Where-Object { $_.canonicalValue -eq 'on' }).policyCount | Should -Be 1
         ($entry.values | Where-Object { $_.canonicalValue -eq 'off' }).policyCount | Should -Be 1
+        $onGroup = $entry.values | Where-Object { $_.canonicalValue -eq 'on' }
+        $offGroup = $entry.values | Where-Object { $_.canonicalValue -eq 'off' }
+        @($onGroup.policyIds) | Should -Be @('p1')
+        @($onGroup.assignedPolicyIds) | Should -Be @('p1')
+        @($offGroup.policyIds) | Should -Be @('p2')
+        @($offGroup.assignedPolicyIds) | Should -Be @()
     }
 
+    It 'SAME-POLICY AND: policyIds stay on each value group so two definitionIds can intersect on one policy without streaming jsonl' {
+        $rows = @(
+            (New-PulseFixtureRow -PolicyId 'p-enforce' -PolicyType 'settingsCatalog' -DefId 'def-audit' -Value 'enforce' -Assignments $null)
+            (New-PulseFixtureRow -PolicyId 'p-audit' -PolicyType 'settingsCatalog' -DefId 'def-audit' -Value 'audit' -Assignments $null)
+            (New-PulseFixtureRow -PolicyId 'p-enforce' -PolicyType 'settingsCatalog' -DefId 'def-control' -Value 'builtin' -Assignments $null)
+            (New-PulseFixtureRow -PolicyId 'p-empty' -PolicyType 'settingsCatalog' -DefId 'def-control' -Value 'empty-xml' -Assignments $null)
+        )
+        $result = InModuleScope TenantPulse -ArgumentList (, $rows) {
+            param($rows)
+            ConvertTo-PulseSettingPresenceIndex -Rows $rows
+        }
+
+        $enforceIds = @(($result.settingsCatalog['def-audit'].values | Where-Object { $_.canonicalValue -eq 'enforce' }).policyIds)
+        $builtinIds = @(($result.settingsCatalog['def-control'].values | Where-Object { $_.canonicalValue -eq 'builtin' }).policyIds)
+        $intersect = @($enforceIds | Where-Object { $builtinIds -contains $_ })
+        $intersect | Should -Be @('p-enforce')
+        $intersect | Should -Not -Contain 'p-audit'
+        $intersect | Should -Not -Contain 'p-empty'
+    }
     It 'REDACTION DISCIPLINE: a Sensitive/secret-classified row is presence-only - the value group carries redacted:true and canonicalValue:$null, never the raw value (T3.4 fix round 1, IMPORTANT finding - the planted secret is now genuinely present in the row''s own -Value field, not pre-nulled by the fixture, so this test actually exercises the function''s OWN redaction discipline rather than trusting an upstream contract)' {
         $plantedSecret = 'PLANTED-presence-index-secret-zzz'
         $nonSecretDisplayName = 'WiFi Pre-Shared Key Setting'

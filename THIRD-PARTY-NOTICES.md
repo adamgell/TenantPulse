@@ -52,6 +52,15 @@ naming exactly this).
   - `source/Data/Checks/TP.INT.0016.psd1` ("Attack Surface Reduction 'Standard
     Protection' baseline rules configured", Task 3.4) - adapts the check logic behind
     Maester's `MT.1178`.
+  - `source/Data/Checks/TP.INT.0017.psd1` ("App Control for Business policy enforcing
+    (not audit-only)") - adapts the check logic behind Maester's `MT.1179`
+    (`Test-MtIntuneAppControl`), keyed against the live
+    `applicationcontrolv2` settingDefinitionIds (Maester's own
+    `...applicationcontrolv2_policy` / `*upload_policy_selected` strings do not
+    exist in the in-repo live capture).
+  - `source/Data/Checks/TP.INT.0018.psd1` ("Managed Installer rules paired with an
+    enforcing App Control policy") - adapts the check logic behind Maester's
+    `MT.1180` (`Test-MtIntuneManagedInstallerRules`).
   - `source/Data/Checks/TP.INT.0019.psd1` ("Apple MDM Push (APNs) certificate valid for
     more than 30 days", Task 3.3) - adapts the check logic behind Maester's `MT.1092`
     (`Test-MtApplePushNotificationCertificate`).

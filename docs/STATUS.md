@@ -282,18 +282,15 @@ after which Phase 3 work continued on the merged tree:
   (`tests/QA/SettingDefinitionCorpusCrossCheck.tests.ps1`, `b862e5f`) so a hard-coded
   `settingDefinitionId` can never again drift from the corpus it's meant to match without the
   suite catching it.
-  **Still BLOCKED, not shipped**: `TP.INT.0017` (App Control policy enforced) and
-  `TP.INT.0018` (Managed Installer rules paired with an enforcing App Control policy). Two
-  independent blockers, both confirmed (not merely suspected) as of the T3.5 dual-review fix
-  round: (1) `tests/Fixtures/SettingsCatalogCorpus/checked-definitions.json` has zero entries
-  matching App Control or Managed Installer, even though this repo's own live capture
-  (`scratch/live-27/snapshot/reference/settingDefinitions.json`) has 34 raw matching
-  `settingDefinitions` - so a `TP.INT.0016`-style settings-presence-index port has nothing to
-  key against in the corpus yet; and (2) App Control's `visibility:"template"` field, while
-  real and confirmed present in that same live capture, is undocumented anywhere in
-  Microsoft's published Graph API schema docs (re-confirmed live against the beta
-  `deviceManagementConfigurationPolicyTemplate` resource for this fix round) - a genuine
-  docs-vs-live-schema gap that a from-docs-only implementation can't safely paper over.
+  **Shipped (2026-08-18):** `TP.INT.0017` (App Control policy enforced) and
+  `TP.INT.0018` (Managed Installer rules paired with an enforcing App Control
+  policy). Implemented against the live `applicationcontrolv2` schema in
+  `scratch/live-27/snapshot/reference/settingDefinitions.json`; compact corpus
+  fixture extended with those four definitionIds. `visibility:"template"` is
+  still unpublished in Microsoft's Graph schema docs - the checks key the live
+  ids, not that field. Same-policy AND via presence-index `policyIds` (not a
+  tenant-wide union). Settings Catalog assignments remain deferred; matching
+  Maester, policy existence is enough.
 - **Task 3.5** wired `Get-PulseCaExclusionContext` into `TP.ENT.0004`/`TP.ENT.0005` so both
   checks surface honored Conditional Access group/user exclusions as evidence instead of
   silently ignoring them (`36bf53e`), then a dual-review fix round hardened both checks
@@ -304,12 +301,9 @@ after which Phase 3 work continued on the merged tree:
   in-repo all along, not "unconfirmed" as a prior pass claimed) and added the `TP.INT.0010`
   numbering-gap note referenced above (`bbef1d1`, current `main` HEAD).
 
-**Catalog state at `bbef1d1`, verified against the live-built module
-(`Get-PulseCheckCatalog`)**: **51 checks total - 28 `TP.INT` + 23 `TP.ENT`.** `TP.INT.0010`
-is DESCOPED until GraphKit ARM exists (id reserved; no `.psd1`). Two checks remain
-genuinely BLOCKED and unshipped: `TP.INT.0017`/`TP.INT.0018` (corpus + docs-schema gaps). Suite:
-1929/1929 tests, 0 failed, 0 errors (`./build.ps1 -Tasks build,test`, re-verified for this
-task).
+**Catalog state after TP.INT.0017/0018:** **53 checks total - 30 `TP.INT` + 23 `TP.ENT`.**
+`TP.INT.0010` is DESCOPED until GraphKit ARM exists (id reserved; no `.psd1`).
+`TP.INT.0017`/`0018` shipped against the live App Control schema.
 
 ### Task 3.6 - Phase 3 live gate: EXECUTED
 
@@ -539,14 +533,10 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
 
 ## Not yet done
 
-1. **`TP.INT.0017` / `TP.INT.0018`**, still BLOCKED (App Control `visibility:"template"`
-   is undocumented in published Graph schema; settings-definition corpus has zero App
-   Control / Managed Installer entries). Not shipped. Needs a product call: implement
-   against live schema + extend the corpus, or keep BLOCKED.
-2. **Evidence-Detail residual**: Reason text is still only capped; unmarked
+1. **Evidence-Detail residual**: Reason text is still only capped; unmarked
    person-identifying Detail keys on checks other than the marked Apple-ID /
    TP.INT.0005 device-name keys stay unredacted under `-Redact`. Judgment boundary
    (policy display names, role names) is deliberate, not unfinished code.
-3. **`TP.INT.0010`**, DESCOPED until GraphKit ARM exists. Id reserved.
-4. Phase 2b / scale (not this catalog): Settings Catalog assignments, admin templates,
+2. **`TP.INT.0010`**, DESCOPED until GraphKit ARM exists. Id reserved.
+3. Phase 2b / scale (not this catalog): Settings Catalog assignments, admin templates,
    typed `intent`, `-ExpandSettings` default-on, dataset streaming.

@@ -123,7 +123,7 @@ it when you are done.
 ## CIS compliance disclaimer
 
 TenantPulse's checks are informed by Microsoft's own official guidance, CISA's SCuBA/ScubaGear
-baselines, and (for the EIDSCA-ported Entra checks and the 17 Maester-ported Intune checks)
+baselines, and (for the EIDSCA-ported Entra checks and the 19 Maester-ported Intune checks)
 adapted logic from the open-source
 [Maester](https://github.com/maester365/maester) project (MIT-licensed - see
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the complete per-check attribution list,
@@ -137,7 +137,7 @@ never a CIS recommendation's title or any of its description/rationale/audit/rem
 which would pull this MIT-licensed catalog into CIS's incompatible CC BY-NC-SA license (see
 [docs/licensing/cis-cite-only.md](docs/licensing/cis-cite-only.md), this repo's own vendored
 licensing summary, for the full rule and the reasoning behind it).
-**No check in this module's 51-check catalog carries a `References.Cis` entry today** - the
+**No check in this module's 53-check catalog carries a `References.Cis` entry today** - the
 Phase 4 research this catalog was authored from cites ScuBA/CISA, Maester/EIDSCA, and Microsoft
 Learn exclusively, with zero verified CIS mappings. The wiring exists and is tested end to end
 (a findings document's `notices.cisDisclaimer` field is `null` when no rendered finding carries a
@@ -177,7 +177,7 @@ consume. See `docs/STATUS.md` for the current live-gate results.
 
 ## Catalog scope - what this is and isn't, honestly
 
-TenantPulse's catalog has grown across four phases to **51 checks** (28 `TP.INT` + 23
+TenantPulse's catalog has grown across four phases to **53 checks** (30 `TP.INT` + 23
 `TP.ENT`; count source of truth: `source/Data/Checks/*.psd1`, one file per check, or
 `(Import-PulseCheckCatalog).Count` against the built module). It did **not** stop at
 Phase 1's ten-check seed plus Phase 4's Entra work, the way an earlier draft of this section
@@ -186,8 +186,9 @@ Intune device management `TP.INT.0001`-`0005`); Phase 3 then did two separate th
 conflate but not the same - the settings-catalog/typed-policy expansion engine (feeding
 richer data into checks that already existed, not new IDs) **and**, across Tasks 3.1-3.4, a
 23-check Intune wave (`TP.INT.0006`-`0009`, `0011`-`0016`, `0019`-`0031` - `TP.INT.0010`
-is DESCOPED until GraphKit ARM exists; `TP.INT.0017`/`0018` remain researched-but-BLOCKED
-and unshipped, see `docs/STATUS.md`'s own Phase 3 section for why) that took `TP.INT` from 5 checks to 28; Phase
+is DESCOPED until GraphKit ARM exists) that took `TP.INT` from 5 checks to 28, then
+`TP.INT.0017`/`0018` (App Control enforce + Managed Installer pairing) shipped against
+the live `applicationcontrolv2` schema and took `TP.INT` to 30; Phase
 4 then added the 23-check Entra core catalog - the EIDSCA port (`TP.ENT.0006`-`0011`),
 authorization/consent/password/guest-access clusters (`TP.ENT.0012`/`0013`/`0015`/`0016`), and
 the ScuBA/CISA-cited Conditional Access, privileged-role, and credential-hygiene checks
@@ -244,6 +245,8 @@ failure hidden from the report.
 | TP.INT.0014 | Intune.EndpointSecurity | Critical | Pending | BitLocker full-disk encryption enforced via Endpoint Security policy |
 | TP.INT.0015 | Intune.EndpointSecurity | High | Pending | LAPS configuration policy meets minimum security bar |
 | TP.INT.0016 | Intune.SettingsCatalog | High | Live | Attack Surface Reduction "Standard Protection" baseline rules configured |
+| TP.INT.0017 | Intune.SettingsCatalog | High | Live | App Control for Business policy enforcing (not audit-only) |
+| TP.INT.0018 | Intune.SettingsCatalog | High | Live | Managed Installer rules paired with an enforcing App Control policy |
 | TP.INT.0019 | Intune.Connectors | Critical | Live | Apple MDM Push (APNs) certificate valid for more than 30 days |
 | TP.INT.0020 | Intune.Connectors | High | Live | Apple Automated Device Enrollment tokens valid and syncing |
 | TP.INT.0021 | Intune.Connectors | High | Live | Apple Volume Purchase Program tokens valid and syncing |

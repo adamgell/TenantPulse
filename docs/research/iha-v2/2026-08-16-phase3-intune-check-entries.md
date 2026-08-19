@@ -23,7 +23,8 @@ correction). TP.INT.0016-0018 (ASR Standard Protection, App Control enforce-mode
 Installer pairing) are imported here for record-completeness but were **not** implemented
 in Task 3.3 - see the T3.3 report for the scoping rationale (they are a template-family
 continuation of the TP.INT.0014/0015 Endpoint Security batch, not part of the
-connector/token-expiry + research-matrix set T3.3 actually scoped).
+connector/token-expiry + research-matrix set T3.3 actually scoped). TP.INT.0016 shipped
+in T3.4; TP.INT.0017/0018 shipped 2026-08-18 against the live applicationcontrolv2 schema.
 
 ## TP.INT.0006 — Conflicting security-setting values across policies
 
@@ -394,42 +395,16 @@ built-in controls selected or a non-empty uploaded XML payload.
   this check correctly, because audit-only policies provide zero real-world blocking.
   Empty-XML-upload is a second silent-failure mode.
 - Task 3.3 scoping note: imported for record-completeness, not implemented in T3.3.
-- **BLOCKED (2026-08-17, Task 3.5 fold-in from T3.4 review; PROVENANCE CORRECTED same day
-  by dual review): still not implemented.** Two separate open items, mirrored here from the
-  prior review pass, neither resolved by this task:
-  1. VISIBILITY - IS confirmed, from the in-repo live capture, not from published Graph
-     schema docs. `scratch/live-27/snapshot/reference/settingDefinitions.json` (a real
-     live-tenant settingDefinitions capture already checked into this repo) carries a
-     `visibility` property on every entry, and the App Control policy-creation-type
-     definition `device_vendor_msft_policy_config_applicationcontrolv2_buildoptions`
-     explicitly has `"visibility": "template"` (confirmed directly against that file for
-     this correction - the field's observed value distribution across the whole capture is
-     `settingsCatalog,template` / `settingsCatalog` / `template` / `none`, so `"template"`
-     alone on this definition means it is NOT discoverable through a generic Settings
-     Catalog browse, only through the App Control template surface - consistent with why
-     this entry's own `Data` line already filters on `templateFamily eq
-     'endpointSecurityApplicationControl'` rather than a generic settings scan). The
-     narrower, still-accurate claim: Microsoft's **published Graph API schema
-     documentation** does not document this property anywhere - live-fetched
-     https://learn.microsoft.com/en-us/graph/api/resources/intune-deviceconfigv2-devicemanagementconfigurationpolicytemplate?view=graph-rest-beta
-     (2026-08-17, confirmed live) for this task, and its `deviceManagementConfigurationPolicyTemplate`
-     resource documents `templateFamily = endpointSecurityApplicationControl` as a real,
-     named enum member (confirming App Control's own template family) but has **no
-     `visibility` property listed at all** - a genuine docs-vs-live-schema gap, not an
-     unconfirmed claim. (The prior version of this note wrongly framed the whole
-     `visibility:"template"` fact as "unconfirmed, needs live-tenant verification" - it does
-     not; the live-tenant evidence was sitting in this same repo's own `scratch/` capture the
-     whole time.)
-  2. CORPUS ABSENCE - `tests/Fixtures/SettingsCatalogCorpus/checked-definitions.json` (the
-     corpus TP.INT.0016's settings-presence-index port validates its settingDefinitionIds
-     against) has **zero entries matching App Control or Managed Installer** (confirmed by
-     direct search of the fixture file for this task), even though the live capture above
-     has 34 raw App Control/Managed Installer `settingDefinitions` entries - so even a
-     TP.INT.0016-style settings-presence-index port has nothing to key against in the
-     CORPUS yet for either check, independent of item 1 above. Both items are genuine
-     implementation BLOCKERS, not merely scoping deferrals like the original "imported for
-     record-completeness" note above - Task 3.5 leaves TP.INT.0017 unimplemented and does
-     not touch TP.INT.0016's already-shipped consulting content.
+- **IMPLEMENTED (2026-08-18):** `Test-PulseAppControlPolicyEnforcing.ps1` against the
+  live `applicationcontrolv2` schema in
+  `scratch/live-27/snapshot/reference/settingDefinitions.json`. Compact corpus fixture
+  extended. Same-policy AND via presence-index `policyIds` (not a tenant-wide union).
+  Maester's own `...applicationcontrolv2_policy` / `*upload_policy_selected` strings
+  do not exist in that capture - live ids are `...xmlupload` /
+  `...buildoptions_upload_xml_selected`. `visibility:"template"` is still unpublished
+  in Microsoft's Graph schema docs; the check keys the live ids, not that field.
+  Settings Catalog assignments remain deferred; matching Maester, policy existence
+  is enough.
 
 ## TP.INT.0018 — Managed Installer rules paired with an enforcing App Control policy
 
@@ -445,11 +420,9 @@ is itself in Enforce mode with an active control.
 - Notes: dependency trap - this check can only meaningfully pass if TP.INT.0017 also
   passes.
 - Task 3.3 scoping note: imported for record-completeness, not implemented in T3.3.
-- **BLOCKED (2026-08-17, Task 3.5 fold-in from T3.4 review): still not implemented,**
-  transitively blocked by both of TP.INT.0017's own open items above (the visibility open
-  question and the corpus absence apply identically here, since this check reads the same
-  `endpointSecurityApplicationControl` template family and depends on TP.INT.0017 passing
-  by its own "dependency trap" Note). No independent new blocker beyond TP.INT.0017's own.
+- **IMPLEMENTED (2026-08-18):** `Test-PulseManagedInstallerPairedWithEnforcingAppControl.ps1`.
+  Same live-schema / same-policy AND / assignment-existence contract as TP.INT.0017.
+  Pass requires Managed Installer enabled on a policy that also satisfies 0017's bar.
 
 ## TP.INT.0019 — Apple MDM Push (APNs) certificate valid for more than 30 days
 

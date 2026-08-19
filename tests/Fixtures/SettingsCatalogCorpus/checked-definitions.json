@@ -96,5 +96,52 @@
         "name": "Warn"
       }
     ]
+  },
+  {
+    "id": "device_vendor_msft_policy_config_applicationcontrolv2_buildoptions",
+    "displayName": "Policy creation type",
+    "options": [
+      {
+        "itemId": "device_vendor_msft_policy_config_applicationcontrolv2_buildoptions_upload_xml_selected",
+        "name": "XML upload"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_applicationcontrolv2_buildoptions_built_in_controls_selected",
+        "name": "Built-in controls"
+      }
+    ]
+  },
+  {
+    "id": "device_vendor_msft_policy_config_applicationcontrolv2_auditmode",
+    "displayName": "Audit mode",
+    "options": [
+      {
+        "itemId": "device_vendor_msft_policy_config_applicationcontrolv2_auditmode_disabled",
+        "name": "Disabled"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_applicationcontrolv2_auditmode_enabled",
+        "name": "Enabled"
+      }
+    ]
+  },
+  {
+    "id": "device_vendor_msft_policy_config_applicationcontrolv2_xmlupload",
+    "displayName": "XML upload",
+    "options": []
+  },
+  {
+    "id": "device_vendor_msft_policy_config_applicationcontrolv2_trustappsfrommanagedinstaller",
+    "displayName": "Trust apps from managed installer",
+    "options": [
+      {
+        "itemId": "device_vendor_msft_policy_config_applicationcontrolv2_trustappsfrommanagedinstaller_disabled",
+        "name": "Disabled"
+      },
+      {
+        "itemId": "device_vendor_msft_policy_config_applicationcontrolv2_trustappsfrommanagedinstaller_enabled",
+        "name": "Enabled"
+      }
+    ]
   }
 ]

@@ -493,7 +493,11 @@
 # 1972 -> 1973 (TP.ENT.0012 AP08 v1.0 projection remap): +1 - NotApplicable when
 # GraphKit 0.2.2's AuthorizationPolicy/Get omits
 # permissionGrantPolicyIdsAssignedToDefaultUserRole.
-$script:tenantPulseGateMinimumTests = 1973
+# 1973 -> 2009 (TP.INT.0017/0018 App Control + Managed Installer): +36 -
+# same-policy AND against live applicationcontrolv2 ids, presence-index
+# policyIds, corpus extension, catalog 51 -> 53. 2009 is the real, measured
+# `./build.ps1 -Tasks test` total on this tree.
+$script:tenantPulseGateMinimumTests = 2009
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

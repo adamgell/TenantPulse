@@ -115,6 +115,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `endpointSecurityDiskEncryptionPolicies`, `endpointSecurityLapsPolicies`,
   `securityBaselinesAssignedAndCurrent`. Walks were not invented.
 
+
+- **TP.INT.0017 / TP.INT.0018 shipped** (App Control for Business enforce +
+  Managed Installer pairing; Maester MT.1179 / MT.1180). Same-policy AND against
+  the live `applicationcontrolv2` settingDefinitionIds (Maester's
+  `..._policy` / `*upload_policy_selected` strings do not exist in the in-repo
+  capture - live ids are `...xmlupload` / `...upload_xml_selected`). Presence
+  index value groups now keep `policyIds`/`assignedPolicyIds` so the AND can
+  intersect without streaming jsonl. Catalog 51 -> 53.
 - **TP.ENT.0012 AP08 remap (GraphKit 0.2.2 live).** `permissionGrantPolicyIdsAssignedToDefaultUserRole`
   is not on the v1.0 `authorizationPolicy` resource; GraphKit's official Get is v1.0, so a
   live row never carries AP08. Absent AP08 is now NotApplicable (same projection class as

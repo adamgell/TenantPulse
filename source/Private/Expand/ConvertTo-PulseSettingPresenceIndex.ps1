@@ -12,7 +12,10 @@
     "is setting X present in ANY assigned policy of family F, and what is its canonical
     value summary" - this function's output is a compact, hash-verifiable JSON document a
     check can look up by (family, settingDefinitionId) in O(1), never re-reading a raw
-    expansion artifact.
+    expansion artifact. Each value group also carries the DISTINCT policyIds (and
+    assignedPolicyIds) that produced it, sorted ordinally, so a same-policy AND across
+    two definitionIds (TP.INT.0017/0018 App Control enforce + active-control) can
+    intersect without streaming jsonl. Counts stay; the id arrays are additive.
 
     ONE PASS, SAME GROUPING DISCIPLINE AS CONFLICTS (Task 2.6's own P0 constraint, carried
     forward unconditionally): -Rows is walked exactly once, folding each row directly into
@@ -57,11 +60,12 @@
     irrelevant; Publish-PulseSettingPresenceIndex's own ConvertTo-PulseCanonicalJson call
     sorts every object's property names ordinally at serialization time, exactly like every
     other canonical artifact in this module - see that serializer's own docstring). The
-    ONE place this function DOES sort explicitly is each defId's own `values` ARRAY (arrays
-    are never reordered by the canonical serializer, only object keys are) - sorted by
-    canonical value text, mirroring ConvertTo-PulseConflictRecords' own value-group sort,
-    so byte-identical -Rows in any input order always produce a byte-identical published
-    artifact.
+    TWO places this function DOES sort explicitly: each defId's own `values` ARRAY
+    (arrays are never reordered by the canonical serializer, only object keys are) -
+    sorted by canonical value text, mirroring ConvertTo-PulseConflictRecords' own
+    value-group sort - AND each value group's `policyIds`/`assignedPolicyIds` arrays
+    (ordinal), so byte-identical -Rows in any input order always produce a
+    byte-identical published artifact.
 #>
 
 function ConvertTo-PulseSettingPresenceIndex {
@@ -191,11 +195,17 @@ function ConvertTo-PulseSettingPresenceIndex {
             [System.Array]::Sort($sortedGroups, $groupComparison)
 
             $valueRecords = foreach ($group in $sortedGroups) {
+                $sortedPolicyIds = @($group.PolicyIds)
+                [System.Array]::Sort($sortedPolicyIds, [System.StringComparer]::Ordinal)
+                $sortedAssignedPolicyIds = @($group.AssignedPolicyIds)
+                [System.Array]::Sort($sortedAssignedPolicyIds, [System.StringComparer]::Ordinal)
                 [pscustomobject]@{
                     canonicalValue      = if ($group.Redacted) { $null } else { ConvertFrom-Json -InputObject $group.CanonicalValue -Depth 64 }
                     redacted            = $group.Redacted
                     policyCount         = $group.PolicyIds.Count
                     assignedPolicyCount = $group.AssignedPolicyIds.Count
+                    policyIds           = @($sortedPolicyIds)
+                    assignedPolicyIds   = @($sortedAssignedPolicyIds)
                 }
             }
 

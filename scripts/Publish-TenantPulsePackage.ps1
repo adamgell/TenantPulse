@@ -163,7 +163,7 @@ else {
         throw "Test result '$TestResultPath' does not exist."
     }
 
-    # MinimumTests 1973 / -AllowNotRun 1 (see
+    # MinimumTests 2009 / -AllowNotRun 1 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -172,11 +172,12 @@ else {
     # per the merge review's ratchet step - not the sum of the two pre-merge branch
     # totals (1465 + 1402), which would double-count shared history. 1956 -> 1971 at
     # the Phase 3 closing fix series; 1971 -> 1972 at the TP.INT.0005 RedactDetailKeys
-    # follow-up; 1972 -> 1973 at the TP.ENT.0012 AP08 v1.0 projection remap).
+    # follow-up; 1972 -> 1973 at the TP.ENT.0012 AP08 v1.0 projection remap;
+    # 1973 -> 2009 at TP.INT.0017/0018).
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
-    & pwsh -NoProfile -File $gate -ResultPath $TestResultPath -MinimumTests 1973 -AllowedSkips 0 -AllowNotRun 1 | Write-Verbose
+    & pwsh -NoProfile -File $gate -ResultPath $TestResultPath -MinimumTests 2009 -AllowedSkips 0 -AllowNotRun 1 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {
-        throw "The supplied test result did not pass the whole-result gate, so this package must not be published. Run: pwsh -File tests/QA/Assert-GateResult.ps1 -ResultPath '$TestResultPath' -MinimumTests 1973"
+        throw "The supplied test result did not pass the whole-result gate, so this package must not be published. Run: pwsh -File tests/QA/Assert-GateResult.ps1 -ResultPath '$TestResultPath' -MinimumTests 2009"
     }
 
     # The result must belong to this version, or it proves nothing about these bits.

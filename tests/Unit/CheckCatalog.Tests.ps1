@@ -65,7 +65,7 @@ Describe 'Import-PulseCheckCatalog' {
         @($result).Count | Should -Be 0
     }
 
-    It 'loads and validates the module''s own default catalog path cleanly (Task 1.9 seed checks + Task 3.1''s TP.INT.0006 + Task 3.2''s TP.INT.0007-0009/0011-0015 + Task 3.3''s TP.INT.0019-0030 + Task 3.4 Part B''s TP.INT.0016/0031, self-check)' {
+    It 'loads and validates the module''s own default catalog path cleanly (Task 1.9 seed checks + Task 3.1''s TP.INT.0006 + Task 3.2''s TP.INT.0007-0009/0011-0015 + Task 3.3''s TP.INT.0019-0030 + Task 3.4 Part B''s TP.INT.0016/0031 + TP.INT.0017/0018, self-check)' {
         $result = InModuleScope TenantPulse {
             Import-PulseCheckCatalog
         }
@@ -73,9 +73,10 @@ Describe 'Import-PulseCheckCatalog' {
         # Merged catalog is the union of both lineages: 10 Phase 1 seed checks + Task
         # 3.2's TP.INT.0006-0009/0011-0015 (9) + Task 3.3's TP.INT.0019-0030 (12) +
         # the Phase 4 Entra catalog TP.ENT.0001-0013/0015-0024 (23, TP.ENT.0014 never
-        # landed) + Task 3.4 Part B's TP.INT.0016/0031 (2) = 51. Count is pinned to the
-        # actual on-disk file count, not this arithmetic - see source/Data/Checks/*.psd1.
-        @($result).Count | Should -Be 51
+        # landed) + Task 3.4 Part B's TP.INT.0016/0031 (2) + TP.INT.0017/0018 (2) = 53.
+        # Count is pinned to the actual on-disk file count, not this arithmetic - see
+        # source/Data/Checks/*.psd1.
+        @($result).Count | Should -Be 53
         $ids = @($result | ForEach-Object { $_.Id })
         $ids | Should -Contain 'TP.ENT.0001'
         $ids | Should -Contain 'TP.INT.0005'
@@ -92,6 +93,8 @@ Describe 'Import-PulseCheckCatalog' {
         $ids | Should -Contain 'TP.ENT.0016'
         $ids | Should -Contain 'TP.ENT.0017'
         $ids | Should -Contain 'TP.ENT.0024'
+        $ids | Should -Contain 'TP.INT.0017'
+        $ids | Should -Contain 'TP.INT.0018'
 
         # Ordinal-sorted by Id regardless of on-disk filename order (same contract the
         # 'valid' fixture test above already exercises).
