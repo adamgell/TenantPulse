@@ -116,6 +116,9 @@ function Resolve-PulseGateEvidence {
         if ($entryFailure -eq 'PermissionDenied') {
             return [pscustomobject]@{ Status = 'Unknown'; Detail = $entryReason; FailureClass = 'PermissionDenied' }
         }
+        if ($entryStatus -ne 'Collected') {
+            return [pscustomobject]@{ Status = 'Unknown'; Detail = $entryReason; FailureClass = 'GateUnknown' }
+        }
         if ($entryFailure -eq 'LicenseRequired') {
             return [pscustomobject]@{ Status = 'Unavailable'; Detail = $entryReason; FailureClass = 'LicenseRequired' }
         }
@@ -135,9 +138,7 @@ function Resolve-PulseGateEvidence {
                 FailureClass = $null
             }
         }
-        if ($entryStatus -eq 'Collected') {
-            return [pscustomobject]@{ Status = 'Unknown'; Detail = 'Collected license evidence did not include a gate decision.'; FailureClass = $null }
-        }
+        return [pscustomobject]@{ Status = 'Unknown'; Detail = 'Collected license evidence did not include a gate decision.'; FailureClass = $null }
     }
 
     return [pscustomobject]@{ Status = 'Unknown'; Detail = $null; FailureClass = $null }

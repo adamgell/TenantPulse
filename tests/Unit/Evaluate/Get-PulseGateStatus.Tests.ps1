@@ -78,6 +78,93 @@ Describe 'Get-PulseGateStatus' {
         $status.FailureClass | Should -Be 'PermissionDenied'
         $status.FailureClass | Should -Not -Be 'LicenseRequired'
     }
+    It 'does not trust stale license detail from a non-collected subscribedSkus outcome' {
+        $cases = @(
+            @{
+                Name = 'failed'
+                Dataset = @{
+                    status = 'Failed'
+                    detail = @{ Status = 'Available'; Detail = 'stale available detail' }
+                }
+                FailureClass = 'GateUnknown'
+            }
+            @{
+                Name = 'skipped'
+                Dataset = @{
+                    status = 'Skipped'
+                    detail = @{ Status = 'Unavailable'; Detail = 'stale unavailable detail' }
+                }
+                FailureClass = 'GateUnknown'
+            }
+            @{
+                Name = 'partial'
+                Dataset = @{
+                    status = 'Partial'
+                    detail = @{ Status = 'Available'; Detail = 'stale available detail' }
+                }
+                FailureClass = 'GateUnknown'
+            }
+            @{
+                Name = 'permission-denied'
+                Dataset = @{
+                    status = 'Skipped'
+                    failureClass = 'PermissionDenied'
+                    reason = 'permission-denied: Directory.Read.All'
+                    detail = @{ Status = 'Available'; Detail = 'stale available detail' }
+                }
+                FailureClass = 'PermissionDenied'
+            }
+        )
+
+        foreach ($case in $cases) {
+            $status = InModuleScope TenantPulse -ArgumentList $case.Dataset {
+                param($dataset)
+                Get-PulseGateStatus -Gate 'EntraP2' -Manifest @{
+                    datasets = @{ subscribedSkus = $dataset }
+                }
+            }
+
+            $status.Status | Should -Be 'Unknown' -Because $case.Name
+            $status.FailureClass | Should -Be $case.FailureClass -Because $case.Name
+            $status.Status | Should -Not -Be 'Available' -Because $case.Name
+            $status.FailureClass | Should -Not -Be 'LicenseRequired' -Because $case.Name
+        }
+    }
+
+    It 'uses gate detail only when subscribedSkus evidence was collected' {
+        $available = InModuleScope TenantPulse {
+            Get-PulseGateStatus -Gate 'EntraP2' -Manifest @{
+                datasets = @{
+                    subscribedSkus = @{
+                        status = 'Collected'
+                        detail = @{
+                            Status = 'Available'
+                            Detail = 'collected service-plan evidence'
+                        }
+                    }
+                }
+            }
+        }
+        $unavailable = InModuleScope TenantPulse {
+            Get-PulseGateStatus -Gate 'EntraP2' -Manifest @{
+                datasets = @{
+                    subscribedSkus = @{
+                        status = 'Collected'
+                        detail = @{
+                            Status = 'Unavailable'
+                            Detail = 'no qualifying P2 service plan'
+                        }
+                    }
+                }
+            }
+        }
+
+        $available.Status | Should -Be 'Available'
+        $available.FailureClass | Should -BeNullOrEmpty
+        $unavailable.Status | Should -Be 'Unavailable'
+        $unavailable.FailureClass | Should -Be 'LicenseRequired'
+    }
+
     It 'uses an explicit collected license-evidence decision when present' {
         $available = InModuleScope TenantPulse {
             Get-PulseGateStatus -Gate 'EntraP2' -Manifest @{
