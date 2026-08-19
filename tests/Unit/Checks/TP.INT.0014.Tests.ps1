@@ -39,6 +39,27 @@ BeforeAll {
                     Write-PulseDataset @params
                 }
 
+                $manifest = Get-PulseSnapshotManifest -Store $store
+                $gates = if ($null -eq $check.Data -or $null -eq $check.Data.Gates) { @() } else { @($check.Data.Gates) }
+                if ($gates.Count -gt 0) {
+                    if (-not $manifest.Contains('licenseEvidence') -or $manifest.licenseEvidence -isnot [System.Collections.IDictionary]) {
+                        $manifest.licenseEvidence = [ordered]@{}
+                    }
+                    foreach ($gate in $gates) {
+                        if ($null -ne $gate -and -not [string]::IsNullOrWhiteSpace([string] $gate)) {
+                            $manifest.licenseEvidence[[string] $gate] = [ordered]@{
+                                Status = 'Available'
+                                Detail = 'fixture gate'
+                            }
+                        }
+                    }
+                    if ($manifest.licenseEvidence.Count -gt 0) {
+                        $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $manifest
+                        Set-PulseAtomicFileContent -Path $store.ManifestPath -Value $canonicalJson
+                    }
+                }
+
+
                 Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture' } }
             }
             return $evaluation.Document.findings[0]
