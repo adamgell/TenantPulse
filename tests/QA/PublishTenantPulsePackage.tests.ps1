@@ -194,11 +194,35 @@ Describe 'Publish-TenantPulsePackage: pack-first-then-verify digest check' {
         $result.Output | Should -Match 'unrecorded\.txt'
         $result.Output | Should -Match 'digest'
     }
-    It 'refuses when the tested digest path differs from the built path only by case' {
+    It 'refuses when the built file set differs only by path case' {
         $script:fixture = New-PulsePublishFixture
-        $digestManifestPath = Join-Path $script:fixture.FixtureRoot 'output/testResults/tested-module-digest.txt'
-        $digestLine = (Get-Content -LiteralPath $digestManifestPath -Raw) -replace '^TenantPulse\.psm1', 'tenantpulse.psm1'
-        Set-Content -LiteralPath $digestManifestPath -Value $digestLine -NoNewline -Encoding utf8
+        $builtModuleDir = Split-Path $script:fixture.BuiltPsm1Path -Parent
+        $caseVariantPath = Join-Path $builtModuleDir 'tenantpulse.psm1'
+        $originalContent = Get-Content -LiteralPath $script:fixture.BuiltPsm1Path -Raw
+        Set-Content -LiteralPath $caseVariantPath -Value $originalContent -NoNewline -Encoding utf8
+
+        # Case-sensitive hosts can hold both files, so the extra lowercase file is
+        # unrecorded. On case-insensitive hosts, make the manifest and package use the
+        # lowercase spelling instead; the exact set check must still reject its mismatch
+        # with the built directory's canonical spelling.
+        if (@(Get-ChildItem -LiteralPath $builtModuleDir -File).Count -eq 1) {
+            $digestManifestPath = Join-Path $script:fixture.FixtureRoot 'output/testResults/tested-module-digest.txt'
+            $digestLine = (Get-Content -LiteralPath $digestManifestPath -Raw) -replace '^TenantPulse\.psm1', 'tenantpulse.psm1'
+            Set-Content -LiteralPath $digestManifestPath -Value $digestLine -NoNewline -Encoding utf8
+
+            $archive = [System.IO.Compression.ZipFile]::Open($script:fixture.PackagePath, 'Update')
+            try {
+                $entry = $archive.CreateEntry('tenantpulse.psm1')
+                $entryStream = $entry.Open()
+                try {
+                    $writer = New-Object System.IO.StreamWriter($entryStream)
+                    $writer.Write($originalContent)
+                    $writer.Flush()
+                }
+                finally { $entryStream.Dispose() }
+            }
+            finally { $archive.Dispose() }
+        }
 
         $result = Invoke-PulsePublishScript -Fixture $script:fixture
 
