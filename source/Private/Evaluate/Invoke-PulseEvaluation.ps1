@@ -155,7 +155,11 @@ function Invoke-PulseEvaluation {
         [string] $OperatorKeyPath = (Join-Path $HOME '.tenantpulse/operator.key'),
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [AllowNull()]
+        $GateProvider = $null
     )
 
     $manifest = Get-PulseSnapshotManifest -Store $Store
@@ -238,7 +242,7 @@ function Invoke-PulseEvaluation {
     $findings = [System.Collections.Generic.List[pscustomobject]]::new()
 
     foreach ($check in $sortedChecks) {
-        $result = Invoke-PulseCheckEvaluation -Check $check -Store $Store -Manifest $manifest -DatasetCache $datasetCache -Context $Context
+        $result = Invoke-PulseCheckEvaluation -Check $check -Store $Store -Manifest $manifest -DatasetCache $datasetCache -Context $Context -GateProvider $GateProvider
 
         # H2 fix: by the time control reaches here, $result.Evidence entries are guaranteed
         # (by Invoke-PulseCheckEvaluation's own try/catch around evidence normalization) to
@@ -440,29 +444,38 @@ function Invoke-PulseCheckEvaluation {
         [hashtable] $DatasetCache,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [AllowNull()]
+        $GateProvider = $null
     )
 
     $gateNames = @($Check.Data.Gates)
     foreach ($gate in $gateNames) {
-        # Gate wiring (post-review): 'Unavailable' now genuinely degrades the check -
-        # Get-PulseGateStatus's Phase 1 stub never returns it, but the branch is real and
-        # covered by tests that override the function. 'Unknown'/'Available' fall through
-        # and the check runs.
-        $gateStatus = Get-PulseGateStatus -Gate $gate -Manifest $Manifest
-        if ($gateStatus.Status -eq 'Unavailable') {
+        $gateStatus = if ($null -ne $GateProvider) {
+            Get-PulseGateStatus -Gate $gate -Manifest $Manifest -Provider $GateProvider
+        } else {
+            Get-PulseGateStatus -Gate $gate -Manifest $Manifest
+        }
+
+        if ($gateStatus.Status -in @('Unavailable', 'Unknown')) {
             $detail = if ($gateStatus.PSObject.Properties.Name -contains 'Detail' -and $gateStatus.Detail) {
                 [string] $gateStatus.Detail
             } else {
                 'no detail provided'
             }
+            $verb = if ($gateStatus.Status -eq 'Unavailable') { 'unavailable' } else { 'unknown' }
+            $reason = "gate '$gate' ${verb}: $detail"
             return @{
-                Status   = 'NotApplicable'
-                Evidence = @()
-                Reason   = "gate '$gate' unavailable: $detail"
+                Status          = 'NotApplicable'
+                Evidence        = @()
+                Reason          = $reason
+                ProviderOutcome = $gateStatus.Outcome
             }
         }
     }
+
 
     # Data.Expansions (Task 3.2): Data.Datasets is now legitimately ABSENT for an
     # artifact-only check (TP.INT.0006's post-migration shape) - $Check.Data.Datasets is

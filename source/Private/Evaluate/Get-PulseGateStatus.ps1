@@ -1,24 +1,147 @@
 <#
-    Private: resolve a check's declared license/feature gate to a status.
+    Private: resolve one declared capability gate without guessing from absent evidence.
 
-    Phase 1 staging: this is a stub gate registry. No live license/feature detection exists
-    yet - that arrives once later tasks start collecting the datasets a real gate check
-    would need (e.g. a subscribedSkus read for 'EntraP1'). Every gate name, unconditionally,
-    resolves to Status 'Unknown' for now.
+    Gate status is intentionally separate from provider collection outcomes:
+      - Available   => the check may consume its declared datasets.
+      - Unavailable => a proven license/feature absence; map to Skipped/LicenseRequired.
+      - Unknown     => evidence was not sufficient to decide; map to Skipped/GateUnknown.
 
-    Returns a small {Status; Detail} object rather than a bare string so a later task's real
-    detection has somewhere to put a human-readable reason ('Unavailable' because of what,
-    specifically) without changing the return SHAPE the evaluator already consumes - only
-    this function's body needs to change.
-
-    'Unknown' is a load-bearing contract, not just a placeholder value: Invoke-PulseEvaluation
-    treats it (and 'Available') as "the check runs" - it never degrades a check to
-    NotApplicable. Only 'Unavailable' does that, and only 'Unavailable' is wired to a
-    NotApplicable reason quoting -Detail ("gate '<name>' unavailable: <detail>"). This
-    function never returns 'Unavailable' yet, so that path is exercised in tests via a
-    mocked/overridden Get-PulseGateStatus, not by this stub - the evaluator's wiring is real
-    and tested even though this implementation cannot yet trigger it.
+    The normal evaluator path only has a snapshot manifest, so it may use explicit gate or
+    license evidence recorded in that manifest. A caller can inject a provider for live or
+    test-owned evidence via -Provider; this function never treats a missing dataset as proof
+    that a license is absent. In particular, a PermissionDenied subscribedSkus outcome is
+    preserved as permission evidence and does not become LicenseRequired.
 #>
+
+function Get-PulseGateProperty {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        $Node,
+
+        [Parameter(Mandatory)]
+        [string] $Name
+    )
+
+    if ($null -eq $Node) { return $null }
+    if ($Node -is [System.Collections.IDictionary]) {
+        if ($Node.Contains($Name)) { return $Node[$Name] }
+        return $null
+    }
+    $property = $Node.PSObject.Properties[$Name]
+    if ($null -ne $property) { return $property.Value }
+    return $null
+}
+
+function New-PulseGateStatusRecord {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Gate,
+
+        [Parameter(Mandatory)]
+        [string] $Status,
+
+        [AllowNull()]
+        [string] $Detail,
+
+        [AllowNull()]
+        [string] $FailureClass = $null
+    )
+
+    if ($Status -notin @('Available', 'Unavailable', 'Unknown')) {
+        $Status = 'Unknown'
+    }
+
+    if ([string]::IsNullOrEmpty($FailureClass)) {
+        $FailureClass = if ($Status -eq 'Unavailable') { 'LicenseRequired' } else { 'GateUnknown' }
+        if ($Status -eq 'Available') { $FailureClass = $null }
+    }
+
+    $outcome = $null
+    if ($Status -ne 'Available') {
+        $outcome = New-PulseCollectionOutcome -Dataset $Gate -Status 'Skipped' `
+            -FailureClass $FailureClass -ReasonCode ("gate-" + $Status.ToLowerInvariant()) `
+            -Detail @{ status = $Status; detail = $Detail } -Provider 'TenantPulse'
+    }
+
+    return [pscustomobject][ordered]@{
+        Status       = $Status
+        Detail       = $Detail
+        FailureClass = $FailureClass
+        Outcome      = $outcome
+    }
+}
+
+function Resolve-PulseGateEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Gate,
+
+        [Parameter(Mandatory)]
+        $Manifest
+    )
+
+    # Explicit evidence is the only manifest-level status source. Both names are accepted
+    # so a future collector can call the namespace `gates` while a focused provider can use
+    # the more descriptive `licenseEvidence` name.
+    foreach ($containerName in @('licenseEvidence', 'gates')) {
+        $container = Get-PulseGateProperty -Node $Manifest -Name $containerName
+        $entry = Get-PulseGateProperty -Node $container -Name $Gate
+        if ($null -ne $entry) {
+            $status = [string] (Get-PulseGateProperty -Node $entry -Name 'Status')
+            if ([string]::IsNullOrEmpty($status)) {
+                $available = Get-PulseGateProperty -Node $entry -Name 'Available'
+                if ($available -is [bool]) {
+                    $status = if ($available) { 'Available' } else { 'Unavailable' }
+                }
+            }
+            $detail = [string] (Get-PulseGateProperty -Node $entry -Name 'Detail')
+            $failureClass = [string] (Get-PulseGateProperty -Node $entry -Name 'FailureClass')
+            return [pscustomobject]@{ Status = $status; Detail = $detail; FailureClass = $failureClass }
+        }
+    }
+
+    # A subscribedSkus row is usable only when its collection outcome is explicit. A
+    # missing entry, a failed read, or a collected entry with no summarized gate evidence
+    # is Unknown, never Unavailable. PermissionDenied is deliberately retained.
+    $datasets = Get-PulseGateProperty -Node $Manifest -Name 'datasets'
+    $licenseEntry = Get-PulseGateProperty -Node $datasets -Name 'subscribedSkus'
+    if ($null -ne $licenseEntry) {
+        $entryStatus = [string] (Get-PulseGateProperty -Node $licenseEntry -Name 'status')
+        $entryFailure = [string] (Get-PulseGateProperty -Node $licenseEntry -Name 'failureClass')
+        $entryReason = [string] (Get-PulseGateProperty -Node $licenseEntry -Name 'reason')
+        if ($entryFailure -eq 'PermissionDenied') {
+            return [pscustomobject]@{ Status = 'Unknown'; Detail = $entryReason; FailureClass = 'PermissionDenied' }
+        }
+        if ($entryFailure -eq 'LicenseRequired') {
+            return [pscustomobject]@{ Status = 'Unavailable'; Detail = $entryReason; FailureClass = 'LicenseRequired' }
+        }
+
+        $detailNode = Get-PulseGateProperty -Node $licenseEntry -Name 'detail'
+        $status = [string] (Get-PulseGateProperty -Node $detailNode -Name 'Status')
+        if ([string]::IsNullOrEmpty($status)) {
+            $available = Get-PulseGateProperty -Node $detailNode -Name 'Available'
+            if ($available -is [bool]) {
+                $status = if ($available) { 'Available' } else { 'Unavailable' }
+            }
+        }
+        if ($status -in @('Available', 'Unavailable', 'Unknown')) {
+            return [pscustomobject]@{
+                Status = $status
+                Detail = [string] (Get-PulseGateProperty -Node $detailNode -Name 'Detail')
+                FailureClass = $null
+            }
+        }
+        if ($entryStatus -eq 'Collected') {
+            return [pscustomobject]@{ Status = 'Unknown'; Detail = 'Collected license evidence did not include a gate decision.'; FailureClass = $null }
+        }
+    }
+
+    return [pscustomobject]@{ Status = 'Unknown'; Detail = $null; FailureClass = $null }
+}
 
 function Get-PulseGateStatus {
     [CmdletBinding()]
@@ -27,18 +150,49 @@ function Get-PulseGateStatus {
         [Parameter(Mandatory)]
         [string] $Gate,
 
-        [Parameter(Mandatory)]
-        [hashtable] $Manifest
+        [Parameter()]
+        [hashtable] $Manifest = @{},
+
+        [Parameter()]
+        [Alias('GateProvider')]
+        [AllowNull()]
+        $Provider = $null
     )
 
-    # -Gate/-Manifest are the declared interface every call site already passes (see
-    # Invoke-PulseCheckEvaluation) - referenced here only via Write-Verbose so a future
-    # implementation has somewhere obvious to plug real detection in, and so static
-    # analysis does not flag them as unused on what is, for now, a deliberate stub.
-    Write-Verbose "Get-PulseGateStatus: gate '$Gate' resolves to 'Unknown' (Phase 1 stub - no live detection yet; manifest has $($Manifest.Keys.Count) top-level keys)."
-
-    return [pscustomobject]@{
-        Status = 'Unknown'
-        Detail = $null
+    $evidence = $null
+    if ($null -ne $Provider) {
+        try {
+            if ($Provider -is [scriptblock]) {
+                $evidence = @(& $Provider -Gate $Gate -Manifest $Manifest)[-1]
+            } elseif ($Provider -is [System.Collections.IDictionary]) {
+                $evidence = $Provider[$Gate]
+            } elseif ($Provider -is [string]) {
+                $evidence = [pscustomobject]@{ Status = [string] $Provider; Detail = $null }
+            } else {
+                throw "provider must be a ScriptBlock, IDictionary, or status string, got '$($Provider.GetType().FullName)'"
+            }
+        } catch {
+            return New-PulseGateStatusRecord -Gate $Gate -Status 'Unknown' -Detail "Gate provider failed: $($_.Exception.Message)"
+        }
+    } else {
+        $evidence = Resolve-PulseGateEvidence -Gate $Gate -Manifest $Manifest
     }
+
+    $status = [string] (Get-PulseGateProperty -Node $evidence -Name 'Status')
+    $detail = [string] (Get-PulseGateProperty -Node $evidence -Name 'Detail')
+    $failureClass = [string] (Get-PulseGateProperty -Node $evidence -Name 'FailureClass')
+    if ($status -notin @('Available', 'Unavailable', 'Unknown')) {
+        $status = 'Unknown'
+        if ([string]::IsNullOrEmpty($detail)) { $detail = 'Gate evidence did not provide a recognized status.' }
+    }
+
+    # A provider may explicitly report a permission denial. Preserve that class and keep
+    # the gate from being mistaken for a proven license absence.
+    if ($failureClass -eq 'PermissionDenied') {
+        $status = 'Unknown'
+    } elseif ($failureClass -notin @('LicenseRequired', 'GateUnknown', 'PermissionDenied', '')) {
+        $failureClass = $null
+    }
+
+    return New-PulseGateStatusRecord -Gate $Gate -Status $status -Detail $detail -FailureClass $failureClass
 }

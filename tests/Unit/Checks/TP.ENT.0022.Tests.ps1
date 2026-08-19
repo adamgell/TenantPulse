@@ -42,7 +42,10 @@ BeforeAll {
                     Write-PulseDataset @params
                 }
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -Context $context
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -Context $context -GateProvider {
+                    param($Gate, $Manifest)
+                    [pscustomobject]@{ Status = 'Available'; Detail = 'P2 license fixture is proven.' }
+                }
             }
             return $evaluation.Document.findings[0]
         } finally {

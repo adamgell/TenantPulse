@@ -277,7 +277,7 @@ Describe 'New-PulseFinding' {
 }
 
 Describe 'Get-PulseGateStatus' {
-    It 'returns Status Unknown (and no Detail) for any gate name (Phase 1 stub registry)' {
+    It 'returns Status Unknown (and no Detail) when no gate evidence is available' {
         $status = InModuleScope TenantPulse {
             Get-PulseGateStatus -Gate 'EntraP1' -Manifest @{}
         }
@@ -531,12 +531,12 @@ Describe 'Invoke-PulseEvaluation' {
         [System.Text.Encoding]::UTF8.GetBytes($jsonFirst) | Should -Be ([System.Text.Encoding]::UTF8.GetBytes($jsonSecond))
     }
 
-    It 'runs the check normally when it declares a gate (Unknown never degrades in Phase 1)' {
+    It 'does not evaluate a check as Pass when its gate is Unknown' {
         $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Gates @('EntraP1') -Rule @{ Type = 'Expression'; Expression = '$true' }
 
         $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
 
-        $evaluation.Document.findings[0].status | Should -Be 'Pass'
+        $evaluation.Document.findings[0].status | Should -Be 'NotApplicable'
     }
 
     It 'sorts findings ordinally by check Id regardless of input order' {
