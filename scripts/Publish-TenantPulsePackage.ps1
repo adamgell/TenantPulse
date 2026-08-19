@@ -231,6 +231,22 @@ else {
             throw "'$relPath' in '$builtModuleDirForDigest' ($currentHash) does not match the digest recorded at test time ($($digestManifest[$relPath])). The built module was edited after the test run - re-run ./build.ps1 -Tasks pack then test, in that order, then publish."
         }
     }
+    # The publisher sends the entire built-module directory, not only the paths the
+    # manifest happens to mention. Require the exact file set here so an unrecorded file
+    # added after the test cannot ride along with otherwise matching tested bytes.
+    $currentBuiltFiles = @(
+        Get-ChildItem -LiteralPath $builtModuleDirForDigest -Recurse -File |
+            ForEach-Object {
+                $_.FullName.Substring($builtModuleDirForDigest.Length + 1) -replace '\\', '/'
+            } |
+            Sort-Object
+    )
+    $recordedBuiltFiles = @($digestManifest.Keys | Sort-Object)
+    $fileSetDifferences = @(Compare-Object -ReferenceObject $recordedBuiltFiles -DifferenceObject $currentBuiltFiles)
+    if ($fileSetDifferences.Count -ne 0) {
+        $differenceSummary = ($fileSetDifferences | ForEach-Object { "$($_.SideIndicator):$($_.InputObject)" }) -join ', '
+        throw "The built module file set differs from the tested-module digest manifest. Unrecorded or missing file(s): $differenceSummary. Re-run ./build.ps1 -Tasks pack then ./build.ps1 -Tasks test, in that order, then publish."
+    }
 
     # Side 2: every recorded file must ALSO be present, at the same relative path, inside
     # the .nupkg, matching the SAME recorded hash - proves the package was built from
@@ -249,6 +265,7 @@ else {
                 $sha = [System.Security.Cryptography.SHA256]::Create()
                 $packagedHash = [System.BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
             }
+
             finally { $stream.Dispose() }
 
             if (-not [string]::Equals($packagedHash, $digestManifest[$relPath], [System.StringComparison]::Ordinal)) {

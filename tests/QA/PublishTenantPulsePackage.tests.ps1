@@ -183,6 +183,18 @@ Describe 'Publish-TenantPulsePackage: pack-first-then-verify digest check' {
         $result.Output | Should -Match 'TenantPulse\.psm1'
         $result.Output | Should -Match 'missing\s*(\||\s)*\s*from'
     }
+    It 'refuses when the built module contains an unrecorded file' {
+        $script:fixture = New-PulsePublishFixture
+        $extraPath = Join-Path (Split-Path $script:fixture.BuiltPsm1Path -Parent) 'unrecorded.txt'
+        Set-Content -LiteralPath $extraPath -Value 'not in the tested digest' -NoNewline -Encoding utf8
+
+        $result = Invoke-PulsePublishScript -Fixture $script:fixture
+
+        $result.ExitCode | Should -Not -Be 0
+        $result.Output | Should -Match 'unrecorded\.txt'
+        $result.Output | Should -Match 'digest'
+    }
+
 
     It 'refuses when no tested-module digest manifest is present at all' {
         $script:fixture = New-PulsePublishFixture
