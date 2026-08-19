@@ -18,13 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/STATUS.md` for the exact dispositions and recheck gates.
 - **Deterministic package handoff, not publication.** TenantPulse candidate `0.1.2` passed
   pack-then-test on macOS PowerShell 7.6.5 (2123 tests, 0 failed, 0 errors, 0 skipped,
-  0 NotRun); its 401763-byte package SHA-256 is
-  `09629660D85C221EEAB710B8F5C784842D4D2B7635698B03606C424B75A7283B`; the publisher
-  dry-run verified all 59 shipped files. It consumes the unchanged exact GraphKit `0.2.2`
-  contract. The stable GraphKit `0.2.2` producer passed its packed-build gate (753 tests,
-  0 failed, 0 errors, 0 skipped); package SHA-256 and tested-module digest are recorded in
-  `docs/STATUS.md`. These are local deterministic results only: CI has not run, TenantPulse
-  `0.1.2` is unpublished, and R1 did not publish either package.
+  0 NotRun); the publisher dry-run verified all 59 shipped files. The synchronized
+  whole-result minimum-test ratchet is 2123 across the build, CI, publisher, and fixture
+  gates. It consumes the unchanged exact GraphKit `0.2.2` contract. Candidate package
+  identity and full digest verification are recorded in `docs/STATUS.md`. The results are
+  local and deterministic only: CI has not run, TenantPulse `0.1.2` is unpublished, and R1
+  did not publish either package.
 
 ## [0.1.1] - 2026-08-19
 

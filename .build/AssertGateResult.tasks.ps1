@@ -499,7 +499,9 @@
 # `./build.ps1 -Tasks test` total on this tree.
 # 2009 -> 2016 (R0 source/release truth): +6 package-identity and exact GraphKit
 # dependency assertions across source, restore pin, built manifest, nupkg, and publisher file-set proof; +1 case-sensitivity regression.
-$script:tenantPulseGateMinimumTests = 2016
+# 2016 -> 2123 (R1 outcome/composite implementation and handoff coverage): +107.
+# 2123 is the real, measured `./build.ps1 -Tasks test` total on this tree.
+$script:tenantPulseGateMinimumTests = 2123
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

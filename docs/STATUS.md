@@ -25,18 +25,19 @@ The implementation details and focused-test source of truth are the plan files u
 **Package handoff and evidence boundary.** GraphKit `0.2.2` is the stable producer released
 before R1; its macOS PowerShell 7.6.5 pack-then-test passed with 753 tests, 0 failed, 0
 errors, and 0 skipped. The tested `GraphKit.0.2.2.nupkg` is 201749 bytes with SHA-256
-`F3D707D7CCCCE95BC64F2A310752F269393F244EF8BFBB5C3F8605CD3D6315F3`, and the packaged
+`519DBE29DD50400867EB4665CA882C6CD3E82F2E31C4AFA67BEA21F10D08F41E`, and the packaged
 `GraphKit.psm1` matches the tested build at SHA-256
 `EA2DC2C3C57C0E9F5F5766F30203A49C1FCC00622E66EA52E0136CEE2B197730`.
 
-TenantPulse `0.1.2` is an **unpublished candidate**, not a release. Its macOS PowerShell
-7.6.5 pack-then-test passed with 2123 tests, 0 failed, 0 errors, 0 skipped, and 0 NotRun.
-The candidate `TenantPulse.0.1.2.nupkg` is 401763 bytes with SHA-256
-`09629660D85C221EEAB710B8F5C784842D4D2B7635698B03606C424B75A7283B`; the publisher
-dry-run verified all 59 shipped files against the tested-module digest manifest. The exact
-GraphKit `0.2.2` dependency is unchanged across TenantPulse source, build dependency,
-built module, and candidate package. These are local deterministic results only: CI has not
-run on either branch, and no package was published by R1.
+TenantPulse `0.1.2` is an **unpublished candidate**, not a release. Its final macOS
+PowerShell 7.6.5 pack-then-test passed with 2123 tests, 0 failed, 0 errors, 0 skipped,
+and 0 NotRun. The candidate `TenantPulse.0.1.2.nupkg` is 401634 bytes with SHA-256
+`91FF3860B6257257BBE827255FFF5E975B7521920411D31EFB3CE1496697B319`; the publisher
+dry-run verified all 59 shipped files against the tested-module digest manifest. The
+four synchronized minimum-test ratchet locations now require 2123. The exact GraphKit
+`0.2.2` dependency is unchanged across TenantPulse source, build dependency, built module,
+and candidate package. These are local deterministic results only: CI has not run on either
+branch, and no package was published by R1.
 
 ## Phase 1 engine: complete
 

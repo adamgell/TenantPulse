@@ -719,7 +719,8 @@ jobs:
           # .build/AssertGateResult.tasks.ps1's own accounting.
           # 2009 -> 2016 (R0 source/release truth): +6 package-identity and exact GraphKit
           # dependency assertions across source, restore pin, built manifest, nupkg, and publisher file-set proof; +1 case-sensitivity regression.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2016 -AllowedSkips $allowedSkips -AllowNotRun 1
+          # 2016 -> 2123 (R1 outcome/composite implementation and handoff coverage): +107.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2123 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
