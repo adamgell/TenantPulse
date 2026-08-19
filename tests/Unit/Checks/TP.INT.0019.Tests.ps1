@@ -60,7 +60,7 @@ BeforeAll {
                 }
 
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
             }
             return $evaluation.Document.findings[0]
         } finally {
@@ -139,7 +139,7 @@ Describe 'TP.INT.0019 - Apple MDM Push (APNs) certificate valid for more than 30
                     [pscustomobject]@{ id = 'cert1'; appleIdentifier = 'apnsadmin@contoso.example'; expirationDateTime = '2028-01-01T00:00:00Z' }
                 )
 
-                (Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath).RedactionMap
+                (Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }).RedactionMap
             }
 
             $redactionMap.Keys | Should -Contain 'apnsadmin@contoso.example'

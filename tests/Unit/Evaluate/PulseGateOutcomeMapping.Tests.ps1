@@ -65,6 +65,18 @@ Describe 'Pulse gate outcome mapping' {
         $finding.status | Should -Not -Be 'Pass'
         $finding.reason | Should -Be "gate 'EntraP2' unknown: License evidence unavailable."
     }
+    It 'maps the default Unknown gate to NotApplicable without evaluating the rule' {
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:store, $script:keyPath, $script:check {
+            param($store, $keyPath, $check)
+            Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+        }
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.status | Should -Not -Be 'Pass'
+        $finding.reason | Should -Be "gate 'EntraP2' unknown: no detail provided"
+    }
+
 
     It 'allows the existing rule to evaluate normally when EntraP2 is Available' {
         $evaluation = InModuleScope TenantPulse -ArgumentList $script:store, $script:keyPath, $script:check {

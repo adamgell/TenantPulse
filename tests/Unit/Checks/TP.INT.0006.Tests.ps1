@@ -64,7 +64,7 @@ BeforeAll {
                     Publish-PulseConflictArtifact -Store $store -Conflicts $conflicts -Gaps $gaps -FamilyCount 1
                 }
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
             }
             return $evaluation.Document.findings[0]
         } finally {
@@ -209,8 +209,8 @@ Describe 'TP.INT.0006 - Conflicting security-setting values across policies' {
                 Write-PulseDataset -Store $store -Name 'configurationPolicies' -ApiVersion 'beta' -Status 'Collected' -Data @()
                 Publish-PulseConflictArtifact -Store $store -Conflicts @($conflictFixture) -Gaps @() -FamilyCount 1
 
-                $first = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
-                $second = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $first = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
+                $second = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
 
                 [pscustomobject]@{ First = $first.Document.findings[0]; Second = $second.Document.findings[0] }
             }

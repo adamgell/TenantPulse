@@ -126,12 +126,12 @@ non-empty `Reason` whenever `Status` is `NotApplicable`.
 For each check, in order:
 
 1. **Gates** (`Data.Gates`): each declared gate name is resolved via `Get-PulseGateStatus
-   -Gate <name> -Manifest <manifest>`. Phase 1: this is a stub registry that always answers
-   `'Unknown'` - no live license/feature detection exists yet. **`Unknown` never degrades a
-   check** - the check still runs. This is deliberate staging: a later task teaching real
-   gate detection only has to change `Get-PulseGateStatus` itself: the evaluator already
-   calls it per declared gate and is ready to react to a real `Unavailable`/`Available`
-   status.
+   -Gate <name> -Manifest <manifest>`. Available permits collection. A proven
+   `Unavailable` gate degrades the check to `NotApplicable` with `FailureClass =
+   LicenseRequired`; an `Unknown` gate degrades it to `NotApplicable` with
+   `FailureClass = GateUnknown`. No unknown gate may evaluate its rule as `Pass`.
+   Gate resolution is deliberately fail-closed: a missing dataset is not proof of license
+   absence, and permission-denied license evidence remains `PermissionDenied`.
 2. **Datasets** (`Data.Datasets`): each declared dataset name must have a manifest entry with
    `status: 'Collected'`. Missing, `Failed`, or `Skipped` degrades the check to
    `NotApplicable` (see Reason semantics above) and the rule is never invoked.
