@@ -7,9 +7,11 @@
     dataset name through the shared DatasetMap.psd1 table (the same map
     Import-PulseCheckCatalog cross-checks Data.Datasets against at catalog-load time), and
     returns one entry per DISTINCT dataset name: { Dataset; Type; Operation; ApiVersion;
-    Pending }. Pending is carried straight through from the map (see DatasetMap.psd1's
-    header) so the collector can classify a pending dataset as Skipped without attempting
-    a Graph call or resolving a descriptor that does not exist yet.
+    Pending; Plan }. Pending is carried straight through from the map (see DatasetMap.psd1's
+    header) so the collector can classify an unplanned pending dataset as Skipped without
+    attempting a Graph call or resolving a descriptor that does not exist yet. Plan is
+    optional metadata naming the TenantPulse-owned plan selected by the dataset-keyed
+    provider-plan registry.
 
     A dataset name a check references that is absent from -DatasetMap is a hard error -
     Import-PulseCheckCatalog should already have caught this at catalog-load time when a
@@ -81,6 +83,7 @@ function Get-PulseCollectionManifest {
         $mapEntry = $DatasetMap[$Name]
         $isPending = $mapEntry.ContainsKey('Pending') -and [bool] $mapEntry.Pending
         $idFromDataset = if ($mapEntry.ContainsKey('IdFromDataset')) { [string] $mapEntry.IdFromDataset } else { $null }
+        $providerPlan = if ($mapEntry.ContainsKey('Plan')) { [string] $mapEntry.Plan } else { $null }
 
         if ($idFromDataset) {
             Resolve-Entry -Name $idFromDataset -RequestedBy $RequestedBy -Chain ($Chain + $Name)
@@ -93,6 +96,7 @@ function Get-PulseCollectionManifest {
             ApiVersion    = $mapEntry.ApiVersion
             Pending       = $isPending
             IdFromDataset = $idFromDataset
+            Plan          = $providerPlan
         }
     }
 
