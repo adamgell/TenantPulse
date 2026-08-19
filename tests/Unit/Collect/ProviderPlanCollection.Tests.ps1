@@ -121,6 +121,40 @@ Describe 'Invoke-PulseCollection provider plans' {
         $emptyRows | Should -Be 0
         Test-Path -LiteralPath (Join-Path $script:store.DatasetsPath 'unresolvedEmpty.json') | Should -BeFalse
     }
+    It 'normalizes a zero-row Partial plan to Failed while retaining structured gaps and operations' {
+        $planRegistry = InModuleScope TenantPulse {
+            @{
+                unresolvedPartial = {
+                    param($Context, $Dataset)
+                    $gap = New-PulseCollectionGap -Scope 'policy-1/settings' -FailureClass 'ProviderFailed' `
+                        -ReasonCode 'child-failed' -Detail @{ child = 'policy-1' } -Operation 'ListBeta' -ApiVersion 'beta'
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Partial -Rows @() -Gaps @($gap) `
+                        -ReasonCode 'partial' -Detail @{ childCount = 1 } -Provider 'GraphKit' `
+                        -ApiVersion 'beta' -Operations @('ListBeta')
+                }
+            }
+        }
+        $manifest = @([pscustomobject]@{
+            Dataset = 'unresolvedPartial'; Type = 'Synthetic'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true
+        })
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.unresolvedPartial.status | Should -Be 'Failed'
+        $saved.datasets.unresolvedPartial.status | Should -Not -Be 'Partial'
+        $saved.datasets.unresolvedPartial.status | Should -Not -Be 'Collected'
+        $saved.datasets.unresolvedPartial.failureClass | Should -Be 'ProviderFailed'
+        $saved.datasets.unresolvedPartial.gaps[0].scope | Should -Be 'policy-1/settings'
+        $saved.datasets.unresolvedPartial.gaps[0].failureClass | Should -Be 'ProviderFailed'
+        $saved.datasets.unresolvedPartial.operations | Should -Be @('ListBeta')
+        Test-Path -LiteralPath (Join-Path $script:store.DatasetsPath 'unresolvedPartial.json') | Should -BeFalse
+    }
+
 
     It 'records a structured dependency failure instead of silently dropping the dependent dataset' {
         Mock Get-GraphOperation -ModuleName TenantPulse {

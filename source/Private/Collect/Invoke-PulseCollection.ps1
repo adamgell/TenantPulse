@@ -152,10 +152,23 @@ function Invoke-PulseCollection {
                 }
 
                 # Revalidate through the shared constructor so a plan cannot bypass the
-                # provider-neutral status/gap invariants before persistence.
+                # provider-neutral status/gap invariants before persistence. A Partial
+                # outcome with no usable authoritative rows is not a meaningful partial
+                # success: normalize it to an explicit provider outcome while retaining
+                # the plan's structured gaps and operation provenance. Valid explicit
+                # failure classes are preserved; the normal unresolved-child default is
+                # ProviderFailed.
+                $planStatus = [string] $planResult.Status
+                $planFailureClass = $planResult.FailureClass
+                if ($planStatus -eq 'Partial' -and @($planResult.Rows).Count -eq 0) {
+                    $planStatus = 'Failed'
+                    if ($null -eq $planFailureClass -or [string]::IsNullOrWhiteSpace([string] $planFailureClass)) {
+                        $planFailureClass = 'ProviderFailed'
+                    }
+                }
                 $planApiVersion = if ([string]::IsNullOrEmpty([string]$planResult.ApiVersion)) { $entry.ApiVersion } else { $planResult.ApiVersion }
-                $outcome = New-PulseCollectionOutcome -Dataset $entry.Dataset -Status $planResult.Status `
-                    -Rows $planResult.Rows -Gaps $planResult.Gaps -FailureClass $planResult.FailureClass `
+                $outcome = New-PulseCollectionOutcome -Dataset $entry.Dataset -Status $planStatus `
+                    -Rows $planResult.Rows -Gaps $planResult.Gaps -FailureClass $planFailureClass `
                     -ReasonCode $planResult.ReasonCode -Detail $planResult.Detail -Provider $planResult.Provider `
                     -ApiVersion $planApiVersion -Operations $planResult.Operations
                 $reason = Protect-PulseReason -Message ([string]$outcome.ReasonCode) -ProfileId $ProfileId `

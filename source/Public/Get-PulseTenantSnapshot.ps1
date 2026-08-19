@@ -114,6 +114,11 @@
         carries assignments:null - the ConfigurationPolicyAssignment sub-fetch is
         unreleased GraphKit per the G-gate sequencing amendment and slots in later, in
         Phase 2b.
+
+    .PARAMETER ProviderPlanRegistry
+        Optional dataset-name keyed registry of TenantPulse-owned provider plan commands.
+        Supplied plans run sequentially with the resolved Graph context; when omitted,
+        ordinary single-operation and Pending collection behavior is unchanged.
 #>
 function Get-PulseTenantSnapshot {
     [CmdletBinding()]
@@ -168,7 +173,13 @@ function Get-PulseTenantSnapshot {
         # ConfigurationPolicyAssignment sub-fetch is unreleased GraphKit and slots in later,
         # in Phase 2b).
         [Parameter()]
-        [switch] $ExpandSettings
+        [switch] $ExpandSettings,
+        # Optional TenantPulse-owned composite plans, keyed only by dataset name. When
+        # omitted, Invoke-PulseCollection retains its ordinary GraphKit/Pending behavior.
+        [Parameter()]
+        [AllowNull()]
+        [hashtable] $ProviderPlanRegistry = @{}
+
     )
 
     $moduleBase = if ($MyInvocation.MyCommand.Module) {
@@ -253,7 +264,8 @@ function Get-PulseTenantSnapshot {
 
     $store = New-PulseSnapshotStore -Path $OutputPath -Tenant $tenantPseudonym -GraphKitVersion $graphKitVersion
 
-    Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
+    Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId `
+        -TenantPseudonym $tenantPseudonym -ProviderPlanRegistry $ProviderPlanRegistry
 
     if ($ExpandSettings) {
         # P0-1 review fix: explicitly discarded - see Invoke-PulseSettingsCatalogExpansionPipeline's

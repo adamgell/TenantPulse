@@ -1026,6 +1026,53 @@ Describe 'Get-PulseTenantSnapshot' {
         $manifest.datasets.deviceCompliancePolicies.status | Should -Be 'Skipped'
         $manifest.datasets.deviceCompliancePolicies.reason | Should -Match '^permission-denied:'
     }
+    It 'passes a supplied dataset-keyed plan registry through the public path sequentially with the same resolved Context' {
+        $check = New-TestCheck -Id 'TP.INT.TEST' -Datasets @('intuneRbacGroupProtection', 'endpointSecurityDiskEncryptionPolicies')
+        $resolvedContext = [pscustomobject]@{
+            ProfileId = 'contoso-tenant-id'
+            TenantId = 'tenant-1'
+            PlanCalls = [System.Collections.Generic.List[string]]::new()
+            PlanContexts = [System.Collections.Generic.List[object]]::new()
+        }
+
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($check) }
+        Mock Get-GraphContext -ModuleName TenantPulse { $resolvedContext }
+        $planRegistry = InModuleScope TenantPulse {
+            @{
+                intuneRbacGroupProtection = {
+                    param($Context, $Dataset)
+                    $Context.PlanCalls.Add($Dataset)
+                    $Context.PlanContexts.Add($Context)
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected -Rows @([pscustomobject]@{ id = 'rbac-1' }) `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' -Operations @('ListBeta')
+                }
+                endpointSecurityDiskEncryptionPolicies = {
+                    param($Context, $Dataset)
+                    $Context.PlanCalls.Add($Dataset)
+                    $Context.PlanContexts.Add($Context)
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected -Rows @([pscustomobject]@{ id = 'disk-1' }) `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' -Operations @('ListBeta')
+                }
+            }
+        }
+
+        $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot, $planRegistry {
+            param($snapshotRoot, $planRegistry)
+            Get-PulseTenantSnapshot -ProfileId 'contoso-tenant-id' -OutputPath $snapshotRoot `
+                -ProviderPlanRegistry $planRegistry
+        }
+
+        $resolvedContext.PlanCalls.Count | Should -Be 2
+        @($resolvedContext.PlanCalls) | Should -Be @('endpointSecurityDiskEncryptionPolicies', 'intuneRbacGroupProtection')
+        [object]::ReferenceEquals($resolvedContext.PlanContexts[0], $resolvedContext) | Should -BeTrue
+        [object]::ReferenceEquals($resolvedContext.PlanContexts[1], $resolvedContext) | Should -BeTrue
+        [object]::ReferenceEquals($resolvedContext.PlanContexts[0], $resolvedContext.PlanContexts[1]) | Should -BeTrue
+
+        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.datasets.intuneRbacGroupProtection.status | Should -Be 'Collected'
+        $manifest.datasets.endpointSecurityDiskEncryptionPolicies.status | Should -Be 'Collected'
+    }
+
 
     # Item 1 (final fix wave, spec 2a): the pseudonym is keyed on the resolved TENANT ID,
     # never -ProfileId - the same tenant reached under two differently-named profiles must
