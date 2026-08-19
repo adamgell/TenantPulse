@@ -15,7 +15,7 @@
     predicate through Test-PulseReadOnlyDatasetMap below, a small non-throwing walker local
     to this file, so every dataset gets its own reported result.
 
-    Unlike a unit test, this file deliberately imports the REAL GraphKit module (0.1.0,
+    Unlike a unit test, this file deliberately imports the REAL GraphKit module (0.2.2,
     installed as TenantPulse's own RequiredModules dependency) and calls its REAL
     Get-GraphOperation - metadata-catalog lookups only, never a network call, never a live
     tenant - to prove every RELEASED dataset entry resolves to an actual Read/Safe
@@ -87,9 +87,9 @@ BeforeAll {
     $script:datasetMapPath = Join-Path -Path $projectPath -ChildPath 'source/Data/DatasetMap.psd1'
     $script:fixtureDatasetMapPath = Join-Path -Path $projectPath -ChildPath 'tests/Fixtures/DatasetMap/mutation-write-op.psd1'
 
-    # Real GraphKit (0.1.0), deliberately NOT stubbed in this file - see the file-level
+    # Real GraphKit (0.2.2), deliberately NOT stubbed in this file - see the file-level
     # docstring above for why this is the one QA test allowed to import it for real.
-    Import-Module -Name GraphKit -Force -ErrorAction Stop
+    Import-Module -FullyQualifiedName @{ ModuleName = 'GraphKit'; RequiredVersion = '0.2.2' } -Force -ErrorAction Stop
 
     <#
         Walks a DatasetMap.psd1-shaped hashtable and returns every read-only-predicate
@@ -182,12 +182,12 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         # Get-PulseTenantSnapshot.Tests.ps1's Invoke-PulseCollection Describe block) stays
         # in place for whichever of these ships next, and for the next batch after that.
         It "Pending dataset '<Name>' (<Type>/<Op>) declares ExpectedThrottleClass='Read' and ExpectedReplayPolicy='Safe'" -ForEach $script:pendingDatasetCases -AllowNullOrEmptyForEach {
-            # No live descriptor exists to resolve - GraphKit 0.1.0 genuinely does not have
+            # No live descriptor exists to resolve - GraphKit 0.2.2 genuinely does not have
             # this Type/Operation pair yet. Confirm that (rather than silently trusting the
             # Pending flag) so a descriptor that quietly shipped early is caught, then assert
             # the map's own declaration is read-only.
             { Get-GraphOperation -Type $Type -Operation $Op -ErrorAction Stop } |
-                Should -Throw -Because "dataset '$Name' is marked Pending - its descriptor must genuinely be absent from the released GraphKit catalog; if this no longer throws, GraphKit shipped it and the Pending flag (and its 0.1.1-release TODO) must be dropped"
+                Should -Throw -Because "dataset '$Name' is marked Pending - its descriptor must genuinely be absent from the released GraphKit catalog; if this no longer throws, GraphKit shipped it and the Pending flag (and its released-catalog follow-up) must be dropped"
 
             $ExpectedThrottleClass | Should -Be 'Read' -Because "Pending dataset '$Name' must still declare the read-only shape its future descriptor is expected to have"
             $ExpectedReplayPolicy | Should -Be 'Safe' -Because "Pending dataset '$Name' must still declare the read-only shape its future descriptor is expected to have"

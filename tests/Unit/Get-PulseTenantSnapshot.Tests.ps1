@@ -12,7 +12,7 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
-    # GraphKit 0.1.0 is a real, importable RequiredModules dependency of TenantPulse
+    # GraphKit 0.2.2 is a real, importable RequiredModules dependency of TenantPulse
     # itself (published to PSGallery) and IS present in this test environment. These
     # tests still never depend on real GraphKit behavior: every GraphKit command
     # TenantPulse calls is stubbed directly inside the TenantPulse module scope -

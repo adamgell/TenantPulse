@@ -12,7 +12,7 @@
 RootModule = 'TenantPulse.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.1.1'
+ModuleVersion = '0.1.2'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -53,10 +53,9 @@ PowerShellVersion = '7.4'
 # Modules that must be imported into the global environment prior to importing this module
 RequiredModules = @(
     # TenantPulse reads the tenant exclusively through GraphKit's read-class descriptors.
-    # See the design spec: no Graph SDK, no Connect-MgGraph, no URI strings of its own.
-    # GraphKit 0.2.2 is published to PSGallery - see RequiredModules.psd1, which pins the
-    # same version for build-time dependency resolution.
-    @{ ModuleName = 'GraphKit'; ModuleVersion = '0.2.2' }
+    # RequiredVersion is deliberate: a newer GraphKit catalog is a different producer
+    # contract and must be re-verified before TenantPulse consumes it.
+    @{ ModuleName = 'GraphKit'; RequiredVersion = '0.2.2' }
 )
 
 # Assemblies that must be loaded prior to importing this module
