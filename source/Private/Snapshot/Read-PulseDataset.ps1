@@ -47,6 +47,12 @@ function Read-PulseDataset {
     }
 
     $entry = $manifest.datasets[$Name]
+    if ($entry.status -in @('Failed', 'Skipped')) {
+        throw "Read-PulseDataset: dataset '$Name' has status '$($entry.status)' and has no usable rows (failureClass=$($entry.failureClass), reasonCode=$($entry.reasonCode))."
+    }
+    if ($entry.status -notin @('Collected', 'Partial')) {
+        throw "Read-PulseDataset: dataset '$Name' has unsupported status '$($entry.status)'."
+    }
     $datasetPath = Join-Path $Store.DatasetsPath $fileName
 
     if (-not (Test-Path -LiteralPath $datasetPath -PathType Leaf)) {

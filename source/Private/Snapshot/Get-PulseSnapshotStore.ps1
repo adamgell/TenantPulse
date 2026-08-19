@@ -61,12 +61,9 @@
     pre-emptively (and possibly wrongly) rejected here.
 #>
 
-# Every schemaVersion this module's writer (New-PulseSnapshotStore) has ever produced -
-# '1.1.0' is the current literal it writes today; '1.0.0' is the pre-Task-2.1 literal,
-# kept here so an older snapshot on disk still opens read-only-compatible (see this
-# function's own SCHEMA 1.1.0 docstring section). Kept as a single named array so
-# Get-PulseSnapshotStore never has to duplicate (and risk drifting from) either literal.
-$script:PulseSnapshotSupportedSchemaVersions = @('1.0.0', '1.1.0')
+# Every schemaVersion this module's writer has produced - 2.0.0 is current, while 1.0.0
+# and 1.1.0 remain readable through Get-PulseSnapshotManifest's in-memory migration.
+$script:PulseSnapshotSupportedSchemaVersions = @('1.0.0', '1.1.0', '2.0.0')
 
 function Get-PulseSnapshotStore {
     [CmdletBinding()]
@@ -161,20 +158,20 @@ function Get-PulseSnapshotStore {
     # SCHEMA-VERSION-CONDITIONAL requiredness (post-review fix, omp finding #3) - see this
     # file's own docstring: only a '1.1.0' manifest must carry non-null object `references`/
     # `expansions` members; a '1.0.0' manifest is exempt (those namespaces did not exist in
-    # that schema at all).
-    if ($actualSchemaVersion -eq '1.1.0') {
+    # Schema 2.0.0 requires the reference/expansion namespaces. Legacy 1.0.0 and 1.1.0
+    # manifests are accepted as-is and normalized in memory by Get-PulseSnapshotManifest.
+    if ($actualSchemaVersion -eq '2.0.0') {
         foreach ($namespaceMember in @('references', 'expansions')) {
             if ($manifestContent.PSObject.Properties.Name -notcontains $namespaceMember) {
-                throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '1.1.0' but is missing required member '$namespaceMember' - '$resolvedRoot' is not a valid snapshot root."
+                throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '$actualSchemaVersion' but is missing required member '$namespaceMember' - '$resolvedRoot' is not a valid snapshot root."
             }
             $namespaceValue = $manifestContent.$namespaceMember
             if ($null -eq $namespaceValue -or $namespaceValue -isnot [System.Management.Automation.PSObject]) {
                 $actualDescription = if ($null -eq $namespaceValue) { 'null' } else { $namespaceValue.GetType().Name }
-                throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '1.1.0' but has a '$namespaceMember' member that is not a non-null object (got: $actualDescription) - '$resolvedRoot' is not a valid snapshot root."
+                throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '$actualSchemaVersion' but has a '$namespaceMember' member that is not a non-null object (got: $actualDescription) - '$resolvedRoot' is not a valid snapshot root."
             }
         }
     }
-
     return [pscustomobject]@{
         Root          = $resolvedRoot
         DatasetsPath  = Join-Path $resolvedRoot 'datasets'

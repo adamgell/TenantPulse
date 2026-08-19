@@ -94,7 +94,7 @@ function New-PulseSnapshotStore {
     }
 
     $manifest = [ordered]@{
-        schemaVersion     = '1.1.0'
+        schemaVersion     = '2.0.0'
         createdUtc        = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [System.Globalization.CultureInfo]::InvariantCulture)
         tenant            = $Tenant
         producer          = [ordered]@{

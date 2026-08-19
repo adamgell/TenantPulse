@@ -60,39 +60,59 @@ function Set-PulseManifestEntry {
         [Parameter(Mandatory)]
         [pscustomobject] $Store,
 
-        [Parameter(Mandatory, ParameterSetName = 'Dataset')]
-        [string] $Name,
+[Parameter(Mandatory, ParameterSetName = 'Dataset')]
+[string] $Name,
 
-        [Parameter(Mandatory, ParameterSetName = 'Dataset')]
-        [ValidateSet('Collected', 'Failed', 'Skipped')]
-        [string] $Status,
+[Parameter(Mandatory, ParameterSetName = 'Dataset')]
+[ValidateSet('Collected', 'Partial', 'Failed', 'Skipped')]
+[string] $Status,
 
-        # Reason, ApiVersion, Sha256 and CollectedUtc are deliberately left untyped:
-        # Write-PulseDataset always passes these explicitly (including an explicit $null
-        # for a Failed/Skipped dataset with no reason, or for the fields only Collected
-        # populates). A [string] parameter type would coerce an explicit $null argument
-        # into an empty string during binding - PowerShell does this even with
-        # [AllowNull()] - which would corrupt the null/absent distinction the manifest
-        # schema relies on.
-        [Parameter(ParameterSetName = 'Dataset')]
-        [AllowNull()]
-        $Reason,
+# Legacy free-form reason retained for existing callers. Structured callers should also
+# provide ReasonCode/Detail rather than encoding failure semantics in text.
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+$Reason,
 
-        [Parameter(ParameterSetName = 'Dataset')]
-        [AllowNull()]
-        $ApiVersion,
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+[ValidateNotNullOrEmpty()]
+[string] $ReasonCode,
 
-        [Parameter(ParameterSetName = 'Dataset')]
-        [AllowNull()]
-        $Sha256,
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+[hashtable] $Detail,
 
-        [Parameter(ParameterSetName = 'Dataset')]
-        [AllowNull()]
-        [System.Nullable[int]] $ItemCount,
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+$FailureClass,
 
-        [Parameter(ParameterSetName = 'Dataset')]
-        [AllowNull()]
-        $CollectedUtc,
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+$Provider,
+
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+[object[]] $Operations,
+
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+[object[]] $Gaps,
+
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+$ApiVersion,
+
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+$Sha256,
+
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+[System.Nullable[int]] $ItemCount,
+
+[Parameter(ParameterSetName = 'Dataset')]
+[AllowNull()]
+$CollectedUtc,
 
         [Parameter(Mandatory, ParameterSetName = 'CollectionFailure')]
         [string] $CollectionFailure,
@@ -289,11 +309,7 @@ function Set-PulseManifestEntry {
             # Computed OUTSIDE the hashtable literal below, deliberately: an `if {} else {}`
             # used directly as a hashtable value literal has its "then"/"else" branch output
             # captured through the pipeline, and an empty-array branch's zero-object pipeline
-            # output collapses the assigned value to $null, not @() - reproduced (gaps wrote
-            # as JSON `null` instead of `[]` for the common case of no -Gaps supplied at all).
-            # @($null) is also a trap on its own - it is a ONE-element array containing $null,
-            # not an empty array - so the $null check must happen before the @() wrap, not
-            # rely on @() to normalize a null away.
+            # output collapses the assigned value to $null, not @().
             $expansionGapsValue = if ($null -eq $ExpansionGaps) { , @() } else { , @($ExpansionGaps) }
 
             $manifest.expansions[$ExpansionName] = [ordered]@{
@@ -315,9 +331,17 @@ function Set-PulseManifestEntry {
                 $manifest.datasets = [ordered]@{}
             }
 
+            $operationsValue = if ($null -eq $Operations) { , @() } else { , @($Operations) }
+            $gapsValue = if ($null -eq $Gaps) { , @() } else { , @($Gaps) }
             $manifest.datasets[$Name] = [ordered]@{
                 status       = $Status
                 apiVersion   = $ApiVersion
+                failureClass = $FailureClass
+                reasonCode   = $ReasonCode
+                detail       = $Detail
+                provider     = $Provider
+                operations   = $operationsValue
+                gaps         = $gapsValue
                 reason       = $Reason
                 sha256       = $Sha256
                 itemCount    = $ItemCount
