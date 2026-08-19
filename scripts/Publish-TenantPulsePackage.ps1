@@ -218,19 +218,6 @@ else {
         throw "The tested-module digest manifest '$digestManifestPath' recorded zero files - nothing to verify. Re-run ./build.ps1 -Tasks test."
     }
 
-    # Side 1: every recorded file must still match, byte-for-byte, in the CURRENT built
-    # module directory - proves the build directory was not touched (edited, not rebuilt)
-    # after the test run that produced the manifest.
-    foreach ($relPath in $digestManifest.Keys) {
-        $currentFilePath = Join-Path $builtModuleDirForDigest $relPath
-        if (-not (Test-Path -LiteralPath $currentFilePath -PathType Leaf)) {
-            throw "The tested-module digest manifest recorded '$relPath', but it is missing from '$builtModuleDirForDigest' now. The build directory changed since the test run that produced the digest - re-run ./build.ps1 -Tasks pack then test, in that order, then publish."
-        }
-        $currentHash = (Get-FileHash -LiteralPath $currentFilePath -Algorithm SHA256).Hash.ToLowerInvariant()
-        if (-not [string]::Equals($currentHash, $digestManifest[$relPath], [System.StringComparison]::Ordinal)) {
-            throw "'$relPath' in '$builtModuleDirForDigest' ($currentHash) does not match the digest recorded at test time ($($digestManifest[$relPath])). The built module was edited after the test run - re-run ./build.ps1 -Tasks pack then test, in that order, then publish."
-        }
-    }
     # The publisher sends the entire built-module directory, not only the paths the
     # manifest happens to mention. Require the exact file set here so an unrecorded file
     # added after the test cannot ride along with otherwise matching tested bytes.
@@ -246,6 +233,19 @@ else {
     if ($fileSetDifferences.Count -ne 0) {
         $differenceSummary = ($fileSetDifferences | ForEach-Object { "$($_.SideIndicator):$($_.InputObject)" }) -join ', '
         throw "The built module file set differs from the tested-module digest manifest. Unrecorded or missing file(s): $differenceSummary. Re-run ./build.ps1 -Tasks pack then ./build.ps1 -Tasks test, in that order, then publish."
+    }
+    # Side 1: every recorded file must still match, byte-for-byte, in the CURRENT built
+    # module directory - proves the build directory was not touched (edited, not rebuilt)
+    # after the test run that produced the manifest.
+    foreach ($relPath in $digestManifest.Keys) {
+        $currentFilePath = Join-Path $builtModuleDirForDigest $relPath
+        if (-not (Test-Path -LiteralPath $currentFilePath -PathType Leaf)) {
+            throw "The tested-module digest manifest recorded '$relPath', but it is missing from '$builtModuleDirForDigest' now. The build directory changed since the test run that produced the digest - re-run ./build.ps1 -Tasks pack then test, in that order, then publish."
+        }
+        $currentHash = (Get-FileHash -LiteralPath $currentFilePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if (-not [string]::Equals($currentHash, $digestManifest[$relPath], [System.StringComparison]::Ordinal)) {
+            throw "'$relPath' in '$builtModuleDirForDigest' ($currentHash) does not match the digest recorded at test time ($($digestManifest[$relPath])). The built module was edited after the test run - re-run ./build.ps1 -Tasks pack then test, in that order, then publish."
+        }
     }
 
     # Side 2: every recorded file must ALSO be present, at the same relative path, inside
