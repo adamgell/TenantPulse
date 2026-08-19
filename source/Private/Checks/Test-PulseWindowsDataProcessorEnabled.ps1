@@ -2,10 +2,16 @@
     Private: TP.INT.0009 rule function - Windows diagnostic data processor configuration
     enabled (Task 3.2, Maester port MT.1099 - Test-MtWindowsDataProcessor, MIT).
 
-    PENDING DATASET (honest NA): dataProcessorServiceForWindowsFeaturesOnboarding has no
-    released GraphKit 0.1.1 descriptor - DatasetMap.psd1 marks it Pending=$true. On a live
-    tenant this resolves NotApplicable until GraphKit ships the descriptor (a G-batch
-    request). Rule body is real and fixture-tested regardless.
+    PENDING DATASET (honest NA): dataProcessorServiceForWindowsFeaturesOnboarding is
+    still Pending in DatasetMap.psd1 because released GraphKit 0.2.2 has no matching
+    descriptor. A controlled Ivy24 read-only GET (beta,
+    /deviceManagement/dataProcessorServiceForWindowsFeaturesOnboarding) did return the
+    expected singleton and both native Boolean fields, but Microsoft Learn publishes no
+    official GET method or application-permission contract for this resource. The
+    permission evidence is therefore insufficient to author a safe GraphKit descriptor.
+    The rule body remains real and fixture-tested. Re-evaluate when Microsoft publishes
+    the method/permission contract or GraphKit ships this exact descriptor, then repeat
+    the controlled read-only probe before dropping Pending.
 
     RULE (ported verbatim from Maester's own AND condition - live-verified against
     https://learn.microsoft.com/en-us/intune/privacy/enable-windows-diagnostic-data,

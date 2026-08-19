@@ -120,6 +120,19 @@ DatasetMap datasets that were Pending on 0.1.1: `authorizationPolicy`,
 `endpointSecurityLapsPolicies`, `securityBaselinesAssignedAndCurrent`. Walks were
 not invented. TenantPulse 0.1.0 is already published; this is the 0.1.1 consume.
 
+**Task 7 evidence (2026-08-19):** the controlled Ivy24 probe did execute a read-only
+`GET /beta/deviceManagement/dataProcessorServiceForWindowsFeaturesOnboarding` through
+GraphKit 0.2.2's raw operation path and returned `Succeeded` with one singleton object
+whose `hasValidWindowsLicense` and `areDataProcessorServiceForWindowsFeaturesEnabled`
+fields were native Booleans. This proves the tenant endpoint and response shape, but it
+does not prove a releasable GraphKit contract: the Microsoft Learn resource page has no
+official GET method or application-permission section, and the read-only permission
+analysis did not resolve a named application permission for the certificate app. The
+DatasetMap entry therefore remains `Pending` rather than gaining a guessed descriptor or
+claiming a false platform-unavailable endpoint. Recheck when Microsoft publishes the
+method/permission contract or GraphKit ships the exact `Singleton.Default` descriptor,
+then repeat the read-only Ivy24 probe before removing `Pending`.
+
 The T4.5 Ivy24 live-gate table later in this file is the historical 0.1.1-era result.
 Those twelve GET/List datasets are no longer awaiting GraphKit.
 

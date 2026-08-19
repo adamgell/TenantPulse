@@ -194,6 +194,19 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         }
     }
 
+    It 'keeps the Windows processor entry Pending while its official contract is unresolved' {
+        $map = Import-PowerShellDataFile -Path $script:datasetMapPath
+        $entry = $map['dataProcessorServiceForWindowsFeaturesOnboarding']
+
+        $entry.Pending | Should -BeTrue
+        $entry.ExpectedThrottleClass | Should -Be 'Read'
+        $entry.ExpectedReplayPolicy | Should -Be 'Safe'
+        {
+            Get-GraphOperation -Type 'DataProcessorServiceForWindowsFeaturesOnboarding' `
+                -Operation 'Get' -ErrorAction Stop
+        } | Should -Throw
+    }
+
     Context 'the whole-map walker (Test-PulseReadOnlyDatasetMap) agrees with the per-dataset assertions above' {
         It 'reports zero violations for the real DatasetMap.psd1' {
             $realMap = Import-PowerShellDataFile -Path $script:datasetMapPath
