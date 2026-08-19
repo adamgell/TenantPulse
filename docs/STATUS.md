@@ -31,8 +31,8 @@ errors, and 0 skipped. The tested `GraphKit.0.2.2.nupkg` is 201749 bytes with SH
 
 TenantPulse `0.1.2` is an **unpublished candidate**, not a release. Its macOS PowerShell
 7.6.5 pack-then-test passed with 2123 tests, 0 failed, 0 errors, 0 skipped, and 0 NotRun.
-The candidate `TenantPulse.0.1.2.nupkg` is 400414 bytes with SHA-256
-`AA724B1031C564CA85591DD1ACB51D968759D0198D79CA78A1FE5D260BF81368`; the publisher
+The candidate `TenantPulse.0.1.2.nupkg` is 401763 bytes with SHA-256
+`09629660D85C221EEAB710B8F5C784842D4D2B7635698B03606C424B75A7283B`; the publisher
 dry-run verified all 59 shipped files against the tested-module digest manifest. The exact
 GraphKit `0.2.2` dependency is unchanged across TenantPulse source, build dependency,
 built module, and candidate package. These are local deterministic results only: CI has not
