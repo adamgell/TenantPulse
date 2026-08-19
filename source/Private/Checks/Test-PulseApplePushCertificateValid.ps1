@@ -3,10 +3,9 @@
     than 30 days (Task 3.3, Maester port MT.1092 - Test-MtApplePushNotificationCertificate,
     MIT).
 
-    PENDING DATASET (honest NA): applePushNotificationCertificate has no released GraphKit
-    0.1.1 descriptor (confirmed via a live Get-GraphOperation -List enumeration against the
-    installed catalog) - DatasetMap.psd1 marks it Pending=$true. On a live tenant this
-    resolves NotApplicable until GraphKit ships the descriptor.
+    DATASET (live): GraphKit 0.2.2 shipped the official descriptor and DatasetMap now treats
+    this dataset as live. Type `ApplePushNotificationCertificate`, Operation `Get`,
+    ApiVersion `v1.0`; this check evaluates live tenant data.
 
     CLAIM (live-verified against
     https://learn.microsoft.com/en-us/intune/device-enrollment/apple/create-mdm-push-certificate,

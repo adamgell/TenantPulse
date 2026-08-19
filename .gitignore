@@ -6,3 +6,5 @@ testResults/
 # Ad-hoc local scratch space (live-gate snapshot dumps, manual repro output) - never
 # committed; may contain pseudonymized-but-still-tenant-shaped data from manual runs.
 scratch/
+# Local secrets (PSGallery API key, etc.) - never committed
+.env

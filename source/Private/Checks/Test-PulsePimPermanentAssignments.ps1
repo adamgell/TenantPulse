@@ -3,14 +3,9 @@
     roles (ScuBA MS.AAD.7.4v1, SHALL NOT). See
     docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0022.
 
-    DATASET STATUS: -Datasets.roleAssignmentScheduleInstances/roleEligibilityScheduleInstances
-    are BOTH Pending in DatasetMap.psd1 (no matching Type in the installed GraphKit 0.1.1
-    catalog, confirmed via Get-GraphOperation -List at implementation time - see that file's
-    own entry docstring and the T4.4 report's descriptor-needs list). A Pending dataset
-    degrades this whole check to engine-assigned NotApplicable at real-run time via the
-    normal manifest mechanism (same as TP.ENT.0012/TP.ENT.0013's own Pending-dataset
-    checks) - this function's own logic below is real and unit-tested against fixtures, not
-    dead code, the same way those checks' own rule functions are.
+    GraphKit 0.2.2 shipped the official descriptors for
+    roleAssignmentScheduleInstances and roleEligibilityScheduleInstances; DatasetMap Pending
+    was dropped and this check evaluates live. Both PIM datasets use v1.0 List operations.
 
     LICENSE GATE IS A FIRST-CLASS OUTCOME, PER THE RESEARCH ENTRY: this check's own
     descriptor declares Data.Gates = @('EntraP2') - PIM's roleAssignmentScheduleInstances/

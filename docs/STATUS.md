@@ -102,6 +102,27 @@ NotApplicable, 0 Error), coverage 9/10 (90%), `-FromSnapshot` reproduced a byte-
 findings JSON, and the raw tenant GUID appears nowhere in the output tree (datasets,
 manifest, or findings) - only its `tp-...` pseudonym.
 
+## GraphKit 0.2.2 consume (TenantPulse 0.1.1)
+
+GraphKit 0.2.2 is published and both pins (`source/TenantPulse.psd1`,
+`RequiredModules.psd1`) are bumped. Official GET/List descriptors shipped for twelve
+DatasetMap datasets that were Pending on 0.1.1: `authorizationPolicy`,
+`directorySettings`, `roleAssignmentScheduleInstances`,
+`roleEligibilityScheduleInstances`, `crossTenantAccessPolicyDefault`,
+`operationApprovalPolicies`, `intuneBrandingProfiles`,
+`windowsFeatureUpdateProfiles`, `applePushNotificationCertificate`,
+`androidManagedStoreAccountEnterpriseSettings`, `mobileThreatDefenseConnectors`,
+`windowsAutopilotDeploymentProfiles`. ApiVersion corrections to match GraphKit:
+`authorizationPolicy`, `applePushNotificationCertificate`, and
+`mobileThreatDefenseConnectors` are v1.0 (were beta). Still Pending (no official GET
+/ no Walk in GraphKit): `dataProcessorServiceForWindowsFeaturesOnboarding`,
+`intuneRbacGroupProtection`, `endpointSecurityDiskEncryptionPolicies`,
+`endpointSecurityLapsPolicies`, `securityBaselinesAssignedAndCurrent`. Walks were
+not invented. TenantPulse 0.1.0 is already published; this is the 0.1.1 consume.
+
+The T4.5 Ivy24 live-gate table later in this file is the historical 0.1.1-era result.
+Those twelve GET/List datasets are no longer awaiting GraphKit.
+
 ## Phase 2 (Settings expansion, core slice T2.1-T2.7): complete, live-gated
 
 Every Phase 2 core-slice task (T2.1 snapshot schema extension, T2.2 Settings Catalog
@@ -235,12 +256,14 @@ hardware, and method.
 
 Task 3.1 shipped the Maester attribution shim and TP.INT.0006 (Intune device cleanup rule
 conflict check). Task 3.2 ported nine further Intune checks (TP.INT.0007-0009/0011-0015) and
-formally evaluated (and **BLOCKED**, not shipped) `TP.INT.0010` - Maester's "Intune diagnostic
-settings -> Audit Logs" check is an ARM call (`GET providers/microsoft.intune/diagnosticSettings`),
+formally evaluated (and **BLOCKED** at T3.2, not shipped; **DESCOPED** 2026-08-18)
+`TP.INT.0010` - Maester's "Intune diagnostic settings -> Audit Logs" check is an ARM
+call (`GET providers/microsoft.intune/diagnosticSettings`),
 not a Graph call, so GraphKit's Graph-only transport can never surface it via the ordinary
-descriptor-Pending mechanism. This is a genuine architecture gap needing a product decision
-(a dedicated ARM auth path, or permanent descope), not a missing-descriptor case, and it
-remains unresolved as of this task - see
+descriptor-Pending mechanism. Product decision 2026-08-18: DESCOPED until GraphKit ARM
+exists. The id is reserved (0009 then 0011). No `.psd1`, no Pending dataset, and no ARM
+auth path in TenantPulse now. This is a genuine architecture gap, not a missing-descriptor
+case. See
 `docs/research/iha-v2/2026-08-16-phase3-intune-check-entries.md`'s TP.INT.0010 numbering-gap
 note. Task 3.3 added twelve more Intune checks (TP.INT.0019-0030) and imported research entries
 for TP.INT.0016/0017/0018 for record-completeness without implementing them yet.
@@ -282,9 +305,9 @@ after which Phase 3 work continued on the merged tree:
   numbering-gap note referenced above (`bbef1d1`, current `main` HEAD).
 
 **Catalog state at `bbef1d1`, verified against the live-built module
-(`Get-PulseCheckCatalog`)**: **51 checks total - 28 `TP.INT` + 23 `TP.ENT`.** Three checks
-remain genuinely BLOCKED and unshipped for the reasons above: `TP.INT.0010` (ARM-vs-Graph
-architecture gap), `TP.INT.0017`/`TP.INT.0018` (corpus + docs-schema gaps). Suite:
+(`Get-PulseCheckCatalog`)**: **51 checks total - 28 `TP.INT` + 23 `TP.ENT`.** `TP.INT.0010`
+is DESCOPED until GraphKit ARM exists (id reserved; no `.psd1`). Two checks remain
+genuinely BLOCKED and unshipped: `TP.INT.0017`/`TP.INT.0018` (corpus + docs-schema gaps). Suite:
 1929/1929 tests, 0 failed, 0 errors (`./build.ps1 -Tasks build,test`, re-verified for this
 task).
 
@@ -352,21 +375,33 @@ License/attribution audit: **shipped** (`4aa3db9`, `tests/QA/LicenseAttributionA
      rendered findings evidence Detail under `-Redact`, via TP.INT.0020/0021's
      `appleIdentifier`/`organizationName` detail keys - `-Redact` only ever substituted
      `evidence.identity`/`evidence.sortKey`, never anything inside `Detail`. Fixed via a
-     minimal contract extension (`RedactDetailKeys` on an evidence entry) and a full audit of
-     every check's evidence construction, which found one further unmarked instance
-     (TP.INT.0019's `appleIdentifier`) beyond the two the live run surfaced directly.
+     minimal contract extension (`RedactDetailKeys` on an evidence entry) and an audit of
+     every check's evidence construction, which found one further unmarked Apple-ID instance
+     (TP.INT.0019's `appleIdentifier`) beyond the two the live run surfaced directly. That
+     audit was not the end of the Detail-key class: the later `docs/gates/README.md`
+     live-gate incident (person-derived device names in `evidence[].detail.deviceName`/
+     `displayName`) showed `TP.INT.0005` (`Test-PulseStaleDevices`) still shipped those
+     hostnames unmarked. Closing-series leftover, now marked: `deviceName` on managed /
+     newly-enrolled rows, `displayName` on entra + gap rows. Residual, not full
+     de-identification: Reason text is still only capped; unmarked person-identifying
+     Detail keys on other checks stay unredacted.
 
 The secret/PII sweep against this gate's own run found no other raw identifying value under
-`-Redact` beyond the two surprises above. **Honest note on re-verification:** the closing fix
-series that fixed both surprises intended to re-run this gate's `-FromSnapshot` output through
-the fixed module (no new Graph calls) as a final proof the fixes actually close the leak
-end-to-end - the local snapshot that live gate produced (`output/live-gate-p3-full`,
-gitignored by design) did not survive between sessions, so that specific re-verification step
-could not run and is not claimed here. Both fixes carry their own fixture-level regression
-coverage (see the closing fix series' own commits) proving the mechanism in isolation; only the
-against-the-real-live-payload re-check is the part still outstanding, blocked on a fresh
-snapshot (either a new live collection, or recovering the original) rather than on any more
-code.
+`-Redact` beyond the two surprises above. The TP.INT.0005 device-name leftover above is a
+later closing-series follow-up, not something that sweep claimed to close.
+
+**Live `-FromSnapshot` re-check, EXECUTED 2026-08-18** against a fresh Ivy24 collection
+(`output/live-gate-p3-full`, GraphKit 0.2.2, TenantPulse 0.1.1, `-Redact -ExpandSettings`):
+51 findings (16 Pass / 1 Warn / 24 Fail / 9 NotApplicable / 1 Error). The five remaining
+Pending Walk/data-processor checks are honest `descriptor-pending` NA
+(`TP.INT.0009`/`0013`/`0014`/`0015`/`0029`). `-FromSnapshot` replay of that snapshot was
+byte-identical (664563 bytes). Redacted findings sweep: 0 email-shaped leaves, 0
+possessive `displayName`/`deviceName` leaves. Tenant-resource GUIDs in Detail stay
+unredacted by design. **Live surprise, not closed here:** `TP.ENT.0012` Error -
+GraphKit 0.2.2's `AuthorizationPolicy/Get` is v1.0, and that projection has no
+`permissionGrantPolicyIdsAssignedToDefaultUserRole` property (field-absence lens, same
+class as the pre-fix TP.INT.0028 ESP trim). Remap or NA-on-absent is follow-up, not
+claimed fixed.
 
 ## Phase 4: core Entra catalog (complete, Task 4.5 phase gate)
 
@@ -399,13 +434,17 @@ this branch (`phase4/t4.1-normalization`) against the already-registered `ivy24`
 profile (certificate auth, `~/.graphkit/profiles.json`).
 
 **Coverage: 21/28 assessed (75%)**. The 7 not-assessed checks are all honest `NotApplicable`,
-not errors: `TP.ENT.0012` (the `authorizationPolicy`-backed cluster), `TP.ENT.0013`/`0015`/`0016`
-(the three `directorySettings`-backed clusters), and `TP.ENT.0022`/`0023` (PIM posture,
-cross-tenant access) are `descriptor-pending: awaiting
-GraphKit release` - written, tested, cited, just waiting on GraphKit descriptors this catalog's
-research already scoped. `TP.ENT.0001` (Security Defaults) is a genuine, correct
-`NotApplicable`: this tenant runs Conditional Access, not Security Defaults, so the check
-declines to evaluate a control the tenant deliberately superseded.
+not errors. **Historical (GraphKit 0.1.1 pin, T4.5 gate):** `TP.ENT.0012` (the
+`authorizationPolicy`-backed cluster), `TP.ENT.0013`/`0015`/`0016` (the three
+`directorySettings`-backed clusters), and `TP.ENT.0022`/`0023` (PIM posture,
+cross-tenant access) were `descriptor-pending: awaiting GraphKit release` - written,
+tested, cited, waiting on GraphKit descriptors this catalog's research already scoped.
+GraphKit 0.2.2 later shipped official GET/List descriptors for those six Entra datasets
+(and six more Intune GET/List datasets). They are no longer Pending. Five Walk /
+data-processor datasets remain Pending; see the GraphKit 0.2.2 consume section above.
+`TP.ENT.0001` (Security Defaults) is a genuine, correct `NotApplicable`: this tenant
+runs Conditional Access, not Security Defaults, so the check declines to evaluate a
+control the tenant deliberately superseded.
 
 **Scores: overall 65.0/127.0 (51.2%)**. Hand-verified against the weight table (Critical=10,
 High=6, Medium=3, Low=1, Info=0; Pass=full weight, Warn=half, Fail=0-but-counts-toward-possible,
@@ -500,8 +539,15 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
   checked directly against source, is "there is nothing here yet" - the same anti-fabrication
   discipline T4.4's fix round established.
 
-## Not yet done - one thing, an operator action, not code
+## Not yet done
 
-1. **First publish to PSGallery**, which needs a PSGallery API key. Publish tooling is
-   ready (`scripts/Publish-TenantPulsePackage.ps1`) but defaults to a dry run and refuses
-   to publish without a resolved API key and `-Confirm`; Adam runs it.
+1. **TenantPulse 0.1.1 published to PSGallery** (2026-08-19). GraphKit 0.2.2 consume.
+   0.1.0 remains listed as the prior release. Not republished.
+2. **Live `-FromSnapshot` re-check of Phase 3 Detail-redaction** is done (byte-identical
+   replay, 2026-08-18). `TP.ENT.0012` v1.0 AP08 absence remapped to NotApplicable.
+3. **`TP.INT.0010`**, DESCOPED 2026-08-18 until GraphKit ARM exists. Id reserved
+   (0009 then 0011). No `.psd1`, no Pending dataset, no ARM auth path in TenantPulse now.
+4. **`TP.INT.0017` / `TP.INT.0018`**, still BLOCKED (corpus + docs-schema). Not shipped.
+5. **Evidence-Detail residual**: Reason text is still only capped; unmarked
+   person-identifying Detail keys on checks other than the marked Apple-ID /
+   TP.INT.0005 device-name keys stay unredacted under `-Redact`.

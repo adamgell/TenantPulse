@@ -30,7 +30,7 @@
     collector (Get-PulseTenantSnapshot / Invoke-PulseCollection) must classify it Skipped
     with reason 'descriptor-pending: awaiting GraphKit release' and must NOT call
     Get-GraphOperation or attempt any Graph call for it (there is nothing there to resolve
-    or call). Once the corresponding GraphKit descriptor ships (0.1.1), drop the Pending
+    or call). Once the corresponding GraphKit descriptor ships (0.1.1, then 0.2.2), drop the Pending
     flag and the collector starts actually collecting the dataset with no other code change
     required.
 
@@ -140,18 +140,21 @@
     # Get-GraphOperation lookup, not Pending.
     managedDeviceCleanupSettings = @{ Type = 'DeviceCleanupRule'; Operation = 'Get'; ApiVersion = 'beta' }
 
-    # Task 3.2 PENDING entries (TP.INT.0008/0009/0011/0012): none of these four Graph
-    # resources have a released GraphKit 0.1.1 descriptor - confirmed against a live
-    # Get-GraphOperation -List enumeration of the installed catalog (55 operations, none
-    # matching). Each check still ships with real rule logic tested via fixture data
-    # (Write-PulseDataset does not consult Pending); on a live tenant each resolves
-    # NotApplicable until GraphKit ships the descriptor - a G-batch request, not invented
-    # here. ExpectedThrottleClass/ExpectedReplayPolicy declare the Read/Safe shape the
-    # static read-only gate (tests/QA/ReadOnly.tests.ps1) requires for every Pending entry.
-    operationApprovalPolicies = @{ Type = 'OperationApprovalPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # Task 3.2 (TP.INT.0008): GraphKit 0.2.2 shipped the official
+    # OperationApprovalPolicy/List descriptor. Pending dropped.
+    operationApprovalPolicies = @{ Type = 'OperationApprovalPolicy'; Operation = 'List'; ApiVersion = 'beta' }
+
+    # Task 3.2 PENDING (TP.INT.0009): still no released GraphKit descriptor for this
+    # Get (beta). ExpectedThrottleClass/ExpectedReplayPolicy declare the Read/Safe
+    # shape the static read-only gate (tests/QA/ReadOnly.tests.ps1) requires for every
+    # Pending entry.
     dataProcessorServiceForWindowsFeaturesOnboarding = @{ Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    intuneBrandingProfiles = @{ Type = 'IntuneBrandingProfile'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    windowsFeatureUpdateProfiles = @{ Type = 'WindowsFeatureUpdateProfile'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Task 3.2 (TP.INT.0011/0012): GraphKit 0.2.2 shipped the official
+    # IntuneBrandingProfile/List and WindowsFeatureUpdateProfile/List descriptors.
+    # Pending dropped.
+    intuneBrandingProfiles = @{ Type = 'IntuneBrandingProfile'; Operation = 'List'; ApiVersion = 'beta' }
+    windowsFeatureUpdateProfiles = @{ Type = 'WindowsFeatureUpdateProfile'; Operation = 'List'; ApiVersion = 'beta' }
 
     # Task 3.2 (TP.INT.0013): composite 4-call Graph fan-out (roleDefinitions ->
     # roleAssignments -> roleAssignments/{id} -> groups/{id}), flattened to the per-group
@@ -177,11 +180,12 @@
     # Task 3.3 LIVE entries: confirmed via a live Get-GraphOperation -List enumeration of
     # the installed GraphKit 0.1.1 catalog against source/Data/Checks/TP.INT.00{20,21,23,25,27,28}.psd1
     # - these ARE released descriptors, contrary to this task's own briefing note that
-    # assumed the whole connector/token family needed Pending (that note was accurate for
-    # applePushNotificationCertificate/androidManagedStoreAccountEnterpriseSettings/
-    # mobileThreatDefenseConnectors/windowsAutopilotDeploymentProfiles below, but NOT for
-    # AppleEnrollmentProgramToken/AppleVppToken/CertificateConnector/DeviceEnrollmentConfiguration/
-    # AutopilotDevice, all of which the installed 0.1.1 catalog already carries).
+    # assumed the whole connector/token family needed Pending. That note was already
+    # inaccurate for AppleEnrollmentProgramToken/AppleVppToken/CertificateConnector/
+    # DeviceEnrollmentConfiguration/AutopilotDevice (the 0.1.1 catalog already carried
+    # them). GraphKit 0.2.2 later shipped the remaining GET/List descriptors
+    # (applePushNotificationCertificate, androidManagedStoreAccountEnterpriseSettings,
+    # mobileThreatDefenseConnectors, windowsAutopilotDeploymentProfiles).
     depOnboardingSettings = @{ Type = 'AppleEnrollmentProgramToken'; Operation = 'List'; ApiVersion = 'beta' }
     vppTokens = @{ Type = 'AppleVppToken'; Operation = 'List'; ApiVersion = 'beta' }
     ndesConnectors = @{ Type = 'CertificateConnector'; Operation = 'List'; ApiVersion = 'beta' }
@@ -197,39 +201,35 @@
     # deploymentProfileAssignedDateTime properties directly (live-confirmed against
     # https://learn.microsoft.com/en-us/graph/api/resources/intune-enrollment-windowsautopilotdeviceidentity?view=graph-rest-beta)
     # - "orphaned" (deploymentProfileAssignmentStatus == 'notAssigned') is therefore
-    # single-dataset-decidable and does NOT need the Pending windowsAutopilotDeploymentProfiles
+    # single-dataset-decidable and does NOT need the windowsAutopilotDeploymentProfiles
     # dataset below at all, a deliberate deviation for the better from the original research
     # entry's two-dataset composite design - see Test-PulseNoOrphanedAutopilotIdentities.ps1's
     # own docstring.
     windowsAutopilotDeviceIdentities = @{ Type = 'AutopilotDevice'; Operation = 'List'; ApiVersion = 'beta' }
 
-    # Task 3.3 PENDING entries (TP.INT.0019/0022/0024/0026/0029): none of these five Graph
-    # resources have a released GraphKit 0.1.1 descriptor - confirmed against the same live
-    # Get-GraphOperation -List enumeration above (no matching Type for any of them). Each
-    # check still ships with real rule logic tested via fixture data; on a live tenant each
-    # resolves NotApplicable until GraphKit ships the descriptor.
-    applePushNotificationCertificate = @{ Type = 'ApplePushNotificationCertificate'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    androidManagedStoreAccountEnterpriseSettings = @{ Type = 'AndroidManagedStoreAccountEnterpriseSettings'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    mobileThreatDefenseConnectors = @{ Type = 'MobileThreatDefenseConnector'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    windowsAutopilotDeploymentProfiles = @{ Type = 'WindowsAutopilotDeploymentProfile'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # Task 3.3 (TP.INT.0019/0022/0024/0026): GraphKit 0.2.2 shipped the official GET/List
+    # descriptors. Pending dropped. GraphKit's ApplePushNotificationCertificate/Get and
+    # MobileThreatDefenseConnector/List descriptors are v1.0, not beta.
+    applePushNotificationCertificate = @{ Type = 'ApplePushNotificationCertificate'; Operation = 'Get'; ApiVersion = 'v1.0' }
+    androidManagedStoreAccountEnterpriseSettings = @{ Type = 'AndroidManagedStoreAccountEnterpriseSettings'; Operation = 'Get'; ApiVersion = 'beta' }
+    mobileThreatDefenseConnectors = @{ Type = 'MobileThreatDefenseConnector'; Operation = 'List'; ApiVersion = 'v1.0' }
+    windowsAutopilotDeploymentProfiles = @{ Type = 'WindowsAutopilotDeploymentProfile'; Operation = 'List'; ApiVersion = 'beta' }
+
+    # Task 3.3 PENDING (TP.INT.0029): still no released GraphKit descriptor for this
+    # composite Walk. ExpectedThrottleClass/ExpectedReplayPolicy declare the Read/Safe
+    # shape the static read-only gate requires for every Pending entry.
     securityBaselinesAssignedAndCurrent = @{ Type = 'SecurityBaselineAssignedAndCurrentWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 
-    # Task 4.2 (EIDSCA port, wave 1) - G-batch descriptor need. This Type/Operation pair
-    # does not resolve against the installed GraphKit 0.1.1 catalog (confirmed via
-    # Get-GraphOperation -List at implementation time: no AuthorizationPolicy Type exists
-    # in the catalog at all) - Pending per this file's own header mechanism, so
-    # TP.ENT.0012 gets an honest descriptor-pending NotApplicable at evaluation time
-    # instead of being skipped from the catalog. See the T4.2 report for the exact
-    # requested-descriptor shape to ride into the next GraphKit release.
+    # Task 4.2 (EIDSCA port, wave 1): GraphKit 0.2.2 shipped the official
+    # AuthorizationPolicy/Get descriptor. Pending dropped. GraphKit's descriptor is
+    # v1.0, not beta.
     #
-    # authorizationPolicy: single-object read, GET /policies/authorizationPolicy (beta) -
+    # authorizationPolicy: single-object read, GET /policies/authorizationPolicy (v1.0) -
     # backs TP.ENT.0012 (AP01/AP04-AP10/AP14).
-    authorizationPolicy = @{ Type = 'AuthorizationPolicy'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    authorizationPolicy = @{ Type = 'AuthorizationPolicy'; Operation = 'Get'; ApiVersion = 'v1.0' }
 
-    # Task 4.2 (EIDSCA port, wave 1) - second G-batch descriptor need. This Type/Operation
-    # pair also does not resolve against the installed GraphKit 0.1.1 catalog (confirmed
-    # via Get-GraphOperation -List: no DirectorySetting Type exists in the catalog at
-    # all) - Pending for the same reason as authorizationPolicy above.
+    # Task 4.2 (EIDSCA port, wave 1): GraphKit 0.2.2 shipped the official
+    # DirectorySetting/List descriptor. Pending dropped.
     #
     # directorySettings: LIST (not a parameterized per-setting Get, correcting the T4.2
     # research entries' speculation of an `Entra.DirectorySettings.Values` descriptor
@@ -240,7 +240,7 @@
     # read different (name) entries out of the SAME collection, not three different
     # endpoints, the same "single dataset, many checks read different slices" pattern
     # authenticationMethodsPolicy already uses for TP.ENT.0006/0008.
-    directorySettings = @{ Type = 'DirectorySetting'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    directorySettings = @{ Type = 'DirectorySetting'; Operation = 'List'; ApiVersion = 'beta' }
 
     # Task 4.4 (ScuBA/CISA CA + role + credential checks) - servicePrincipals: GET
     # /servicePrincipals (v1.0), backs TP.ENT.0019's service-principal half of app
@@ -259,15 +259,13 @@
     # scope named explicitly in the check's own docstring/consulting text.
     servicePrincipals = @{ Type = 'ServicePrincipal'; Operation = 'List'; ApiVersion = 'v1.0' }
 
-    # Task 4.4 - PIM (TP.ENT.0022): NEITHER RoleAssignmentScheduleInstance NOR
-    # RoleEligibilityScheduleInstance exists as a Type in the installed GraphKit 0.1.1
-    # catalog (confirmed via Get-GraphOperation -List). Both Pending - see the T4.4 report
-    # for the exact requested descriptor shapes.
-    roleAssignmentScheduleInstances  = @{ Type = 'RoleAssignmentScheduleInstance'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    roleEligibilityScheduleInstances = @{ Type = 'RoleEligibilityScheduleInstance'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # Task 4.4 - PIM (TP.ENT.0022): GraphKit 0.2.2 shipped the official
+    # RoleAssignmentScheduleInstance/List and RoleEligibilityScheduleInstance/List
+    # descriptors. Pending dropped.
+    roleAssignmentScheduleInstances  = @{ Type = 'RoleAssignmentScheduleInstance'; Operation = 'List'; ApiVersion = 'v1.0' }
+    roleEligibilityScheduleInstances = @{ Type = 'RoleEligibilityScheduleInstance'; Operation = 'List'; ApiVersion = 'v1.0' }
 
-    # Task 4.4 - cross-tenant access (TP.ENT.0023): no CrossTenantAccessPolicy Type exists
-    # in the installed GraphKit 0.1.1 catalog (confirmed via Get-GraphOperation -List).
-    # Pending - see the T4.4 report for the exact requested descriptor shape.
-    crossTenantAccessPolicyDefault = @{ Type = 'CrossTenantAccessPolicy'; Operation = 'GetDefault'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # Task 4.4 - cross-tenant access (TP.ENT.0023): GraphKit 0.2.2 shipped the official
+    # CrossTenantAccessPolicy/GetDefault descriptor. Pending dropped.
+    crossTenantAccessPolicyDefault = @{ Type = 'CrossTenantAccessPolicy'; Operation = 'GetDefault'; ApiVersion = 'v1.0' }
 }

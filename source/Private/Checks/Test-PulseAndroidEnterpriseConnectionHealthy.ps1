@@ -2,10 +2,9 @@
     Private: TP.INT.0022 rule function - Android Enterprise connection bound, validated,
     and syncing (Task 3.3, Maester port MT.1095 - Test-MtAndroidEnterpriseConnection, MIT).
 
-    PENDING DATASET (honest NA): androidManagedStoreAccountEnterpriseSettings has no
-    released GraphKit 0.1.1 descriptor (confirmed via a live Get-GraphOperation -List
-    enumeration) - DatasetMap.psd1 marks it Pending=$true. On a live tenant this resolves
-    NotApplicable until GraphKit ships the descriptor.
+    DATASET (live): GraphKit 0.2.2 shipped the official descriptor and DatasetMap now treats
+    this dataset as live. Type `AndroidManagedStoreAccountEnterpriseSettings`,
+    Operation `Get`, ApiVersion `beta`; this check evaluates live tenant data.
 
     CLAIM (live-verified against
     https://learn.microsoft.com/en-us/intune/device-enrollment/android/connect-managed-google-play,

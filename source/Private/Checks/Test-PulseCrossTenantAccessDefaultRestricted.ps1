@@ -4,13 +4,9 @@
     outbound collaboration is scoped deliberately. See
     docs/research/iha-v2/2026-08-16-phase4-entra-check-entries.md#tpent0023.
 
-    DATASET STATUS: -Datasets.crossTenantAccessPolicyDefault is Pending in DatasetMap.psd1
-    (no CrossTenantAccessPolicy Type in the installed GraphKit 0.1.1 catalog, confirmed via
-    Get-GraphOperation -List at implementation time - see that file's own entry docstring
-    and the T4.4 report's descriptor-needs list). Degrades this check to engine-assigned
-    NotApplicable at real-run time via the normal manifest mechanism, same as every other
-    Pending-dataset check in this catalog - this function's own logic is real and
-    unit-tested against fixtures, not dead code.
+    GraphKit 0.2.2 shipped the official crossTenantAccessPolicyDefault descriptor; DatasetMap
+    Pending was dropped and this check evaluates live. CrossTenantAccessPolicy/GetDefault is
+    v1.0.
 
     NO DEDICATED SCUBA CONTROL (re-fetched, see the research entry's own RE-FETCHED note):
     live-fetched against cisagov/ScubaGear's own aad.md baseline confirms Section 8 (Guest

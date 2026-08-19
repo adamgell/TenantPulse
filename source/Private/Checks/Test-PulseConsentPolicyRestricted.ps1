@@ -6,13 +6,14 @@
     time and have now been independently re-fetched and confirmed (see the research entry's
     updated Notes for the source/date).
 
-    Reads the `directorySettings` dataset (Pending in DatasetMap.psd1) through the shared
-    Get-PulseDirectorySettingValue helper - see that function's own docstring for why an
-    absent setting resolves to its EIDSCA-documented DEFAULT rather than an engine Error: a
-    tenant that has never customized a setting is the common case, not a shape regression.
-    Per the TEMPLATE-DEFAULT RESOLUTION RULE, an absent row is evaluated against that
-    default with explicit provenance ('explicitlyConfigured' = $false in evidence), never
-    treated as NA-for-absence.
+    GraphKit 0.2.2 shipped the official directorySettings descriptor; DatasetMap Pending was
+    dropped and this check evaluates live. directorySettings List remains beta. The shared
+    Get-PulseDirectorySettingValue helper's own docstring explains why an absent setting
+    resolves to its EIDSCA-documented DEFAULT rather than an engine Error: a tenant that has
+    never customized a setting is the common case, not a shape regression. Per the
+    TEMPLATE-DEFAULT RESOLUTION RULE, an absent row is evaluated against that default with
+    explicit provenance ('explicitlyConfigured' = $false in evidence), never treated as
+    NA-for-absence.
 
     Setting names/expected values re-verified 2026-08-16 directly against the EIDSCA config
     source (https://raw.githubusercontent.com/Cloud-Architekt/AzureAD-Attack-Defense/AADSCAv4/config/EidscaConfig.json,

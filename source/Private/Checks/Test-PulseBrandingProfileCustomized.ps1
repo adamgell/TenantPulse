@@ -2,9 +2,9 @@
     Private: TP.INT.0011 rule function - default Intune branding profile customized
     (Task 3.2, Maester port MT.1101 - Test-MtTenantCustomization, MIT).
 
-    PENDING DATASET (honest NA): intuneBrandingProfiles has no released GraphKit 0.1.1
-    descriptor - DatasetMap.psd1 marks it Pending=$true. On a live tenant this resolves
-    NotApplicable until GraphKit ships the descriptor.
+    DATASET (live): GraphKit 0.2.2 shipped the official descriptor and DatasetMap now treats
+    this dataset as live. Type `IntuneBrandingProfile`, Operation `List`, ApiVersion
+    `beta`; this check evaluates live tenant data.
 
     RULE (ported verbatim from Maester's own OR condition - live-verified against
     https://learn.microsoft.com/en-us/intune/app-management/configuration/configure-company-portal,

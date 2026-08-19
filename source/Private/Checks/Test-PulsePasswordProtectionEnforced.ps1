@@ -6,8 +6,9 @@
     UNVERIFIED at wave-1 time and have now been independently re-fetched and confirmed (see
     the research entry's updated Notes for the source/date).
 
-    Reads the `directorySettings` dataset (Pending in DatasetMap.psd1) through the shared
-    Get-PulseDirectorySettingValue helper - see that function's own docstring for the
+    GraphKit 0.2.2 shipped the official directorySettings descriptor; DatasetMap Pending was
+    dropped and this check evaluates live. directorySettings List remains beta. The shared
+    Get-PulseDirectorySettingValue helper's own docstring explains the
     absent-setting-defaults-to-EIDSCA-default convention this reuses. Per the
     TEMPLATE-DEFAULT RESOLUTION RULE, an absent row is evaluated against that default with
     explicit provenance ('explicitlyConfigured' = $false in evidence), never NA-for-absence.

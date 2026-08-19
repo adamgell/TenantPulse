@@ -2,17 +2,9 @@
     Private: TP.INT.0008 rule function - Intune Multi Admin Approval policy configured
     (Task 3.2, Maester port MT.1096 - Test-MtOperationApprovalPolicies, MIT).
 
-    PENDING DATASET (honest NA, not invented): the operationApprovalPolicies dataset maps
-    to `deviceManagement/operationApprovalPolicies` (beta), which has no released GraphKit
-    0.1.1 descriptor as of this task - DatasetMap.psd1 marks it Pending=$true. On a live
-    tenant this check therefore always resolves NotApplicable (the collector Skips the
-    dataset with reason 'descriptor-pending: awaiting GraphKit release', which
-    Invoke-PulseEvaluation's own dataset-status gate turns into this check's
-    NotApplicable, quoting that reason) until GraphKit ships the descriptor - a G-batch
-    request, not something this task can invent a Graph call for. The rule body below is
-    real, tested against fixture data (Write-PulseDataset does not consult Pending - only
-    the live collector does), and will start actually evaluating live tenants the moment
-    the descriptor ships with no code change here.
+    DATASET (live): GraphKit 0.2.2 shipped the official descriptor and DatasetMap now treats
+    this dataset as live. Type `OperationApprovalPolicy`, Operation `List`, ApiVersion
+    `beta`; this check evaluates live tenant data.
 
     RULE (ported verbatim from Maester's own pass/fail split - live-verified against
     https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/multi-admin-approval,

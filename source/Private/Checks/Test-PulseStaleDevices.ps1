@@ -37,6 +37,14 @@
     Evidence identities are prefixed by source ('managed:'/'entra:'/'gap:') so the
     different id spaces - which are NOT the same identifier system - can never collide
     inside one finding's evidence set.
+
+    REDACTION (Phase 3 closing fix series, item 4, live-gate leak): deviceName
+    (managedDevices, including newly-enrolled) and displayName (entraDevices +
+    population-gap rows) are person-identifying per the docs/gates/README.md live-gate
+    leak. Marked via RedactDetailKeys so Invoke-PulseAssessment -Redact puts the raw
+    names into the evaluation RedactionMap. gap:summary has only a count and is
+    unmarked. deviceId was already dropped from gap Detail (Identity already carries
+    the redacted key).
 #>
 
 function Test-PulseStaleDevices {
@@ -140,13 +148,13 @@ function Test-PulseStaleDevices {
 
     $evidence = [System.Collections.Generic.List[hashtable]]::new()
     foreach ($device in $newlyEnrolledNeverSynced) {
-        $evidence.Add(@{ Identity = "managed:$($device.id)"; Detail = @{ source = 'managedDevices'; deviceName = $device.deviceName; status = 'newly enrolled, never synced'; enrolledDateTime = $device.enrolledDateTime } })
+        $evidence.Add(@{ Identity = "managed:$($device.id)"; Detail = @{ source = 'managedDevices'; deviceName = $device.deviceName; status = 'newly enrolled, never synced'; enrolledDateTime = $device.enrolledDateTime }; RedactDetailKeys = @('deviceName') })
     }
     foreach ($device in $staleManaged) {
-        $evidence.Add(@{ Identity = "managed:$($device.id)"; Detail = @{ source = 'managedDevices'; deviceName = $device.deviceName; lastSyncDateTime = $device.lastSyncDateTime } })
+        $evidence.Add(@{ Identity = "managed:$($device.id)"; Detail = @{ source = 'managedDevices'; deviceName = $device.deviceName; lastSyncDateTime = $device.lastSyncDateTime }; RedactDetailKeys = @('deviceName') })
     }
     foreach ($device in $staleEntra) {
-        $evidence.Add(@{ Identity = "entra:$($device.id)"; Detail = @{ source = 'entraDevices'; displayName = $device.displayName; approximateLastSignInDateTime = $device.approximateLastSignInDateTime } })
+        $evidence.Add(@{ Identity = "entra:$($device.id)"; Detail = @{ source = 'entraDevices'; displayName = $device.displayName; approximateLastSignInDateTime = $device.approximateLastSignInDateTime }; RedactDetailKeys = @('displayName') })
     }
     if ($entraOnlyDevices.Count -gt 0) {
         $evidence.Add(@{ Identity = 'gap:summary'; Detail = @{ source = 'population-gap'; entraRegisteredNotIntuneManagedCount = $entraOnlyDevices.Count } })
@@ -156,7 +164,7 @@ function Test-PulseStaleDevices {
             # duplicated/leaked the same device identity -Redact is supposed to hide. See
             # this module's -Redact docstring for the honest, non-overclaiming statement of
             # what detail redaction does and does not cover today.
-            $evidence.Add(@{ Identity = "gap:$($device.id)"; Detail = @{ source = 'population-gap'; displayName = $device.displayName } })
+            $evidence.Add(@{ Identity = "gap:$($device.id)"; Detail = @{ source = 'population-gap'; displayName = $device.displayName }; RedactDetailKeys = @('displayName') })
         }
     }
 

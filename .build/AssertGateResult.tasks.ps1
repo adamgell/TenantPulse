@@ -483,7 +483,17 @@
 # measured `./build.ps1 -Tasks build,test` total (verified on both PowerShell 7.6.5 and
 # 7.4.19) at the end of this series; all four tracking locations bumped together in the
 # same commit, per the ratchet's own rule.
-$script:tenantPulseGateMinimumTests = 1971
+#
+# 1971 -> 1972 (TP.INT.0005 RedactDetailKeys follow-up): +1 - strengthened
+# deviceName/displayName redaction It in tests/Unit/Checks/TP.INT.0005.Tests.ps1
+# (distinct managed/entra names + HMAC-shape + rule-evidence mark assertions).
+# 1972 is the real, measured `./build.ps1 -Tasks test` total on this tree; all
+# four tracking locations bumped together, per the ratchet's own rule.
+#
+# 1972 -> 1973 (TP.ENT.0012 AP08 v1.0 projection remap): +1 - NotApplicable when
+# GraphKit 0.2.2's AuthorizationPolicy/Get omits
+# permissionGrantPolicyIdsAssignedToDefaultUserRole.
+$script:tenantPulseGateMinimumTests = 1973
 
 task Record_Tested_Module_Digest {
     $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'

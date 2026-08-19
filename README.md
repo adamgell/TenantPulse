@@ -123,9 +123,11 @@ it when you are done.
 ## CIS compliance disclaimer
 
 TenantPulse's checks are informed by Microsoft's own official guidance, CISA's SCuBA/ScubaGear
-baselines, and (for the EIDSCA-ported and two Intune checks) adapted logic from the open-source
+baselines, and (for the EIDSCA-ported Entra checks and the 17 Maester-ported Intune checks)
+adapted logic from the open-source
 [Maester](https://github.com/maester365/maester) project (MIT-licensed - see
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)). **TenantPulse does not claim, imply, or
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the complete per-check attribution list,
+which a QA gate keeps reconciled 1:1 with the check catalog's Origin declarations). **TenantPulse does not claim, imply, or
 certify CIS Benchmark compliance, alignment, or coverage of any kind**, for Intune, Entra,
 or any other product.
 
@@ -153,7 +155,7 @@ constitute a claim of CIS Benchmark compliance."*
 ## Operator prerequisites
 
 - PowerShell 7.4 or later
-- [GraphKit](https://github.com/AdamGell/GraphKit) 0.1.1 or later, installed from PSGallery
+- [GraphKit](https://github.com/AdamGell/GraphKit) 0.2.2 or later, installed from PSGallery
   (TenantPulse declares this as a runtime dependency in its module manifest, so
   `Install-PSResource -Name TenantPulse` pulls it automatically)
 - A GraphKit profile already registered for the tenant you want to assess (see GraphKit's
@@ -167,10 +169,11 @@ constitute a claim of CIS Benchmark compliance."*
 - PSGallery access (or an internal mirror) to install TenantPulse and GraphKit
 
 Of the three operator gates Phase 1 originally identified, two are now closed: GraphKit
-0.1.1 is published to PSGallery (all ten seed checks' descriptors are live, none Pending),
-and `Policy.Read.All` has been granted on the Ivy24 lab app registration (Conditional-Access
--backed checks assess for real). Only TenantPulse's own first publish to PSGallery remains
-- see `docs/STATUS.md` for the current live-gate results and that gate's status.
+0.2.2 is published to PSGallery (TenantPulse 0.1.1 consumes it; the twelve GET/List
+datasets that were Pending on GraphKit 0.1.1 are live), and `Policy.Read.All` has been
+granted on the Ivy24 lab app registration (Conditional-Access-backed checks assess for
+real). TenantPulse 0.1.0 is already published; this release is the 0.1.1 GraphKit 0.2.2
+consume. See `docs/STATUS.md` for the current live-gate results.
 
 ## Catalog scope - what this is and isn't, honestly
 
@@ -182,9 +185,9 @@ said: Phase 1 shipped the ten-check seed (Entra Conditional Access `TP.ENT.0001`
 Intune device management `TP.INT.0001`-`0005`); Phase 3 then did two separate things, easy to
 conflate but not the same - the settings-catalog/typed-policy expansion engine (feeding
 richer data into checks that already existed, not new IDs) **and**, across Tasks 3.1-3.4, a
-23-check Intune wave (`TP.INT.0006`-`0009`, `0011`-`0016`, `0019`-`0031` - three IDs,
-`TP.INT.0010`/`0017`/`0018`, remain researched-but-BLOCKED and unshipped, see
-`docs/STATUS.md`'s own Phase 3 section for why) that took `TP.INT` from 5 checks to 28; Phase
+23-check Intune wave (`TP.INT.0006`-`0009`, `0011`-`0016`, `0019`-`0031` - `TP.INT.0010`
+is DESCOPED until GraphKit ARM exists; `TP.INT.0017`/`0018` remain researched-but-BLOCKED
+and unshipped, see `docs/STATUS.md`'s own Phase 3 section for why) that took `TP.INT` from 5 checks to 28; Phase
 4 then added the 23-check Entra core catalog - the EIDSCA port (`TP.ENT.0006`-`0011`),
 authorization/consent/password/guest-access clusters (`TP.ENT.0012`/`0013`/`0015`/`0016`), and
 the ScuBA/CISA-cited Conditional Access, privileged-role, and credential-hygiene checks
@@ -197,7 +200,7 @@ degrades honestly to `NotApplicable` with reason `descriptor-pending: awaiting G
 release` until a future GraphKit release ships the descriptor(s) it needs (source of truth:
 the `Pending = $true` flag on each dataset entry in `source/Data/DatasetMap.psd1`) - never a
 silent gap, never a guessed result. `TP.ENT.0022` additionally requires Entra ID P2 licensing
-once its descriptor lands; a 400/403 on a non-P2 tenant is itself a rendered finding ("PIM
+once collected; a 400/403 on a non-P2 tenant is itself a rendered finding ("PIM
 posture unassessable - Entra ID P2 required"), per its own research entry - not a collection
 failure hidden from the report.
 
@@ -214,17 +217,17 @@ failure hidden from the report.
 | TP.ENT.0009 | Entra.AuthenticationMethods | High | Live | SMS is not usable as an authentication sign-in factor |
 | TP.ENT.0010 | Entra.AuthenticationMethods | Medium | Live | Temporary Access Pass is enabled and configured for one-time use |
 | TP.ENT.0011 | Entra.AuthenticationMethods | High | Live | Voice call is not enabled as an authentication method |
-| TP.ENT.0012 | Entra.AuthorizationPolicy | High | Pending | Default authorization policy settings restrict SSPR-for-admins, guest self-service, and default app-registration rights |
-| TP.ENT.0013 | Entra.Consent | High | Pending | Group/team owner and risk-based user consent restrictions |
-| TP.ENT.0015 | Entra.PasswordProtection | High | Pending | Password Protection mode, on-prem enforcement, and Smart Lockout thresholds |
-| TP.ENT.0016 | Entra.GuestAccess | Medium | Pending | Guest group ownership is restricted and guest group-content access is intact |
+| TP.ENT.0012 | Entra.AuthorizationPolicy | High | Live | Default authorization policy settings restrict SSPR-for-admins, guest self-service, and default app-registration rights |
+| TP.ENT.0013 | Entra.Consent | High | Live | Group/team owner and risk-based user consent restrictions |
+| TP.ENT.0015 | Entra.PasswordProtection | High | Live | Password Protection mode, on-prem enforcement, and Smart Lockout thresholds |
+| TP.ENT.0016 | Entra.GuestAccess | Medium | Live | Guest group ownership is restricted and guest group-content access is intact |
 | TP.ENT.0017 | Entra.ConditionalAccess | Critical | Live | MFA is required for all users by an enforced Conditional Access policy |
 | TP.ENT.0018 | Entra.ConditionalAccess | Critical | Live | Phishing-resistant authentication strength is required for privileged roles |
 | TP.ENT.0019 | Entra.Identity | High | Live | Service principal credential hygiene (password/certificate lifetime) |
 | TP.ENT.0020 | Entra.PrivilegedRoles | High | Live | Global Administrator count is within ScuBA's 2-8 SHALL range |
 | TP.ENT.0021 | Entra.PrivilegedRoles | High | Live | Fewer than 10 total privileged role assignments |
-| TP.ENT.0022 | Entra.PrivilegedRoles | High | Pending | Zero permanent-active assignments for privileged roles (PIM posture, Entra ID P2) |
-| TP.ENT.0023 | Entra.Identity | Medium | Pending | Cross-tenant access default settings restrict inbound/outbound B2B collaboration |
+| TP.ENT.0022 | Entra.PrivilegedRoles | High | Live | Zero permanent-active assignments for privileged roles (PIM posture, Entra ID P2) |
+| TP.ENT.0023 | Entra.Identity | Medium | Live | Cross-tenant access default settings restrict inbound/outbound B2B collaboration |
 | TP.ENT.0024 | Entra.ConditionalAccess | Info | Live | Conditional Access coverage for workload identities (awareness, non-scored) |
 | TP.INT.0001 | Intune.Enrollment | Critical | Live | MDM authority is set to Intune |
 | TP.INT.0002 | Intune.Compliance | High | Live | A compliance policy exists for every enrolled platform |
@@ -233,22 +236,22 @@ failure hidden from the report.
 | TP.INT.0005 | Intune.DeviceLifecycle | Medium | Live | Devices inactive for more than 90 days |
 | TP.INT.0006 | Intune.SettingsCatalog | Medium | Live | Conflicting security-setting values across policies |
 | TP.INT.0007 | Intune.Governance | Low | Live | Intune device clean-up rule configured |
-| TP.INT.0008 | Intune.Governance | Medium | Pending | Intune Multi Admin Approval policy configured |
+| TP.INT.0008 | Intune.Governance | Medium | Live | Intune Multi Admin Approval policy configured |
 | TP.INT.0009 | Intune.Governance | Low | Pending | Windows diagnostic data processor configuration enabled |
-| TP.INT.0011 | Intune.Governance | Low | Pending | Default branding profile customized |
-| TP.INT.0012 | Intune.Updates | High | Pending | Windows Feature Update policy avoids end-of-support builds |
+| TP.INT.0011 | Intune.Governance | Low | Live | Default branding profile customized |
+| TP.INT.0012 | Intune.Updates | High | Live | Windows Feature Update policy avoids end-of-support builds |
 | TP.INT.0013 | Intune.Governance | High | Pending | Intune RBAC groups protected via RMAU or role-assignable groups |
 | TP.INT.0014 | Intune.EndpointSecurity | Critical | Pending | BitLocker full-disk encryption enforced via Endpoint Security policy |
 | TP.INT.0015 | Intune.EndpointSecurity | High | Pending | LAPS configuration policy meets minimum security bar |
 | TP.INT.0016 | Intune.SettingsCatalog | High | Live | Attack Surface Reduction "Standard Protection" baseline rules configured |
-| TP.INT.0019 | Intune.Connectors | Critical | Pending | Apple MDM Push (APNs) certificate valid for more than 30 days |
+| TP.INT.0019 | Intune.Connectors | Critical | Live | Apple MDM Push (APNs) certificate valid for more than 30 days |
 | TP.INT.0020 | Intune.Connectors | High | Live | Apple Automated Device Enrollment tokens valid and syncing |
 | TP.INT.0021 | Intune.Connectors | High | Live | Apple Volume Purchase Program tokens valid and syncing |
-| TP.INT.0022 | Intune.Connectors | Critical | Pending | Android Enterprise connection bound, validated, and syncing |
+| TP.INT.0022 | Intune.Connectors | Critical | Live | Android Enterprise connection bound, validated, and syncing |
 | TP.INT.0023 | Intune.Connectors | High | Live | Intune Certificate Connectors healthy and on a supported version |
-| TP.INT.0024 | Intune.Connectors | High | Pending | Mobile Threat Defense connectors enabled and syncing |
+| TP.INT.0024 | Intune.Connectors | High | Live | Mobile Threat Defense connectors enabled and syncing |
 | TP.INT.0025 | Intune.Enrollment | Medium | Live | Personally-owned Windows device enrollment blocked |
-| TP.INT.0026 | Intune.Enrollment | Medium | Pending | Windows Autopilot deployment profile exists and is assigned |
+| TP.INT.0026 | Intune.Enrollment | Medium | Live | Windows Autopilot deployment profile exists and is assigned |
 | TP.INT.0027 | Intune.Enrollment | Low | Live | No orphaned Windows Autopilot device identities |
 | TP.INT.0028 | Intune.Enrollment | Medium | Live | Enrollment Status Page configured with blocking failure behavior |
 | TP.INT.0029 | Intune.SecurityBaselines | Medium | Pending | Security baselines assigned and not on a deprecated version |
@@ -257,16 +260,11 @@ failure hidden from the report.
 
 Every `Pending` row above resolves against one of these not-yet-released GraphKit dataset
 descriptors (`source/Data/DatasetMap.psd1`'s own `Pending = $true` entries are the source of
-truth if this list ever drifts): `Entra.AuthorizationPolicy.Get`,
-`Entra.DirectorySettings.Values`,
-`Entra.PIM.RoleAssignmentScheduleInstances`/`RoleEligibilityScheduleInstances.List`,
-`Entra.CrossTenantAccessPolicy.Default.Get` (the four Phase 4/Entra ones), and, from Phase 3's
-Intune wave, `OperationApprovalPolicy.List`, `DataProcessorServiceForWindowsFeaturesOnboarding.Get`,
-`IntuneBrandingProfile.List`, `WindowsFeatureUpdateProfile.List`,
+truth if this list ever drifts): `DataProcessorServiceForWindowsFeaturesOnboarding.Get`,
 `IntuneRbacGroupProtectionWalk.Walk`, `EndpointSecurityDiskEncryptionPolicyWalk.Walk`,
-`EndpointSecurityLapsPolicyWalk.Walk`, `ApplePushNotificationCertificate.Get`,
-`AndroidManagedStoreAccountEnterpriseSettings.Get`, `MobileThreatDefenseConnector.List`,
-`WindowsAutopilotDeploymentProfile.List`, and `SecurityBaselineAssignedAndCurrentWalk.Walk`.
+`EndpointSecurityLapsPolicyWalk.Walk`, and `SecurityBaselineAssignedAndCurrentWalk.Walk`.
+GraphKit 0.2.2 shipped official GET/List descriptors for the twelve datasets those five
+do not cover; Walks were not invented for the remaining Types.
 
 What the catalog does **not** cover, honestly, as of Phase 4: group-**membership** expansion for
 Conditional Access exclusions (only direct user/group/role references resolve today - a group
@@ -276,7 +274,7 @@ silent gap), assignment verification for Intune policies (existence is checked, 
 policy is actually assigned to any device), transitive/group-assigned role-assignment expansion
 for `TP.ENT.0021`'s privileged-role count (direct assignments only - documented in that check's
 own evidence text), `TP.ENT.0019`'s scope (only `servicePrincipal` credentials are read - GraphKit
-0.1.1 has no `Application` type yet, so app-**registration** client secrets/certificates are not
+0.2.2 has no `Application` type yet, so app-**registration** client secrets/certificates are not
 visible to this check at all until a future GraphKit release adds one; evidence is also capped to
 the top 50 worst offenders by design, not exhaustive), and a rendering format other than JSON.
 

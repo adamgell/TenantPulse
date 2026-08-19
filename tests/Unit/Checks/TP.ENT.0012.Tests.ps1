@@ -136,6 +136,21 @@ Describe 'TP.ENT.0012 - Default authorization policy settings cluster' {
         $finding.reason | Should -Match "guestUserRoleId"
     }
 
+    It 'NotApplicable: v1.0 authorizationPolicy omits AP08 permissionGrantPolicyIdsAssignedToDefaultUserRole (GraphKit 0.2.2 projection)' {
+        $v1 = $script:compliantAuthzPolicyHashtable.Clone()
+        $v1.Remove('permissionGrantPolicyIdsAssignedToDefaultUserRole')
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0012' -Datasets @(
+            @{ Name = 'authorizationPolicy'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($v1) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'permissionGrantPolicyIdsAssignedToDefaultUserRole'
+        $finding.reason | Should -Match 'v1.0'
+        @($finding.evidence | Where-Object { $_.identity -eq 'EIDSCA.AP08' }).Count | Should -Be 1
+        $finding.evidence.Count | Should -Be 9
+    }
+
     It 'descriptor-pending: NotApplicable when authorizationPolicy was skipped (no released GraphKit descriptor)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0012' -Datasets @(
             @{ Name = 'authorizationPolicy'; ApiVersion = 'beta'; Status = 'Skipped'; Reason = 'descriptor-pending: awaiting GraphKit release' }

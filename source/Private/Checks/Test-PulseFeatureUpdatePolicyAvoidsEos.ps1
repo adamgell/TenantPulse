@@ -3,9 +3,9 @@
     end-of-support builds (Task 3.2, Maester port MT.1102 - Test-MtFeatureUpdatePolicy,
     MIT).
 
-    PENDING DATASET (honest NA): windowsFeatureUpdateProfiles has no released GraphKit
-    0.1.1 descriptor - DatasetMap.psd1 marks it Pending=$true. On a live tenant this
-    resolves NotApplicable until GraphKit ships the descriptor.
+    DATASET (live): GraphKit 0.2.2 shipped the official descriptor and DatasetMap now treats
+    this dataset as live. Type `WindowsFeatureUpdateProfile`, Operation `List`,
+    ApiVersion `beta`; this check evaluates live tenant data.
 
     DETERMINISM: "is endOfSupportDate in the past" needs an "as of when" reference.
     Maester's own function compares against Get-Date (wall-clock, live-evaluation time) -

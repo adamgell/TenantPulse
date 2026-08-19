@@ -60,12 +60,14 @@
         surfaced raw in rendered findings evidence Detail under -Redact, 2026-08-17,
         TP.INT.0020/0021's appleIdentifier/organizationName detail keys): evidence Detail is
         NOT blanket-redacted, and never will be - a rule author is free to put whatever
-        fields it judges useful into Detail (e.g. TP.INT.0005's deviceName), and most of
-        that is deliberately NOT identity-shaped (tenant-resource GUIDs and policy display
-        names stay unredacted by design). Instead, a rule MAY mark specific Detail keys as
-        identity-bearing on a per-evidence-entry basis via -RedactDetailKeys (a string
-        array naming the keys, e.g. `@('appleIdentifier')` - see New-PulseFinding's own
-        docstring for the full mechanism). Invoke-PulseEvaluation's redaction-map-building
+        fields it judges useful into Detail, and most of that is deliberately NOT
+        identity-shaped (tenant-resource GUIDs and policy display names stay unredacted by
+        design). Person-identifying Detail keys are the opposite: TP.INT.0005's
+        deviceName/displayName are marked device-name-class keys, the same class as
+        appleIdentifier. A rule MAY mark specific Detail keys as identity-bearing on a
+        per-evidence-entry basis via -RedactDetailKeys (a string array naming the keys,
+        e.g. `@('appleIdentifier')` - see New-PulseFinding's own docstring for the full
+        mechanism). Invoke-PulseEvaluation's redaction-map-building
         step adds each marked-and-present raw Detail value to the SAME HMAC map an
         evidence Identity is pseudonymized through, and Export-PulseJsonReport substitutes
         it under -Redact using the identical lookup-and-substitute logic already applied to

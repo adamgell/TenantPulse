@@ -708,7 +708,13 @@ jobs:
           # standing gate, item 3's TP.INT.0028 ESP-projection fixtures, item 4's
           # evidence-Detail-redaction regression coverage) - see
           # .build/AssertGateResult.tasks.ps1's own accounting.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1971 -AllowedSkips $allowedSkips -AllowNotRun 1
+          #
+          # 1971 -> 1972 (TP.INT.0005 RedactDetailKeys follow-up): +1 - see
+          # .build/AssertGateResult.tasks.ps1's own accounting.
+          #
+          # 1972 -> 1973 (TP.ENT.0012 AP08 v1.0 projection remap): +1 - see
+          # .build/AssertGateResult.tasks.ps1's own accounting.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 1973 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

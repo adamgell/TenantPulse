@@ -247,4 +247,89 @@ Describe 'TP.INT.0005 - Devices inactive for more than 90 days' {
             Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+    It 'marks deviceName/displayName for redaction - stale-device names land in the evaluation RedactionMap (closing-series follow-up per docs/gates/README.md incident)' {
+        $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $keyPath = Join-Path $storeRoot '.opkey/operator.key'
+        try {
+            $result = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath {
+                param($storeRoot, $keyPath)
+
+                $catalog = @(Import-PulseCheckCatalog)
+                $check = $catalog | Where-Object { $_.Id -eq 'TP.INT.0005' }
+
+                $managedData = @(
+                    [pscustomobject]@{ id = 'm1'; deviceName = "JDoe's MacBook"; lastSyncDateTime = '2020-01-01T00:00:00Z'; azureADDeviceId = 'aad-1' }
+                )
+                $entraData = @(
+                    [pscustomobject]@{ id = 'e1'; displayName = "ASmith's iPhone"; deviceId = 'aad-1'; approximateLastSignInDateTime = '2020-01-01T00:00:00Z' }
+                )
+
+                $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+                Write-PulseDataset -Store $store -Name 'managedDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data $managedData
+                Write-PulseDataset -Store $store -Name 'entraDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data $entraData
+
+                $evaluation = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $rule = Test-PulseStaleDevices -Datasets @{
+                    managedDevices = $managedData
+                    entraDevices   = $entraData
+                }
+
+                [pscustomobject]@{
+                    RedactionMap = $evaluation.RedactionMap
+                    Finding      = $evaluation.Document.findings[0]
+                    RuleEvidence = @($rule.Evidence)
+                }
+            }
+
+            $redactionMap = $result.RedactionMap
+            $finding = $result.Finding
+
+            $redactionMap.Keys | Should -Contain "JDoe's MacBook"
+            $redactionMap.Keys | Should -Contain "ASmith's iPhone"
+            $redactionMap["JDoe's MacBook"] | Should -Match '^tp-[0-9a-f]{64}$'
+            $redactionMap["ASmith's iPhone"] | Should -Match '^tp-[0-9a-f]{64}$'
+
+            $finding.status | Should -Be 'Fail'
+
+            $deviceNameRows = @($finding.evidence | Where-Object { -not [string]::IsNullOrEmpty([string] $_.detail.deviceName) })
+            $displayNameRows = @($finding.evidence | Where-Object { -not [string]::IsNullOrEmpty([string] $_.detail.displayName) })
+            $deviceNameRows.Count | Should -Be 1
+            $displayNameRows.Count | Should -Be 1
+            $deviceNameRows[0].detail.deviceName | Should -Be "JDoe's MacBook"
+            $displayNameRows[0].detail.displayName | Should -Be "ASmith's iPhone"
+
+            foreach ($entry in @($finding.evidence)) {
+                $detail = $entry.detail
+                if ($null -eq $detail) { continue }
+
+                # gap:summary is count-only; no person-identifying Detail key to mark.
+                if ($entry.identity -eq 'gap:summary') { continue }
+
+                if (-not [string]::IsNullOrEmpty([string] $detail.deviceName)) {
+                    $redactionMap.Keys | Should -Contain $detail.deviceName
+                }
+                if (-not [string]::IsNullOrEmpty([string] $detail.displayName)) {
+                    $redactionMap.Keys | Should -Contain $detail.displayName
+                }
+            }
+
+            # Document findings drop RedactDetailKeys (identity/detail/sortKey only).
+            # The mark lives on the normalized rule evidence the evaluator reads.
+            foreach ($entry in @($result.RuleEvidence)) {
+                $detail = $entry.Detail
+                if ($null -eq $detail) { continue }
+
+                if ($entry.Identity -eq 'gap:summary') { continue }
+
+                if (-not [string]::IsNullOrEmpty([string] $detail.deviceName)) {
+                    @($entry.RedactDetailKeys) | Should -Contain 'deviceName'
+                }
+                if (-not [string]::IsNullOrEmpty([string] $detail.displayName)) {
+                    @($entry.RedactDetailKeys) | Should -Contain 'displayName'
+                }
+            }
+        } finally {
+            Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }

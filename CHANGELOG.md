@@ -100,6 +100,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   all four expansion artifacts byte-identical to the original run.
 
 ### Changed
+- **GraphKit 0.2.2 consume (TenantPulse 0.1.1).** Pin bumped to GraphKit 0.2.2 in both
+  `source/TenantPulse.psd1` and `RequiredModules.psd1`. Dropped `Pending = $true` from
+  twelve DatasetMap datasets whose official GET/List descriptors shipped:
+  `authorizationPolicy`, `directorySettings`, `roleAssignmentScheduleInstances`,
+  `roleEligibilityScheduleInstances`, `crossTenantAccessPolicyDefault`,
+  `operationApprovalPolicies`, `intuneBrandingProfiles`, `windowsFeatureUpdateProfiles`,
+  `applePushNotificationCertificate`, `androidManagedStoreAccountEnterpriseSettings`,
+  `mobileThreatDefenseConnectors`, `windowsAutopilotDeploymentProfiles`. ApiVersion
+  corrections to match GraphKit: `authorizationPolicy`,
+  `applePushNotificationCertificate`, and `mobileThreatDefenseConnectors` are v1.0
+  (were beta). Still Pending (no official GET / no Walk in GraphKit):
+  `dataProcessorServiceForWindowsFeaturesOnboarding`, `intuneRbacGroupProtection`,
+  `endpointSecurityDiskEncryptionPolicies`, `endpointSecurityLapsPolicies`,
+  `securityBaselinesAssignedAndCurrent`. Walks were not invented.
+
+- **TP.ENT.0012 AP08 remap (GraphKit 0.2.2 live).** `permissionGrantPolicyIdsAssignedToDefaultUserRole`
+  is not on the v1.0 `authorizationPolicy` resource; GraphKit's official Get is v1.0, so a
+  live row never carries AP08. Absent AP08 is now NotApplicable (same projection class as
+  TP.INT.0028's ESP List trim) when the other gating defaults pass; other missing
+  properties still Error. A remaining gating Fail still surfaces.
 
 - Check descriptor loader hardening (post-review): closed PowerShell-coercion type holes
   that let array-typed `Id`/`Severity`/`Rule.Type`/etc. silently pass their
@@ -276,6 +296,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from whatever happens to be on disk at publish time - closing a gap where a built-module
   file could be silently edited (not rebuilt) between a passing test run and a later
   publish with nothing catching the drift.
+- **TP.INT.0005 stale-device evidence Detail hostnames (`Test-PulseStaleDevices`):**
+  `deviceName` (managed / newly-enrolled rows) and `displayName` (entra + gap rows) are now
+  marked via `RedactDetailKeys`, so `Invoke-PulseAssessment -Redact` HMAC-pseudonymizes those
+  hostnames the same way it already does evidence Identity. Motive: the
+  `docs/gates/README.md` live-gate incident (person-derived device names leaking in
+  `evidence[].detail.deviceName`/`displayName`). The earlier gap-row `deviceId` drop (already
+  recorded above) only removed a duplicate of the already-redacted Identity; this is the
+  remaining device-name class. Does not claim full de-identification.
 
 ### Security
 

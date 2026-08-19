@@ -2,11 +2,9 @@
     Private: TP.INT.0026 rule function - Windows Autopilot deployment profile exists and
     is assigned (Task 3.3, research-matrix - no Maester origin, practitioner judgment).
 
-    PENDING DATASET (honest NA): windowsAutopilotDeploymentProfiles has no released
-    GraphKit 0.1.1 descriptor (confirmed via a live Get-GraphOperation -List enumeration -
-    only the DEVICE IDENTITY list, `AutopilotDevice`, is released; the deployment PROFILE
-    object itself, a distinct resource, is not) - DatasetMap.psd1 marks it Pending=$true.
-    On a live tenant this resolves NotApplicable until GraphKit ships the descriptor.
+    DATASET (live): GraphKit 0.2.2 shipped the official descriptor and DatasetMap now treats
+    this dataset as live. Type `WindowsAutopilotDeploymentProfile`, Operation `List`,
+    ApiVersion `beta`; this check evaluates live tenant data.
 
     CLAIM (live-verified against https://learn.microsoft.com/en-us/autopilot/, fetched for
     this check - the page is a valid, current landing page linking Windows Autopilot

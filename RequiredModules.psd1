@@ -28,13 +28,13 @@
     # pinned to the same version) and is now published to PSGallery, so
     # Resolve-Dependency (PSResourceGet/PowerShellGet against PSGallery) resolves it here
     # like every other build dependency.
-    GraphKit                    = '0.1.1'
+    GraphKit                    = '0.2.2'
 
     # GraphKit's own RequiredModules (transitive runtime dependencies). Resolve-Dependency
     # does NOT walk transitive requirements, and GraphKit's manifest demands these be
     # loadable at import - locally they happen to be installed, so only CI failed (every
     # matrix leg, at Import-Module time). Declare them explicitly, pinned to GraphKit
-    # 0.1.1's own declared minima.
+    # 0.2.2's own declared minima (unchanged from 0.1.1).
     'Microsoft.Graph.Authentication'        = '2.38.1'
     'Microsoft.PowerShell.SecretManagement' = '1.1.2'
 }

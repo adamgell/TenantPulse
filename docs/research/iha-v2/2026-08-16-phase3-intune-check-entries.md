@@ -152,7 +152,7 @@ Consulting.WhatItMeans/WhyItMatters text was corrected to match this on 2026-08-
 that file's own git history) - any remaining GDPR mention there is explicitly the
 author's own contextual note, not attributed to the cited Authority.
 
-## TP.INT.0010 — numbering gap (BLOCKED at T3.2, never a research entry here)
+## TP.INT.0010 — numbering gap (DESCOPED 2026-08-18, never a research entry here)
 
 There is no research entry for TP.INT.0010 above - the id sequence jumps from TP.INT.0009
 to TP.INT.0011 deliberately, not by accident. `TP.INT.0010` names Maester's "Intune
@@ -168,13 +168,16 @@ per-check ship/blocked table and its own concerns/follow-ups item 1:
 > "wait for GraphKit." Needs an explicit product decision (separate ARM auth path, or
 > permanently-scoped-out) before it can ship honestly."
 
+**DESCOPED (2026-08-18):** product decision recorded. `TP.INT.0010` is descoped until
+GraphKit ARM exists. The id stays reserved (0009 then 0011). No `.psd1`, no Pending
+dataset, and no ARM auth path in TenantPulse now.
+
 This is the one Maester Intune check that is not a Graph call at all, so it was never wired
 into TenantPulse's own descriptor-Pending mechanism the way every other not-yet-collectible
 check (TP.INT.0008, 0009, 0011-0015, etc.) was - doing so would have implied "wait for a
 GraphKit release" for something GraphKit's own Graph-only transport can never surface.
-T3.2's own recommendation stands, unchanged by this task: either descope it permanently from
-the Maester-port catalog, or schedule a dedicated ARM-auth-path task - it should not
-silently reappear as "just another Pending dataset" in a future batch. No `.psd1` file, no
+The 2026-08-18 product decision closes T3.2's open recommendation: descope until GraphKit
+ARM exists. It must not silently reappear as "just another Pending dataset" in a future batch. No `.psd1` file, no
 research-entry section, and no Consulting content exist for TP.INT.0010 anywhere in this
 repo, and this task does not create one.
 
