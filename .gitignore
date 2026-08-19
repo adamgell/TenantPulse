@@ -8,3 +8,5 @@ testResults/
 scratch/
 # Local secrets (PSGallery API key, etc.) - never committed
 .env
+# Isolated feature worktrees
+.worktrees/
