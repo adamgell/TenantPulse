@@ -123,6 +123,8 @@ not invented. TenantPulse 0.1.0 is already published; this is the 0.1.1 consume.
 The T4.5 Ivy24 live-gate table later in this file is the historical 0.1.1-era result.
 Those twelve GET/List datasets are no longer awaiting GraphKit.
 
+**R0 package-identity correction (2026-08-19):** published TenantPulse `0.1.1` remains the historical consumer artifact and is not overwritten. Current source is the unpublished `0.1.2` candidate because changing `RequiredModules` changes shipped bytes. Its runtime manifest requires exact GraphKit `0.2.2`; the build dependency file retains its separate `0.2.2` restore pin. Source, built manifest, `.nupkg`, full suite, and dry-run digest verification must all agree before this candidate can be called releasable.
+
 ## Phase 2 (Settings expansion, core slice T2.1-T2.7): complete, live-gated
 
 Every Phase 2 core-slice task (T2.1 snapshot schema extension, T2.2 Settings Catalog

@@ -155,9 +155,7 @@ constitute a claim of CIS Benchmark compliance."*
 ## Operator prerequisites
 
 - PowerShell 7.4 or later
-- [GraphKit](https://github.com/AdamGell/GraphKit) 0.2.2 or later, installed from PSGallery
-  (TenantPulse declares this as a runtime dependency in its module manifest, so
-  `Install-PSResource -Name TenantPulse` pulls it automatically)
+- [GraphKit](https://github.com/AdamGell/GraphKit) exactly `0.2.2`, installed from PSGallery. TenantPulse `0.1.2` declares this with `RequiredVersion`, so a newer unverified GraphKit does not satisfy the runtime contract.
 - A GraphKit profile already registered for the tenant you want to assess (see GraphKit's
   own documentation - profile registration, credential setup, and Graph app-registration
   concerns are entirely GraphKit's responsibility, not TenantPulse's)
@@ -168,12 +166,7 @@ constitute a claim of CIS Benchmark compliance."*
   collect require
 - PSGallery access (or an internal mirror) to install TenantPulse and GraphKit
 
-Of the three operator gates Phase 1 originally identified, two are now closed: GraphKit
-0.2.2 is published to PSGallery (TenantPulse 0.1.1 consumes it; the twelve GET/List
-datasets that were Pending on GraphKit 0.1.1 are live), and `Policy.Read.All` has been
-granted on the Ivy24 lab app registration (Conditional-Access-backed checks assess for
-real). TenantPulse 0.1.0 is already published; this release is the 0.1.1 GraphKit 0.2.2
-consume. See `docs/STATUS.md` for the current live-gate results.
+GraphKit `0.2.2` and TenantPulse `0.1.1` are published on PSGallery. Published TenantPulse `0.1.1` used minimum-version dependency semantics; current source is the unpublished `0.1.2` candidate, which requires exact GraphKit `0.2.2`. The twelve GET/List datasets that were Pending on GraphKit `0.1.1` remain live. See `docs/STATUS.md` for live-gate evidence and current candidate status.
 
 ## Catalog scope - what this is and isn't, honestly
 
@@ -357,16 +350,11 @@ suite through the build entry point rather than invoking Pester directly:
 
 ```powershell
 ./build.ps1 -ResolveDependency -Tasks noop
-./build.ps1 -Tasks build
-./build.ps1 -Tasks test
 ./build.ps1 -Tasks pack
+./build.ps1 -Tasks test
 ```
 
-The `pack` task produces the package from the tested build output. Generated artifacts are
-written under `output/` and should not be edited directly. `./build.ps1 -Tasks test` also
-enforces a whole-result `MinimumTests` gate (via `tests/QA/Assert-GateResult.ps1`) locally,
-the same one CI enforces, and records a per-shipped-file SHA-256 digest manifest that
-`scripts/Publish-TenantPulsePackage.ps1` later verifies the packaged `.nupkg` against.
+The `pack` task begins with `Clean`, so package before testing. The `test` task proves that package-producing build, enforces the whole-result gate, and records the per-shipped-file SHA-256 manifest that `scripts/Publish-TenantPulsePackage.ps1` compares with the `.nupkg`.
 
 `scripts/Publish-TenantPulsePackage.ps1` publishes an already-packed `.nupkg` to PSGallery.
 It never builds and enforces pack-first-then-verify: it compares every shipped file inside
@@ -377,10 +365,7 @@ PSGallery - and only publishes for real when given a resolved API key (via
 `-NuGetApiKeySecure` or the `TENANTPULSE_NUGET_API_KEY` environment variable - there is no
 plain-string API key parameter) and `-Confirm`.
 
-GraphKit is declared as a runtime dependency in the module manifest
-(`source/TenantPulse.psd1`) and pinned to the same version in `RequiredModules.psd1` (the
-Sampler build-dependency file), so `./build.ps1 -ResolveDependency` resolves it from
-PSGallery like every other build dependency - no manual `$env:PSModulePath` setup needed.
+`source/TenantPulse.psd1` declares GraphKit `0.2.2` with `RequiredVersion`, the exact runtime contract. `RequiredModules.psd1` separately pins `GraphKit = '0.2.2'` for build-time restore through PSGallery. These two files intentionally use different schemas but must resolve the same version.
 
 Unit tests never import real GraphKit: every GraphKit command TenantPulse calls
 (`Get-GraphContext`, `Get-GraphObject`, `Invoke-GraphOperation`, `Get-GraphOperation`) is

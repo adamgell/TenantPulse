@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Exact GraphKit runtime contract (TenantPulse 0.1.2 candidate).** The module manifest now requires exactly GraphKit `0.2.2`; `RequiredModules.psd1` remains the separate restore-time `0.2.2` pin. Source, built manifest, and candidate package are checked independently. Published TenantPulse `0.1.1` remains immutable and is not republished.
+
+## [0.1.1] - 2026-08-19
+
 ### Added
 
 - Repository scaffold: Sampler build pipeline, module manifest, QA gates, and CI workflow.

@@ -77,9 +77,9 @@ jobs:
         shell: pwsh
         run: pwsh -File ./build.ps1 -ResolveDependency -Tasks noop
 
-      - name: Build
+      - name: Pack candidate
         shell: pwsh
-        run: pwsh -File ./build.ps1 -Tasks build
+        run: pwsh -File ./build.ps1 -Tasks pack
 
       - name: Test
         shell: pwsh
@@ -717,7 +717,9 @@ jobs:
           #
           # 1973 -> 2009 (TP.INT.0017/0018 App Control + Managed Installer): +36 - see
           # .build/AssertGateResult.tasks.ps1's own accounting.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2009 -AllowedSkips $allowedSkips -AllowNotRun 1
+          # 2009 -> 2014 (R0 source/release truth): +5 package-identity and exact GraphKit
+          # dependency assertions across source, restore pin, built manifest, and nupkg.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2014 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
