@@ -397,11 +397,9 @@ Pending Walk/data-processor checks are honest `descriptor-pending` NA
 (`TP.INT.0009`/`0013`/`0014`/`0015`/`0029`). `-FromSnapshot` replay of that snapshot was
 byte-identical (664563 bytes). Redacted findings sweep: 0 email-shaped leaves, 0
 possessive `displayName`/`deviceName` leaves. Tenant-resource GUIDs in Detail stay
-unredacted by design. **Live surprise, not closed here:** `TP.ENT.0012` Error -
-GraphKit 0.2.2's `AuthorizationPolicy/Get` is v1.0, and that projection has no
-`permissionGrantPolicyIdsAssignedToDefaultUserRole` property (field-absence lens, same
-class as the pre-fix TP.INT.0028 ESP trim). Remap or NA-on-absent is follow-up, not
-claimed fixed.
+unredacted by design. **Live surprise, closed:** `TP.ENT.0012` Error on absent
+`permissionGrantPolicyIdsAssignedToDefaultUserRole` remapped to NotApplicable (v1.0
+AuthorizationPolicy/Get projection; same class as TP.INT.0028's ESP List trim).
 
 ## Phase 4: core Entra catalog (complete, Task 4.5 phase gate)
 
@@ -541,13 +539,14 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
 
 ## Not yet done
 
-1. **TenantPulse 0.1.1 published to PSGallery** (2026-08-19). GraphKit 0.2.2 consume.
-   0.1.0 remains listed as the prior release. Not republished.
-2. **Live `-FromSnapshot` re-check of Phase 3 Detail-redaction** is done (byte-identical
-   replay, 2026-08-18). `TP.ENT.0012` v1.0 AP08 absence remapped to NotApplicable.
-3. **`TP.INT.0010`**, DESCOPED 2026-08-18 until GraphKit ARM exists. Id reserved
-   (0009 then 0011). No `.psd1`, no Pending dataset, no ARM auth path in TenantPulse now.
-4. **`TP.INT.0017` / `TP.INT.0018`**, still BLOCKED (corpus + docs-schema). Not shipped.
-5. **Evidence-Detail residual**: Reason text is still only capped; unmarked
+1. **`TP.INT.0017` / `TP.INT.0018`**, still BLOCKED (App Control `visibility:"template"`
+   is undocumented in published Graph schema; settings-definition corpus has zero App
+   Control / Managed Installer entries). Not shipped. Needs a product call: implement
+   against live schema + extend the corpus, or keep BLOCKED.
+2. **Evidence-Detail residual**: Reason text is still only capped; unmarked
    person-identifying Detail keys on checks other than the marked Apple-ID /
-   TP.INT.0005 device-name keys stay unredacted under `-Redact`.
+   TP.INT.0005 device-name keys stay unredacted under `-Redact`. Judgment boundary
+   (policy display names, role names) is deliberate, not unfinished code.
+3. **`TP.INT.0010`**, DESCOPED until GraphKit ARM exists. Id reserved.
+4. Phase 2b / scale (not this catalog): Settings Catalog assignments, admin templates,
+   typed `intent`, `-ExpandSettings` default-on, dataset streaming.
