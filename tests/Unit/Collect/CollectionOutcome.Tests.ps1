@@ -21,14 +21,71 @@ Describe 'New-PulseCollectionGap' {
         $gap.Detail.permission | Should -Be 'Device.Read.All'
         $gap.Operation | Should -Be 'List'
         $gap.ApiVersion | Should -Be 'beta'
-    }
 
+    }
     It 'rejects an unsupported failure class' {
         {
             InModuleScope TenantPulse {
                 New-PulseCollectionGap -Scope 'child-a' -FailureClass 'NotARealFailure' -ReasonCode 'bad' -Detail $null -Operation 'List' -ApiVersion 'beta'
             }
         } | Should -Throw -ExpectedMessage '*FailureClass*'
+    }
+    It 'rejects a gap with a missing required field or invalid detail type' {
+        $cases = @(
+            @{ Name = 'Scope'; Gap = [pscustomobject]@{ Scope = $null; FailureClass = 'ProviderFailed'; ReasonCode = 'child-failed'; Detail = $null; Operation = 'List'; ApiVersion = 'beta' } }
+            @{ Name = 'ReasonCode'; Gap = [pscustomobject]@{ Scope = 'child-a'; FailureClass = 'ProviderFailed'; ReasonCode = ''; Detail = $null; Operation = 'List'; ApiVersion = 'beta' } }
+            @{ Name = 'Operation'; Gap = [pscustomobject]@{ Scope = 'child-a'; FailureClass = 'ProviderFailed'; ReasonCode = 'child-failed'; Detail = $null; Operation = $null; ApiVersion = 'beta' } }
+            @{ Name = 'ApiVersion'; Gap = [pscustomobject]@{ Scope = 'child-a'; FailureClass = 'ProviderFailed'; ReasonCode = 'child-failed'; Detail = $null; Operation = 'List'; ApiVersion = $null } }
+            @{ Name = 'Detail'; Gap = [pscustomobject]@{ Scope = 'child-a'; FailureClass = 'ProviderFailed'; ReasonCode = 'child-failed'; Detail = 'not-a-hashtable'; Operation = 'List'; ApiVersion = 'beta' } }
+            @{ Name = 'FailureClass'; Gap = [pscustomobject]@{ Scope = 'child-a'; FailureClass = $null; ReasonCode = 'child-failed'; Detail = $null; Operation = 'List'; ApiVersion = 'beta' } }
+        )
+
+        foreach ($case in $cases) {
+            {
+                InModuleScope TenantPulse -ArgumentList $case.Gap {
+                    param($gap)
+                    New-PulseCollectionOutcome -Dataset 'malformed-gap' -Status 'Partial' -Rows @() -Gaps ([object[]]@($gap)) -ReasonCode 'partial' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta'
+                }
+            } | Should -Throw -ExpectedMessage "*$($case.Name)*"
+        }
+
+        {
+            InModuleScope TenantPulse {
+                New-PulseCollectionOutcome -Dataset 'null-gap' -Status 'Partial' -Rows @() -Gaps ([object[]]@($null)) -ReasonCode 'partial' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta'
+            }
+        } | Should -Throw -ExpectedMessage '*Gaps*null*'
+    }
+
+    It 'preserves Rows, Gaps, and Operations as object arrays for zero, one, and many values' {
+        $shapes = InModuleScope TenantPulse {
+            $gap = New-PulseCollectionGap -Scope 'child-a' -FailureClass 'ProviderFailed' -ReasonCode 'child-failed' -Detail $null -Operation 'List' -ApiVersion 'beta'
+            $gap2 = New-PulseCollectionGap -Scope 'child-b' -FailureClass 'PermissionDenied' -ReasonCode 'child-denied' -Detail @{} -Operation 'List' -ApiVersion 'beta'
+            $scalar = New-PulseCollectionOutcome -Dataset 'scalar' -Status 'Partial' -Rows ([pscustomobject]@{ id = 'scalar' }) -Gaps $gap -ReasonCode 'scalar' -Detail @{} -Operations 'List'
+            @(
+                (New-PulseCollectionOutcome -Dataset 'zero' -Status 'Collected' -Rows ([object[]]@()) -Gaps ([object[]]@()) -ReasonCode 'zero' -Detail @{} -Operations ([object[]]@())),
+                (New-PulseCollectionOutcome -Dataset 'one' -Status 'Partial' -Rows ([object[]]@([pscustomobject]@{ id = '1' })) -Gaps ([object[]]@($gap)) -ReasonCode 'one' -Detail @{} -Operations ([object[]]@('List'))),
+                (New-PulseCollectionOutcome -Dataset 'many' -Status 'Partial' -Rows ([object[]]@([pscustomobject]@{ id = '1' }, [pscustomobject]@{ id = '2' })) -Gaps ([object[]]@($gap, $gap2)) -ReasonCode 'many' -Detail @{} -Operations ([object[]]@('List', 'Get'))),
+                $scalar
+            )
+        }
+
+        foreach ($shape in $shapes) {
+            $shape.Rows.GetType().FullName | Should -Be 'System.Object[]'
+            $shape.Gaps.GetType().FullName | Should -Be 'System.Object[]'
+            $shape.Operations.GetType().FullName | Should -Be 'System.Object[]'
+        }
+        $shapes[0].Rows.Count | Should -Be 0
+        $shapes[1].Rows.Count | Should -Be 1
+        $shapes[2].Rows.Count | Should -Be 2
+        $shapes[3].Rows.Count | Should -Be 1
+        $shapes[0].Gaps.Count | Should -Be 0
+        $shapes[1].Gaps.Count | Should -Be 1
+        $shapes[2].Gaps.Count | Should -Be 2
+        $shapes[3].Gaps.Count | Should -Be 1
+        $shapes[0].Operations.Count | Should -Be 0
+        $shapes[1].Operations.Count | Should -Be 1
+        $shapes[2].Operations.Count | Should -Be 2
+        $shapes[3].Operations.Count | Should -Be 1
     }
 }
 

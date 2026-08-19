@@ -1,5 +1,6 @@
 <#
-    Private: the single writer for one manifest.references.<name> entry (schema 1.1.0).
+    Private: the single writer for one manifest.references.<name> entry (schema 2.0.0;
+    legacy 1.1.0 stores remain writable when their namespace is structurally valid).
 
     Thin, domain-typed wrapper over Set-PulseManifestEntry's 'Reference' parameter set -
     mirrors how Write-PulseDataset wraps the 'Dataset' set rather than a caller poking

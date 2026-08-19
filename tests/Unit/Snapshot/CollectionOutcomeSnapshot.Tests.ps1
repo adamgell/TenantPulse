@@ -52,12 +52,13 @@ Describe 'Task 1 snapshot outcome schema' {
         $rows[0].id | Should -Be 'row-1'
     }
 
-    It 'migrates released 1.0.0 and 1.1.0 manifests in memory without inferring from legacy reason text' {
+    It 'migrates released 1.0.0 and 1.1.0 manifests in memory without changing the declared schema or inferring from legacy reason text' {
         foreach ($legacyVersion in @('1.0.0', '1.1.0')) {
             $root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
             New-Item -Path $root -ItemType Directory -Force | Out-Null
             $manifestPath = Join-Path $root 'manifest.json'
-            $legacyJson = '{"schemaVersion":"' + $legacyVersion + '","createdUtc":"2026-08-19T00:00:00.000Z","tenant":"tp-legacy","producer":{},"collectionFailure":null,"datasets":{"ok":{"status":"Collected","apiVersion":"v1.0","reason":"descriptor-pending but actually collected","sha256":null,"itemCount":0,"collectedUtc":null},"bad":{"status":"Failed","apiVersion":"v1.0","reason":"descriptor-pending: old text must not be parsed","sha256":null,"itemCount":null,"collectedUtc":null},"skip":{"status":"Skipped","apiVersion":"v1.0","reason":"permission-denied: old text must not be parsed","sha256":null,"itemCount":null,"collectedUtc":null}}}'
+            $legacyNamespaces = if ($legacyVersion -eq '1.1.0') { ',"references":{},"expansions":{}' } else { '' }
+            $legacyJson = '{"schemaVersion":"' + $legacyVersion + '","createdUtc":"2026-08-19T00:00:00.000Z","tenant":"tp-legacy","producer":{},"collectionFailure":null,"datasets":{"ok":{"status":"Collected","apiVersion":"v1.0","reason":"descriptor-pending but actually collected","sha256":null,"itemCount":0,"collectedUtc":null},"bad":{"status":"Failed","apiVersion":"v1.0","reason":"descriptor-pending: old text must not be parsed","sha256":null,"itemCount":null,"collectedUtc":null},"skip":{"status":"Skipped","apiVersion":"v1.0","reason":"permission-denied: old text must not be parsed","sha256":null,"itemCount":null,"collectedUtc":null}}' + $legacyNamespaces + '}'
             Set-Content -LiteralPath $manifestPath -Value $legacyJson -NoNewline
 
             $store = InModuleScope TenantPulse -ArgumentList $root {
@@ -69,7 +70,7 @@ Describe 'Task 1 snapshot outcome schema' {
                 Get-PulseSnapshotManifest -Store $store
             }
 
-            $manifest.schemaVersion | Should -Be '2.0.0'
+            $manifest.schemaVersion | Should -Be $legacyVersion
             $manifest.datasets.ok.failureClass | Should -BeNullOrEmpty
             $manifest.datasets.ok.gaps.Count | Should -Be 0
             $manifest.datasets.ok.operations.Count | Should -Be 0
@@ -77,6 +78,51 @@ Describe 'Task 1 snapshot outcome schema' {
             $manifest.datasets.bad.reasonCode | Should -Be 'legacy-failed'
             $manifest.datasets.skip.failureClass | Should -Be 'GateUnknown'
             $manifest.datasets.skip.reasonCode | Should -Be 'legacy-skipped'
+        }
+    }
+
+    It 'applies deterministic structured defaults for direct legacy dataset writes' {
+        $store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
+            param($root)
+            New-PulseSnapshotStore -Path $root
+        }
+
+        InModuleScope TenantPulse -ArgumentList $store {
+            param($store)
+            Set-PulseManifestEntry -Store $store -Name 'SkippedDataset' -Status 'Skipped' -Reason 'not licensed'
+            Set-PulseManifestEntry -Store $store -Name 'FailedDataset' -Status 'Failed'
+        }
+
+        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.datasets.SkippedDataset.failureClass | Should -Be 'GateUnknown'
+        $manifest.datasets.SkippedDataset.reasonCode | Should -Be 'not licensed'
+        $manifest.datasets.FailedDataset.failureClass | Should -Be 'ProviderFailed'
+        $manifest.datasets.FailedDataset.reasonCode | Should -Be 'failed'
+        $manifest.datasets.SkippedDataset.reasonCode | Should -Not -BeNullOrEmpty
+        $manifest.datasets.FailedDataset.reasonCode | Should -Not -BeNullOrEmpty
+    }
+
+    It 'rejects reference writes against a legacy 1.0.0 store without changing its manifest' {
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        New-Item -Path $root -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'manifest.json') -Value '{"schemaVersion":"1.0.0","createdUtc":"2026-08-19T00:00:00.000Z","tenant":"tp-legacy","producer":{},"datasets":{}}' -NoNewline
+        try {
+            $store = InModuleScope TenantPulse -ArgumentList $root {
+                param($root)
+                Get-PulseSnapshotStore -Path $root
+            }
+            {
+                InModuleScope TenantPulse -ArgumentList $store {
+                    param($store)
+                    Set-PulseReferenceEntry -Store $store -Name 'legacyReference' -Status 'Failed' -Reason 'not available'
+                }
+            } | Should -Throw -ExpectedMessage '*1.0.0*references*'
+
+            $rawManifest = Get-Content -LiteralPath (Join-Path $root 'manifest.json') -Raw
+            $rawManifest | Should -Match '"schemaVersion":"1.0.0"'
+            $rawManifest | Should -Not -Match '"references"'
+        } finally {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 

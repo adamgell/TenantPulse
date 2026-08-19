@@ -14,13 +14,13 @@
     a crash mid-write can never leave manifest.json truncated or half-written - readers see
     either the old manifest or the new one, never a partial one.
 
-    REFERENCE/EXPANSION PARAMETER SETS (Task 2.1, schema 1.1.0): two more mutually
-    exclusive usages besides Dataset/CollectionFailure - update one manifest.references.<name>
-    entry (Set-PulseReferenceEntry's sole implementation) or one manifest.expansions.<name>
-    entry (Set-PulseExpansionEntry's sole implementation). Both go through the exact same
-    mutex-guarded read-modify-write-then-atomic-publish cycle as the Dataset set, rather than
-    forking a second copy of that machinery - this remains the one function that ever writes
-    manifest.json.
+    REFERENCE/EXPANSION PARAMETER SETS (schema 2.0.0; legacy 1.1.0 compatibility): two
+    more mutually exclusive usages besides Dataset/CollectionFailure - update one
+    manifest.references.<name> entry (Set-PulseReferenceEntry's sole implementation) or
+    one manifest.expansions.<name> entry (Set-PulseExpansionEntry's sole implementation).
+    Both go through the exact same mutex-guarded read-modify-write-then-atomic-publish
+    cycle as the Dataset set, rather than forking a second copy of that machinery - this
+    remains the one function that ever writes manifest.json.
 
     REJECTS a 1.0.0-schema store (post-review fix, omp finding #4): a manifest that predates
     schema 1.1.0 has no `references`/`expansions` member AT ALL (see New-PulseSnapshotStore's
@@ -228,6 +228,20 @@ $CollectedUtc,
 
     if ($PSCmdlet.ParameterSetName -eq 'Dataset') {
         Assert-PulseDatasetName -Name $Name
+
+        # Direct legacy callers may provide only -Status/-Reason. Fill the required
+        # structured fields exactly as Write-PulseDataset's compatibility adapter does,
+        # while leaving any explicitly supplied structured values authoritative.
+        if ([string]::IsNullOrWhiteSpace($ReasonCode)) {
+            $ReasonCode = if ($null -ne $Reason -and -not [string]::IsNullOrWhiteSpace([string] $Reason)) {
+                [string] $Reason
+            } else {
+                $Status.ToLowerInvariant()
+            }
+        }
+        if ($Status -in @('Failed', 'Skipped') -and $null -eq $FailureClass) {
+            $FailureClass = if ($Status -eq 'Skipped') { 'GateUnknown' } else { 'ProviderFailed' }
+        }
     } elseif ($PSCmdlet.ParameterSetName -eq 'Reference') {
         Assert-PulseDatasetName -Name $ReferenceName -Kind 'reference name'
     } elseif ($PSCmdlet.ParameterSetName -eq 'Expansion') {
@@ -251,7 +265,10 @@ $CollectedUtc,
         $manifest = Get-PulseSnapshotManifest -Store $Store
 
         if ($PSCmdlet.ParameterSetName -eq 'CollectionFailure') {
-            $manifest.collectionFailure = $CollectionFailure
+            # Use the dictionary indexer: Add-PulseManifestPropertyAccessors adds
+            # compatibility note properties, and dot assignment can update that view
+            # without changing the serialized dictionary key.
+            $manifest['collectionFailure'] = $CollectionFailure
         }
         elseif ($PSCmdlet.ParameterSetName -eq 'Reference') {
             # REJECT, do not auto-vivify (post-review fix, omp finding #4) - see this file's

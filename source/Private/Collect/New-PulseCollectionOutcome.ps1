@@ -74,9 +74,9 @@ function New-PulseCollectionOutcome {
         $FailureClass = $failureClassText
     }
 
-    $rowsValue = if ($null -eq $Rows) { @() } else { @($Rows) }
-    $gapsValue = if ($null -eq $Gaps) { @() } else { @($Gaps) }
-    $operationsValue = if ($null -eq $Operations) { @() } else { @($Operations) }
+    $rowsValue = if ($null -eq $Rows) { , ([object[]]@()) } else { , ([object[]]@($Rows)) }
+    $gapsValue = if ($null -eq $Gaps) { , ([object[]]@()) } else { , ([object[]]@($Gaps)) }
+    $operationsValue = if ($null -eq $Operations) { , ([object[]]@()) } else { , ([object[]]@($Operations)) }
 
     foreach ($gap in $gapsValue) {
         if ($null -eq $gap) {
@@ -90,8 +90,20 @@ function New-PulseCollectionOutcome {
             }
         }
 
-        if ($supportedFailureClasses -notcontains ([string] $gap.FailureClass)) {
-            throw "New-PulseCollectionOutcome: gap FailureClass '$($gap.FailureClass)' is unsupported."
+        foreach ($requiredStringProperty in @('Scope', 'ReasonCode', 'Operation', 'ApiVersion')) {
+            $requiredStringValue = [string] $gap.$requiredStringProperty
+            if ([string]::IsNullOrWhiteSpace($requiredStringValue)) {
+                throw "New-PulseCollectionOutcome: each gap must contain a non-empty $requiredStringProperty."
+            }
+        }
+
+        $gapFailureClass = [string] $gap.FailureClass
+        if ([string]::IsNullOrWhiteSpace($gapFailureClass) -or $supportedFailureClasses -notcontains $gapFailureClass) {
+            throw "New-PulseCollectionOutcome: gap FailureClass '$gapFailureClass' is unsupported."
+        }
+
+        if ($null -ne $gap.Detail -and $gap.Detail -isnot [hashtable]) {
+            throw 'New-PulseCollectionOutcome: each gap Detail must be a hashtable or null.'
         }
     }
 

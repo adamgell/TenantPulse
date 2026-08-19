@@ -81,14 +81,11 @@ function ConvertTo-PulseMigratedManifest {
         }
     }
 
-    $Manifest.schemaVersion = '2.0.0'
+    # Migration enriches legacy dataset entries in memory but deliberately preserves the
+    # declared schema and namespace capability. A 1.0.0 store must remain unable to accept
+    # reference/expansion writes; adding namespaces here would create a fake upgrade that
+    # could be serialized by a later manifest write.
     $Manifest.datasets = $migratedDatasets
-    if (-not $Manifest.Contains('references')) {
-        $Manifest.references = [ordered]@{}
-    }
-    if (-not $Manifest.Contains('expansions')) {
-        $Manifest.expansions = [ordered]@{}
-    }
 
     return $Manifest
 }

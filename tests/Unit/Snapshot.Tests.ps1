@@ -1494,9 +1494,45 @@ Describe 'Get-PulseSnapshotStore' {
             }
         } | Should -Throw -ExpectedMessage '*references*'
     }
+
+    It 'throws for a 1.1.0 manifest with "references":"x" - a scalar, not an object' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.1.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{},"references":"x","expansions":{}}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*references*'
+    }
+
+    It 'throws for a 1.1.0 manifest with "expansions":null (reproduced acceptance)' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.1.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{},"references":{},"expansions":null}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*expansions*'
+    }
+
+    It 'throws for a 1.1.0 manifest with "expansions":[] - an array, not an object' {
+        New-Item -Path $script:openRoot -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:openRoot 'manifest.json') -Value '{"schemaVersion":"1.1.0","createdUtc":"2026-01-01T00:00:00.000Z","tenant":"tp-abc123","producer":{},"datasets":{},"references":{},"expansions":[]}' -NoNewline
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:openRoot {
+                param($openRoot)
+                Get-PulseSnapshotStore -Path $openRoot
+            }
+        } | Should -Throw -ExpectedMessage '*expansions*'
+    }
 }
 
-Describe 'New-PulseSnapshotStore schema 1.1.0 (Task 2.1)' {
+Describe 'New-PulseSnapshotStore schema 2.0.0 (Task 1)' {
     BeforeEach {
         $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
     }
@@ -1505,14 +1541,14 @@ Describe 'New-PulseSnapshotStore schema 1.1.0 (Task 2.1)' {
         Remove-Item -LiteralPath $script:storeRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    It 'writes schemaVersion 1.1.0' {
+    It 'writes schemaVersion 2.0.0' {
         $store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
             param($storeRoot)
             New-PulseSnapshotStore -Path $storeRoot
         }
 
         $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
-        $manifest.schemaVersion | Should -Be '1.1.0'
+        $manifest.schemaVersion | Should -Be '2.0.0'
     }
 
     It 'writes empty references and expansions objects' {

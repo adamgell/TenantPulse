@@ -25,16 +25,11 @@
     field name, rather than surfacing later as null/missing data quietly baked into a
     "successful" scored report.
 
-    SCHEMA 1.1.0 (Task 2.1): New-PulseSnapshotStore now writes schemaVersion '1.1.0' (adds
-    the `references`/`expansions` manifest namespaces - see that function's own
-    docstring), but a schemaVersion '1.0.0' snapshot written by an earlier release must
-    still open here successfully - readonly-compatible, not rejected. '1.0.0' is kept in
-    $script:PulseSnapshotSupportedSchemaVersions for exactly that reason. A '1.0.0'
-    manifest has no `references`/`expansions` members at all; this function does not
-    require or backfill them for that schema version - every reader of those namespaces
-    against a '1.0.0' store (Get-PulseReferenceData, a future expansion reader) treats an
-    absent member as "nothing captured/expanded for this store," not as a validation
-    failure.
+    SCHEMA 2.0.0 (Task 1): New-PulseSnapshotStore now writes schemaVersion '2.0.0' and
+    includes the structured dataset outcome fields plus `references`/`expansions` namespaces.
+    SchemaVersion '1.0.0' and '1.1.0' snapshots written by earlier releases remain
+    readable through Get-PulseSnapshotManifest's in-memory dataset migration. 1.0.0 remains
+    namespace-exempt; 1.1.0 requires both namespaces as part of its declared shape.
 
     SCHEMA-VERSION-CONDITIONAL requiredness (post-review fix, omp finding #3): a manifest
     declaring schemaVersion '1.1.0' is a DIFFERENT case - that schema version's whole
@@ -155,12 +150,10 @@ function Get-PulseSnapshotStore {
         throw "Get-PulseSnapshotStore: '$manifestPath' has a 'producer' member that is not a non-null object (got: $actualDescription) - '$resolvedRoot' is not a valid snapshot root."
     }
 
-    # SCHEMA-VERSION-CONDITIONAL requiredness (post-review fix, omp finding #3) - see this
-    # file's own docstring: only a '1.1.0' manifest must carry non-null object `references`/
-    # `expansions` members; a '1.0.0' manifest is exempt (those namespaces did not exist in
-    # Schema 2.0.0 requires the reference/expansion namespaces. Legacy 1.0.0 and 1.1.0
-    # manifests are accepted as-is and normalized in memory by Get-PulseSnapshotManifest.
-    if ($actualSchemaVersion -eq '2.0.0') {
+    # SCHEMA-VERSION-CONDITIONAL requiredness: schemas 1.1.0 and 2.0.0 require non-null
+    # object `references`/`expansions` namespaces. A 1.0.0 manifest is exempt because those
+    # namespaces did not exist then.
+    if ($actualSchemaVersion -in @('1.1.0', '2.0.0')) {
         foreach ($namespaceMember in @('references', 'expansions')) {
             if ($manifestContent.PSObject.Properties.Name -notcontains $namespaceMember) {
                 throw "Get-PulseSnapshotStore: '$manifestPath' declares schemaVersion '$actualSchemaVersion' but is missing required member '$namespaceMember' - '$resolvedRoot' is not a valid snapshot root."

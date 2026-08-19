@@ -1,5 +1,6 @@
 <#
-    Private: the single writer for one manifest.expansions.<name> entry (schema 1.1.0).
+    Private: the single writer for one manifest.expansions.<name> entry (schema 2.0.0;
+    legacy 1.1.0 stores remain writable when their namespace is structurally valid).
 
     Thin, domain-typed wrapper over Set-PulseManifestEntry's 'Expansion' parameter set -
     mirrors Set-PulseReferenceEntry/Write-PulseDataset's own wrapper pattern rather than a
