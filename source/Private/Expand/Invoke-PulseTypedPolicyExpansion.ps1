@@ -213,26 +213,62 @@ function Invoke-PulseTypedPolicyExpansion {
             continue
         }
 
-        $normalizedAssignments = @()
+        $normalizedAssignmentList = [System.Collections.Generic.List[object]]::new()
+        $invalidAssignmentTarget = $false
         foreach ($assignment in $rawAssignments) {
             $target = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'target'
-            if ($null -eq $target) { continue }
+            if ($null -eq $target -or -not (Test-PulseSettingsCatalogNode -Node $target)) {
+                $invalidAssignmentTarget = $true
+                break
+            }
+
+            $intentRaw = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'intent'
             $targetTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName '@odata.type'
             $targetType = if ($null -ne $targetTypeRaw) { [string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '' } else { $null }
             $groupIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'groupId'
             $filterIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId'
             $filterTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType'
-            $normalizedAssignments += [pscustomobject]@{
-                # intent (include/exclude) is structurally present but INTENTIONALLY left
-                # $null on every row this phase - Phase 2b is where the real value gets
-                # threaded through from the raw assignment payload, so 2b lands as a data
-                # population change against this already-shipped shape, not a schema change.
-                intent     = $null
+
+            $intent = if ($null -ne $intentRaw) {
+                [string] $intentRaw
+            } elseif ([string]::Equals($targetType, 'exclusionGroup', [System.StringComparison]::OrdinalIgnoreCase)) {
+                'exclude'
+            } elseif ($targetType -in @('group', 'allDevices', 'allLicensedUsers')) {
+                'include'
+            } else {
+                $null
+            }
+
+            $normalizedAssignmentList.Add([pscustomobject]@{
+                intent     = $intent
                 targetType = $targetType
                 groupId    = if ($null -ne $groupIdRaw) { [string] $groupIdRaw } else { $null }
                 filterId   = if ($null -ne $filterIdRaw) { [string] $filterIdRaw } else { $null }
                 filterType = if ($null -ne $filterTypeRaw) { [string] $filterTypeRaw } else { $null }
+            }) | Out-Null
+        }
+
+        if ($invalidAssignmentTarget) {
+            $gapEntries.Add([pscustomobject]@{ policyId = $policyId; reason = (New-PulseTypedGapReason -Category 'InvalidAssignmentTarget') }) | Out-Null
+            continue
+        }
+
+        $normalizedAssignments = @($normalizedAssignmentList.ToArray())
+        if ($normalizedAssignments.Count -gt 1) {
+            $assignmentFields = @('intent', 'targetType', 'groupId', 'filterId', 'filterType')
+            $assignmentComparison = [System.Comparison[object]] {
+                param($left, $right)
+                foreach ($field in $assignmentFields) {
+                    $leftValue = $left.$field
+                    $rightValue = $right.$field
+                    if ($null -eq $leftValue -and $null -ne $rightValue) { return -1 }
+                    if ($null -ne $leftValue -and $null -eq $rightValue) { return 1 }
+                    $fieldComparison = [string]::CompareOrdinal([string] $leftValue, [string] $rightValue)
+                    if ($fieldComparison -ne 0) { return $fieldComparison }
+                }
+                return 0
             }
+            [System.Array]::Sort($normalizedAssignments, $assignmentComparison)
         }
 
         try {

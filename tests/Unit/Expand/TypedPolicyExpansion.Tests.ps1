@@ -77,6 +77,72 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' }
     }
 
+    It 'normalizes typed-policy include and exclude intent, preserves filters, and sorts assignments deterministically' {
+        $policy = New-TestCompliancePolicy -Id 'p-intent'
+        $assignments = @(
+            [pscustomobject]@{
+                id = 'z-exclude'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'
+                    groupId = 'group-excluded'
+                }
+            }
+            [pscustomobject]@{
+                id = 'z-include-group'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                    groupId = 'group-included'
+                    deviceAndAppManagementAssignmentFilterId = 'filter-1'
+                    deviceAndAppManagementAssignmentFilterType = 'include'
+                }
+            }
+            [pscustomobject]@{
+                id = 'a-all-devices'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'
+                }
+            }
+        )
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'p-intent' } { $assignments }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'Expanded'
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store -Name 'compliance'
+        $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
+        $normalized = @($rows[0].assignments)
+        $normalized.Count | Should -Be 3
+
+        @($normalized.intent) | Should -Be @('exclude', 'include', 'include')
+        @($normalized.targetType) | Should -Be @('exclusionGroup', 'allDevices', 'group')
+        $normalized[0].groupId | Should -Be 'group-excluded'
+        $normalized[2].groupId | Should -Be 'group-included'
+        $normalized[2].filterId | Should -Be 'filter-1'
+        $normalized[2].filterType | Should -Be 'include'
+    }
+
+    It 'gaps a typed policy whose assignment target is missing instead of publishing a false unassigned row' {
+        $policy = New-TestCompliancePolicy -Id 'p-invalid-target'
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'p-invalid-target' } {
+            @([pscustomobject]@{ id = 'bad-assignment'; target = $null })
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.RowCount | Should -Be 0
+        $summary.Gaps.Count | Should -Be 1
+        $summary.Gaps[0].reason | Should -Be 'category:InvalidAssignmentTarget'
+    }
+
     It 'T2.7 LIVE-GATE REGRESSION: a raw tenant id appearing as an ordinary (non-sensitive) typed-policy property VALUE is redacted to its pseudonym in the published jsonl' {
         # Same class of live finding as the Settings Catalog fix (Ivy24, T2.7): the raw
         # tenant id can legitimately appear as ADMIN-ENTERED CONFIGURATION DATA in an
