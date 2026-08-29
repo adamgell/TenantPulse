@@ -130,14 +130,11 @@
     deviceCompliancePolicyAssignments = @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
     deviceConfigurationAssignments    = @{ Type = 'DeviceConfigurationAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
 
-    # TP.INT.0007: GraphKit's next descriptor candidate replaces the obsolete undocumented
-    # cleanup-settings singleton with Microsoft's supported per-platform rules collection.
-    # TenantPulse still requires immutable GraphKit 0.2.2, whose catalog does not contain
-    # this operation, so keep the dataset explicitly Pending until a NEW released GraphKit
-    # package carries this exact Read/Safe descriptor. The candidate contract was verified
-    # locally from GraphKit's ManagedDeviceCleanupRule.ListBeta.psd1; it is test input, not
-    # a reason to weaken the exact runtime dependency or pretend the operation is released.
-    managedDeviceCleanupRules = @{ Type = 'ManagedDeviceCleanupRule'; Operation = 'ListBeta'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # TP.INT.0007: GraphKit 0.3.0 replaces the obsolete undocumented cleanup-settings
+    # singleton with Microsoft's supported per-platform rules collection. The descriptor
+    # is a direct Read/Safe collection primitive, so this entry follows the ordinary static
+    # catalog gate rather than the Pending placeholder path.
+    managedDeviceCleanupRules = @{ Type = 'ManagedDeviceCleanupRule'; Operation = 'ListBeta'; ApiVersion = 'beta' }
 
     # Task 3.2 (TP.INT.0008): GraphKit 0.2.2 shipped the official
     # OperationApprovalPolicy/List descriptor. Pending dropped.

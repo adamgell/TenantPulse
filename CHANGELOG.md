@@ -5,6 +5,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-29
+
+### Added
+
+- Built-in read-only provider plans for Intune RBAC, Endpoint Security BitLocker and LAPS,
+  and current plus legacy security baselines. The public snapshot path wires them by
+  default while still allowing a caller to replace any individual plan.
+- Settings Catalog assignment collection with normalized include/exclude targets, filter
+  metadata, typed assignment intent, deterministic ordering, and explicit policy-scoped
+  gaps for missing or malformed payloads.
+
+### Changed
+
+- Migrated `TP.INT.0007` from the obsolete cleanup-settings singleton to the supported
+  per-platform managed-device cleanup-rule collection.
+- Requires exact GraphKit `0.3.0`, which supplies the new live-proven operation primitives
+  and makes SecretManagement a lazy persisted-vault boundary instead of an unconditional
+  import-time dependency.
+- Reclassified the Windows data-processor check as explicitly platform-unavailable through
+  its built-in provider plan. It remains non-collecting until Microsoft publishes a GET and
+  application-permission contract; it is no longer presented as ordinary release backlog.
+
 ## [0.1.3] - 2026-08-19
 
 ### Fixed

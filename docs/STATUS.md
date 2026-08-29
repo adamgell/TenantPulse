@@ -4,27 +4,26 @@ This is internal development/task narrative, moved out of README.md (post-review
 README.md is meant to read as a PSGallery landing page, not an implementation log). Nothing
 here is required to install or use TenantPulse; see README.md for that.
 
-## R1 outcome/composite handoff (2026-08-19)
+## Next-release outcome/composite handoff (2026-08-29)
 
-R1's provider-outcome/gate/partial-aware collection infrastructure and the TenantPulse-owned
-sequential composite plans and the device-cleanup collection migration are implemented in
-source and focused-tested. The six
-`DatasetMap.psd1` entries below deliberately remain `Pending`; implementation and local
-deterministic evidence are not the same claim as CI, live cutover, or full service coverage.
-TenantPulse `0.1.2` and its corrective `0.1.3` are separately verified as published to
-PSGallery; the remaining claims are recorded below.
-The implementation details and focused-test source of truth are the plan files under
-`source/Private/Collect/`, the check descriptors under `source/Data/Checks/`, and
-`source/Data/DatasetMap.psd1`. No pending flag was removed.
+GraphKit `0.3.0` and TenantPulse `0.2.0` are the coordinated next-release candidates. These
+repositories have no adopted customer or legacy runtime to migrate; the remaining release
+work is therefore package, live read-only, review, and exact-SHA CI verification. Historical
+GraphKit `0.2.2` and TenantPulse `0.1.3` package identities remain recorded below.
 
-| Dataset/check | R1 disposition |
+The source implementation is wired through TenantPulse's public snapshot path. Synthetic
+`Pending` map entries for composite datasets are implementation placeholders, not the runtime
+outcome: the built-in provider registry intercepts each one before the ordinary descriptor
+fallback. Evidence levels are kept separate below.
+
+| Dataset/check | Candidate disposition |
 |---|---|
-| `managedDeviceCleanupRules` / `TP.INT.0007` | The released GraphKit 0.2.2 package lacks the per-platform collection operation. The obsolete singleton contract has been removed and the candidate `ManagedDeviceCleanupRule.ListBeta` shape is locally contract-tested. Retain `Pending`; cut over only after that exact descriptor ships in a later GraphKit release and the collection/check path is verified live. |
-| `dataProcessorServiceForWindowsFeaturesOnboarding` / `TP.INT.0009` | A controlled read through GraphKit 0.2.2 returned the singleton and native Boolean fields, but Microsoft Learn has no official GET/application-permission contract and GraphKit 0.2.2 has no matching descriptor. Retain `Pending`; recheck when Microsoft publishes that contract or GraphKit ships the exact `Singleton.Default` descriptor, then repeat the read-only probe. |
-| `intuneRbacGroupProtection` / `TP.INT.0013` | Released primitive reads succeeded, but the observed role-assignment response lacked the role-definition relationship needed to preserve role names. Retain `Pending`; cut over only after an evidence-backed released primitive or supported response expansion supplies that relationship. |
-| `endpointSecurityDiskEncryptionPolicies` / `TP.INT.0014` | The provider/composite plan is implemented and focused-tested, but its exact package/live gate was not completed. Retain `Pending`; do not describe BitLocker as live or default cut over. |
-| `endpointSecurityLapsPolicies` / `TP.INT.0015` | The provider/composite plan is implemented and focused-tested, but its exact package/live gate was not completed. Retain `Pending`; do not describe LAPS as live or default cut over. |
-| `securityBaselinesAssignedAndCurrent` / `TP.INT.0029` | The provider/composite plan is implemented and focused-tested, but its exact package/live gate was not completed. Retain `Pending`; do not describe security baselines as live or default cut over. |
+| `managedDeviceCleanupRules` / `TP.INT.0007` | Direct GraphKit `ManagedDeviceCleanupRule.ListBeta` Read/Safe collection. The descriptor was live-proven against Ivy24 and is carried by the GraphKit `0.3.0` candidate; the exact TenantPulse package path still requires its coordinated live gate. |
+| `dataProcessorServiceForWindowsFeaturesOnboarding` / `TP.INT.0009` | Built-in no-network plan returns `PlatformUnavailable`. Microsoft publishes the resource shape but no official GET/application-permission contract, so neither project guesses a descriptor. Recheck only when that service contract changes. |
+| `intuneRbacGroupProtection` / `TP.INT.0013` | Built-in provider plan consumes GraphKit's expanded unified-role-assignment and template primitives. The primitive response shape was live-proven; exact packaged TenantPulse evaluation remains a candidate gate. |
+| `endpointSecurityDiskEncryptionPolicies` / `TP.INT.0014` | Built-in BitLocker provider plan is enabled by default and focused-tested. Exact packaged live evaluation remains a candidate gate. |
+| `endpointSecurityLapsPolicies` / `TP.INT.0015` | Built-in LAPS provider plan is enabled by default and focused-tested. Exact packaged live evaluation remains a candidate gate. |
+| `securityBaselinesAssignedAndCurrent` / `TP.INT.0029` | Built-in provider plan covers current Settings Catalog and legacy intent baselines, their templates, and assignment disposition. Exact packaged live evaluation remains a candidate gate. |
 
 **Package handoff and evidence boundary.** GraphKit `0.2.2` is the stable producer released
 before R1. On 2026-08-29, the PSGallery archive downloaded for GraphKit `0.2.2` was 201750

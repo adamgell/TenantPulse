@@ -4,7 +4,7 @@
     Microsoft Learn publishes the beta resource type and its two Boolean properties, and a
     controlled Ivy24 read-only GET returned the expected singleton shape. It does not publish
     an official GET method page or an application-permission contract for this resource, and
-    released GraphKit 0.2.2 has no matching descriptor. The plan therefore records a
+    released GraphKit 0.3.0 has no matching descriptor. The plan therefore records a
     PlatformUnavailable outcome rather than inventing a descriptor or silently treating a
     missing catalog entry as a transient GraphKit release wait.
 
@@ -49,7 +49,7 @@ function Invoke-PulseWindowsDataProcessorPlan {
             NativeBooleanFields = $true
         }
         GraphKit = [ordered]@{
-            PackageVersion = '0.2.2'
+            PackageVersion = '0.3.0'
             Descriptor     = 'Absent from released catalog'
             DescriptorLookup = 'DataProcessorServiceForWindowsFeaturesOnboarding/Get'
         }
@@ -67,7 +67,7 @@ function Invoke-PulseWindowsDataProcessorPlan {
             Application = 'Unverified'
             Evidence = 'Microsoft Learn publishes no method or permissions contract for this resource; the app-only probe succeeded, but the permission grant analysis did not resolve a named application permission.'
         }
-        RecheckTrigger = 'Re-evaluate when Microsoft publishes an official GET method and application-permission metadata, or a released GraphKit package adds this exact descriptor with RequiredPermissions; repeat the controlled read-only Ivy24 probe before dropping Pending.'
+        RecheckTrigger = 'Re-evaluate when Microsoft publishes an official GET method and application-permission metadata, or a later GraphKit package adds this exact descriptor with RequiredPermissions; repeat the controlled read-only Ivy24 probe before removing the platform-unavailable disposition.'
     }
 
     return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Skipped' -Rows @() -Gaps @() `

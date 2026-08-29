@@ -15,7 +15,7 @@
     predicate through Test-PulseReadOnlyDatasetMap below, a small non-throwing walker local
     to this file, so every dataset gets its own reported result.
 
-    Unlike a unit test, this file deliberately imports the REAL GraphKit module (0.2.2,
+    Unlike a unit test, this file deliberately imports the REAL GraphKit module (0.3.0,
     installed as TenantPulse's own RequiredModules dependency) and calls its REAL
     Get-GraphOperation - metadata-catalog lookups only, never a network call, never a live
     tenant - to prove every RELEASED dataset entry resolves to an actual Read/Safe
@@ -87,9 +87,9 @@ BeforeAll {
     $script:datasetMapPath = Join-Path -Path $projectPath -ChildPath 'source/Data/DatasetMap.psd1'
     $script:fixtureDatasetMapPath = Join-Path -Path $projectPath -ChildPath 'tests/Fixtures/DatasetMap/mutation-write-op.psd1'
 
-    # Real GraphKit (0.2.2), deliberately NOT stubbed in this file - see the file-level
+    # Real GraphKit (0.3.0), deliberately NOT stubbed in this file - see the file-level
     # docstring above for why this is the one QA test allowed to import it for real.
-    Import-Module -FullyQualifiedName @{ ModuleName = 'GraphKit'; RequiredVersion = '0.2.2' } -Force -ErrorAction Stop
+    Import-Module -FullyQualifiedName @{ ModuleName = 'GraphKit'; RequiredVersion = '0.3.0' } -Force -ErrorAction Stop
 
     <#
         Walks a DatasetMap.psd1-shaped hashtable and returns every read-only-predicate
@@ -182,7 +182,7 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         # Get-PulseTenantSnapshot.Tests.ps1's Invoke-PulseCollection Describe block) stays
         # in place for whichever of these ships next, and for the next batch after that.
         It "Pending dataset '<Name>' (<Type>/<Op>) declares ExpectedThrottleClass='Read' and ExpectedReplayPolicy='Safe'" -ForEach $script:pendingDatasetCases -AllowNullOrEmptyForEach {
-            # No live descriptor exists to resolve - GraphKit 0.2.2 genuinely does not have
+            # No live descriptor exists to resolve - GraphKit 0.3.0 genuinely does not have
             # this Type/Operation pair yet. Confirm that (rather than silently trusting the
             # Pending flag) so a descriptor that quietly shipped early is caught, then assert
             # the map's own declaration is read-only.
@@ -207,7 +207,7 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         } | Should -Throw
     }
 
-    It 'keeps managed-device cleanup rules Pending on GraphKit 0.2.2 with the candidate descriptor contract declared exactly' {
+    It 'resolves managed-device cleanup rules through the exact GraphKit 0.3.0 Read/Safe descriptor' {
         $map = Import-PowerShellDataFile -Path $script:datasetMapPath
         $entry = $map['managedDeviceCleanupRules']
 
@@ -215,13 +215,20 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         $entry.Type | Should -Be 'ManagedDeviceCleanupRule'
         $entry.Operation | Should -Be 'ListBeta'
         $entry.ApiVersion | Should -Be 'beta'
-        $entry.Pending | Should -BeTrue
-        $entry.ExpectedThrottleClass | Should -Be 'Read'
-        $entry.ExpectedReplayPolicy | Should -Be 'Safe'
+        $entry.ContainsKey('Pending') | Should -BeFalse
+        $entry.ContainsKey('ExpectedThrottleClass') | Should -BeFalse
+        $entry.ContainsKey('ExpectedReplayPolicy') | Should -BeFalse
         $map.ContainsKey('managedDeviceCleanupSettings') | Should -BeFalse
-        {
-            Get-GraphOperation -Type 'ManagedDeviceCleanupRule' -Operation 'ListBeta' -ErrorAction Stop
-        } | Should -Throw -Because 'TenantPulse still requires immutable GraphKit 0.2.2; only the newer local descriptor candidate has this operation'
+
+        $descriptor = Get-GraphOperation -Type 'ManagedDeviceCleanupRule' -Operation 'ListBeta' -ErrorAction Stop
+        $descriptor.PathTemplate | Should -Be '/deviceManagement/managedDeviceCleanupRules'
+        $descriptor.ApiVersion | Should -Be 'beta'
+        $descriptor.OperationKind | Should -Be 'Collection'
+        $descriptor.ThrottleClass | Should -Be 'Read'
+        $descriptor.ReplayPolicy | Should -Be 'Safe'
+        @($descriptor.RequiredPermissions).Count | Should -Be 1
+        $descriptor.RequiredPermissions[0].Type | Should -Be 'Application'
+        $descriptor.RequiredPermissions[0].Value | Should -Be 'DeviceManagementManagedDevices.Read.All'
     }
 
     Context 'the whole-map walker (Test-PulseReadOnlyDatasetMap) agrees with the per-dataset assertions above' {

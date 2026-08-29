@@ -6,7 +6,7 @@
     @{id=<policyId>}, walks the result through ConvertTo-PulseSettingRows, and merges every
     policy's rows into one deterministic expanded/settingsCatalog.jsonl.
 
-    SETTINGS CATALOG ASSIGNMENTS: GraphKit 0.2.2 releases
+    SETTINGS CATALOG ASSIGNMENTS: GraphKit 0.3.0 releases
     ConfigurationPolicyAssignment.ListBeta. Each eligible policy therefore fetches and
     persists its assignment payload alongside its settings payload; normalized assignment
     targets are stamped onto every emitted row. An unavailable assignment payload gaps that

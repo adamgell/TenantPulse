@@ -51,7 +51,7 @@ Describe 'Windows data processor provider disposition' {
         $outcome.Detail.Method | Should -Be 'GET'
         $outcome.Detail.Path | Should -Be '/deviceManagement/dataProcessorServiceForWindowsFeaturesOnboarding'
         $outcome.Detail.ApiVersion | Should -Be 'beta'
-        $outcome.Detail.GraphKit.PackageVersion | Should -Be '0.2.2'
+        $outcome.Detail.GraphKit.PackageVersion | Should -Be '0.3.0'
         $outcome.Detail.GraphKit.Descriptor | Should -Be 'Absent from released catalog'
         $outcome.Detail.LiveProbe.Outcome | Should -Be 'Succeeded'
         $outcome.Detail.LiveProbe.ReadOnly | Should -BeTrue

@@ -155,7 +155,10 @@ constitute a claim of CIS Benchmark compliance."*
 ## Operator prerequisites
 
 - PowerShell 7.4 or later
-- [GraphKit](https://github.com/AdamGell/GraphKit) exactly `0.2.2`, installed from PSGallery. TenantPulse `0.1.3` declares this with `RequiredVersion`, so a newer unverified GraphKit does not satisfy the runtime contract.
+- [GraphKit](https://github.com/AdamGell/GraphKit) exactly `0.3.0`. TenantPulse `0.2.0`
+  declares this with `RequiredVersion`, so a different GraphKit version does not satisfy the
+  candidate runtime contract. Until both versions are published, install the exact packages
+  produced and verified together from these source revisions.
 - A GraphKit profile already registered for the tenant you want to assess (see GraphKit's
   own documentation - profile registration, credential setup, and Graph app-registration
   concerns are entirely GraphKit's responsibility, not TenantPulse's)
@@ -166,18 +169,14 @@ constitute a claim of CIS Benchmark compliance."*
   collect require
 - PSGallery access (or an internal mirror) to install TenantPulse and GraphKit
 
-GraphKit `0.2.2` is the stable producer published before R1. TenantPulse `0.1.2` and the
-corrective TenantPulse `0.1.3` are both immutable PSGallery releases; `0.1.3` is the current
-published version and requires exact GraphKit `0.2.2`. The twelve GET/List datasets that were
-Pending on GraphKit `0.1.1` remain live.
-
-R1's outcome model and TenantPulse-owned sequential composite plans are implemented in
-published `0.1.3` source and was deterministically verified through the local package gate,
-but the five composite/data-processor paths remain `Pending` and are not cut over or live
-verified: `TP.INT.0009`, `TP.INT.0013`, `TP.INT.0014`, `TP.INT.0015`, and `TP.INT.0029`.
-That local evidence is not CI evidence: no CI run exists for source revision `771124b`. See
-`docs/STATUS.md` for the exact package evidence, controlled live observations, and the
-remaining operator/recheck gates.
+GraphKit `0.2.2` and TenantPulse `0.1.3` remain the immutable current PSGallery releases.
+The source documented here is the next candidate pair: GraphKit `0.3.0` plus TenantPulse
+`0.2.0`. It adds the cleanup-rule primitive, Settings Catalog assignments, expanded Intune
+RBAC primitives, and default TenantPulse provider plans for RBAC, BitLocker, LAPS, and current
+plus legacy security baselines. The Windows data-processor path is explicitly classified as
+platform-unavailable because Microsoft has not published the GET/application-permission
+contract needed for a releasable descriptor. See `docs/STATUS.md` for the exact local, live,
+package, and CI evidence boundaries.
 
 ## Catalog scope - what this is and isn't, honestly
 
@@ -199,12 +198,13 @@ the ScuBA/CISA-cited Conditional Access, privileged-role, and credential-hygiene
 (`TP.ENT.0017`-`0024`). Not a comprehensive tenant-health product - a deliberately scoped,
 verified-against-a-real-tenant catalog.
 
-"Live" below means the check's dataset(s) resolve against an already-released GraphKit
-descriptor and assess for real against a live tenant today. "Pending" means the opposite -
-degrades honestly to `NotApplicable` with reason `descriptor-pending: awaiting GraphKit
-release` until a future GraphKit release ships the descriptor(s) it needs (source of truth:
-the `Pending = $true` flag on each dataset entry in `source/Data/DatasetMap.psd1`) - never a
-silent gap, never a guessed result. `TP.ENT.0022` additionally requires Entra ID P2 licensing
+"Live" below means the check's dataset path has been exercised against a live tenant.
+"Candidate" means the implementation is wired and deterministic but its exact packaged
+candidate still needs the recorded live/CI gate. "Platform unavailable" means TenantPulse
+returns an explicit non-collecting disposition because the service contract needed for a
+supported read does not exist. A raw `Pending = $true` map placeholder is still never sent to
+Graph directly; a built-in provider plan must resolve it first or it degrades honestly to
+`NotApplicable`. `TP.ENT.0022` additionally requires Entra ID P2 licensing
 once collected; a 400/403 on a non-P2 tenant is itself a rendered finding ("PIM
 posture unassessable - Entra ID P2 required"), per its own research entry - not a collection
 failure hidden from the report.
@@ -240,14 +240,14 @@ failure hidden from the report.
 | TP.INT.0004 | Intune.Updates | Medium | Live | At least 2 Windows Update rings have deadlines configured |
 | TP.INT.0005 | Intune.DeviceLifecycle | Medium | Live | Devices inactive for more than 90 days |
 | TP.INT.0006 | Intune.SettingsCatalog | Medium | Live | Conflicting security-setting values across policies |
-| TP.INT.0007 | Intune.Governance | Low | Pending | Intune device clean-up rule configured |
+| TP.INT.0007 | Intune.Governance | Low | Candidate | Intune device clean-up rule configured |
 | TP.INT.0008 | Intune.Governance | Medium | Live | Intune Multi Admin Approval policy configured |
-| TP.INT.0009 | Intune.Governance | Low | Pending | Windows diagnostic data processor configuration enabled |
+| TP.INT.0009 | Intune.Governance | Low | Platform unavailable | Windows diagnostic data processor configuration enabled |
 | TP.INT.0011 | Intune.Governance | Low | Live | Default branding profile customized |
 | TP.INT.0012 | Intune.Updates | High | Live | Windows Feature Update policy avoids end-of-support builds |
-| TP.INT.0013 | Intune.Governance | High | Pending | Intune RBAC groups protected via RMAU or role-assignable groups |
-| TP.INT.0014 | Intune.EndpointSecurity | Critical | Pending | BitLocker full-disk encryption enforced via Endpoint Security policy |
-| TP.INT.0015 | Intune.EndpointSecurity | High | Pending | LAPS configuration policy meets minimum security bar |
+| TP.INT.0013 | Intune.Governance | High | Candidate | Intune RBAC groups protected via RMAU or role-assignable groups |
+| TP.INT.0014 | Intune.EndpointSecurity | Critical | Candidate | BitLocker full-disk encryption enforced via Endpoint Security policy |
+| TP.INT.0015 | Intune.EndpointSecurity | High | Candidate | LAPS configuration policy meets minimum security bar |
 | TP.INT.0016 | Intune.SettingsCatalog | High | Live | Attack Surface Reduction "Standard Protection" baseline rules configured |
 | TP.INT.0017 | Intune.SettingsCatalog | High | Live | App Control for Business policy enforcing (not audit-only) |
 | TP.INT.0018 | Intune.SettingsCatalog | High | Live | Managed Installer rules paired with an enforcing App Control policy |
@@ -261,24 +261,23 @@ failure hidden from the report.
 | TP.INT.0026 | Intune.Enrollment | Medium | Live | Windows Autopilot deployment profile exists and is assigned |
 | TP.INT.0027 | Intune.Enrollment | Low | Live | No orphaned Windows Autopilot device identities |
 | TP.INT.0028 | Intune.Enrollment | Medium | Live | Enrollment Status Page configured with blocking failure behavior |
-| TP.INT.0029 | Intune.SecurityBaselines | Medium | Pending | Security baselines assigned and not on a deprecated version |
+| TP.INT.0029 | Intune.SecurityBaselines | Medium | Candidate | Security baselines assigned and not on a deprecated version |
 | TP.INT.0030 | Intune.Compliance | Medium | Live | Fleet compliance rate below acceptable threshold |
 | TP.INT.0031 | Intune.SettingsCatalog | Critical | Live | BitLocker CSP settings present and correct across all Settings Catalog policies |
 
-Every `Pending` row above resolves against one of these not-yet-released GraphKit dataset
-descriptors (`source/Data/DatasetMap.psd1`'s own `Pending = $true` entries are the source of
-truth if this list ever drifts): `DataProcessorServiceForWindowsFeaturesOnboarding.Get`,
-`IntuneRbacGroupProtectionWalk.Walk`, `EndpointSecurityDiskEncryptionPolicyWalk.Walk`,
-`EndpointSecurityLapsPolicyWalk.Walk`, and `SecurityBaselineAssignedAndCurrentWalk.Walk`.
-GraphKit 0.2.2 shipped official GET/List descriptors for the twelve datasets those five
-do not cover; Walks were not invented for the remaining Types.
+The four composite rows retain synthetic `Pending` map placeholders because they do not map
+to a single Graph operation. TenantPulse's default provider registry intercepts those names
+and composes only GraphKit Read/Safe primitives. The Windows data-processor placeholder is
+intercepted by a no-network plan that emits `PlatformUnavailable`. The cleanup rule is no
+longer Pending: GraphKit `0.3.0` ships its direct Read/Safe collection descriptor.
 
-What the catalog does **not** cover, honestly, as of Phase 4: group-**membership** expansion for
+What the catalog does **not** cover, honestly, as of this candidate: group-**membership** expansion for
 Conditional Access exclusions (only direct user/group/role references resolve today - a group
 assigned to a CA exclusion is read as a group reference, not expanded to its members, because no
 group-members dataset exists yet; several checks document this as a known limitation, not a
-silent gap), assignment verification for Intune policies (existence is checked, not whether a
-policy is actually assigned to any device), transitive/group-assigned role-assignment expansion
+silent gap), assignment verification for every Intune policy family (Settings Catalog and the
+security-baseline provider do preserve assignment disposition; other existence checks may not),
+transitive/group-assigned role-assignment expansion
 for `TP.ENT.0021`'s privileged-role count (direct assignments only - documented in that check's
 own evidence text), `TP.ENT.0019`'s scope (only `servicePrincipal` credentials are read - GraphKit
 0.2.2 has no `Application` type yet, so app-**registration** client secrets/certificates are not
@@ -309,7 +308,7 @@ content-addressed files, never a fixed name. See
 `source/Private/Evaluate/FindingsSchema.md`'s own "Settings expansion artifacts" section
 for the exact row/conflict-record schema.
 
-Settings Catalog assignment collection uses GraphKit 0.2.2's released
+Settings Catalog assignment collection uses GraphKit 0.3.0's
 `ConfigurationPolicyAssignment.ListBeta` descriptor for each policy. TenantPulse persists
 that raw payload and normalizes include/exclude intent, target type, group id, and assignment
 filter fields onto every expanded setting row. An empty assignment response is authoritative
@@ -375,7 +374,11 @@ PSGallery - and only publishes for real when given a resolved API key (via
 `-NuGetApiKeySecure` or the `TENANTPULSE_NUGET_API_KEY` environment variable - there is no
 plain-string API key parameter) and `-Confirm`.
 
-`source/TenantPulse.psd1` declares GraphKit `0.2.2` with `RequiredVersion`, the exact runtime contract. `RequiredModules.psd1` separately pins `GraphKit = '0.2.2'` for build-time restore through PSGallery. These two files intentionally use different schemas but must resolve the same version.
+`source/TenantPulse.psd1` declares GraphKit `0.3.0` with `RequiredVersion`, the exact runtime
+contract. `RequiredModules.psd1` separately pins `GraphKit = '0.3.0'` for build-time staging.
+These two files intentionally use different schemas but must resolve the same version. While
+the candidate is unpublished, validation stages the already-tested GraphKit package locally;
+it must not silently fall back to public GraphKit `0.2.2`.
 
 Unit tests never import real GraphKit: every GraphKit command TenantPulse calls
 (`Get-GraphContext`, `Get-GraphObject`, `Invoke-GraphOperation`, `Get-GraphOperation`) is

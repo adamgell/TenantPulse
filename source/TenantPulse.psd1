@@ -12,7 +12,7 @@
 RootModule = 'TenantPulse.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.1.3'
+ModuleVersion = '0.2.0'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -55,7 +55,7 @@ RequiredModules = @(
     # TenantPulse reads the tenant exclusively through GraphKit's read-class descriptors.
     # RequiredVersion is deliberate: a newer GraphKit catalog is a different producer
     # contract and must be re-verified before TenantPulse consumes it.
-    @{ ModuleName = 'GraphKit'; RequiredVersion = '0.2.2' }
+    @{ ModuleName = 'GraphKit'; RequiredVersion = '0.3.0' }
 )
 
 # Assemblies that must be loaded prior to importing this module
@@ -113,11 +113,17 @@ PrivateData = @{
 
         # ReleaseNotes of this module
         ReleaseNotes = @'
-## [0.1.3] - 2026-08-19
+## [0.2.0] - 2026-08-29
 
-### Fixed
+### Added
 
-- Corrected release metadata after immutable TenantPulse `0.1.2` was published with pre-release documentation. No runtime behavior or GraphKit dependency changed.
+- Built-in read-only provider plans for Intune RBAC, Endpoint Security BitLocker and LAPS, and current plus legacy security baselines.
+- Settings Catalog assignment collection with include, exclude, filter, and typed intent preservation.
+
+### Changed
+
+- Migrated TP.INT.0007 to the supported per-platform managed-device cleanup-rule collection.
+- Requires exact GraphKit `0.3.0` for the new live-proven operation primitives and lazy SecretManagement boundary.
 '@
 
         # Prerelease string of this module

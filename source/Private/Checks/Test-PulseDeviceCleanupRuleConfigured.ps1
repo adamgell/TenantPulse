@@ -6,10 +6,9 @@
     `deviceManagement/managedDeviceCleanupRules` (plural). Each row is a distinct rule
     carrying id, displayName, deviceCleanupRulePlatformType, and
     deviceInactivityBeforeRetirementInDays. A successful empty collection authoritatively
-    means no rule is configured. GraphKit's ManagedDeviceCleanupRule.ListBeta candidate
-    implements that collection, but TenantPulse's DatasetMap keeps it Pending while the
-    module remains pinned to immutable GraphKit 0.2.2; direct unit fixtures exercise this
-    rule now without pretending the candidate is a released runtime dependency.
+    means no rule is configured. GraphKit 0.3.0's
+    ManagedDeviceCleanupRule.ListBeta descriptor implements that collection as a direct
+    Read/Safe primitive consumed by TenantPulse's DatasetMap.
 
     CORRECTED CLAIM (live-verified against
     https://learn.microsoft.com/en-us/intune/governance/configure-cleanup-rules, fetched

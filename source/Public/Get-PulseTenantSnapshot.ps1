@@ -111,7 +111,7 @@
         live gate). When set, after the normal check-driven dataset collection above has
         finished, this also collects `configurationPolicies`, captures the settings-
         definitions corpus, and runs the Settings Catalog per-policy fan-out/walk (see
-        Invoke-PulseSettingsCatalogExpansionPipeline's own docstring). GraphKit 0.2.2's
+        Invoke-PulseSettingsCatalogExpansionPipeline's own docstring). GraphKit 0.3.0's
         ConfigurationPolicyAssignment.ListBeta descriptor supplies each policy's real
         assignment targets; an unavailable assignment payload gaps that policy.
 
