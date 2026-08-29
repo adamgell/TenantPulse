@@ -119,6 +119,7 @@ PrivateData = @{
 
 - Built-in read-only provider plans for Intune RBAC, Endpoint Security BitLocker and LAPS, and current plus legacy security baselines.
 - Settings Catalog assignment collection with include, exclude, filter, and typed intent preservation.
+- Typed compliance and device-configuration assignment intent with deterministic normalization and malformed-target gaps.
 
 ### Changed
 

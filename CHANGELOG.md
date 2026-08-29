@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settings Catalog assignment collection with normalized include/exclude targets, filter
   metadata, typed assignment intent, deterministic ordering, and explicit policy-scoped
   gaps for missing or malformed payloads.
+- Typed compliance and device-configuration assignments now populate include/exclude intent,
+  preserve filters, sort deterministically, and gap the whole policy if a target is malformed.
 
 ### Changed
 

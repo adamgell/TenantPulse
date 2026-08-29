@@ -302,18 +302,16 @@ total as a snapshot's own manifest grows - a real cost a live 781-policy run pay
 policy). See `docs/spike/2026-08-16-t27-perf-container.md` for the full recorded numbers,
 hardware, and method.
 
-**Ledger: deferred/not-yet-populated Phase 2 data, explicit not silent**:
+**Ledger: resolved or explicitly descoped Phase 2 data**:
 
-- An **expansion-summary dataset** (an aggregate-counts view across the settingsCatalog/
-  compliance/deviceConfiguration expansion families, for a consuming report/check) is
-  scoped but explicitly **deferred to Phase 3** - its consumer moved there, so there is
-  nothing in this phase that reads or emits it. Not present anywhere in a Phase 2 snapshot;
-  do not expect it before Phase 3.
-- Every typed-assignment record `Invoke-PulseTypedPolicyExpansion` normalizes
-  (`targetType`/`groupId`/`filterId`/`filterType`/`intent`) already carries an `intent`
-  field, structurally, but it is hard-coded `$null` on every row today - unpopulated until
-  Phase 2b, which is where the real intent value (include/exclude) gets threaded through.
-  Present in the shape now so 2b is a pure data-population change, not a schema change.
+- The orphaned **expansion-summary dataset** is explicitly **descoped**. No report or check
+  consumes it, and the authoritative per-family counts and statuses already live in the
+  snapshot manifest's `expansions` entries. A second derived persisted aggregate would add
+  synchronization risk without adding information. If a future consumer needs a summary,
+  derive it from those manifest entries under that consumer's own contract.
+- Typed compliance and device-configuration assignment records now populate include/exclude
+  `intent` from the assignment target, preserve filter metadata, sort deterministically, and
+  gap a policy rather than publishing a false unassigned row when a target is malformed.
 
 ## Phase 3 (T3.1-T3.6): engine and catalog work complete; T3.6 live gate honestly incomplete
 
@@ -601,5 +599,5 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    TP.INT.0005 device-name keys stay unredacted under `-Redact`. Judgment boundary
    (policy display names, role names) is deliberate, not unfinished code.
 2. **`TP.INT.0010`**, DESCOPED until GraphKit ARM exists. Id reserved.
-3. Phase 2b / scale (not this catalog): admin templates, typed-policy `intent`,
+3. Phase 2b / scale (not this catalog): admin templates,
    `-ExpandSettings` default-on, dataset streaming.
