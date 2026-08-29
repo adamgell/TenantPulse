@@ -10,16 +10,24 @@ BeforeAll {
     function script:Invoke-SecurityBaselinePlanFixture {
         param(
             [Parameter()] [AllowEmptyCollection()] [object[]] $Templates = @(),
+            [Parameter()] [AllowEmptyCollection()] [object[]] $Policies = @(),
             [Parameter()] [AllowEmptyCollection()] [object[]] $Intents = @(),
+            [Parameter()] [hashtable] $Assignments = @{},
             [Parameter()] [AllowNull()] $TemplateError,
-            [Parameter()] [AllowNull()] $IntentError
+            [Parameter()] [AllowNull()] $PolicyError,
+            [Parameter()] [AllowNull()] $IntentError,
+            [Parameter()] [hashtable] $AssignmentErrors = @{}
         )
 
         $fixture = @{
-            Templates     = $Templates
-            Intents       = $Intents
-            TemplateError = $TemplateError
-            IntentError   = $IntentError
+            Templates       = $Templates
+            Policies        = $Policies
+            Intents         = $Intents
+            Assignments     = $Assignments
+            TemplateError   = $TemplateError
+            PolicyError     = $PolicyError
+            IntentError     = $IntentError
+            AssignmentErrors = $AssignmentErrors
         }
 
         InModuleScope TenantPulse -ArgumentList $fixture {
@@ -57,6 +65,19 @@ BeforeAll {
                     }
                     return @($script:SecurityBaselineFixture.Intents)
                 }
+                if ($Type -eq 'ConfigurationPolicy') {
+                    if ($null -ne $script:SecurityBaselineFixture.PolicyError) {
+                        throw $script:SecurityBaselineFixture.PolicyError
+                    }
+                    return @($script:SecurityBaselineFixture.Policies)
+                }
+                if ($Type -eq 'ConfigurationPolicyAssignment') {
+                    $id = [string] $Parameters.id
+                    if ($script:SecurityBaselineFixture.AssignmentErrors.ContainsKey($id)) {
+                        throw $script:SecurityBaselineFixture.AssignmentErrors[$id]
+                    }
+                    return @($script:SecurityBaselineFixture.Assignments[$id])
+                }
                 throw "Unexpected Graph call '$Type/$Operation'."
             }
 
@@ -91,53 +112,85 @@ BeforeAll {
 }
 
 Describe 'Invoke-PulseSecurityBaselinePlan' {
-    It 'joins security-baseline intents to template disposition and preserves native assignment state' {
+    It 'collects current configuration-policy baselines, assignments, and template disposition' {
         $result = Invoke-SecurityBaselinePlanFixture -Templates @(
             [pscustomobject]@{ id = 'template-current'; displayName = 'Windows baseline'; templateType = 'securityBaseline'; versionInfo = '24H2'; isDeprecated = $false }
             [pscustomobject]@{ id = 'template-old'; displayName = 'Edge baseline'; templateType = 'microsoftEdgeSecurityBaseline'; versionInfo = 'v1'; isDeprecated = $true }
             [pscustomobject]@{ id = 'template-other'; displayName = 'Office settings'; templateType = 'deviceConfigurationForOffice365'; versionInfo = 'v1'; isDeprecated = $false }
-        ) -Intents @(
-            [pscustomobject]@{ id = 'intent-current'; displayName = 'Windows profile'; templateId = 'template-current'; isAssigned = $true }
-            [pscustomobject]@{ id = 'intent-old'; displayName = 'Edge profile'; templateId = 'template-old'; isAssigned = $false }
-            [pscustomobject]@{ id = 'intent-other'; displayName = 'Office profile'; templateId = 'template-other'; isAssigned = $true }
-        )
+        ) -Policies @(
+            [pscustomobject]@{ id = 'policy-current'; name = 'Windows profile'; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline' } }
+            [pscustomobject]@{ id = 'policy-old'; name = 'Edge profile'; templateReference = [pscustomobject]@{ templateId = 'template-old'; templateFamily = 'baselineMicrosoftEdge' } }
+            [pscustomobject]@{ id = 'policy-other'; name = 'Disk profile'; templateReference = [pscustomobject]@{ templateId = 'template-other'; templateFamily = 'endpointSecurityDiskEncryption' } }
+        ) -Assignments @{
+            'policy-current' = @([pscustomobject]@{ id = 'assignment-1' })
+            'policy-old' = @()
+        }
 
         $result.Outcome.Status | Should -Be 'Collected'
         @($result.Outcome.Rows).Count | Should -Be 2
         @($result.Outcome.Gaps).Count | Should -Be 0
-        $result.Outcome.Rows[0].id | Should -Be 'intent-current'
-        $result.Outcome.Rows[0].templateFamily | Should -Be 'securityBaseline'
+        $result.Outcome.Rows[0].id | Should -Be 'policy-current'
+        $result.Outcome.Rows[0].templateFamily | Should -Be 'baseline'
         $result.Outcome.Rows[0].hasAssignment | Should -BeTrue
         $result.Outcome.Rows[0].isDeprecated | Should -BeFalse
-        $result.Outcome.Rows[1].id | Should -Be 'intent-old'
-        $result.Outcome.Rows[1].templateFamily | Should -Be 'microsoftEdgeSecurityBaseline'
+        $result.Outcome.Rows[1].id | Should -Be 'policy-old'
+        $result.Outcome.Rows[1].templateFamily | Should -Be 'baselineMicrosoftEdge'
         $result.Outcome.Rows[1].hasAssignment | Should -BeFalse
         $result.Outcome.Rows[1].isDeprecated | Should -BeTrue
         @($result.Calls | Where-Object Kind -eq 'Descriptor' | ForEach-Object { "$($_.Type)/$($_.Operation)/$($_.ApiVersion)" }) | Should -Be @(
             'DeviceManagementTemplate/ListBeta/beta'
+            'ConfigurationPolicy/ListBeta/beta'
+            'ConfigurationPolicyAssignment/ListBeta/beta'
             'DeviceManagementIntent/ListBeta/beta'
         )
-        @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)" }) | Should -Be @(
-            'DeviceManagementTemplate/ListBeta'
-            'DeviceManagementIntent/ListBeta'
+        @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)/$($_.Id)" }) | Should -Be @(
+            'DeviceManagementTemplate/ListBeta/'
+            'ConfigurationPolicy/ListBeta/'
+            'DeviceManagementIntent/ListBeta/'
+            'ConfigurationPolicyAssignment/ListBeta/policy-current'
+            'ConfigurationPolicyAssignment/ListBeta/policy-old'
         )
     }
 
-    It 'returns an authoritative empty collection when no baseline intent exists' {
+    It 'also collects the four documented legacy intent families and normalizes their family names' {
         $result = Invoke-SecurityBaselinePlanFixture -Templates @(
-            [pscustomobject]@{ id = 'template-current'; displayName = 'Windows baseline'; templateType = 'securityBaseline'; versionInfo = '24H2'; isDeprecated = $false }
-        ) -Intents @()
+            [pscustomobject]@{ id = 't-win'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 1 }
+            [pscustomobject]@{ id = 't-defender'; templateType = 'advancedThreatProtectionSecurityBaseline'; isDeprecated = $false; intentCount = 1 }
+            [pscustomobject]@{ id = 't-edge'; templateType = 'microsoftEdgeSecurityBaseline'; isDeprecated = $true; intentCount = 1 }
+            [pscustomobject]@{ id = 't-cloud'; templateType = 'cloudPC'; isDeprecated = $false; intentCount = 1 }
+            [pscustomobject]@{ id = 't-office'; templateType = 'microsoftOffice365ProPlusSecurityBaseline'; isDeprecated = $false; intentCount = 1 }
+        ) -Intents @(
+            [pscustomobject]@{ id = 'i-win'; displayName = 'Windows'; templateId = 't-win'; isAssigned = $true }
+            [pscustomobject]@{ id = 'i-defender'; displayName = 'Defender'; templateId = 't-defender'; isAssigned = $true }
+            [pscustomobject]@{ id = 'i-edge'; displayName = 'Edge'; templateId = 't-edge'; isAssigned = $false }
+            [pscustomobject]@{ id = 'i-cloud'; displayName = 'Windows 365'; templateId = 't-cloud'; isAssigned = $true }
+            [pscustomobject]@{ id = 'i-office'; displayName = 'Office'; templateId = 't-office'; isAssigned = $true }
+        )
+
+        $result.Outcome.Status | Should -Be 'Collected'
+        @($result.Outcome.Rows).Count | Should -Be 4
+        @($result.Outcome.Rows.templateFamily) | Should -Be @(
+            'baselineWindows365'
+            'baselineDefenderForEndpoint'
+            'baselineMicrosoftEdge'
+            'baseline'
+        )
+        @($result.Outcome.Rows.id) | Should -Not -Contain 'i-office'
+    }
+
+    It 'returns an authoritative empty collection only when both current and legacy baseline surfaces are empty' {
+        $result = Invoke-SecurityBaselinePlanFixture -Templates @(
+            [pscustomobject]@{ id = 'template-current'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 0 }
+        ) -Policies @() -Intents @()
 
         $result.Outcome.Status | Should -Be 'Collected'
         @($result.Outcome.Rows).Count | Should -Be 0
         @($result.Outcome.Gaps).Count | Should -Be 0
     }
 
-    It 'fails closed when an intent cannot be joined to template disposition metadata' {
-        $result = Invoke-SecurityBaselinePlanFixture -Templates @(
-            [pscustomobject]@{ id = 'template-current'; displayName = 'Windows baseline'; templateType = 'securityBaseline'; versionInfo = '24H2'; isDeprecated = $false }
-        ) -Intents @(
-            [pscustomobject]@{ id = 'intent-unknown'; displayName = 'Unknown profile'; templateId = 'missing-template'; isAssigned = $true }
+    It 'fails closed when a current baseline policy cannot join to template disposition metadata' {
+        $result = Invoke-SecurityBaselinePlanFixture -Templates @() -Policies @(
+            [pscustomobject]@{ id = 'policy-unknown'; name = 'Unknown'; templateReference = [pscustomobject]@{ templateId = 'missing'; templateFamily = 'baseline' } }
         )
 
         $result.Outcome.Status | Should -Be 'Failed'
@@ -146,12 +199,73 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
     }
 
-    It 'classifies a template collection permission failure without attempting intents' {
+    It 'fails closed when a tracked template reports legacy intents but the intent collection is empty' {
+        $result = Invoke-SecurityBaselinePlanFixture -Templates @(
+            [pscustomobject]@{ id = 'template-current'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 1 }
+        ) -Intents @()
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'template:template-current'
+    }
+
+    It 'retains a scoped gap when a current baseline assignment read fails' {
+        $result = Invoke-SecurityBaselinePlanFixture -Templates @(
+            [pscustomobject]@{ id = 'template-current'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 0 }
+        ) -Policies @(
+            [pscustomobject]@{ id = 'policy-current'; name = 'Windows'; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline' } }
+        ) -AssignmentErrors @{ 'policy-current' = '403 Forbidden' }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:policy-current'
+    }
+
+    It 'sorts equivalent gaps independently of provider traversal order' {
+        $templates = @(
+            [pscustomobject]@{ id = 'template-current'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 2 }
+        )
+        $first = Invoke-SecurityBaselinePlanFixture -Templates $templates -Intents @(
+            [pscustomobject]@{ id = 'intent-z'; templateId = 'missing-z'; isAssigned = $true }
+            [pscustomobject]@{ id = 'intent-a'; templateId = 'missing-a'; isAssigned = $true }
+        )
+        $second = Invoke-SecurityBaselinePlanFixture -Templates $templates -Intents @(
+            [pscustomobject]@{ id = 'intent-a'; templateId = 'missing-a'; isAssigned = $true }
+            [pscustomobject]@{ id = 'intent-z'; templateId = 'missing-z'; isAssigned = $true }
+        )
+
+        ($first.Outcome.Gaps | ConvertTo-Json -Depth 8 -Compress) | Should -Be `
+            ($second.Outcome.Gaps | ConvertTo-Json -Depth 8 -Compress)
+        @($first.Outcome.Gaps.Scope) | Should -Be @('intent:intent-a', 'intent:intent-z', 'template:template-current')
+    }
+
+    It 'classifies a template collection permission failure before attempting either profile surface' {
         $result = Invoke-SecurityBaselinePlanFixture -TemplateError ([System.UnauthorizedAccessException]::new('fixture permission denied'))
 
         $result.Outcome.Status | Should -Be 'Failed'
         $result.Outcome.FailureClass | Should -BeIn @('PermissionDenied', 'ProviderFailed')
         @($result.Calls | Where-Object Kind -eq 'Graph').Count | Should -Be 1
+    }
+
+    It 'preserves a sole profile-surface permission failure at the top level' {
+        $result = Invoke-SecurityBaselinePlanFixture -PolicyError '403 Forbidden'
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        $result.Outcome.FailureClass | Should -Be 'PermissionDenied'
+        $result.Outcome.ReasonCode | Should -Be 'permission-denied'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'PermissionDenied'
+    }
+
+    It 'still calls both profile surfaces when neither contains a tracked baseline' {
+        $result = Invoke-SecurityBaselinePlanFixture -Templates @() -Policies @() -Intents @()
+
+        @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)" }) | Should -Be @(
+            'DeviceManagementTemplate/ListBeta'
+            'ConfigurationPolicy/ListBeta'
+            'DeviceManagementIntent/ListBeta'
+        )
     }
 }
 

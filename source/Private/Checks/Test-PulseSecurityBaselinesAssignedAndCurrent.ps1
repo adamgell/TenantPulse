@@ -4,20 +4,23 @@
     judgment).
 
     PROVIDER PLAN: `securityBaselinesAssignedAndCurrent` is a TenantPulse-owned composite.
-    Invoke-PulseSecurityBaselinePlan reads GraphKit's released
-    DeviceManagementTemplate.ListBeta and DeviceManagementIntent.ListBeta primitives, joins
-    intent.templateId to template.id, and keeps only the tracked security-baseline template
-    families. DatasetMap.psd1 retains its synthetic Pending Walk marker only as the static
-    manifest placeholder; the normal collection path must route this dataset through the
-    provider-plan registry before the Pending fallback is evaluated.
+    Invoke-PulseSecurityBaselinePlan reads GraphKit's released template, configuration-
+    policy, per-policy assignment, and legacy intent primitives. Current policies join
+    templateReference.templateId to template.id; remaining read-only legacy intents join
+    intent.templateId to the same template catalog. Both paths keep only the four tracked
+    security-baseline families. DatasetMap.psd1 retains its synthetic Pending Walk marker
+    only as the static manifest placeholder; the normal collection path routes this dataset
+    through the built-in provider-plan registry before the Pending fallback is evaluated.
 
     COMPACT ROW SHAPE this rule expects (defined here, matching the precedent set by
     TP.INT.0013's own compact-record contract, not raw Graph): one row per joined
     security-baseline intent -
     {id, name, templateFamily, hasAssignment (bool), isDeprecated (bool)}. Building this
-    The provider plan derives templateFamily from the joined template's native templateType,
-    hasAssignment from intent.isAssigned, and isDeprecated from template.isDeprecated. It
-    rejects missing joins and non-Boolean disposition fields rather than manufacturing a
+    For current policies the provider plan derives templateFamily from templateReference and
+    hasAssignment from the per-policy assignment collection. For legacy intents it maps the
+    template's native templateType to the same four family names and preserves
+    intent.isAssigned. Both use template.isDeprecated and reject missing joins, count drift,
+    child-read failures, and non-Boolean disposition fields rather than manufacturing a
     result from incomplete service data.
 
     CLAIM (live-verified against
