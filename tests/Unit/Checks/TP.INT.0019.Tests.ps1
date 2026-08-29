@@ -40,6 +40,9 @@ BeforeAll {
                 }
 
                 $manifest = Get-PulseSnapshotManifest -Store $store
+                # Keep the boundary fixture deterministic as the wall clock crosses UTC
+                # midnight; the rule must compare against the snapshot's cutoff, not now.
+                $manifest['createdUtc'] = '2026-08-19T00:00:00.0000000Z'
                 $gates = if ($null -eq $check.Data -or $null -eq $check.Data.Gates) { @() } else { @($check.Data.Gates) }
                 if ($gates.Count -gt 0) {
                     if (-not $manifest.Contains('licenseEvidence') -or $manifest.licenseEvidence -isnot [System.Collections.IDictionary]) {
