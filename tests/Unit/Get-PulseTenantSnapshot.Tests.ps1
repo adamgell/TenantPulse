@@ -1073,6 +1073,72 @@ Describe 'Get-PulseTenantSnapshot' {
         $manifest.datasets.endpointSecurityDiskEncryptionPolicies.status | Should -Be 'Collected'
     }
 
+    It 'uses the five built-in provider plans without caller wiring' {
+        $datasets = @(
+            'dataProcessorServiceForWindowsFeaturesOnboarding'
+            'intuneRbacGroupProtection'
+            'endpointSecurityDiskEncryptionPolicies'
+            'endpointSecurityLapsPolicies'
+            'securityBaselinesAssignedAndCurrent'
+        )
+        $check = New-TestCheck -Id 'TP.INT.DEFAULT-PLANS' -Datasets $datasets
+
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($check) }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'tenant-1' }
+        }
+        Mock Invoke-PulseWindowsDataProcessorPlan -ModuleName TenantPulse {
+            param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+            [pscustomobject][ordered]@{
+                Dataset = $Dataset; Status = 'Skipped'; Rows = @(); Gaps = @()
+                FailureClass = 'PlatformUnavailable'; ReasonCode = 'platform-unavailable'
+                Detail = @{}; Provider = 'GraphKit'; ApiVersion = 'beta'; Operations = @('Get')
+            }
+        }
+        Mock Invoke-PulseIntuneRbacGroupProtectionPlan -ModuleName TenantPulse {
+            param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+            [pscustomobject][ordered]@{
+                Dataset = $Dataset; Status = 'Collected'; Rows = @(); Gaps = @()
+                FailureClass = $null; ReasonCode = 'collected'; Detail = @{}
+                Provider = 'GraphKit'; ApiVersion = 'beta'; Operations = @('ListBeta')
+            }
+        }
+        Mock Invoke-PulseEndpointSecurityPolicyPlan -ModuleName TenantPulse {
+            param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+            [pscustomobject][ordered]@{
+                Dataset = $Dataset; Status = 'Collected'; Rows = @(); Gaps = @()
+                FailureClass = $null; ReasonCode = 'collected'; Detail = @{}
+                Provider = 'GraphKit'; ApiVersion = 'beta'; Operations = @('ListBeta')
+            }
+        }
+        Mock Invoke-PulseSecurityBaselinePlan -ModuleName TenantPulse {
+            param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+            [pscustomobject][ordered]@{
+                Dataset = $Dataset; Status = 'Collected'; Rows = @(); Gaps = @()
+                FailureClass = $null; ReasonCode = 'collected'; Detail = @{}
+                Provider = 'GraphKit'; ApiVersion = 'beta'; Operations = @('ListBeta')
+            }
+        }
+
+        $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot {
+            param($snapshotRoot)
+            Get-PulseTenantSnapshot -ProfileId 'contoso-tenant-id' -OutputPath $snapshotRoot
+        }
+
+        Should -Invoke Invoke-PulseWindowsDataProcessorPlan -ModuleName TenantPulse -Times 1 -Exactly
+        Should -Invoke Invoke-PulseIntuneRbacGroupProtectionPlan -ModuleName TenantPulse -Times 1 -Exactly
+        Should -Invoke Invoke-PulseEndpointSecurityPolicyPlan -ModuleName TenantPulse -Times 2 -Exactly
+        Should -Invoke Invoke-PulseSecurityBaselinePlan -ModuleName TenantPulse -Times 1 -Exactly
+
+        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'PlatformUnavailable' `
+            -Because $manifest.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reason
+        $manifest.datasets.intuneRbacGroupProtection.status | Should -Be 'Collected'
+        $manifest.datasets.endpointSecurityDiskEncryptionPolicies.status | Should -Be 'Collected'
+        $manifest.datasets.endpointSecurityLapsPolicies.status | Should -Be 'Collected'
+        $manifest.datasets.securityBaselinesAssignedAndCurrent.status | Should -Be 'Collected'
+    }
+
 
     # Item 1 (final fix wave, spec 2a): the pseudonym is keyed on the resolved TENANT ID,
     # never -ProfileId - the same tenant reached under two differently-named profiles must

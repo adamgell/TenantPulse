@@ -8,10 +8,9 @@
     PlatformUnavailable outcome rather than inventing a descriptor or silently treating a
     missing catalog entry as a transient GraphKit release wait.
 
-    This plan intentionally performs no Graph call. It is selected only when the central
-    provider registry explicitly wires it for this dataset; until that wiring and the
-    DatasetMap cutover are reviewed together, the existing Pending map entry remains the
-    ordinary collection behavior.
+    This plan intentionally performs no Graph call. The built-in provider registry selects
+    it for this dataset before the DatasetMap Pending fallback, replacing an indefinite
+    descriptor-pending result with the explicit platform disposition.
 #>
 
 function Invoke-PulseWindowsDataProcessorPlan {

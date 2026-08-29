@@ -16,9 +16,10 @@
         afterwards. A clean read is written Collected. A 403 is written Skipped with a
         reason naming the descriptor's required permissions - "not permitted", not
         "broken". Any other failure is written Failed with the caught error's message. A
-        dataset flagged Pending in DatasetMap.psd1 (no GraphKit descriptor exists yet) is
-        written Skipped with reason 'descriptor-pending: awaiting GraphKit release' and
-        never attempted at all.
+        A dataset flagged Pending in DatasetMap.psd1 is first resolved through TenantPulse's
+        built-in provider-plan registry. Shipped composites run there; an entry with no
+        registered plan is written Skipped with reason
+        'descriptor-pending: awaiting GraphKit release' and never attempted at all.
 
         Two distinct paths cover a total authentication failure, because GraphKit's
         Get-GraphContext performs zero network calls and never acquires a token (see its
@@ -115,9 +116,10 @@
         assignment targets; an unavailable assignment payload gaps that policy.
 
     .PARAMETER ProviderPlanRegistry
-        Optional dataset-name keyed registry of TenantPulse-owned provider plan commands.
-        Supplied plans run sequentially with the resolved Graph context; when omitted,
-        ordinary single-operation and Pending collection behavior is unchanged.
+        Optional dataset-name keyed overrides for TenantPulse-owned provider plan commands.
+        TenantPulse wires its five shipped plans by default. A supplied entry replaces the
+        matching built-in plan and runs sequentially with the same resolved Graph context;
+        other built-in plans remain active.
 #>
 function Get-PulseTenantSnapshot {
     [CmdletBinding()]
@@ -171,8 +173,8 @@ function Get-PulseTenantSnapshot {
         # released ConfigurationPolicyAssignment.ListBeta read for every eligible policy.
         [Parameter()]
         [switch] $ExpandSettings,
-        # Optional TenantPulse-owned composite plans, keyed only by dataset name. When
-        # omitted, Invoke-PulseCollection retains its ordinary GraphKit/Pending behavior.
+        # Optional overrides for TenantPulse-owned composite plans, keyed only by dataset
+        # name. Shipped plans are wired by default below.
         [Parameter()]
         [AllowNull()]
         [hashtable] $ProviderPlanRegistry = @{}
@@ -201,6 +203,8 @@ function Get-PulseTenantSnapshot {
     $checks = @(Select-PulseCheck @selectParams)
 
     $manifest = @(Get-PulseCollectionManifest -Checks $checks -DatasetMap $datasetMap)
+
+    $resolvedProviderPlanRegistry = Resolve-PulseProviderPlanRegistry -Overrides $ProviderPlanRegistry
 
     $operatorKey = Get-PulseOperatorKey
 
@@ -262,7 +266,7 @@ function Get-PulseTenantSnapshot {
     $store = New-PulseSnapshotStore -Path $OutputPath -Tenant $tenantPseudonym -GraphKitVersion $graphKitVersion
 
     Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId `
-        -TenantPseudonym $tenantPseudonym -ProviderPlanRegistry $ProviderPlanRegistry
+        -TenantPseudonym $tenantPseudonym -ProviderPlanRegistry $resolvedProviderPlanRegistry
 
     if ($ExpandSettings) {
         # P0-1 review fix: explicitly discarded - see Invoke-PulseSettingsCatalogExpansionPipeline's
