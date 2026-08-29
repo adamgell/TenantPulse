@@ -8,14 +8,12 @@ BeforeAll {
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
     function script:Invoke-RbacPlanFixture {
         param(
-            [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $RoleDefinitions,
             [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $RoleAssignments,
             [Parameter(Mandatory)] [hashtable] $Groups,
             [Parameter()] [hashtable] $GroupErrors = @{}
         )
 
         $fixture = @{
-            RoleDefinitions = $RoleDefinitions
             RoleAssignments = $RoleAssignments
             Groups          = $Groups
             GroupErrors     = $GroupErrors
@@ -42,10 +40,7 @@ BeforeAll {
                     Id         = if ($null -ne $Parameters) { [string] $Parameters.id } else { $null }
                 })
 
-                if ($Type -eq 'DeviceManagementRoleDefinition') {
-                    return @($script:RbacFixture.RoleDefinitions)
-                }
-                if ($Type -eq 'DeviceManagementRoleAssignment') {
+                if ($Type -eq 'DeviceManagementUnifiedRoleAssignment' -and $Operation -eq 'ListBeta') {
                     return @($script:RbacFixture.RoleAssignments)
                 }
                 if ($Type -eq 'Group') {
@@ -76,13 +71,20 @@ BeforeAll {
 Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
     It 'emits compact deterministic rows for protected and unprotected groups' {
         $result = Invoke-RbacPlanFixture `
-            -RoleDefinitions @(
-                [pscustomobject]@{ id = 'role-b'; displayName = 'School Administrator' }
-                [pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }
-            ) `
             -RoleAssignments @(
-                [pscustomobject]@{ id = 'assignment-b'; roleDefinitionId = 'role-b'; members = @('group-b', 'group-a') }
-                [pscustomobject]@{ id = 'assignment-a'; roleDefinitionId = 'role-a'; members = @('group-a') }
+                [pscustomobject]@{
+                    id             = 'assignment-b'
+                    roleDefinition = [pscustomobject]@{ id = 'role-b'; displayName = 'School Administrator' }
+                    principals     = @(
+                        [pscustomobject]@{ id = 'group-b'; displayName = 'School Admins'; '@odata.type' = '#microsoft.graph.group' }
+                        [pscustomobject]@{ id = 'group-a'; displayName = 'App Admins'; '@odata.type' = '#microsoft.graph.group' }
+                    )
+                }
+                [pscustomobject]@{
+                    id             = 'assignment-a'
+                    roleDefinition = [pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }
+                    principals     = @([pscustomobject]@{ id = 'group-a'; displayName = 'App Admins'; '@odata.type' = '#microsoft.graph.group' })
+                }
             ) `
             -Groups @{
                 'group-a' = [pscustomobject]@{ id = 'group-a'; displayName = 'App Admins'; isManagementRestricted = $false; isAssignableToRole = $false }
@@ -100,10 +102,20 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
 
     It 'deduplicates repeated group references while preserving every role name' {
         $result = Invoke-RbacPlanFixture `
-            -RoleDefinitions @([pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }) `
             -RoleAssignments @(
-                [pscustomobject]@{ id = 'assignment-a'; roleDefinitionId = 'role-a'; members = @('group-a', 'group-a') }
-                [pscustomobject]@{ id = 'assignment-b'; roleDefinitionId = 'role-a'; members = @('group-a') }
+                [pscustomobject]@{
+                    id             = 'assignment-a'
+                    roleDefinition = [pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }
+                    principals     = @(
+                        [pscustomobject]@{ id = 'group-a'; '@odata.type' = '#microsoft.graph.group' }
+                        [pscustomobject]@{ id = 'group-a'; '@odata.type' = '#microsoft.graph.group' }
+                    )
+                }
+                [pscustomobject]@{
+                    id             = 'assignment-b'
+                    roleDefinition = [pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }
+                    principals     = @([pscustomobject]@{ id = 'group-a'; '@odata.type' = '#microsoft.graph.group' })
+                }
             ) `
             -Groups @{ 'group-a' = [pscustomobject]@{ id = 'group-a'; displayName = 'App Admins'; isManagementRestricted = $false; isAssignableToRole = $true } }
 
@@ -113,10 +125,9 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'Group').Count | Should -Be 1
     }
 
-    It 'returns an authoritative empty collection only after a successful assignment read with no group-backed assignments' {
+    It 'returns an authoritative empty collection only after a successful empty expanded-assignment read' {
         $result = Invoke-RbacPlanFixture `
-            -RoleDefinitions @([pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }) `
-            -RoleAssignments @([pscustomobject]@{ id = 'assignment-a'; roleDefinitionId = 'role-a'; members = @() }) `
+            -RoleAssignments @() `
             -Groups @{}
 
         $result.Outcome.Status | Should -Be 'Collected'
@@ -127,8 +138,11 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
 
     It 'retains a missing group protection flag as a structured child gap instead of emitting an unreadable row' {
         $result = Invoke-RbacPlanFixture `
-            -RoleDefinitions @([pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }) `
-            -RoleAssignments @([pscustomobject]@{ id = 'assignment-a'; roleDefinitionId = 'role-a'; members = @('group-a') }) `
+            -RoleAssignments @([pscustomobject]@{
+                    id             = 'assignment-a'
+                    roleDefinition = [pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }
+                    principals     = @([pscustomobject]@{ id = 'group-a'; '@odata.type' = '#microsoft.graph.group' })
+                }) `
             -Groups @{ 'group-a' = [pscustomobject]@{ id = 'group-a'; displayName = 'App Admins'; isManagementRestricted = $false } }
 
         $result.Outcome.Status | Should -Be 'Failed'
@@ -141,8 +155,14 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
 
     It 'retains a failed child group lookup as a gap with the group scope and operation' {
         $result = Invoke-RbacPlanFixture `
-            -RoleDefinitions @([pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }) `
-            -RoleAssignments @([pscustomobject]@{ id = 'assignment-a'; roleDefinitionId = 'role-a'; members = @('group-a', 'group-b') }) `
+            -RoleAssignments @([pscustomobject]@{
+                    id             = 'assignment-a'
+                    roleDefinition = [pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }
+                    principals     = @(
+                        [pscustomobject]@{ id = 'group-a'; '@odata.type' = '#microsoft.graph.group' }
+                        [pscustomobject]@{ id = 'group-b'; '@odata.type' = '#microsoft.graph.group' }
+                    )
+                }) `
             -Groups @{
                 'group-a' = [pscustomobject]@{ id = 'group-a'; displayName = 'App Admins'; isManagementRestricted = $false; isAssignableToRole = $false }
                 'group-b' = [pscustomobject]@{ id = 'group-b'; displayName = 'School Admins'; isManagementRestricted = $true; isAssignableToRole = $false }
@@ -161,33 +181,52 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
 
     It 'records a missing role-definition relation as an assignment gap instead of an unknown-role row' {
         $result = Invoke-RbacPlanFixture `
-            -RoleDefinitions @([pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }) `
-            -RoleAssignments @([pscustomobject]@{ id = 'assignment-a'; displayName = 'HD Team'; members = @('group-a') }) `
+            -RoleAssignments @([pscustomobject]@{
+                    id         = 'assignment-a'
+                    displayName = 'HD Team'
+                    principals = @([pscustomobject]@{ id = 'group-a'; '@odata.type' = '#microsoft.graph.group' })
+                }) `
             -Groups @{ 'group-a' = [pscustomobject]@{ id = 'group-a'; displayName = 'App Admins'; isManagementRestricted = $false; isAssignableToRole = $false } }
 
         $result.Outcome.Status | Should -Be 'Failed'
         @($result.Outcome.Rows).Count | Should -Be 0
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'assignment:assignment-a'
-        $result.Outcome.Gaps[0].Operation | Should -Be 'List'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ListBeta'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
         $result.Outcome.Gaps[0].ReasonCode | Should -Be 'invalid-provider-data'
         @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'Group').Count | Should -Be 0
     }
 
+    It 'records a missing principals expansion as an assignment gap instead of an authoritative empty collection' {
+        $result = Invoke-RbacPlanFixture `
+            -RoleAssignments @([pscustomobject]@{
+                    id             = 'assignment-a'
+                    roleDefinition = [pscustomobject]@{ id = 'role-a'; displayName = 'App Manager' }
+                }) `
+            -Groups @{}
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'assignment:assignment-a'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ListBeta'
+        $result.Outcome.Gaps[0].ApiVersion | Should -Be 'beta'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'Group').Count | Should -Be 0
+    }
+
     It 'validates all released descriptors before making any Graph call' {
         $result = Invoke-RbacPlanFixture `
-            -RoleDefinitions @() `
             -RoleAssignments @() `
             -Groups @{}
 
         $descriptorCalls = @($result.Calls | Where-Object Kind -eq 'Descriptor')
-        $descriptorCalls.Count | Should -Be 3
+        $descriptorCalls.Count | Should -Be 2
         @($descriptorCalls | ForEach-Object { "$($_.Type)/$($_.Operation)/$($_.ApiVersion)" }) | Should -Be @(
-            'DeviceManagementRoleDefinition/List/v1.0'
-            'DeviceManagementRoleAssignment/List/v1.0'
+            'DeviceManagementUnifiedRoleAssignment/ListBeta/beta'
             'Group/Get/v1.0'
         )
-        @($result.Calls | Where-Object Kind -eq 'Graph').Count | Should -Be 2
+        @($result.Calls | Where-Object Kind -eq 'Graph').Count | Should -Be 1
     }
 }

@@ -2,9 +2,10 @@
     Private: collect the compact, group-keyed input for TP.INT.0013.
 
     This is a TenantPulse-owned composite plan. GraphKit remains responsible for one
-    operation at a time: the two Intune RBAC list reads and one selected Group.Get read per
-    distinct member group. Every call receives the same resolved context and is made in
-    deterministic sequence; there is deliberately no generic Walk or parallel fan-out.
+    operation at a time: one expanded Intune unified-RBAC assignment read and one selected
+    Group.Get read per distinct principal group. Every call receives the same resolved context
+    and is made in deterministic sequence; there is deliberately no generic Walk or parallel
+    fan-out.
 
     A child group failure is a structured collection gap. Rows from successful child reads
     remain usable as a Partial outcome, while a run with no usable rows is Failed so the
@@ -33,8 +34,7 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
     )
 
     $descriptorSpecs = @(
-        @{ Type = 'DeviceManagementRoleDefinition'; Operation = 'List'; ApiVersion = 'v1.0' }
-        @{ Type = 'DeviceManagementRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+        @{ Type = 'DeviceManagementUnifiedRoleAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         @{ Type = 'Group'; Operation = 'Get'; ApiVersion = 'v1.0' }
     )
 
@@ -45,7 +45,7 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         Assert-PulseReadOnlyDescriptor -Type $spec.Type -Operation $spec.Operation -ApiVersion $spec.ApiVersion
     }
 
-    $operations = @('List', 'List', 'Get')
+    $operations = @('ListBeta', 'Get')
     $apiVersion = if ($ManifestEntry.PSObject.Properties['ApiVersion'] -and $ManifestEntry.ApiVersion) {
         [string] $ManifestEntry.ApiVersion
     } else {
@@ -76,37 +76,11 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
             -Operations $operations
     }
 
-    $roleDefinitions = @()
-    try {
-        $roleDefinitions = @(Get-GraphObject -Context $Context -Type 'DeviceManagementRoleDefinition' -Operation 'List' -ErrorAction Stop)
-    } catch {
-        return New-RbacFailureOutcome -Operation 'DeviceManagementRoleDefinition.List' -ErrorRecord $_
-    }
-
     $roleAssignments = @()
     try {
-        $roleAssignments = @(Get-GraphObject -Context $Context -Type 'DeviceManagementRoleAssignment' -Operation 'List' -ErrorAction Stop)
+        $roleAssignments = @(Get-GraphObject -Context $Context -Type 'DeviceManagementUnifiedRoleAssignment' -Operation 'ListBeta' -ErrorAction Stop)
     } catch {
-        return New-RbacFailureOutcome -Operation 'DeviceManagementRoleAssignment.List' -ErrorRecord $_
-    }
-
-    $roleNamesById = @{}
-    foreach ($definition in $roleDefinitions) {
-        if ($null -eq $definition) { continue }
-
-        $definitionId = $null
-        $definitionName = $null
-        if ($definition -is [System.Collections.IDictionary]) {
-            if ($definition.Contains('id')) { $definitionId = [string] $definition['id'] }
-            if ($definition.Contains('displayName')) { $definitionName = [string] $definition['displayName'] }
-        } else {
-            if ($definition.PSObject.Properties['id']) { $definitionId = [string] $definition.id }
-            if ($definition.PSObject.Properties['displayName']) { $definitionName = [string] $definition.displayName }
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace($definitionId)) {
-            $roleNamesById[$definitionId] = if ([string]::IsNullOrWhiteSpace($definitionName)) { $definitionId } else { $definitionName }
-        }
+        return New-RbacFailureOutcome -Operation 'DeviceManagementUnifiedRoleAssignment.ListBeta' -ErrorRecord $_
     }
 
     # The ordered map is keyed case-insensitively so the same group is read once even if
@@ -116,77 +90,73 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
     $groupRoleNames = [ordered]@{}
     $gaps = [System.Collections.Generic.List[object]]::new()
     foreach ($assignment in $roleAssignments) {
-        if ($null -eq $assignment) { continue }
-
         $assignmentId = $null
-        $roleDefinitionId = $null
         $roleDefinitionName = $null
-        $members = @()
+        $principals = @()
         $roleDefinition = $null
-        if ($assignment -is [System.Collections.IDictionary]) {
+        $hasPrincipals = $false
+        if ($null -eq $assignment) {
+            $assignmentId = 'unknown'
+        } elseif ($assignment -is [System.Collections.IDictionary]) {
             if ($assignment.Contains('id')) { $assignmentId = [string] $assignment['id'] }
-            if ($assignment.Contains('roleDefinitionId')) { $roleDefinitionId = [string] $assignment['roleDefinitionId'] }
             if ($assignment.Contains('roleDefinition')) { $roleDefinition = $assignment['roleDefinition'] }
-            if ($assignment.Contains('members')) { $members = @($assignment['members']) }
+            if ($assignment.Contains('principals')) {
+                $hasPrincipals = $true
+                $principals = @($assignment['principals'])
+            }
         } else {
             if ($assignment.PSObject.Properties['id']) { $assignmentId = [string] $assignment.id }
-            if ($assignment.PSObject.Properties['roleDefinitionId']) { $roleDefinitionId = [string] $assignment.roleDefinitionId }
             if ($assignment.PSObject.Properties['roleDefinition']) { $roleDefinition = $assignment.roleDefinition }
-            if ($assignment.PSObject.Properties['members']) { $members = @($assignment.members) }
+            if ($assignment.PSObject.Properties['principals']) {
+                $hasPrincipals = $true
+                $principals = @($assignment.principals)
+            }
         }
 
         if ($null -ne $roleDefinition) {
             if ($roleDefinition -is [System.Collections.IDictionary]) {
-                if ([string]::IsNullOrWhiteSpace($roleDefinitionId) -and $roleDefinition.Contains('id')) {
-                    $roleDefinitionId = [string] $roleDefinition['id']
-                }
                 if ($roleDefinition.Contains('displayName')) {
                     $roleDefinitionName = [string] $roleDefinition['displayName']
                 }
             } else {
-                if ([string]::IsNullOrWhiteSpace($roleDefinitionId) -and $roleDefinition.PSObject.Properties['id']) {
-                    $roleDefinitionId = [string] $roleDefinition.id
-                }
                 if ($roleDefinition.PSObject.Properties['displayName']) {
                     $roleDefinitionName = [string] $roleDefinition.displayName
                 }
             }
         }
 
-        $roleName = if (-not [string]::IsNullOrWhiteSpace($roleDefinitionId) -and $roleNamesById.ContainsKey($roleDefinitionId)) {
-            [string] $roleNamesById[$roleDefinitionId]
-        } elseif (-not [string]::IsNullOrWhiteSpace($roleDefinitionName)) {
-            $roleDefinitionName
-        } else {
-            $null
-        }
-
-        # The released list shape can carry group members without carrying the role
-        # definition navigation. Do not turn that unresolved relationship into a plausible
-        # "(unknown role)" row: it is an assignment-scoped provider-data gap and no group
-        # lookup is attempted for that assignment.
-        if ($members.Count -gt 0 -and [string]::IsNullOrWhiteSpace($roleName)) {
+        # This descriptor promises both expansions. Any returned assignment missing either
+        # relationship is invalid provider data, not evidence that no group-backed RBAC
+        # assignments exist.
+        if (-not $hasPrincipals -or $principals.Count -eq 0 -or [string]::IsNullOrWhiteSpace($roleDefinitionName)) {
             $scopeId = if ([string]::IsNullOrWhiteSpace($assignmentId)) { 'unknown' } else { $assignmentId }
             $gaps.Add((New-PulseCollectionGap -Scope "assignment:$scopeId" -FailureClass 'InvalidProviderData' `
-                    -ReasonCode 'invalid-provider-data' -Detail @{ assignmentId = $scopeId } -Operation 'List' -ApiVersion 'v1.0'))
+                    -ReasonCode 'invalid-provider-data' -Detail @{ assignmentId = $scopeId } -Operation 'ListBeta' -ApiVersion 'beta'))
             continue
         }
 
-        foreach ($member in $members) {
+        $hasInvalidPrincipal = $false
+        foreach ($principal in $principals) {
             $groupId = $null
-            if ($member -is [System.Collections.IDictionary]) {
-                if ($member.Contains('id')) { $groupId = [string] $member['id'] }
-            } elseif ($member -is [string] -or $member -is [guid]) {
-                $groupId = [string] $member
-            } elseif ($null -ne $member -and $member.PSObject.Properties['id']) {
-                $groupId = [string] $member.id
+            if ($principal -is [System.Collections.IDictionary]) {
+                if ($principal.Contains('id')) { $groupId = [string] $principal['id'] }
+            } elseif ($null -ne $principal -and $principal.PSObject.Properties['id']) {
+                $groupId = [string] $principal.id
             }
 
-            if ([string]::IsNullOrWhiteSpace($groupId)) { continue }
+            if ([string]::IsNullOrWhiteSpace($groupId)) {
+                $hasInvalidPrincipal = $true
+                continue
+            }
             if (-not $groupRoleNames.Contains($groupId)) {
                 $groupRoleNames[$groupId] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             }
-            $groupRoleNames[$groupId].Add($roleName) | Out-Null
+            $groupRoleNames[$groupId].Add($roleDefinitionName) | Out-Null
+        }
+        if ($hasInvalidPrincipal) {
+            $scopeId = if ([string]::IsNullOrWhiteSpace($assignmentId)) { 'unknown' } else { $assignmentId }
+            $gaps.Add((New-PulseCollectionGap -Scope "assignment:$scopeId" -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ assignmentId = $scopeId } -Operation 'ListBeta' -ApiVersion 'beta'))
         }
     }
 
