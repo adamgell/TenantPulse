@@ -214,9 +214,12 @@
     mobileThreatDefenseConnectors = @{ Type = 'MobileThreatDefenseConnector'; Operation = 'List'; ApiVersion = 'v1.0' }
     windowsAutopilotDeploymentProfiles = @{ Type = 'WindowsAutopilotDeploymentProfile'; Operation = 'List'; ApiVersion = 'beta' }
 
-    # Task 3.3 PENDING (TP.INT.0029): still no released GraphKit descriptor for this
-    # composite Walk. ExpectedThrottleClass/ExpectedReplayPolicy declare the Read/Safe
-    # shape the static read-only gate requires for every Pending entry.
+    # TP.INT.0029 is a TenantPulse-owned provider plan over GraphKit's released
+    # DeviceManagementTemplate.ListBeta and DeviceManagementIntent.ListBeta primitives.
+    # This synthetic Pending Walk entry remains the static manifest placeholder; the normal
+    # collection registry routes it through Invoke-PulseSecurityBaselinePlan before the
+    # descriptor-pending fallback. ExpectedThrottleClass/ExpectedReplayPolicy declare the
+    # Read/Safe shape enforced for every such placeholder.
     securityBaselinesAssignedAndCurrent = @{ Type = 'SecurityBaselineAssignedAndCurrentWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 
     # Task 4.2 (EIDSCA port, wave 1): GraphKit 0.2.2 shipped the official

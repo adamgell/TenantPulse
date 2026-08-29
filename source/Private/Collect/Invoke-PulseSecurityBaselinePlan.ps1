@@ -1,18 +1,17 @@
 <#
     Private: collect TP.INT.0029 security-baseline assignment/version state.
 
-    GraphKit 0.2.2 releases the reusable Settings Catalog policy and assignment primitives:
-    ConfigurationPolicy.ListBeta and ConfigurationPolicyAssignment.ListBeta. It does not
-    release an official, reusable primitive for the security-baseline template family,
-    version, or deprecation metadata needed by this check. The old composite Walk descriptor
-    is intentionally not a substitute for that missing service contract.
+    GraphKit supplies two released read primitives for this composite:
 
-    Until Microsoft exposes a supportable metadata operation and GraphKit releases its exact
-    descriptor, this plan returns an explicit PlatformUnavailable outcome. It validates the
-    two released primitives before returning, but does not call them and does not invent
-    baseline rows from policy or assignment data that cannot establish version state. The
-    exact recheck trigger is carried in Detail so an operator can distinguish a platform
-    limitation from a package or permission failure.
+      - DeviceManagementTemplate.ListBeta exposes templateType, versionInfo, and the native
+        Boolean isDeprecated.
+      - DeviceManagementIntent.ListBeta exposes each profile's templateId and native Boolean
+        isAssigned.
+
+    TenantPulse joins intent.templateId to template.id, retains only the security-baseline
+    template families, and emits the compact check row
+    {id,name,templateFamily,hasAssignment,isDeprecated}. A missing relationship or wrongly
+    typed Boolean is provider-data uncertainty, never an authoritative empty collection.
 #>
 
 function Invoke-PulseSecurityBaselinePlan {
@@ -36,13 +35,12 @@ function Invoke-PulseSecurityBaselinePlan {
         [string] $TenantPseudonym
     )
 
-    # These are the only released primitives that can participate in this composite. The
-    # assignment response is authoritative for assignment presence, but neither response can
-    # establish template version/deprecation, so no network call is honest until that final
-    # contract exists.
+    $null = $ProfileId
+    $null = $TenantPseudonym
+
     $descriptorSpecs = @(
-        @{ Type = 'ConfigurationPolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
-        @{ Type = 'ConfigurationPolicyAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+        @{ Type = 'DeviceManagementTemplate'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+        @{ Type = 'DeviceManagementIntent'; Operation = 'ListBeta'; ApiVersion = 'beta' }
     )
 
     foreach ($spec in $descriptorSpecs) {
@@ -55,16 +53,156 @@ function Invoke-PulseSecurityBaselinePlan {
         'beta'
     }
 
-    $recheckTrigger = 'Recheck when GraphKit publishes a released read-only security-baseline metadata primitive exposing template family, version, and deprecation state, followed by a controlled live response-shape and permission verification.'
+    $operations = @('DeviceManagementTemplate.ListBeta', 'DeviceManagementIntent.ListBeta')
 
-    return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Skipped' -Rows @() -Gaps @() `
-        -FailureClass 'PlatformUnavailable' -ReasonCode 'platform-unavailable' `
-        -Detail @{
-            unsupportedContract = 'Security-baseline template family/version/deprecation metadata has no released reusable Graph primitive in GraphKit 0.2.2.'
-            releasedDescriptors = @('ConfigurationPolicy.ListBeta', 'ConfigurationPolicyAssignment.ListBeta')
-            missingMetadata = @('templateFamily', 'version', 'isDeprecated')
-            recheckTrigger = $recheckTrigger
-        } `
-        -Provider 'GraphKit' -ApiVersion $apiVersion `
-        -Operations @('ConfigurationPolicy.ListBeta', 'ConfigurationPolicyAssignment.ListBeta')
+    function Get-BaselinePropertyValue {
+        param($InputObject, [string] $Name)
+        if ($null -eq $InputObject) { return $null }
+        if ($InputObject -is [System.Collections.IDictionary]) {
+            if ($InputObject.Contains($Name)) { return $InputObject[$Name] }
+            return $null
+        }
+        $property = $InputObject.PSObject.Properties[$Name]
+        if ($null -eq $property) { return $null }
+        return $property.Value
+    }
+
+    function Test-BaselinePropertyPresent {
+        param($InputObject, [string] $Name)
+        if ($null -eq $InputObject) { return $false }
+        if ($InputObject -is [System.Collections.IDictionary]) { return $InputObject.Contains($Name) }
+        return $null -ne $InputObject.PSObject.Properties[$Name]
+    }
+
+    function New-BaselineReadFailure {
+        param(
+            [Parameter(Mandatory)] [string] $Operation,
+            [Parameter(Mandatory)] [System.Management.Automation.ErrorRecord] $ErrorRecord
+        )
+
+        $failureClass = Get-PulseFailureClass -ErrorRecord $ErrorRecord
+        $normalized = switch ($failureClass) {
+            'PermissionDenied' { 'PermissionDenied'; break }
+            'AuthFailure' { 'AuthenticationFailed'; break }
+            default { 'ProviderFailed' }
+        }
+        $reasonCode = switch ($normalized) {
+            'PermissionDenied' { 'permission-denied'; break }
+            'AuthenticationFailed' { 'authentication-failed'; break }
+            default { 'provider-failed' }
+        }
+
+        return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
+            -FailureClass $normalized -ReasonCode $reasonCode -Detail @{ operation = $Operation } `
+            -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
+    }
+
+    try {
+        $templates = @(Get-GraphObject -Context $Context -Type 'DeviceManagementTemplate' -Operation 'ListBeta' -ErrorAction Stop)
+    } catch {
+        return New-BaselineReadFailure -Operation 'DeviceManagementTemplate.ListBeta' -ErrorRecord $_
+    }
+
+    try {
+        $intents = @(Get-GraphObject -Context $Context -Type 'DeviceManagementIntent' -Operation 'ListBeta' -ErrorAction Stop)
+    } catch {
+        return New-BaselineReadFailure -Operation 'DeviceManagementIntent.ListBeta' -ErrorRecord $_
+    }
+
+    $trackedTemplateTypes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($templateType in @(
+        'securityBaseline'
+        'advancedThreatProtectionSecurityBaseline'
+        'microsoftEdgeSecurityBaseline'
+        'microsoftOffice365ProPlusSecurityBaseline'
+        'cloudPC'
+    )) {
+        $trackedTemplateTypes.Add($templateType) | Out-Null
+    }
+
+    $templatesById = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $gaps = [System.Collections.Generic.List[object]]::new()
+    foreach ($template in $templates) {
+        $templateId = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'id')
+        $templateType = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'templateType')
+        if ([string]::IsNullOrWhiteSpace($templateId) -or [string]::IsNullOrWhiteSpace($templateType)) {
+            $gaps.Add((New-PulseCollectionGap -Scope 'template:unknown' -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ missing = 'id-or-templateType' } `
+                    -Operation 'DeviceManagementTemplate.ListBeta' -ApiVersion 'beta'))
+            continue
+        }
+        if ($templatesById.ContainsKey($templateId)) {
+            $gaps.Add((New-PulseCollectionGap -Scope "template:$templateId" -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ duplicateTemplateId = $templateId } `
+                    -Operation 'DeviceManagementTemplate.ListBeta' -ApiVersion 'beta'))
+            continue
+        }
+        $templatesById.Add($templateId, $template)
+    }
+
+    $rowsById = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($intent in $intents) {
+        $intentId = [string] (Get-BaselinePropertyValue -InputObject $intent -Name 'id')
+        $templateId = [string] (Get-BaselinePropertyValue -InputObject $intent -Name 'templateId')
+        $scope = if ([string]::IsNullOrWhiteSpace($intentId)) { 'intent:unknown' } else { "intent:$intentId" }
+
+        if ([string]::IsNullOrWhiteSpace($intentId) -or [string]::IsNullOrWhiteSpace($templateId) -or -not $templatesById.ContainsKey($templateId)) {
+            $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ missing = 'id-templateId-or-template-join' } `
+                    -Operation 'DeviceManagementIntent.ListBeta' -ApiVersion 'beta'))
+            continue
+        }
+
+        $template = $templatesById[$templateId]
+        $templateType = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'templateType')
+        if (-not $trackedTemplateTypes.Contains($templateType)) { continue }
+
+        $hasIsAssigned = Test-BaselinePropertyPresent -InputObject $intent -Name 'isAssigned'
+        $hasIsDeprecated = Test-BaselinePropertyPresent -InputObject $template -Name 'isDeprecated'
+        $isAssigned = Get-BaselinePropertyValue -InputObject $intent -Name 'isAssigned'
+        $isDeprecated = Get-BaselinePropertyValue -InputObject $template -Name 'isDeprecated'
+        if (-not $hasIsAssigned -or $isAssigned -isnot [bool] -or -not $hasIsDeprecated -or $isDeprecated -isnot [bool]) {
+            $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ invalid = 'isAssigned-or-isDeprecated' } `
+                    -Operation 'DeviceManagementIntent.ListBeta' -ApiVersion 'beta'))
+            continue
+        }
+        if ($rowsById.ContainsKey($intentId)) {
+            $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ duplicateIntentId = $intentId } `
+                    -Operation 'DeviceManagementIntent.ListBeta' -ApiVersion 'beta'))
+            continue
+        }
+
+        $displayName = [string] (Get-BaselinePropertyValue -InputObject $intent -Name 'displayName')
+        if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $intentId }
+        $rowsById.Add($intentId, [pscustomobject][ordered]@{
+                id             = $intentId
+                name           = $displayName
+                templateFamily = $templateType
+                hasAssignment  = $isAssigned
+                isDeprecated   = $isDeprecated
+            })
+    }
+
+    $rowIds = [string[]] @($rowsById.Keys)
+    if ($rowIds.Count -gt 1) { [System.Array]::Sort($rowIds, [System.StringComparer]::Ordinal) }
+    $rows = @($rowIds | ForEach-Object { $rowsById[$_] })
+    $gapArray = $gaps.ToArray()
+
+    if ($gapArray.Count -eq 0) {
+        return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Collected' -Rows $rows -Gaps @() `
+            -ReasonCode 'collected' -Detail @{ baselineCount = $rows.Count } -Provider 'GraphKit' `
+            -ApiVersion $apiVersion -Operations $operations
+    }
+    if ($rows.Count -gt 0) {
+        return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Partial' -Rows $rows -Gaps $gapArray `
+            -ReasonCode 'partial' -Detail @{ baselineCount = $rows.Count; gapCount = $gapArray.Count } `
+            -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
+    }
+
+    return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gapArray `
+        -FailureClass 'InvalidProviderData' -ReasonCode 'invalid-provider-data' `
+        -Detail @{ gapCount = $gapArray.Count } -Provider 'GraphKit' -ApiVersion $apiVersion `
+        -Operations $operations
 }
