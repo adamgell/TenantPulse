@@ -296,7 +296,9 @@ collection Phase 1 already does:
 - **Compliance and legacy device configuration policies** (`deviceCompliancePolicies`,
   `deviceConfigurations`) - the older, polymorphic `@odata.type`-typed Graph resources,
   decomposed via a hand-maintained property map (`source/Data/TypedPolicyMaps.psd1`) rather
-  than a Graph-side settings catalog, since none exists for these types.
+  than a Graph-side settings catalog, since none exists for these types. Per-policy
+  assignments preserve include/exclude intent and filter metadata; a malformed assignment
+  target gaps that policy instead of publishing a false unassigned row.
 - **Conflict detection** - a single pass over every row from the families above, grouping
   by `settingDefinitionId` to surface settings where two or more policies disagree, with a
   four-state assignment-overlap verdict (`proven`/`possible`/`none`/`unknown`).
