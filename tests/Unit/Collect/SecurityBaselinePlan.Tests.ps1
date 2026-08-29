@@ -10,10 +10,12 @@ BeforeAll {
     function script:Invoke-SecurityBaselinePlanFixture {
         param(
             [Parameter()] [AllowEmptyCollection()] [object[]] $Templates = @(),
+            [Parameter()] [AllowEmptyCollection()] [object[]] $CurrentTemplates = @(),
             [Parameter()] [AllowEmptyCollection()] [object[]] $Policies = @(),
             [Parameter()] [AllowEmptyCollection()] [object[]] $Intents = @(),
             [Parameter()] [hashtable] $Assignments = @{},
             [Parameter()] [AllowNull()] $TemplateError,
+            [Parameter()] [AllowNull()] $CurrentTemplateError,
             [Parameter()] [AllowNull()] $PolicyError,
             [Parameter()] [AllowNull()] $IntentError,
             [Parameter()] [hashtable] $AssignmentErrors = @{}
@@ -21,10 +23,12 @@ BeforeAll {
 
         $fixture = @{
             Templates       = $Templates
+            CurrentTemplates = $CurrentTemplates
             Policies        = $Policies
             Intents         = $Intents
             Assignments     = $Assignments
             TemplateError   = $TemplateError
+            CurrentTemplateError = $CurrentTemplateError
             PolicyError     = $PolicyError
             IntentError     = $IntentError
             AssignmentErrors = $AssignmentErrors
@@ -58,6 +62,12 @@ BeforeAll {
                         throw $script:SecurityBaselineFixture.TemplateError
                     }
                     return @($script:SecurityBaselineFixture.Templates)
+                }
+                if ($Type -eq 'DeviceManagementConfigurationPolicyTemplate') {
+                    if ($null -ne $script:SecurityBaselineFixture.CurrentTemplateError) {
+                        throw $script:SecurityBaselineFixture.CurrentTemplateError
+                    }
+                    return @($script:SecurityBaselineFixture.CurrentTemplates)
                 }
                 if ($Type -eq 'DeviceManagementIntent') {
                     if ($null -ne $script:SecurityBaselineFixture.IntentError) {
@@ -113,16 +123,16 @@ BeforeAll {
 
 Describe 'Invoke-PulseSecurityBaselinePlan' {
     It 'collects current configuration-policy baselines, assignments, and template disposition' {
-        $result = Invoke-SecurityBaselinePlanFixture -Templates @(
-            [pscustomobject]@{ id = 'template-current'; displayName = 'Windows baseline'; templateType = 'securityBaseline'; versionInfo = '24H2'; isDeprecated = $false }
-            [pscustomobject]@{ id = 'template-old'; displayName = 'Edge baseline'; templateType = 'microsoftEdgeSecurityBaseline'; versionInfo = 'v1'; isDeprecated = $true }
-            [pscustomobject]@{ id = 'template-other'; displayName = 'Office settings'; templateType = 'deviceConfigurationForOffice365'; versionInfo = 'v1'; isDeprecated = $false }
+        $result = Invoke-SecurityBaselinePlanFixture -CurrentTemplates @(
+            [pscustomobject]@{ id = 'template-current'; baseId = 'base-windows'; version = 2; displayName = 'Windows baseline'; displayVersion = '24H2'; lifecycleState = 'active'; templateFamily = 'baseline' }
+            [pscustomobject]@{ id = 'template-old'; baseId = 'base-edge'; version = 1; displayName = 'Edge baseline'; displayVersion = 'v1'; lifecycleState = 'superseded'; templateFamily = 'baseline' }
+            [pscustomobject]@{ id = 'template-other'; baseId = 'base-disk'; version = 1; displayName = 'Disk settings'; displayVersion = 'v1'; lifecycleState = 'active'; templateFamily = 'endpointSecurityDiskEncryption' }
         ) -Policies @(
-            [pscustomobject]@{ id = 'policy-current'; name = 'Windows profile'; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline' } }
-            [pscustomobject]@{ id = 'policy-old'; name = 'Edge profile'; templateReference = [pscustomobject]@{ templateId = 'template-old'; templateFamily = 'baselineMicrosoftEdge' } }
-            [pscustomobject]@{ id = 'policy-other'; name = 'Disk profile'; templateReference = [pscustomobject]@{ templateId = 'template-other'; templateFamily = 'endpointSecurityDiskEncryption' } }
+            [pscustomobject]@{ id = 'policy-current'; name = 'Windows profile'; isAssigned = $true; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline'; templateDisplayName = 'Windows baseline'; templateDisplayVersion = '24H2' } }
+            [pscustomobject]@{ id = 'policy-old'; name = 'Edge profile'; isAssigned = $false; templateReference = [pscustomobject]@{ templateId = 'template-old'; templateFamily = 'baseline'; templateDisplayName = 'Edge baseline'; templateDisplayVersion = 'v1' } }
+            [pscustomobject]@{ id = 'policy-other'; name = 'Disk profile'; isAssigned = $false; templateReference = [pscustomobject]@{ templateId = 'template-other'; templateFamily = 'endpointSecurityDiskEncryption'; templateDisplayName = 'Disk settings'; templateDisplayVersion = 'v1' } }
         ) -Assignments @{
-            'policy-current' = @([pscustomobject]@{ id = 'assignment-1' })
+            'policy-current' = @([pscustomobject]@{ id = 'assignment-1'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'; deviceAndAppManagementAssignmentFilterType = 'none' }; source = 'direct'; sourceId = $null })
             'policy-old' = @()
         }
 
@@ -134,17 +144,19 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
         $result.Outcome.Rows[0].hasAssignment | Should -BeTrue
         $result.Outcome.Rows[0].isDeprecated | Should -BeFalse
         $result.Outcome.Rows[1].id | Should -Be 'policy-old'
-        $result.Outcome.Rows[1].templateFamily | Should -Be 'baselineMicrosoftEdge'
+        $result.Outcome.Rows[1].templateFamily | Should -Be 'baseline'
         $result.Outcome.Rows[1].hasAssignment | Should -BeFalse
         $result.Outcome.Rows[1].isDeprecated | Should -BeTrue
         @($result.Calls | Where-Object Kind -eq 'Descriptor' | ForEach-Object { "$($_.Type)/$($_.Operation)/$($_.ApiVersion)" }) | Should -Be @(
             'DeviceManagementTemplate/ListBeta/beta'
+            'DeviceManagementConfigurationPolicyTemplate/ListBeta/beta'
             'ConfigurationPolicy/ListBeta/beta'
             'ConfigurationPolicyAssignment/ListBeta/beta'
             'DeviceManagementIntent/ListBeta/beta'
         )
         @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)/$($_.Id)" }) | Should -Be @(
             'DeviceManagementTemplate/ListBeta/'
+            'DeviceManagementConfigurationPolicyTemplate/ListBeta/'
             'ConfigurationPolicy/ListBeta/'
             'DeviceManagementIntent/ListBeta/'
             'ConfigurationPolicyAssignment/ListBeta/policy-current'
@@ -189,7 +201,7 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
     }
 
     It 'fails closed when a current baseline policy cannot join to template disposition metadata' {
-        $result = Invoke-SecurityBaselinePlanFixture -Templates @() -Policies @(
+        $result = Invoke-SecurityBaselinePlanFixture -CurrentTemplates @() -Policies @(
             [pscustomobject]@{ id = 'policy-unknown'; name = 'Unknown'; templateReference = [pscustomobject]@{ templateId = 'missing'; templateFamily = 'baseline' } }
         )
 
@@ -210,10 +222,10 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
     }
 
     It 'retains a scoped gap when a current baseline assignment read fails' {
-        $result = Invoke-SecurityBaselinePlanFixture -Templates @(
-            [pscustomobject]@{ id = 'template-current'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 0 }
+        $result = Invoke-SecurityBaselinePlanFixture -CurrentTemplates @(
+            [pscustomobject]@{ id = 'template-current'; baseId = 'base-current'; version = 2; displayName = 'Windows baseline'; displayVersion = '24H2'; lifecycleState = 'active'; templateFamily = 'baseline' }
         ) -Policies @(
-            [pscustomobject]@{ id = 'policy-current'; name = 'Windows'; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline' } }
+            [pscustomobject]@{ id = 'policy-current'; name = 'Windows'; isAssigned = $true; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline'; templateDisplayName = 'Windows baseline'; templateDisplayVersion = '24H2' } }
         ) -AssignmentErrors @{ 'policy-current' = '403 Forbidden' }
 
         $result.Outcome.Status | Should -Be 'Failed'
@@ -263,9 +275,108 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
 
         @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)" }) | Should -Be @(
             'DeviceManagementTemplate/ListBeta'
+            'DeviceManagementConfigurationPolicyTemplate/ListBeta'
             'ConfigurationPolicy/ListBeta'
             'DeviceManagementIntent/ListBeta'
         )
+    }
+
+    It 'counts only well-formed positive current-policy assignment targets as assigned' {
+        $templates = @(
+            [pscustomobject]@{ id = 'template-current'; baseId = 'base-current'; version = 2; displayName = 'Windows baseline'; displayVersion = '24H2'; lifecycleState = 'active'; templateFamily = 'baseline' }
+        )
+        $result = Invoke-SecurityBaselinePlanFixture -CurrentTemplates $templates -Policies @(
+            [pscustomobject]@{ id = 'policy-exclusion-only'; name = 'Excluded only'; isAssigned = $false; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline'; templateDisplayName = 'Windows baseline'; templateDisplayVersion = '24H2' } }
+            [pscustomobject]@{ id = 'policy-positive'; name = 'Positive'; isAssigned = $true; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline'; templateDisplayName = 'Windows baseline'; templateDisplayVersion = '24H2' } }
+        ) -Assignments @{
+            'policy-exclusion-only' = @(
+                [pscustomobject]@{ id = 'assignment-exclude'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'group-exclude'; deviceAndAppManagementAssignmentFilterType = 'none' }; source = 'direct'; sourceId = $null }
+            )
+            'policy-positive' = @(
+                [pscustomobject]@{ id = 'assignment-include'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'group-include'; deviceAndAppManagementAssignmentFilterType = 'none' }; source = 'direct'; sourceId = $null }
+            )
+        }
+
+        $result.Outcome.Status | Should -Be 'Collected'
+        @($result.Outcome.Rows).Count | Should -Be 2
+        ($result.Outcome.Rows | Where-Object id -eq 'policy-exclusion-only').hasAssignment | Should -BeFalse
+        ($result.Outcome.Rows | Where-Object id -eq 'policy-positive').hasAssignment | Should -BeTrue
+    }
+
+    It 'gaps a malformed current-policy assignment instead of counting it as assigned' {
+        $result = Invoke-SecurityBaselinePlanFixture -CurrentTemplates @(
+            [pscustomobject]@{ id = 'template-current'; baseId = 'base-current'; version = 2; displayName = 'Windows baseline'; displayVersion = '24H2'; lifecycleState = 'active'; templateFamily = 'baseline' }
+        ) -Policies @(
+            [pscustomobject]@{ id = 'policy-malformed'; name = 'Malformed'; isAssigned = $true; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline'; templateDisplayName = 'Windows baseline'; templateDisplayVersion = '24H2' } }
+        ) -Assignments @{
+            'policy-malformed' = @(
+                [pscustomobject]@{ id = 'assignment-malformed'; target = $null; source = 'direct'; sourceId = $null }
+            )
+        }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:policy-malformed'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+    }
+
+    It 'gaps a tracked legacy template when intentCount is absent' {
+        $result = Invoke-SecurityBaselinePlanFixture -Templates @(
+            [pscustomobject]@{ id = 'template-missing-count'; templateType = 'securityBaseline'; isDeprecated = $false }
+        )
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        $result.Outcome.Gaps[0].Scope | Should -Be 'template:template-missing-count'
+        $result.Outcome.Gaps[0].Detail.invalid | Should -Be 'intentCount'
+    }
+
+    It 'gaps a tracked legacy template whose required id is missing' {
+        $result = Invoke-SecurityBaselinePlanFixture -Templates @(
+            [pscustomobject]@{ id = ''; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 0 }
+        )
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        $result.Outcome.Gaps[0].Scope | Should -Be 'template:unknown'
+        $result.Outcome.Gaps[0].Detail.missing | Should -Be 'id'
+    }
+
+    It 'drops duplicate current-policy ids deterministically instead of retaining either row' {
+        $templates = @(
+            [pscustomobject]@{ id = 'template-active'; baseId = 'base'; version = 2; displayName = 'Active'; displayVersion = 'v2'; lifecycleState = 'active'; templateFamily = 'baseline' }
+            [pscustomobject]@{ id = 'template-old'; baseId = 'base'; version = 1; displayName = 'Old'; displayVersion = 'v1'; lifecycleState = 'superseded'; templateFamily = 'baseline' }
+        )
+        $policies = @(
+            [pscustomobject]@{ id = 'policy-duplicate'; name = 'Active profile'; isAssigned = $true; templateReference = [pscustomobject]@{ templateId = 'template-active'; templateFamily = 'baseline'; templateDisplayName = 'Active'; templateDisplayVersion = 'v2' } }
+            [pscustomobject]@{ id = 'policy-duplicate'; name = 'Old profile'; isAssigned = $true; templateReference = [pscustomobject]@{ templateId = 'template-old'; templateFamily = 'baseline'; templateDisplayName = 'Old'; templateDisplayVersion = 'v1' } }
+        )
+        $assignments = @{ 'policy-duplicate' = @([pscustomobject]@{ id = 'assignment'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'; deviceAndAppManagementAssignmentFilterType = 'none' }; source = 'direct'; sourceId = $null }) }
+
+        $first = Invoke-SecurityBaselinePlanFixture -CurrentTemplates $templates -Policies $policies -Assignments $assignments
+        $second = Invoke-SecurityBaselinePlanFixture -CurrentTemplates $templates -Policies @($policies[1], $policies[0]) -Assignments $assignments
+
+        $first.Outcome.Status | Should -Be 'Failed'
+        @($first.Outcome.Rows).Count | Should -Be 0
+        ($first.Outcome | ConvertTo-Json -Depth 8 -Compress) | Should -Be ($second.Outcome | ConvertTo-Json -Depth 8 -Compress)
+        @($first.Outcome.Gaps | Where-Object { $_.Detail.duplicatePolicyId -eq 'policy-duplicate' }).Count | Should -Be 1
+    }
+
+    It 'drops duplicate legacy-intent ids deterministically instead of retaining either row' {
+        $templates = @(
+            [pscustomobject]@{ id = 'template-active'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 1 }
+            [pscustomobject]@{ id = 'template-old'; templateType = 'securityBaseline'; isDeprecated = $true; intentCount = 1 }
+        )
+        $intents = @(
+            [pscustomobject]@{ id = 'intent-duplicate'; displayName = 'Active'; templateId = 'template-active'; isAssigned = $true }
+            [pscustomobject]@{ id = 'intent-duplicate'; displayName = 'Old'; templateId = 'template-old'; isAssigned = $false }
+        )
+
+        $first = Invoke-SecurityBaselinePlanFixture -Templates $templates -Intents $intents
+        $second = Invoke-SecurityBaselinePlanFixture -Templates $templates -Intents @($intents[1], $intents[0])
+
+        $first.Outcome.Status | Should -Be 'Failed'
+        @($first.Outcome.Rows).Count | Should -Be 0
+        ($first.Outcome | ConvertTo-Json -Depth 8 -Compress) | Should -Be ($second.Outcome | ConvertTo-Json -Depth 8 -Compress)
+        @($first.Outcome.Gaps | Where-Object { $_.Detail.duplicateIntentId -eq 'intent-duplicate' }).Count | Should -Be 1
     }
 }
 
@@ -316,7 +427,7 @@ Describe 'TP.INT.0029 security-baseline row fixtures' {
 
     It 'does not turn a malformed native assignment value into successful check input' {
         $result = Invoke-SecurityBaselinePlanFixture -Templates @(
-            [pscustomobject]@{ id = 'template-current'; displayName = 'Windows baseline'; templateType = 'securityBaseline'; versionInfo = '24H2'; isDeprecated = $false }
+            [pscustomobject]@{ id = 'template-current'; displayName = 'Windows baseline'; templateType = 'securityBaseline'; versionInfo = '24H2'; isDeprecated = $false; intentCount = 1 }
         ) -Intents @(
             [pscustomobject]@{ id = 'intent-invalid'; displayName = 'Invalid'; templateId = 'template-current'; isAssigned = 'true' }
         )

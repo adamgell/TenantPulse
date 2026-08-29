@@ -211,8 +211,11 @@
     mobileThreatDefenseConnectors = @{ Type = 'MobileThreatDefenseConnector'; Operation = 'List'; ApiVersion = 'v1.0' }
     windowsAutopilotDeploymentProfiles = @{ Type = 'WindowsAutopilotDeploymentProfile'; Operation = 'List'; ApiVersion = 'beta' }
 
-    # TP.INT.0029 is a TenantPulse-owned provider plan over GraphKit's released
-    # DeviceManagementTemplate.ListBeta and DeviceManagementIntent.ListBeta primitives.
+    # TP.INT.0029 is a TenantPulse-owned provider plan over GraphKit primitives. Its current-
+    # policy branch requires DeviceManagementConfigurationPolicyTemplate.ListBeta over
+    # /deviceManagement/configurationPolicyTemplates in addition to ConfigurationPolicy and
+    # ConfigurationPolicyAssignment; the legacy branch separately uses
+    # DeviceManagementTemplate.ListBeta and DeviceManagementIntent.ListBeta.
     # This synthetic Pending Walk entry remains the static manifest placeholder; the normal
     # collection registry routes it through Invoke-PulseSecurityBaselinePlan before the
     # descriptor-pending fallback. ExpectedThrottleClass/ExpectedReplayPolicy declare the

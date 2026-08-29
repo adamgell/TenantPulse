@@ -4,24 +4,28 @@
     judgment).
 
     PROVIDER PLAN: `securityBaselinesAssignedAndCurrent` is a TenantPulse-owned composite.
-    Invoke-PulseSecurityBaselinePlan reads GraphKit's released template, configuration-
-    policy, per-policy assignment, and legacy intent primitives. Current policies join
-    templateReference.templateId to template.id; remaining read-only legacy intents join
-    intent.templateId to the same template catalog. Both paths keep only the four tracked
-    security-baseline families. DatasetMap.psd1 retains its synthetic Pending Walk marker
-    only as the static manifest placeholder; the normal collection path routes this dataset
-    through the built-in provider-plan registry before the Pending fallback is evaluated.
+    Invoke-PulseSecurityBaselinePlan composes configuration-policy, per-policy assignment,
+    current configuration-policy-template, legacy device-management-template, and legacy
+    intent primitives. Current policies join templateReference.templateId to
+    configurationPolicyTemplate.id and map lifecycleState; legacy intents separately join
+    intent.templateId to deviceManagementTemplate.id and use isDeprecated. Both paths keep
+    only the four tracked security-baseline families. DatasetMap.psd1 retains its synthetic
+    Pending Walk marker only as the static manifest placeholder; the normal collection path
+    routes this dataset through the built-in provider-plan registry before the Pending
+    fallback is evaluated.
 
     COMPACT ROW SHAPE this rule expects (defined here, matching the precedent set by
     TP.INT.0013's own compact-record contract, not raw Graph): one row per joined
-    security-baseline intent -
-    {id, name, templateFamily, hasAssignment (bool), isDeprecated (bool)}. Building this
-    For current policies the provider plan derives templateFamily from templateReference and
+    security-baseline instance -
+    {id, name, templateFamily, hasAssignment (bool), isDeprecated (bool)}. For current
+    policies the provider plan derives templateFamily from templateReference and
     hasAssignment from the per-policy assignment collection. For legacy intents it maps the
     template's native templateType to the same four family names and preserves
-    intent.isAssigned. Both use template.isDeprecated and reject missing joins, count drift,
-    child-read failures, and non-Boolean disposition fields rather than manufacturing a
-    result from incomplete service data.
+    intent.isAssigned. Current templates map active lifecycleState to current and
+    superseded/deprecated/retired to obsolete; legacy templates use isDeprecated. Both paths
+    reject missing joins, count drift, child-read failures, malformed assignment targets,
+    duplicate ids, and invalid disposition fields rather than manufacturing a result from
+    incomplete service data.
 
     CLAIM (live-verified against
     https://learn.microsoft.com/en-us/intune/device-security/security-baselines/overview,

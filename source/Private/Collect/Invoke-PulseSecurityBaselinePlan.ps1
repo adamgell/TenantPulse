@@ -2,13 +2,13 @@
     Private: collect TP.INT.0029 security-baseline assignment/version state.
 
     Current baselines are configurationPolicies whose templateReference.templateFamily is
-    one of the four families in the check contract. Their assignments are read through the
-    released per-policy assignment operation. Read-only legacy intent records are retained
-    as a second input because existing profiles can remain on that service surface even
-    though new baseline management moved to configurationPolicies.
+    one of the four families in the check contract. Their template ids join to the distinct
+    configurationPolicyTemplates resource, whose lifecycleState establishes whether the
+    referenced version is active or obsolete. Their assignments are read through the
+    per-policy assignment operation. Read-only legacy intent records retain their separate
+    join to deviceManagement/templates because existing profiles can remain on that surface.
 
-    Both shapes join their template id to DeviceManagementTemplate.ListBeta for the native
-    isDeprecated disposition. TenantPulse emits one compact row
+    TenantPulse emits one compact row
     {id,name,templateFamily,hasAssignment,isDeprecated}. Missing joins, malformed native
     booleans, child-read failures, or a template intentCount mismatch remain structured
     uncertainty and can never become an authoritative empty collection.
@@ -40,6 +40,7 @@ function Invoke-PulseSecurityBaselinePlan {
 
     $descriptorSpecs = @(
         @{ Type = 'DeviceManagementTemplate'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+        @{ Type = 'DeviceManagementConfigurationPolicyTemplate'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         @{ Type = 'ConfigurationPolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         @{ Type = 'ConfigurationPolicyAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         @{ Type = 'DeviceManagementIntent'; Operation = 'ListBeta'; ApiVersion = 'beta' }
@@ -55,6 +56,7 @@ function Invoke-PulseSecurityBaselinePlan {
     }
     $operations = @(
         'DeviceManagementTemplate.ListBeta'
+        'DeviceManagementConfigurationPolicyTemplate.ListBeta'
         'ConfigurationPolicy.ListBeta'
         'ConfigurationPolicyAssignment.ListBeta'
         'DeviceManagementIntent.ListBeta'
@@ -156,13 +158,20 @@ function Invoke-PulseSecurityBaselinePlan {
         cloudPC                                   = 'baselineWindows365'
     }
 
+    $gaps = [System.Collections.Generic.List[object]]::new()
     try {
         $templates = @(Get-GraphObject -Context $Context -Type 'DeviceManagementTemplate' -Operation 'ListBeta' -ErrorAction Stop)
     } catch {
         return New-BaselineReadFailure -Operation 'DeviceManagementTemplate.ListBeta' -ErrorRecord $_
     }
 
-    $gaps = [System.Collections.Generic.List[object]]::new()
+    try {
+        $currentTemplates = @(Get-GraphObject -Context $Context -Type 'DeviceManagementConfigurationPolicyTemplate' -Operation 'ListBeta' -ErrorAction Stop)
+    } catch {
+        $currentTemplates = @()
+        $gaps.Add((New-BaselineReadGap -Scope 'surface:configurationPolicyTemplates' `
+                -Operation 'DeviceManagementConfigurationPolicyTemplate.ListBeta' -ErrorRecord $_))
+    }
     try {
         $policies = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta' -ErrorAction Stop)
     } catch {
@@ -182,12 +191,56 @@ function Invoke-PulseSecurityBaselinePlan {
     $duplicateTemplateIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($template in (Sort-BaselineObjectsById -Items $templates)) {
         $templateId = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'id')
-        if ([string]::IsNullOrWhiteSpace($templateId)) { continue }
+        $templateType = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'templateType')
+        if ([string]::IsNullOrWhiteSpace($templateId)) {
+            if ($legacyFamilyMap.ContainsKey($templateType)) {
+                $gaps.Add((New-PulseCollectionGap -Scope 'template:unknown' -FailureClass 'InvalidProviderData' `
+                        -ReasonCode 'invalid-provider-data' -Detail @{ missing = 'id' } `
+                        -Operation 'DeviceManagementTemplate.ListBeta' -ApiVersion 'beta'))
+            }
+            continue
+        }
         if ($templatesById.ContainsKey($templateId)) {
             $duplicateTemplateIds.Add($templateId) | Out-Null
             continue
         }
         $templatesById.Add($templateId, $template)
+    }
+
+    $currentTemplatesById = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $duplicateCurrentTemplateIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($template in (Sort-BaselineObjectsById -Items $currentTemplates)) {
+        $templateId = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'id')
+        $templateFamily = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'templateFamily')
+        if ([string]::IsNullOrWhiteSpace($templateId)) {
+            if ($currentFamilies.Contains($templateFamily)) {
+                $gaps.Add((New-PulseCollectionGap -Scope 'current-template:unknown' -FailureClass 'InvalidProviderData' `
+                        -ReasonCode 'invalid-provider-data' -Detail @{ missing = 'id' } `
+                        -Operation 'DeviceManagementConfigurationPolicyTemplate.ListBeta' -ApiVersion 'beta'))
+            }
+            continue
+        }
+        if ($currentTemplatesById.ContainsKey($templateId)) {
+            $duplicateCurrentTemplateIds.Add($templateId) | Out-Null
+            continue
+        }
+        $currentTemplatesById.Add($templateId, $template)
+    }
+
+    $duplicatePolicyIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $seenPolicyIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($policy in $policies) {
+        $policyId = [string] (Get-BaselinePropertyValue -InputObject $policy -Name 'id')
+        if (-not [string]::IsNullOrWhiteSpace($policyId) -and -not $seenPolicyIds.Add($policyId)) {
+            $duplicatePolicyIds.Add($policyId) | Out-Null
+        }
+    }
+    $duplicatePolicyIdArray = [string[]]@($duplicatePolicyIds)
+    if ($duplicatePolicyIdArray.Count -gt 1) { [System.Array]::Sort($duplicatePolicyIdArray, [System.StringComparer]::Ordinal) }
+    foreach ($policyId in $duplicatePolicyIdArray) {
+        $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass 'InvalidProviderData' `
+                -ReasonCode 'invalid-provider-data' -Detail @{ duplicatePolicyId = $policyId } `
+                -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta'))
     }
 
     $rowsByKey = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -199,20 +252,26 @@ function Invoke-PulseSecurityBaselinePlan {
         $policyId = [string] (Get-BaselinePropertyValue -InputObject $policy -Name 'id')
         $templateId = [string] (Get-BaselinePropertyValue -InputObject $templateReference -Name 'templateId')
         $scope = if ([string]::IsNullOrWhiteSpace($policyId)) { 'policy:unknown' } else { "policy:$policyId" }
+        if ($duplicatePolicyIds.Contains($policyId)) { continue }
         if ([string]::IsNullOrWhiteSpace($policyId) -or [string]::IsNullOrWhiteSpace($templateId) -or
-            -not $templatesById.ContainsKey($templateId) -or $duplicateTemplateIds.Contains($templateId)) {
+            -not $currentTemplatesById.ContainsKey($templateId) -or $duplicateCurrentTemplateIds.Contains($templateId)) {
             $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
                     -ReasonCode 'invalid-provider-data' -Detail @{ missing = 'id-templateReference-or-template-join' } `
                     -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta'))
             continue
         }
 
-        $template = $templatesById[$templateId]
-        $isDeprecated = Get-BaselinePropertyValue -InputObject $template -Name 'isDeprecated'
-        if (-not (Test-BaselinePropertyPresent -InputObject $template -Name 'isDeprecated') -or $isDeprecated -isnot [bool]) {
+        $template = $currentTemplatesById[$templateId]
+        $lifecycleState = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'lifecycleState')
+        $isDeprecated = switch ($lifecycleState.ToLowerInvariant()) {
+            'active' { $false }
+            { $_ -in @('superseded', 'deprecated', 'retired') } { $true }
+            default { $null }
+        }
+        if ($null -eq $isDeprecated) {
             $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
-                    -ReasonCode 'invalid-provider-data' -Detail @{ invalid = 'isDeprecated' } `
-                    -Operation 'DeviceManagementTemplate.ListBeta' -ApiVersion 'beta'))
+                    -ReasonCode 'invalid-provider-data' -Detail @{ invalid = 'lifecycleState'; value = $lifecycleState } `
+                    -Operation 'DeviceManagementConfigurationPolicyTemplate.ListBeta' -ApiVersion 'beta'))
             continue
         }
 
@@ -225,22 +284,65 @@ function Invoke-PulseSecurityBaselinePlan {
             continue
         }
 
-        $rowKey = "policy:$policyId"
-        if ($rowsByKey.ContainsKey($rowKey)) {
+        $positiveAssignmentCount = 0
+        $assignmentDataInvalid = $false
+        foreach ($assignment in $assignments) {
+            $assignmentId = [string] (Get-BaselinePropertyValue -InputObject $assignment -Name 'id')
+            $target = Get-BaselinePropertyValue -InputObject $assignment -Name 'target'
+            $targetType = [string] (Get-BaselinePropertyValue -InputObject $target -Name '@odata.type')
+            $normalizedTargetType = $targetType.TrimStart('#').ToLowerInvariant()
+            $requiresGroupId = $normalizedTargetType -in @(
+                'microsoft.graph.groupassignmenttarget'
+                'microsoft.graph.exclusiongroupassignmenttarget'
+            )
+            $groupId = [string] (Get-BaselinePropertyValue -InputObject $target -Name 'groupId')
+            if ([string]::IsNullOrWhiteSpace($assignmentId) -or [string]::IsNullOrWhiteSpace($normalizedTargetType) -or
+                ($requiresGroupId -and [string]::IsNullOrWhiteSpace($groupId))) {
+                $assignmentDataInvalid = $true
+                break
+            }
+            switch ($normalizedTargetType) {
+                'microsoft.graph.groupassignmenttarget' { $positiveAssignmentCount++; continue }
+                'microsoft.graph.alldevicesassignmenttarget' { $positiveAssignmentCount++; continue }
+                'microsoft.graph.alllicensedusersassignmenttarget' { $positiveAssignmentCount++; continue }
+                'microsoft.graph.exclusiongroupassignmenttarget' { continue }
+                default { $assignmentDataInvalid = $true; break }
+            }
+            if ($assignmentDataInvalid) { break }
+        }
+        if ($assignmentDataInvalid) {
             $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
-                    -ReasonCode 'invalid-provider-data' -Detail @{ duplicatePolicyId = $policyId } `
-                    -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta'))
+                    -ReasonCode 'invalid-provider-data' -Detail @{ invalid = 'assignment-target' } `
+                    -Operation 'ConfigurationPolicyAssignment.ListBeta' -ApiVersion 'beta'))
             continue
         }
+
+        $rowKey = "policy:$policyId"
         $name = [string] (Get-BaselinePropertyValue -InputObject $policy -Name 'name')
         if ([string]::IsNullOrWhiteSpace($name)) { $name = $policyId }
         $rowsByKey.Add($rowKey, [pscustomobject][ordered]@{
                 id             = $policyId
                 name           = $name
                 templateFamily = $family
-                hasAssignment  = (@($assignments).Count -gt 0)
+                hasAssignment  = ($positiveAssignmentCount -gt 0)
                 isDeprecated   = $isDeprecated
             })
+    }
+
+    $duplicateIntentIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $seenIntentIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($intent in $intents) {
+        $intentId = [string] (Get-BaselinePropertyValue -InputObject $intent -Name 'id')
+        if (-not [string]::IsNullOrWhiteSpace($intentId) -and -not $seenIntentIds.Add($intentId)) {
+            $duplicateIntentIds.Add($intentId) | Out-Null
+        }
+    }
+    $duplicateIntentIdArray = [string[]]@($duplicateIntentIds)
+    if ($duplicateIntentIdArray.Count -gt 1) { [System.Array]::Sort($duplicateIntentIdArray, [System.StringComparer]::Ordinal) }
+    foreach ($intentId in $duplicateIntentIdArray) {
+        $gaps.Add((New-PulseCollectionGap -Scope "intent:$intentId" -FailureClass 'InvalidProviderData' `
+                -ReasonCode 'invalid-provider-data' -Detail @{ duplicateIntentId = $intentId } `
+                -Operation 'DeviceManagementIntent.ListBeta' -ApiVersion 'beta'))
     }
 
     $legacyIntentCounts = [System.Collections.Generic.Dictionary[string, int]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -248,6 +350,7 @@ function Invoke-PulseSecurityBaselinePlan {
         $intentId = [string] (Get-BaselinePropertyValue -InputObject $intent -Name 'id')
         $templateId = [string] (Get-BaselinePropertyValue -InputObject $intent -Name 'templateId')
         $scope = if ([string]::IsNullOrWhiteSpace($intentId)) { 'intent:unknown' } else { "intent:$intentId" }
+        if ($duplicateIntentIds.Contains($intentId)) { continue }
         if ([string]::IsNullOrWhiteSpace($intentId) -or [string]::IsNullOrWhiteSpace($templateId) -or
             -not $templatesById.ContainsKey($templateId) -or $duplicateTemplateIds.Contains($templateId)) {
             $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
@@ -273,12 +376,6 @@ function Invoke-PulseSecurityBaselinePlan {
         }
 
         $rowKey = "intent:$intentId"
-        if ($rowsByKey.ContainsKey($rowKey)) {
-            $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
-                    -ReasonCode 'invalid-provider-data' -Detail @{ duplicateIntentId = $intentId } `
-                    -Operation 'DeviceManagementIntent.ListBeta' -ApiVersion 'beta'))
-            continue
-        }
         $name = [string] (Get-BaselinePropertyValue -InputObject $intent -Name 'displayName')
         if ([string]::IsNullOrWhiteSpace($name)) { $name = $intentId }
         $rowsByKey.Add($rowKey, [pscustomobject][ordered]@{
@@ -296,8 +393,13 @@ function Invoke-PulseSecurityBaselinePlan {
         if ($duplicateTemplateIds.Contains($templateId)) { continue }
         $template = $templatesById[$templateId]
         $templateType = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'templateType')
-        if (-not $legacyFamilyMap.ContainsKey($templateType) -or
-            -not (Test-BaselinePropertyPresent -InputObject $template -Name 'intentCount')) {
+        if (-not $legacyFamilyMap.ContainsKey($templateType)) {
+            continue
+        }
+        if (-not (Test-BaselinePropertyPresent -InputObject $template -Name 'intentCount')) {
+            $gaps.Add((New-PulseCollectionGap -Scope "template:$templateId" -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ invalid = 'intentCount' } `
+                    -Operation 'DeviceManagementTemplate.ListBeta' -ApiVersion 'beta'))
             continue
         }
         $intentCount = Get-BaselinePropertyValue -InputObject $template -Name 'intentCount'
