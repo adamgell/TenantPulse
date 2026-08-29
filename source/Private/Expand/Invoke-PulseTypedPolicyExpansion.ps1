@@ -222,27 +222,38 @@ function Invoke-PulseTypedPolicyExpansion {
                 break
             }
 
-            $intentRaw = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'intent'
             $targetTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName '@odata.type'
-            $targetType = if ($null -ne $targetTypeRaw) { [string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '' } else { $null }
             $groupIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'groupId'
             $filterIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId'
             $filterTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType'
 
-            $intent = if ($null -ne $intentRaw) {
-                [string] $intentRaw
-            } elseif ([string]::Equals($targetType, 'exclusionGroup', [System.StringComparison]::OrdinalIgnoreCase)) {
-                'exclude'
-            } elseif ($targetType -in @('group', 'allDevices', 'allLicensedUsers')) {
-                'include'
-            } else {
-                $null
+            $targetTypeCandidate = if ($null -ne $targetTypeRaw) {
+                ([string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '').Trim()
+            } else { $null }
+            $targetType = switch ($targetTypeCandidate) {
+                'group' { 'group'; break }
+                'exclusionGroup' { 'exclusionGroup'; break }
+                'allDevices' { 'allDevices'; break }
+                'allLicensedUsers' { 'allLicensedUsers'; break }
+                default { $null }
             }
+
+            $groupId = if ($null -ne $groupIdRaw) { [string] $groupIdRaw } else { $null }
+            if ([string]::IsNullOrWhiteSpace($targetType) -or
+                ($targetType -in @('group', 'exclusionGroup') -and [string]::IsNullOrWhiteSpace($groupId))) {
+                $invalidAssignmentTarget = $true
+                break
+            }
+
+            # These v1.0 typed-assignment operations express membership through the target.
+            # A device-configuration resource's beta-only apply/remove intent is a different
+            # semantic axis and must never escape into row schema v1's include/exclude field.
+            $intent = if ($targetType -eq 'exclusionGroup') { 'exclude' } else { 'include' }
 
             $normalizedAssignmentList.Add([pscustomobject]@{
                 intent     = $intent
                 targetType = $targetType
-                groupId    = if ($null -ne $groupIdRaw) { [string] $groupIdRaw } else { $null }
+                groupId    = $groupId
                 filterId   = if ($null -ne $filterIdRaw) { [string] $filterIdRaw } else { $null }
                 filterType = if ($null -ne $filterTypeRaw) { [string] $filterTypeRaw } else { $null }
             }) | Out-Null
