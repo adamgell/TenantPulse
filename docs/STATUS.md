@@ -7,7 +7,8 @@ here is required to install or use TenantPulse; see README.md for that.
 ## R1 outcome/composite handoff (2026-08-19)
 
 R1's provider-outcome/gate/partial-aware collection infrastructure and the TenantPulse-owned
-sequential composite plans are implemented in source and focused-tested. The five
+sequential composite plans and the device-cleanup collection migration are implemented in
+source and focused-tested. The six
 `DatasetMap.psd1` entries below deliberately remain `Pending`; implementation and local
 deterministic evidence are not the same claim as CI, live cutover, or full service coverage.
 TenantPulse `0.1.2` and its corrective `0.1.3` are separately verified as published to
@@ -18,6 +19,7 @@ The implementation details and focused-test source of truth are the plan files u
 
 | Dataset/check | R1 disposition |
 |---|---|
+| `managedDeviceCleanupRules` / `TP.INT.0007` | The released GraphKit 0.2.2 package lacks the per-platform collection operation. The obsolete singleton contract has been removed and the candidate `ManagedDeviceCleanupRule.ListBeta` shape is locally contract-tested. Retain `Pending`; cut over only after that exact descriptor ships in a later GraphKit release and the collection/check path is verified live. |
 | `dataProcessorServiceForWindowsFeaturesOnboarding` / `TP.INT.0009` | A controlled read through GraphKit 0.2.2 returned the singleton and native Boolean fields, but Microsoft Learn has no official GET/application-permission contract and GraphKit 0.2.2 has no matching descriptor. Retain `Pending`; recheck when Microsoft publishes that contract or GraphKit ships the exact `Singleton.Default` descriptor, then repeat the read-only probe. |
 | `intuneRbacGroupProtection` / `TP.INT.0013` | Released primitive reads succeeded, but the observed role-assignment response lacked the role-definition relationship needed to preserve role names. Retain `Pending`; cut over only after an evidence-backed released primitive or supported response expansion supplies that relationship. |
 | `endpointSecurityDiskEncryptionPolicies` / `TP.INT.0014` | The provider/composite plan is implemented and focused-tested, but its exact package/live gate was not completed. Retain `Pending`; do not describe BitLocker as live or default cut over. |

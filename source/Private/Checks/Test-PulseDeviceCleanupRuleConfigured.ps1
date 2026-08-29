@@ -2,20 +2,14 @@
     Private: TP.INT.0007 rule function - Intune managed-device clean-up rule configured
     (Task 3.2, Maester port MT.1053 - Test-MtManagedDeviceCleanupSettings, MIT).
 
-    ADAPTED, NOT A LINE-FOR-LINE PORT (live-verified divergence): Maester's own function
-    queries the newer per-platform RULES collection, `deviceManagement/managedDeviceCleanupRules`
-    (plural - each row a distinct rule with displayName/deviceCleanupRulePlatformType/
-    deviceInactivityBeforeRetirementInDays). The GraphKit descriptor actually released
-    (0.1.1, Type 'DeviceCleanupRule', Operation 'Get') instead resolves to the OLDER,
-    simpler SINGLETON resource `deviceManagement/managedDeviceCleanupSettings` - one
-    tenant-wide deviceInactivityBeforeRetirementInDays value, no per-platform rows, no
-    displayName/platform to report per-rule (live-confirmed via Microsoft Graph's own
-    managedDeviceCleanupSettings resource doc, which shows exactly one property on this
-    resource: https://learn.microsoft.com/en-us/graph/api/resources/intune-devices-manageddevicecleanupsettings).
-    This check is ported against the descriptor that actually exists, not the one
-    Maester's own implementation happens to call - same field-absence/zero-as-fail
-    semantics, but Evidence carries the one tenant-wide value TenantPulse can actually
-    read, not a per-rule table.
+    The supported service contract is the per-platform RULES collection,
+    `deviceManagement/managedDeviceCleanupRules` (plural). Each row is a distinct rule
+    carrying id, displayName, deviceCleanupRulePlatformType, and
+    deviceInactivityBeforeRetirementInDays. A successful empty collection authoritatively
+    means no rule is configured. GraphKit's ManagedDeviceCleanupRule.ListBeta candidate
+    implements that collection, but TenantPulse's DatasetMap keeps it Pending while the
+    module remains pinned to immutable GraphKit 0.2.2; direct unit fixtures exercise this
+    rule now without pretending the candidate is a released runtime dependency.
 
     CORRECTED CLAIM (live-verified against
     https://learn.microsoft.com/en-us/intune/governance/configure-cleanup-rules, fetched
@@ -26,11 +20,13 @@
     checks back in before its device certificate expires. This check's Consulting text
     reflects that corrected behavior throughout, never "deletes".
 
-    RULE: Fail when deviceInactivityBeforeRetirementInDays is absent, $null, blank, or
-    resolves to 0 (Maester's own "falsy or zero" condition, ported verbatim) - Pass
-    otherwise. The property is documented as a String type on the Graph resource (a known
-    Graph-doc quirk - see this file's own inline note) but always carries a numeric day
-    count in practice; parsed defensively rather than assumed to be a native [int].
+    RULE: Pass when at least one collected rule carries a positive day count; Fail for an
+    authoritative empty collection or when every well-formed row carries 0. The Graph
+    resource documents this field as Int32. Missing, null, string, fractional, negative,
+    or out-of-Int32-range values are malformed service data and throw so the evaluator
+    emits Error. A malformed sibling can never be ignored merely because another row is
+    valid. Evidence is one row per rule and is deterministically ordered by platform then
+    rule id by the evaluator's normal (SortKey, Identity) ordering contract.
 #>
 
 function Test-PulseDeviceCleanupRuleConfigured {
@@ -44,35 +40,87 @@ function Test-PulseDeviceCleanupRuleConfigured {
         [hashtable] $Context = @{}
     )
 
-    $rows = @($Datasets.managedDeviceCleanupSettings)
+    function Get-PulseCleanupRuleProperty {
+        param($Row, [string] $Name, [ref] $Found)
+
+        $Found.Value = $false
+        if ($Row -is [System.Collections.IDictionary]) {
+            if ($Row.Contains($Name)) {
+                $Found.Value = $true
+                return $Row[$Name]
+            }
+            return $null
+        }
+
+        if ($Row -is [pscustomobject]) {
+            $property = $Row.PSObject.Properties[$Name]
+            if ($null -ne $property) {
+                $Found.Value = $true
+                return $property.Value
+            }
+        }
+
+        return $null
+    }
+
+    $rows = @($Datasets.managedDeviceCleanupRules)
     if ($rows.Count -eq 0) {
-        throw 'Test-PulseDeviceCleanupRuleConfigured: managedDeviceCleanupSettings dataset returned no rows - the service returned nothing to evaluate for this tenant-wide singleton.'
+        return New-PulseFinding -Status Fail -Reason 'No Intune device clean-up rule is configured: the managed-device cleanup rules collection is authoritatively empty.' -Evidence @()
     }
 
-    $rawValue = $rows[0].deviceInactivityBeforeRetirementInDays
-    $days = 0
-    $hasValue = $false
-    if ($null -ne $rawValue -and [string]$rawValue -ne '') {
-        $parsed = 0
-        if ([int]::TryParse([string] $rawValue, [ref] $parsed)) {
-            $days = $parsed
-            $hasValue = $true
+    $evidence = [System.Collections.Generic.List[object]]::new()
+    $configuredCount = 0
+    foreach ($row in $rows) {
+        if ($null -eq $row -or ($row -isnot [System.Collections.IDictionary] -and $row -isnot [pscustomobject])) {
+            throw 'Test-PulseDeviceCleanupRuleConfigured: the managed-device cleanup rules collection contains a malformed row.'
         }
-    }
 
-    $evidence = @(
-        @{
-            Identity = 'managedDeviceCleanupSettings'
-            Detail   = @{ deviceInactivityBeforeRetirementInDays = $rawValue }
-            SortKey  = 'managedDeviceCleanupSettings'
+        $found = $false
+        $rawDays = Get-PulseCleanupRuleProperty -Row $row -Name 'deviceInactivityBeforeRetirementInDays' -Found ([ref] $found)
+        $integralTypes = @([byte], [sbyte], [int16], [uint16], [int32], [uint32], [int64], [uint64])
+        $isIntegral = $false
+        foreach ($type in $integralTypes) {
+            if ($type.IsInstanceOfType($rawDays)) {
+                $isIntegral = $true
+                break
+            }
         }
-    )
+        if (-not $found -or $null -eq $rawDays -or -not $isIntegral -or $rawDays -lt 0 -or $rawDays -gt [int]::MaxValue) {
+            throw 'Test-PulseDeviceCleanupRuleConfigured: deviceInactivityBeforeRetirementInDays is malformed; expected a non-negative Int32 value.'
+        }
+        $days = [int] $rawDays
 
-    if (-not $hasValue -or $days -eq 0) {
-        $reason = 'No Intune device clean-up rule is configured: deviceInactivityBeforeRetirementInDays is absent or 0, so Intune never automatically hides stale managed-device records from the admin center - the device count/compliance-rate view can drift indefinitely stale without anyone noticing.'
-        return New-PulseFinding -Status Fail -Reason $reason -Evidence $evidence
+        $idFound = $false
+        $id = Get-PulseCleanupRuleProperty -Row $row -Name 'id' -Found ([ref] $idFound)
+        if (-not $idFound -or [string]::IsNullOrWhiteSpace([string] $id)) {
+            throw 'Test-PulseDeviceCleanupRuleConfigured: a managed-device cleanup rule is missing its required id.'
+        }
+        $displayNameFound = $false
+        $displayName = Get-PulseCleanupRuleProperty -Row $row -Name 'displayName' -Found ([ref] $displayNameFound)
+        $platformFound = $false
+        $platform = Get-PulseCleanupRuleProperty -Row $row -Name 'deviceCleanupRulePlatformType' -Found ([ref] $platformFound)
+
+        if ($days -gt 0) { $configuredCount++ }
+        $evidence.Add(@{
+            Identity = [string] $id
+            SortKey  = if ($platformFound -and $null -ne $platform) { [string] $platform } else { [string] $id }
+            Detail   = [ordered]@{
+                deviceCleanupRulePlatformType            = if ($platformFound) { $platform } else { $null }
+                deviceInactivityBeforeRetirementInDays   = $days
+                displayName                              = if ($displayNameFound) { $displayName } else { $null }
+            }
+        })
     }
 
-    $reason = "A device clean-up rule is configured: devices that have not checked in for $days day(s) are automatically hidden from the Intune admin center and reports (the device is not wiped or retired - it simply stops appearing until it checks in again or its certificate expires)."
-    return New-PulseFinding -Status Pass -Reason $reason -Evidence $evidence
+    if ($configuredCount -eq 0) {
+        $reason = "No Intune device clean-up rule is configured: all $($rows.Count) collected rule row(s) have deviceInactivityBeforeRetirementInDays set to 0."
+        return New-PulseFinding -Status Fail -Reason $reason -Evidence $evidence.ToArray()
+    }
+
+    $reason = if ($configuredCount -eq 1) {
+        "1 Intune device clean-up rule is configured with a positive inactivity threshold ($($rows.Count) collected rule row(s) evaluated)."
+    } else {
+        "$configuredCount Intune device clean-up rules are configured with positive inactivity thresholds ($($rows.Count) collected rule rows evaluated)."
+    }
+    return New-PulseFinding -Status Pass -Reason $reason -Evidence $evidence.ToArray()
 }

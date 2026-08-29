@@ -61,17 +61,23 @@ is the one this research entry should have always pointed to.
 
 ## TP.INT.0007 — Intune device clean-up rule configured
 
-Whether `deviceInactivityBeforeRetirementInDays` is configured (non-zero) on the tenant's
-managed-device clean-up settings.
+Whether at least one per-platform managed-device clean-up rule has a positive
+`deviceInactivityBeforeRetirementInDays` value.
 
 - Authority: Maester https://maester.dev/docs/tests/MT.1053 ; https://learn.microsoft.com/en-us/intune/governance/configure-cleanup-rules
 - Origin: Maester MT.1053 (`Test-MtManagedDeviceCleanupSettings`, MIT, port)
-- Data: `beta/deviceManagement/managedDeviceCleanupRules`; descriptor:
-  `DeviceManagement.CleanupRules.List` (beta)
-- Severity rationale: Low - hygiene/reporting-accuracy issue, not a direct exposure; fails
-  when `deviceInactivityBeforeRetirementInDays` is absent or `0`.
+- Data: `beta/deviceManagement/managedDeviceCleanupRules`; descriptor candidate:
+  `ManagedDeviceCleanupRule.ListBeta` (beta collection). TenantPulse remains pinned to
+  immutable GraphKit 0.2.2, so this dataset is Pending until a later GraphKit release
+  carries that exact operation.
+- Severity rationale: Low - hygiene/reporting-accuracy issue, not a direct exposure. A
+  successful empty collection or a collection whose well-formed rows are all `0` fails;
+  missing or malformed day values produce Error rather than authoritative success.
 - Notes: beta-only endpoint, isolate behind degradation layer per roadmap G-note. Don't
-  conflate with Entra stale-device cleanup (separate object, separate check).
+  conflate with Entra stale-device cleanup (separate object, separate check). A successful
+  empty collection authoritatively means no rule; each populated row is a distinct
+  per-platform rule and evidence is ordered by platform then rule id. Malformed day values
+  are Error, never silently skipped into a Pass.
 
 **RESOLVED (2026-08-16):** an earlier draft of this research entry said clean-up rules
 "delete managed-device records". Live-verified against

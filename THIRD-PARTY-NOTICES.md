@@ -21,11 +21,10 @@ naming exactly this).
     logic behind Maester's `MT.1054`.
   - `source/Data/Checks/TP.INT.0007.psd1` ("Intune device clean-up rule configured",
     Task 3.2) - adapts the check logic behind Maester's `MT.1053`
-    (`Test-MtManagedDeviceCleanupSettings`), against the `managedDeviceCleanupSettings`
-    singleton GraphKit actually exposes rather than Maester's own
-    `managedDeviceCleanupRules` collection call - see
-    `source/Private/Checks/Test-PulseDeviceCleanupRuleConfigured.ps1`'s own docstring for
-    that divergence.
+    (`Test-MtManagedDeviceCleanupSettings`) against the per-platform
+    `managedDeviceCleanupRules` collection. TenantPulse adds deterministic per-rule
+    evidence and fail-closed malformed-row handling; see
+    `source/Private/Checks/Test-PulseDeviceCleanupRuleConfigured.ps1`.
   - `source/Data/Checks/TP.INT.0008.psd1` ("Intune Multi Admin Approval policy
     configured", Task 3.2) - adapts the check logic behind Maester's `MT.1096`
     (`Test-MtOperationApprovalPolicies`).

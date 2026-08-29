@@ -240,7 +240,7 @@ failure hidden from the report.
 | TP.INT.0004 | Intune.Updates | Medium | Live | At least 2 Windows Update rings have deadlines configured |
 | TP.INT.0005 | Intune.DeviceLifecycle | Medium | Live | Devices inactive for more than 90 days |
 | TP.INT.0006 | Intune.SettingsCatalog | Medium | Live | Conflicting security-setting values across policies |
-| TP.INT.0007 | Intune.Governance | Low | Live | Intune device clean-up rule configured |
+| TP.INT.0007 | Intune.Governance | Low | Pending | Intune device clean-up rule configured |
 | TP.INT.0008 | Intune.Governance | Medium | Live | Intune Multi Admin Approval policy configured |
 | TP.INT.0009 | Intune.Governance | Low | Pending | Windows diagnostic data processor configuration enabled |
 | TP.INT.0011 | Intune.Governance | Low | Live | Default branding profile customized |

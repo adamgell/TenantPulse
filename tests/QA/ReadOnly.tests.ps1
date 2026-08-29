@@ -207,6 +207,23 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         } | Should -Throw
     }
 
+    It 'keeps managed-device cleanup rules Pending on GraphKit 0.2.2 with the candidate descriptor contract declared exactly' {
+        $map = Import-PowerShellDataFile -Path $script:datasetMapPath
+        $entry = $map['managedDeviceCleanupRules']
+
+        $entry | Should -Not -BeNullOrEmpty
+        $entry.Type | Should -Be 'ManagedDeviceCleanupRule'
+        $entry.Operation | Should -Be 'ListBeta'
+        $entry.ApiVersion | Should -Be 'beta'
+        $entry.Pending | Should -BeTrue
+        $entry.ExpectedThrottleClass | Should -Be 'Read'
+        $entry.ExpectedReplayPolicy | Should -Be 'Safe'
+        $map.ContainsKey('managedDeviceCleanupSettings') | Should -BeFalse
+        {
+            Get-GraphOperation -Type 'ManagedDeviceCleanupRule' -Operation 'ListBeta' -ErrorAction Stop
+        } | Should -Throw -Because 'TenantPulse still requires immutable GraphKit 0.2.2; only the newer local descriptor candidate has this operation'
+    }
+
     Context 'the whole-map walker (Test-PulseReadOnlyDatasetMap) agrees with the per-dataset assertions above' {
         It 'reports zero violations for the real DatasetMap.psd1' {
             $realMap = Import-PowerShellDataFile -Path $script:datasetMapPath
