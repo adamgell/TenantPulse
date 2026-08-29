@@ -155,7 +155,7 @@ constitute a claim of CIS Benchmark compliance."*
 ## Operator prerequisites
 
 - PowerShell 7.4 or later
-- [GraphKit](https://github.com/AdamGell/GraphKit) exactly `0.2.2`, installed from PSGallery. TenantPulse `0.1.2` declares this with `RequiredVersion`, so a newer unverified GraphKit does not satisfy the runtime contract.
+- [GraphKit](https://github.com/AdamGell/GraphKit) exactly `0.2.2`, installed from PSGallery. TenantPulse `0.1.3` declares this with `RequiredVersion`, so a newer unverified GraphKit does not satisfy the runtime contract.
 - A GraphKit profile already registered for the tenant you want to assess (see GraphKit's
   own documentation - profile registration, credential setup, and Graph app-registration
   concerns are entirely GraphKit's responsibility, not TenantPulse's)
@@ -166,17 +166,18 @@ constitute a claim of CIS Benchmark compliance."*
   collect require
 - PSGallery access (or an internal mirror) to install TenantPulse and GraphKit
 
-GraphKit `0.2.2` is the stable producer published before R1. Published TenantPulse `0.1.1`
-remains the historical consumer artifact; current source is the unpublished `0.1.2`
-candidate, which requires exact GraphKit `0.2.2`. The twelve GET/List datasets that were
+GraphKit `0.2.2` is the stable producer published before R1. TenantPulse `0.1.2` and the
+corrective TenantPulse `0.1.3` are both immutable PSGallery releases; `0.1.3` is the current
+published version and requires exact GraphKit `0.2.2`. The twelve GET/List datasets that were
 Pending on GraphKit `0.1.1` remain live.
 
 R1's outcome model and TenantPulse-owned sequential composite plans are implemented in
-current source and deterministically verified through the local packed candidate gate, but
-the five composite/data-processor paths remain `Pending` and are not cut over or live
+published `0.1.3` source and was deterministically verified through the local package gate,
+but the five composite/data-processor paths remain `Pending` and are not cut over or live
 verified: `TP.INT.0009`, `TP.INT.0013`, `TP.INT.0014`, `TP.INT.0015`, and `TP.INT.0029`.
-CI has not run for these branches. See `docs/STATUS.md` for the exact package evidence,
-controlled live observations, and the remaining operator/recheck gates.
+That local evidence is not CI evidence: no CI run exists for source revision `771124b`. See
+`docs/STATUS.md` for the exact package evidence, controlled live observations, and the
+remaining operator/recheck gates.
 
 ## Catalog scope - what this is and isn't, honestly
 

@@ -5,9 +5,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-19
+
+### Fixed
+
+- Published corrective release metadata after immutable TenantPulse `0.1.2` shipped with
+  candidate-only release notes. No runtime behavior or GraphKit dependency changed.
+
+## [0.1.2] - 2026-08-19
+
 ### Changed
 
-- **Exact GraphKit runtime contract (TenantPulse 0.1.2 candidate).** The module manifest now requires exactly GraphKit `0.2.2`; `RequiredModules.psd1` remains the separate restore-time `0.2.2` pin. Source, built manifest, and candidate package are checked independently. Published TenantPulse `0.1.1` remains immutable and is not republished.
+- **Exact GraphKit runtime contract.** TenantPulse `0.1.2` and the corrective `0.1.3`
+  manifest both require exactly GraphKit `0.2.2`; `RequiredModules.psd1` remains the
+  separate restore-time `0.2.2` pin. Every published version remains immutable.
 - **R1 outcome/composite plans (2026-08-19).** Provider outcome/gate/partial-aware
   infrastructure and sequential TenantPulse-owned plans for Intune RBAC,
   endpoint-security BitLocker/LAPS, security baselines, and the Windows data processor are
@@ -16,14 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   official Microsoft GET/application-permission contract and a GraphKit descriptor, and the
   endpoint-security/security-baseline composite live gates were not completed. See
   `docs/STATUS.md` for the exact dispositions and recheck gates.
-- **Deterministic package handoff, not publication.** TenantPulse candidate `0.1.2` passed
+- **Published package identities.** The pre-publication `0.1.2` candidate passed
   pack-then-test on macOS PowerShell 7.6.5 (2123 tests, 0 failed, 0 errors, 0 skipped,
-  0 NotRun); the publisher dry-run verified all 59 shipped files. The synchronized
-  whole-result minimum-test ratchet is 2123 across the build, CI, publisher, and fixture
-  gates. It consumes the unchanged exact GraphKit `0.2.2` contract. Candidate package
-  identity and full digest verification are recorded in `docs/STATUS.md`. The results are
-  local and deterministic only: CI has not run, TenantPulse `0.1.2` is unpublished, and R1
-  did not publish either package.
+  0 NotRun), and the publisher verified 59 shipped files against the test-time digest
+  manifest. That local candidate archive was 401634 bytes with SHA-256
+  `91FF3860B6257257BBE827255FFF5E975B7521920411D31EFB3CE1496697B319`; it is not the
+  published archive identity. PSGallery's immutable `0.1.2` archive is 401753 bytes with
+  SHA-256 `51C90EA4CE8C428D7C87564715FB2EC19BDF0DA27D035131576EF341584E40E6`.
+  PSGallery's current `0.1.3` archive is 400377 bytes with SHA-256
+  `CA1A47BDC8FD9CD8D0885F61622B29DB23CA56F95042C6D789CEFAAA593F24B3`; its
+  `TenantPulse.psm1` is 1148725 bytes with SHA-256
+  `C4FAD4565747E150B21CF857C77C5F83122A7B9DC54771B05786A928D3AA8AD9`.
+  No CI result exists for source revision `771124b`; local package evidence is not an
+  exact-SHA CI claim. The remaining R1 claims are documented in `docs/STATUS.md`.
 
 ## [0.1.1] - 2026-08-19
 

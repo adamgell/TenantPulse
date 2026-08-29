@@ -9,7 +9,9 @@ here is required to install or use TenantPulse; see README.md for that.
 R1's provider-outcome/gate/partial-aware collection infrastructure and the TenantPulse-owned
 sequential composite plans are implemented in source and focused-tested. The five
 `DatasetMap.psd1` entries below deliberately remain `Pending`; implementation and local
-deterministic package evidence are not the same claim as CI, live cutover, or publication.
+deterministic evidence are not the same claim as CI, live cutover, or full service coverage.
+TenantPulse `0.1.2` and its corrective `0.1.3` are separately verified as published to
+PSGallery; the remaining claims are recorded below.
 The implementation details and focused-test source of truth are the plan files under
 `source/Private/Collect/`, the check descriptors under `source/Data/Checks/`, and
 `source/Data/DatasetMap.psd1`. No pending flag was removed.
@@ -23,21 +25,31 @@ The implementation details and focused-test source of truth are the plan files u
 | `securityBaselinesAssignedAndCurrent` / `TP.INT.0029` | The provider/composite plan is implemented and focused-tested, but its exact package/live gate was not completed. Retain `Pending`; do not describe security baselines as live or default cut over. |
 
 **Package handoff and evidence boundary.** GraphKit `0.2.2` is the stable producer released
-before R1; its macOS PowerShell 7.6.5 pack-then-test passed with 753 tests, 0 failed, 0
-errors, and 0 skipped. The tested `GraphKit.0.2.2.nupkg` is 201749 bytes with SHA-256
-`519DBE29DD50400867EB4665CA882C6CD3E82F2E31C4AFA67BEA21F10D08F41E`, and the packaged
-`GraphKit.psm1` matches the tested build at SHA-256
-`EA2DC2C3C57C0E9F5F5766F30203A49C1FCC00622E66EA52E0136CEE2B197730`.
+before R1. On 2026-08-29, the PSGallery archive downloaded for GraphKit `0.2.2` was 201750
+bytes with SHA-256 `8993BFD6C78F6143069208F79F82D7EC9C72F87AB876DF6769C8733AAAB46385`.
+Its `GraphKit.psm1` was 416488 bytes with SHA-256
+`C20E30F8944EBDB38D9EFAAC7C538A4400DC5B91206E3510749FCF7E0F4091DC`, and its manifest
+was 7487 bytes with SHA-256
+`CAFFB3C39029310F9E562EBD6D90091BA329AD264A6E6728AB241C4E584A1111`. The locally
+restored `output/RequiredModules/GraphKit/0.2.2` module and manifest match those public
+payloads byte-for-byte. Earlier GraphKit hashes and the claim that the public module differed
+only by one trailing newline did not identify this public package and are not release evidence.
 
-TenantPulse `0.1.2` is an **unpublished candidate**, not a release. Its final macOS
-PowerShell 7.6.5 pack-then-test passed with 2123 tests, 0 failed, 0 errors, 0 skipped,
-and 0 NotRun. The candidate `TenantPulse.0.1.2.nupkg` is 401634 bytes with SHA-256
-`91FF3860B6257257BBE827255FFF5E975B7521920411D31EFB3CE1496697B319`; the publisher
-dry-run verified all 59 shipped files against the tested-module digest manifest. The
-four synchronized minimum-test ratchet locations now require 2123. The exact GraphKit
-`0.2.2` dependency is unchanged across TenantPulse source, build dependency, built module,
-and candidate package. These are local deterministic results only: CI has not run on either
-branch, and no package was published by R1.
+TenantPulse `0.1.2` is published to PSGallery and its immutable embedded release notes still
+describe it as a candidate. The pre-publication local `0.1.2` archive was 401634 bytes with
+SHA-256 `91FF3860B6257257BBE827255FFF5E975B7521920411D31EFB3CE1496697B319`; it is not the
+PSGallery archive, which is 401753 bytes with SHA-256
+`51C90EA4CE8C428D7C87564715FB2EC19BDF0DA27D035131576EF341584E40E6`. TenantPulse `0.1.3`
+is also published to PSGallery as the metadata-only correction with the same exact GraphKit
+`0.2.2` dependency. Its public archive is 400377 bytes with SHA-256
+`CA1A47BDC8FD9CD8D0885F61622B29DB23CA56F95042C6D789CEFAAA593F24B3`; its
+`TenantPulse.psm1` is 1148725 bytes with SHA-256
+`C4FAD4565747E150B21CF857C77C5F83122A7B9DC54771B05786A928D3AA8AD9`, and its manifest is
+4980 bytes with SHA-256 `785B370BE4C8B70576654F0873B456476C884C05BAA8CEECED1EAAF9374ECCF7`.
+All 61 files in the current local built module match the public `0.1.3` payloads. The local
+and public `.nupkg` archives are not byte-identical because the archive entry metadata differs
+(including two public `.gitkeep` entries), so an archive SHA-256 must not be used as a local
+reproducibility claim. No CI result exists for source revision `771124b`.
 
 ## Phase 1 engine: complete
 
@@ -171,7 +183,7 @@ then repeat the read-only Ivy24 probe before removing `Pending`.
 The T4.5 Ivy24 live-gate table later in this file is the historical 0.1.1-era result.
 Those twelve GET/List datasets are no longer awaiting GraphKit.
 
-**R0 package-identity correction (2026-08-19):** published TenantPulse `0.1.1` remains the historical consumer artifact and is not overwritten. Current source is the unpublished `0.1.2` candidate because changing `RequiredModules` changes shipped bytes. Its runtime manifest requires exact GraphKit `0.2.2`; the build dependency file retains its separate `0.2.2` restore pin. Source, built manifest, `.nupkg`, full suite, and dry-run digest verification must all agree before this candidate can be called releasable.
+**R0 package-identity correction (2026-08-19):** published TenantPulse `0.1.1` remains the historical consumer artifact and is not overwritten. The `0.1.2` source first used the exact GraphKit `0.2.2` runtime requirement because changing `RequiredModules` changes shipped bytes; its build dependency file retains the separate `0.2.2` restore pin. `0.1.2` was then published with candidate-only embedded release notes. Published `0.1.3` corrects that metadata without changing runtime behavior or the GraphKit dependency.
 
 ## Phase 2 (Settings expansion, core slice T2.1-T2.7): complete, live-gated
 

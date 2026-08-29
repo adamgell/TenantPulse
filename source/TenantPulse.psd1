@@ -12,7 +12,7 @@
 RootModule = 'TenantPulse.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.1.2'
+ModuleVersion = '0.1.3'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -112,7 +112,13 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = ''
+        ReleaseNotes = @'
+## [0.1.3] - 2026-08-19
+
+### Fixed
+
+- Corrected release metadata after immutable TenantPulse `0.1.2` was published with pre-release documentation. No runtime behavior or GraphKit dependency changed.
+'@
 
         # Prerelease string of this module
         Prerelease =  ''
