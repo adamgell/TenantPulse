@@ -148,7 +148,6 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
             @(
                 [ordered]@{
                     id     = 'assignment-include'
-                    intent = 'include'
                     target = [ordered]@{
                         '@odata.type'                              = '#microsoft.graph.groupAssignmentTarget'
                         groupId                                   = 'group-include'
@@ -158,7 +157,6 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                 }
                 [ordered]@{
                     id     = 'assignment-exclude'
-                    intent = 'exclude'
                     target = [ordered]@{
                         '@odata.type'                              = '#microsoft.graph.exclusionGroupAssignmentTarget'
                         groupId                                   = 'group-exclude'
@@ -185,16 +183,16 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         $row = Get-Content -LiteralPath (Get-PulseExpandedJsonlPath -Store $script:store) | ConvertFrom-Json
         $row.assignments.Count | Should -Be 2
-        $row.assignments[0].intent | Should -Be 'include'
-        $row.assignments[0].targetType | Should -Be 'group'
-        $row.assignments[0].groupId | Should -Be 'group-include'
-        $row.assignments[0].filterId | Should -Be 'filter-include'
-        $row.assignments[0].filterType | Should -Be 'include'
-        $row.assignments[1].intent | Should -Be 'exclude'
-        $row.assignments[1].targetType | Should -Be 'exclusionGroup'
-        $row.assignments[1].groupId | Should -Be 'group-exclude'
-        $row.assignments[1].filterId | Should -BeNullOrEmpty
-        $row.assignments[1].filterType | Should -Be 'none'
+        $includeAssignment = $row.assignments | Where-Object groupId -EQ 'group-include'
+        $includeAssignment.intent | Should -Be 'include'
+        $includeAssignment.targetType | Should -Be 'group'
+        $includeAssignment.filterId | Should -Be 'filter-include'
+        $includeAssignment.filterType | Should -Be 'include'
+        $excludeAssignment = $row.assignments | Where-Object groupId -EQ 'group-exclude'
+        $excludeAssignment.intent | Should -Be 'exclude'
+        $excludeAssignment.targetType | Should -Be 'exclusionGroup'
+        $excludeAssignment.filterId | Should -BeNullOrEmpty
+        $excludeAssignment.filterType | Should -Be 'none'
 
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $manifest.datasets.'configurationPolicyAssignments-policy-assigned'.status | Should -Be 'Collected'
@@ -210,6 +208,40 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         (Get-Content -LiteralPath (Get-PulseExpandedJsonlPath -Store $script:store) -Raw) | Should -Be $liveJsonl
     }
 
+    It 'gaps a policy when an assignment target is missing, null, or not an object instead of publishing authoritative empty assignments' {
+        $policies = @(
+            (New-TestPolicy -Id 'policy-target-missing')
+            (New-TestPolicy -Id 'policy-target-null')
+            (New-TestPolicy -Id 'policy-target-scalar')
+        )
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
+        } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
+        } {
+            switch ($Parameters.id) {
+                'policy-target-missing' { @([ordered]@{ id = 'assignment-missing' }) }
+                'policy-target-null' { @([ordered]@{ id = 'assignment-null'; target = $null }) }
+                'policy-target-scalar' { @([ordered]@{ id = 'assignment-scalar'; target = 'not-an-object' }) }
+            }
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $index {
+            param($store, $context, $policies, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies $policies -DefinitionIndex $index
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.RowCount | Should -Be 0
+        $summary.Gaps.Count | Should -Be 3
+        @($summary.Gaps | ForEach-Object reason | Sort-Object -Unique) | Should -Be @('category:InvalidAssignmentTarget')
+        $summary.Gaps.policyId | Sort-Object | Should -Be @('policy-target-missing', 'policy-target-null', 'policy-target-scalar')
+    }
+
     It 'a policy fetch failure yields Partial status with a STRUCTURED {policyId;reason} gap (P0-3: no raw exception text), other policies still succeed' {
         $goodPolicy = New-TestPolicy -Id 'policy-good'
         $badPolicy = New-TestPolicy -Id 'policy-bad'
@@ -217,8 +249,12 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $settingsResponse = New-TestSettingsResponse
 
         $plantedSecretInException = 'PLANTED-EXCEPTION-SECRET-abc123'
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'policy-good' } { $settingsResponse }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'policy-bad' } { throw "simulated Graph failure carrying $plantedSecretInException" }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'policy-good'
+        } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'policy-bad'
+        } { throw "simulated Graph failure carrying $plantedSecretInException" }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $goodPolicy, $badPolicy, $index {
             param($store, $context, $goodPolicy, $badPolicy, $index)
@@ -348,7 +384,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $policyB = New-TestPolicy -Id 'shared-id'
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse -Value 'owner-value'
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'shared-id' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'shared-id'
+        } { $settingsResponse }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policyA, $policyB, $index {
             param($store, $context, $policyA, $policyB, $index)
@@ -373,7 +411,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $emptyPolicy = New-TestPolicy -Id ''
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'policy-good' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'policy-good'
+        } { $settingsResponse }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $goodPolicy, $emptyPolicy, $index {
             param($store, $context, $goodPolicy, $emptyPolicy, $index)
@@ -390,7 +430,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $whitespacePolicy = New-TestPolicy -Id '   '
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'policy-good' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'policy-good'
+        } { $settingsResponse }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $goodPolicy, $whitespacePolicy, $index {
             param($store, $context, $goodPolicy, $whitespacePolicy, $index)
@@ -437,8 +479,12 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $responseA = New-TestSettingsResponse -Value 'value-a'
         $responseB = New-TestSettingsResponse -Value 'value-b'
 
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq $policyA.id } { $responseA }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq $policyB.id } { $responseB }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq $policyA.id
+        } { $responseA }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq $policyB.id
+        } { $responseB }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policyA, $policyB, $index {
             param($store, $context, $policyA, $policyB, $index)
@@ -452,6 +498,73 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
             InModuleScope TenantPulse -ArgumentList $store2, $script:context, $policyA, $policyB, $index {
                 param($store2, $context, $policyA, $policyB, $index)
                 Invoke-PulseSettingsCatalogExpansion -Store $store2 -Context $context -Policies @($policyB, $policyA) -DefinitionIndex $index
+            }
+            $reversedBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $store2))
+
+            [System.Convert]::ToBase64String($forwardBytes) | Should -Be ([System.Convert]::ToBase64String($reversedBytes))
+        } finally {
+            Remove-Item -LiteralPath $storeRoot2 -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'assignment normalization is byte-identical when Graph returns the same complete assignment tuples in reverse order' {
+        $policy = New-TestPolicy -Id 'policy-assignment-order'
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+        $assignments = @(
+            [ordered]@{
+                id = 'assignment-exclude'
+                target = [ordered]@{
+                    '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'
+                    groupId = 'group-z'
+                    deviceAndAppManagementAssignmentFilterId = 'filter-z'
+                    deviceAndAppManagementAssignmentFilterType = 'exclude'
+                }
+            }
+            [ordered]@{
+                id = 'assignment-include-filtered'
+                target = [ordered]@{
+                    '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                    groupId = 'group-a'
+                    deviceAndAppManagementAssignmentFilterId = 'filter-a'
+                    deviceAndAppManagementAssignmentFilterType = 'include'
+                }
+            }
+            [ordered]@{
+                id = 'assignment-include-unfiltered'
+                target = [ordered]@{
+                    '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                    groupId = 'group-a'
+                    deviceAndAppManagementAssignmentFilterId = $null
+                    deviceAndAppManagementAssignmentFilterType = 'none'
+                }
+            }
+        )
+        $script:assignmentFetchCount = 0
+
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
+        } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
+        } {
+            $script:assignmentFetchCount++
+            if ($script:assignmentFetchCount -eq 1) { return $assignments }
+            return @($assignments[2], $assignments[1], $assignments[0])
+        }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
+            param($store, $context, $policy, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
+        }
+        $forwardBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $script:store))
+
+        $storeRoot2 = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $store2 = InModuleScope TenantPulse -ArgumentList $storeRoot2 { param($storeRoot2) New-PulseSnapshotStore -Path $storeRoot2 }
+        try {
+            InModuleScope TenantPulse -ArgumentList $store2, $script:context, $policy, $index {
+                param($store2, $context, $policy, $index)
+                Invoke-PulseSettingsCatalogExpansion -Store $store2 -Context $context -Policies @($policy) -DefinitionIndex $index
             }
             $reversedBytes = [System.IO.File]::ReadAllBytes((Get-PulseExpandedJsonlPath -Store $store2))
 

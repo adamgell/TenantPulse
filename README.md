@@ -309,15 +309,14 @@ content-addressed files, never a fixed name. See
 `source/Private/Evaluate/FindingsSchema.md`'s own "Settings expansion artifacts" section
 for the exact row/conflict-record schema.
 
-**Known gap, by design, for this phase**: `ConfigurationPolicyAssignment.ListBeta` (the
-descriptor that would resolve which devices/users a Settings Catalog policy is actually
-assigned to) is not yet a released GraphKit descriptor as of this phase - every Settings
-Catalog row carries `assignments: null`, and any conflict that involves at least one such
-row reports `assignmentOverlap: 'unknown'` with an explicit `'assignments-deferred:
-awaiting GraphKit release'` reason, rather than a silently wrong verdict. Compliance and
-legacy device configuration policies do NOT have this gap (their assignment descriptors are
-already released) - their rows carry real assignment data today. This is tracked as its own
-follow-up slice ("Phase 2b" in the implementation plan), not a silent limitation.
+Settings Catalog assignment collection uses GraphKit 0.2.2's released
+`ConfigurationPolicyAssignment.ListBeta` descriptor for each policy. TenantPulse persists
+that raw payload and normalizes include/exclude intent, target type, group id, and assignment
+filter fields onto every expanded setting row. An empty assignment response is authoritative
+and becomes `assignments: []`; an unavailable payload or an assignment with a missing, null,
+or non-object target gaps that policy instead of publishing a false unassigned result.
+Conflict overlap therefore consumes real Settings Catalog targets whenever those policy rows
+are present.
 
 **Scale note**: Settings Catalog expansion fans out one Graph read per policy, at the
 measured rate documented in `docs/spike/` (mean ~300ms/policy on the Ivy24 lab tenant) -

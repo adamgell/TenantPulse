@@ -209,11 +209,11 @@ conflict detection, all in one run.
   (zero gaps), 15/15 policies, `unresolvedNameCount` 0, `redactedSecretCount` 8.
 - **Unresolved-name rate: 0% across all three families** - well inside the plan's <1%
   exit criterion.
-- **Conflicts: real conflicts surfaced, not a zero-conflicts-by-luck outcome** - 165
-  conflict entries from all 3 families; `assignmentOverlap` breakdown `none`=8,
-  `possible`=34, `unknown`=123 (the 123 all involve at least one `settingsCatalog` row,
-  whose assignments are deferred per the G-gate - the 8/34 non-`unknown` verdicts come
-  from compliance/deviceConfiguration rows, which DO carry real assignment data today).
+- **Conflicts: real conflicts surfaced, not a zero-conflicts-by-luck outcome** - this
+  historical pre-assignment-collection gate produced 165 conflict entries from all 3
+  families; `assignmentOverlap` breakdown `none`=8, `possible`=34, `unknown`=123. Those
+  counts are retained as evidence for that run, not as proof of the current assignment-aware
+  runtime; Settings Catalog assignment collection now requires a fresh live-service gate.
 - `groupPolicyConfigurations` (the plan's own "9 gpConfigs" reconciliation note) is
   correctly ABSENT from this manifest - admin templates (T2.4) are Phase 2b, deferred by
   the G-gate; this dataset is not collected under the core-slice `-ExpandSettings` at all.
@@ -351,8 +351,8 @@ after which Phase 3 work continued on the merged tree:
   fixture extended with those four definitionIds. `visibility:"template"` is
   still unpublished in Microsoft's Graph schema docs - the checks key the live
   ids, not that field. Same-policy AND via presence-index `policyIds` (not a
-  tenant-wide union). Settings Catalog assignments remain deferred; matching
-  Maester, policy existence is enough.
+  tenant-wide union). Matching Maester, these two checks intentionally evaluate policy
+  existence even though the expansion now also collects Settings Catalog assignments.
 - **Task 3.5** wired `Get-PulseCaExclusionContext` into `TP.ENT.0004`/`TP.ENT.0005` so both
   checks surface honored Conditional Access group/user exclusions as evidence instead of
   silently ignoring them (`36bf53e`), then a dual-review fix round hardened both checks
@@ -600,5 +600,5 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    TP.INT.0005 device-name keys stay unredacted under `-Redact`. Judgment boundary
    (policy display names, role names) is deliberate, not unfinished code.
 2. **`TP.INT.0010`**, DESCOPED until GraphKit ARM exists. Id reserved.
-3. Phase 2b / scale (not this catalog): Settings Catalog assignments, admin templates,
-   typed `intent`, `-ExpandSettings` default-on, dataset streaming.
+3. Phase 2b / scale (not this catalog): admin templates, typed-policy `intent`,
+   `-ExpandSettings` default-on, dataset streaming.

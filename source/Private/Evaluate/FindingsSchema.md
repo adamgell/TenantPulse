@@ -186,9 +186,7 @@ manifest.expansions.<name> = {
                              # PulseConflictArtifact's own docstring)
   rowCount; unresolvedNameCount; redactedSecretCount;
   gaps: [ { policyId; reason } , ... ];  # sorted ordinally on (policyId, reason)
-  reason;                   # required for NotExpanded/Failed; also carries the
-                             # 'assignments-deferred: awaiting GraphKit release' note on
-                             # every successful settingsCatalog entry (G-gate core slice)
+  reason;                   # required for NotExpanded/Failed
 }
 ```
 
@@ -249,10 +247,7 @@ embedded raw newlines, exactly one trailing LF per line including the last.
         // >= 2 value records per conflict entry, by construction (see below)
       ],
       "assignmentOverlap": "proven" | "possible" | "none" | "unknown",
-      "assignmentOverlapReason": "..."|null   // populated at least for 'unknown' -
-                                                // 'assignments-deferred: awaiting GraphKit
-                                                // release' for every core-slice
-                                                // settingsCatalog-involving conflict
+      "assignmentOverlapReason": "..."|null   // populated at least for 'unknown'
     }
     // sorted ordinally by settingDefinitionId; each entry's values sorted by their own
     // canonical-value text; each value record's policies sorted by policyId
@@ -273,9 +268,9 @@ always `null` in that case and the true value is never present anywhere in this 
 `'possible'` (cannot rule overlap out, but not proven either - e.g. a filter or an
 All-devices/All-users target is involved), `'none'` (every pair of contributing policies'
 assignment targets is provably disjoint), or `'unknown'` (at least one contributing row
-carries `assignments: null` - the deferred-assignments state every `settingsCatalog` row
-carries in the core slice, so overlap cannot be evaluated at all for any conflict that
-includes one).
+lacks authoritative assignment data). Settings Catalog rows always carry a normalized
+assignment array: `[]` means authoritatively unassigned, while an unavailable or invalid
+assignment payload gaps that policy before row publication.
 
 ### `settingPresenceIndex` artifact (`expanded/settingPresenceIndex.<sha256>.json`)
 

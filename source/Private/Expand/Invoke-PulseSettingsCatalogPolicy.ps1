@@ -259,7 +259,9 @@ function Invoke-PulseSettingsCatalogPolicy {
     $normalizedAssignments = @()
     foreach ($assignment in $rawAssignments) {
         $target = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'target'
-        if ($null -eq $target) { continue }
+        if ($null -eq $target -or -not (Test-PulseSettingsCatalogNode -Node $target)) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
 
         $intentRaw = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'intent'
         $targetTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName '@odata.type'
@@ -267,13 +269,47 @@ function Invoke-PulseSettingsCatalogPolicy {
         $filterIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId'
         $filterTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType'
 
+        $targetType = if ($null -ne $targetTypeRaw) { [string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '' } else { $null }
+        $intent = if ($null -ne $intentRaw) {
+            [string] $intentRaw
+        } elseif ([string]::Equals($targetType, 'exclusionGroup', [System.StringComparison]::OrdinalIgnoreCase)) {
+            'exclude'
+        } elseif ($targetType -in @('group', 'allDevices', 'allLicensedUsers')) {
+            'include'
+        } else {
+            $null
+        }
+
         $normalizedAssignments += [pscustomobject]@{
-            intent     = if ($null -ne $intentRaw) { [string] $intentRaw } else { $null }
-            targetType = if ($null -ne $targetTypeRaw) { [string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '' } else { $null }
+            intent     = $intent
+            targetType = $targetType
             groupId    = if ($null -ne $groupIdRaw) { [string] $groupIdRaw } else { $null }
             filterId   = if ($null -ne $filterIdRaw) { [string] $filterIdRaw } else { $null }
             filterType = if ($null -ne $filterTypeRaw) { [string] $filterTypeRaw } else { $null }
         }
+    }
+
+    if ($normalizedAssignments.Count -gt 1) {
+        $assignmentFields = @('intent', 'targetType', 'groupId', 'filterId', 'filterType')
+        $order = [int[]] (0..($normalizedAssignments.Count - 1))
+        $comparison = [System.Comparison[int]] {
+            param($a, $b)
+            foreach ($field in $assignmentFields) {
+                $left = $normalizedAssignments[$a].$field
+                $right = $normalizedAssignments[$b].$field
+                if ($null -eq $left -and $null -ne $right) { return -1 }
+                if ($null -ne $left -and $null -eq $right) { return 1 }
+                $fieldComparison = [string]::CompareOrdinal([string] $left, [string] $right)
+                if ($fieldComparison -ne 0) { return $fieldComparison }
+            }
+            return 0
+        }
+        [System.Array]::Sort($order, $comparison)
+        $sortedAssignments = [object[]]::new($normalizedAssignments.Count)
+        for ($i = 0; $i -lt $order.Count; $i++) {
+            $sortedAssignments[$i] = $normalizedAssignments[$order[$i]]
+        }
+        $normalizedAssignments = $sortedAssignments
     }
 
     try {
