@@ -6,14 +6,11 @@
     @{id=<policyId>}, walks the result through ConvertTo-PulseSettingRows, and merges every
     policy's rows into one deterministic expanded/settingsCatalog.jsonl.
 
-    ASSIGNMENTS-DEFERRED (G-gate sequencing amendment, P1-12 review fix - now PERSISTED,
-    not just a test title): every row carries assignments:null (see ConvertTo-PulseSettingRows's
-    own docstring). Every 'Expanded'/'Partial' expansion entry this function writes also
-    carries -Reason 'assignments-deferred: awaiting GraphKit release' - the manifest's own
-    `reason` field is not status-gated to only the NotExpanded/Failed outcomes (Set-
-    PulseExpansionEntry only REQUIRES -Reason for those two), so this is the one place the
-    G-gate note is durably recorded on a SUCCESSFUL run's own artifact, not only asserted by
-    a test title.
+    SETTINGS CATALOG ASSIGNMENTS: GraphKit 0.2.2 releases
+    ConfigurationPolicyAssignment.ListBeta. Each eligible policy therefore fetches and
+    persists its assignment payload alongside its settings payload; normalized assignment
+    targets are stamped onto every emitted row. An unavailable assignment payload gaps that
+    policy rather than fabricating assignments:null.
 
     PREVALIDATION - ORDINAL-UNIQUE, NON-EMPTY POLICY IDS (P0-4 review fix - reproduced: a
     32-duplicate-id probe produced 13 gaps and a manifest/raw-dataset hash divergence,
@@ -340,8 +337,6 @@ function Invoke-PulseSettingsCatalogExpansion {
         [string] $TenantId
     )
 
-    $assignmentsDeferredReason = 'assignments-deferred: awaiting GraphKit release'
-
     if ($null -eq $DefinitionIndex -or $DefinitionIndex.Count -eq 0) {
         $reason = Protect-PulseReason -Message 'definitions corpus unavailable' -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
         Set-PulseExpansionEntry -Store $Store -Name $Name -Status 'NotExpanded' -Reason $reason
@@ -357,6 +352,7 @@ function Invoke-PulseSettingsCatalogExpansion {
 
     $policyList = @($Policies)
     $rawDatasetPrefix = 'configurationPolicySettings-'
+    $rawAssignmentDatasetPrefix = 'configurationPolicyAssignments-'
 
     $allRows = [System.Collections.Generic.List[object]]::new()
     $gapEntries = [System.Collections.Generic.List[object]]::new()
@@ -395,6 +391,7 @@ function Invoke-PulseSettingsCatalogExpansion {
     if (-not $FromCapturedPayloads.IsPresent) {
         try {
             Assert-PulseReadOnlyDescriptor -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' -ApiVersion 'beta'
+            Assert-PulseReadOnlyDescriptor -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' -ApiVersion 'beta'
         } catch {
             if ($_.Exception.Message -match 'descriptor-version-drift') {
                 $reason = Protect-PulseReason -Message $_.Exception.Message -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
@@ -454,9 +451,11 @@ function Invoke-PulseSettingsCatalogExpansion {
     foreach ($eligible in $eligiblePolicies) {
         $policy = $eligible.Policy
         $rawDatasetName = "$rawDatasetPrefix$($eligible.PolicyId)"
+        $rawAssignmentDatasetName = "$rawAssignmentDatasetPrefix$($eligible.PolicyId)"
         try {
             $result = Invoke-PulseSettingsCatalogPolicy -Store $Store -Policy $policy -Context $Context -DefinitionIndex $DefinitionIndex `
                 -FromCapturedPayloads $FromCapturedPayloads.IsPresent -RawDatasetName $rawDatasetName `
+                -RawAssignmentDatasetName $rawAssignmentDatasetName `
                 -TenantId $TenantId -Pseudonym $Pseudonym
         } catch {
             # WORKER DRAIN applies here too (P0-5's own spirit, preserved from the deleted
@@ -510,11 +509,8 @@ function Invoke-PulseSettingsCatalogExpansion {
     # than copying this function's block, and that fork was never called out as project debt
     # at the time. It is closed here: this call site and Invoke-PulseTypedPolicyExpansion's
     # own now both go through the identical staging/hash/publish code path. The
-    # 'assignments-deferred' reason is still passed through and persisted on every
-    # successful (Expanded/Partial) write exactly as before (P1-12) - Publish-
-    # PulseExpansionRows's own -Reason parameter carries it; the ALL-POLICIES-FAILED ->
-    # NotExpanded rule (task-review omp-Medium fix) is also unchanged, just owned by the
-    # shared helper now instead of being re-implemented here.
+    # ALL-POLICIES-FAILED -> NotExpanded rule (task-review omp-Medium fix) is unchanged,
+    # just owned by the shared helper now instead of being re-implemented here.
     # RAW-TENANT-ID-IN-ROW-CONTENT (T2.7 live-gate finding, reproduced live on Ivy24 -
     # a real Settings Catalog policy's own configured VALUE, a OneDrive Known-Folder-Move
     # opt-in setting, legitimately carries the tenant's own GUID as admin-entered
@@ -532,6 +528,6 @@ function Invoke-PulseSettingsCatalogExpansion {
     $redactedRows = Protect-PulseGraphRowTenantId -Data $sortedRows -TenantId $TenantId -Pseudonym $Pseudonym
 
     return Publish-PulseExpansionRows -Store $Store -Name $Name -Rows $redactedRows -Gaps $sortedGaps `
-        -PolicyCount $policyList.Count -Reason $assignmentsDeferredReason `
+        -PolicyCount $policyList.Count `
         -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
 }

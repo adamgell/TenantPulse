@@ -76,6 +76,9 @@ function Invoke-PulseSettingsCatalogPolicy {
         [Parameter(Mandatory)]
         [string] $RawDatasetName,
 
+        [Parameter(Mandatory)]
+        [string] $RawAssignmentDatasetName,
+
         [Parameter()]
         [AllowNull()]
         [AllowEmptyString()]
@@ -149,6 +152,7 @@ function Invoke-PulseSettingsCatalogPolicy {
     $isBaseline = (-not [string]::IsNullOrEmpty($templateFamily)) -and ($templateFamily -like 'baseline*')
 
     $settingsPayload = $null
+    $rawAssignments = $null
     $fetchGap = $null
 
     if ($FromCapturedPayloads) {
@@ -158,6 +162,15 @@ function Invoke-PulseSettingsCatalogPolicy {
             Write-Verbose "Invoke-PulseSettingsCatalogPolicy: captured payload for '$policyId' unreadable: $($_.Exception.Message)"
             $category = if ($_.Exception.Message -match '(?i)no manifest entry|missing from the snapshot') { 'CapturedPayloadMissing' } else { 'CapturedPayloadUnreadable' }
             $fetchGap = New-PulseStructuredGapReason -Category $category
+        }
+        if (-not $fetchGap) {
+            try {
+                $rawAssignments = Read-PulseDataset -Store $Store -Name $RawAssignmentDatasetName
+            } catch {
+                Write-Verbose "Invoke-PulseSettingsCatalogPolicy: captured assignment payload for '$policyId' unreadable: $($_.Exception.Message)"
+                $category = if ($_.Exception.Message -match '(?i)no manifest entry|missing from the snapshot') { 'AssignmentPayloadMissing' } else { 'AssignmentPayloadUnreadable' }
+                $fetchGap = New-PulseStructuredGapReason -Category $category
+            }
         }
     } else {
         # READ-ONLY ENFORCEMENT (task-review Critical, symmetric with
@@ -185,6 +198,16 @@ function Invoke-PulseSettingsCatalogPolicy {
         }
 
         try {
+            Assert-PulseReadOnlyDescriptor -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' -ApiVersion 'beta'
+        } catch {
+            if ($_.Exception.Message -match 'descriptor-version-drift') {
+                Write-Verbose "Invoke-PulseSettingsCatalogPolicy: $($_.Exception.Message)"
+                return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'AssignmentFetchFailed') }
+            }
+            throw
+        }
+
+        try {
             $raw = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' -Parameters @{ id = $policyId } -ErrorAction Stop)
             $redacted = Protect-PulseSettingsCatalogSecretPayload -Data $raw -DefinitionIndex $DefinitionIndex
             # SECRET-REDACTED at write: this dataset gets the same hash-verified persistence
@@ -209,16 +232,55 @@ function Invoke-PulseSettingsCatalogPolicy {
             }
             $fetchGap = New-PulseStructuredGapReason -Category $category -StatusCode $statusCode
         }
+
+        if (-not $fetchGap) {
+            try {
+                $rawAssignments = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' -Parameters @{ id = $policyId } -ErrorAction Stop)
+                Write-PulseDataset -Store $Store -Name $RawAssignmentDatasetName -Data $rawAssignments -ApiVersion 'beta' -Status 'Collected' `
+                    -TenantId $TenantId -Pseudonym $Pseudonym
+            } catch {
+                Write-Verbose "Invoke-PulseSettingsCatalogPolicy: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
+                $failureClass = Get-PulseFailureClass -ErrorRecord $_
+                $statusCode = Get-PulseGraphErrorStatusCode -ErrorRecord $_
+                $category = switch ($failureClass) {
+                    'PermissionDenied' { 'AssignmentPermissionDenied' }
+                    'AuthFailure' { 'AssignmentAuthFailure' }
+                    default { 'AssignmentFetchFailed' }
+                }
+                $fetchGap = New-PulseStructuredGapReason -Category $category -StatusCode $statusCode
+            }
+        }
     }
 
     if ($fetchGap) {
         return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = $fetchGap }
     }
 
+    $normalizedAssignments = @()
+    foreach ($assignment in $rawAssignments) {
+        $target = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'target'
+        if ($null -eq $target) { continue }
+
+        $intentRaw = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'intent'
+        $targetTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName '@odata.type'
+        $groupIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'groupId'
+        $filterIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId'
+        $filterTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType'
+
+        $normalizedAssignments += [pscustomobject]@{
+            intent     = if ($null -ne $intentRaw) { [string] $intentRaw } else { $null }
+            targetType = if ($null -ne $targetTypeRaw) { [string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '' } else { $null }
+            groupId    = if ($null -ne $groupIdRaw) { [string] $groupIdRaw } else { $null }
+            filterId   = if ($null -ne $filterIdRaw) { [string] $filterIdRaw } else { $null }
+            filterType = if ($null -ne $filterTypeRaw) { [string] $filterTypeRaw } else { $null }
+        }
+    }
+
     try {
         $walkResult = ConvertTo-PulseSettingRows -PolicyId $policyId -PolicyType 'settingsCatalog' `
             -PolicyName $policyName -TemplateFamily $templateFamily -IsBaseline $isBaseline `
-            -SettingsPayload $settingsPayload -DefinitionIndex $DefinitionIndex -MaxDepth $script:PulseSettingsCatalogWalkerMaxDepth
+            -SettingsPayload $settingsPayload -DefinitionIndex $DefinitionIndex -Assignments $normalizedAssignments `
+            -MaxDepth $script:PulseSettingsCatalogWalkerMaxDepth
     } catch {
         # An instanceId collision (or any other internal walk invariant failure) is a
         # data-integrity anomaly scoped to THIS policy - see ConvertTo-PulseSettingRows's

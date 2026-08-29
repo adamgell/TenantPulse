@@ -43,6 +43,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansionPipeline' {
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' -and $Operation -eq 'ListBeta' } { $policies }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $definitions }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { @() }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)

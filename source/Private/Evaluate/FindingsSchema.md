@@ -214,8 +214,11 @@ per line in the family's own `.jsonl`)
   "valueLabel": "..."|[...]|null, "labelResolved": true|false,
   "redacted": true|false, "valueState": "..."|null,
   "applicability": { "platform"; "technologies" }|null,
-  "assignments": null            // ALWAYS null in the core slice - see the G-gate
-                                   // sequencing amendment; a non-null shape is Phase 2b
+  "assignments": [
+    { "intent": "include"|"exclude"|null, "targetType": "..."|null,
+      "groupId": "..."|null, "filterId": "..."|null, "filterType": "..."|null }
+  ]                              // empty means authoritatively unassigned; a failed
+                                   // assignment fetch gaps the policy instead of emitting rows
 }
 ```
 
@@ -282,4 +285,3 @@ carries `policyCount` / `assignedPolicyCount` (original) plus `policyIds` /
 id arrays let a same-policy AND (TP.INT.0017/0018) intersect without streaming
 the underlying jsonl. A redacted value group still has `canonicalValue: null`
 and never carries the secret; its `policyIds` are presence-only.
-

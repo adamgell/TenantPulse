@@ -101,21 +101,22 @@
 
     # Task 2.2 (Settings Catalog expansion, -ExpandSettings): declared here so the STATIC
     # read-only gate (tests/QA/ReadOnly.tests.ps1, which walks every key in this file) also
-    # proves these two descriptors are Read/Safe - the same "single pivot, no documented
+    # proves these three descriptors are Read/Safe - the same "single pivot, no documented
     # exception" this file is for every other Get-GraphObject call TenantPulse ever makes.
-    # NEITHER is consumed by the ordinary check-driven Invoke-PulseCollection loop (no
+    # NONE is consumed by the ordinary check-driven Invoke-PulseCollection loop (no
     # T2.2-era check references either name in its own Data.Datasets, and
     # configurationPolicySettings needs a PER-POLICY id, not the single first-row
-    # IdFromDataset semantics Invoke-PulseCollection implements) - both are instead fetched
+    # IdFromDataset semantics Invoke-PulseCollection implements) - all are instead fetched
     # directly by the Settings Catalog expansion pipeline
     # (Invoke-PulseSettingsCatalogExpansionPipeline for configurationPolicies,
     # Invoke-PulseSettingsCatalogPolicy - one call per policy - for
-    # configurationPolicySettings), each of which calls Assert-PulseReadOnlyDescriptor
+    # configurationPolicySettings and configurationPolicyAssignments), each of which calls Assert-PulseReadOnlyDescriptor
     # itself against the SAME {Type;Operation} pair declared here before ever calling
     # Get-GraphObject, exactly like Invoke-PulseCollection does for every check-driven
     # dataset.
     configurationPolicies       = @{ Type = 'ConfigurationPolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
     configurationPolicySettings = @{ Type = 'ConfigurationPolicySetting'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+    configurationPolicyAssignments = @{ Type = 'ConfigurationPolicyAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
 
     # Task 2.3 (compliance + legacy typed-policy expansion, -ExpandSettings): declared here
     # for the exact same reason as the two Task 2.2 entries directly above - so the STATIC
@@ -124,9 +125,8 @@
     # IdFromDataset's single first-row semantics), but fetched directly, once per policy,
     # by Invoke-PulseTypedPolicyExpansion, which calls Assert-PulseReadOnlyDescriptor
     # itself against these SAME {Type;Operation} pairs before ever calling Get-GraphObject.
-    # Both descriptors are ALREADY RELEASED in GraphKit 0.1.1 (unlike T2.2's own
-    # ConfigurationPolicyAssignment, still G-gate-pending) - see the plan's own G-gate
-    # section for why T2.3's assignment fan-out is real, not deferred.
+    # Both descriptors are ALREADY RELEASED in GraphKit 0.1.1; GraphKit 0.2.2 now also
+    # releases the Settings Catalog assignment descriptor declared above.
     deviceCompliancePolicyAssignments = @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
     deviceConfigurationAssignments    = @{ Type = 'DeviceConfigurationAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
 

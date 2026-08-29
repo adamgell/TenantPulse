@@ -110,10 +110,9 @@
         live gate). When set, after the normal check-driven dataset collection above has
         finished, this also collects `configurationPolicies`, captures the settings-
         definitions corpus, and runs the Settings Catalog per-policy fan-out/walk (see
-        Invoke-PulseSettingsCatalogExpansionPipeline's own docstring). Every emitted row
-        carries assignments:null - the ConfigurationPolicyAssignment sub-fetch is
-        unreleased GraphKit per the G-gate sequencing amendment and slots in later, in
-        Phase 2b.
+        Invoke-PulseSettingsCatalogExpansionPipeline's own docstring). GraphKit 0.2.2's
+        ConfigurationPolicyAssignment.ListBeta descriptor supplies each policy's real
+        assignment targets; an unavailable assignment payload gaps that policy.
 
     .PARAMETER ProviderPlanRegistry
         Optional dataset-name keyed registry of TenantPulse-owned provider plan commands.
@@ -168,10 +167,8 @@ function Get-PulseTenantSnapshot {
         # set, AFTER the normal check-driven dataset collection below has finished, this
         # collects `configurationPolicies`, captures the settings-definitions corpus, and
         # runs the Settings Catalog per-policy fan-out/walk (see
-        # Invoke-PulseSettingsCatalogExpansionPipeline's own docstring) - every emitted row
-        # carries assignments:null (the G-gate sequencing amendment: the
-        # ConfigurationPolicyAssignment sub-fetch is unreleased GraphKit and slots in later,
-        # in Phase 2b).
+        # Invoke-PulseSettingsCatalogExpansionPipeline's own docstring), including the
+        # released ConfigurationPolicyAssignment.ListBeta read for every eligible policy.
         [Parameter()]
         [switch] $ExpandSettings,
         # Optional TenantPulse-owned composite plans, keyed only by dataset name. When

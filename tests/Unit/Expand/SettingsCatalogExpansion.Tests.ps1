@@ -12,6 +12,9 @@ BeforeAll {
         function Get-GraphObject { param() }
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
+    Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+        $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
+    } { @() }
 
     function New-TestPolicy {
         param([string] $Id, [string] $Name = 'Test Policy', [string] $TemplateFamily = 'none', [string] $TemplateId = '')
@@ -84,7 +87,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
 
-    It 'expands a single clean policy end to end: Expanded status, generation-named jsonl, correct sha256, raw payload dataset persisted, assignments-deferred note persisted' {
+    It 'expands a single clean unassigned policy end to end with settings and assignment payloads persisted' {
         $policy = New-TestPolicy -Id 'policy-1'
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse -Value 'hello-world'
@@ -107,8 +110,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $manifest.expansions.settingsCatalog.sha256 | Should -Not -BeNullOrEmpty
         # P0-6: path is generation-named, embeds the recorded sha256.
         $manifest.expansions.settingsCatalog.path | Should -Match "settingsCatalog\.$($manifest.expansions.settingsCatalog.sha256)\.jsonl$"
-        # P1-12: the assignments-deferred note is persisted, not just a test title.
-        $manifest.expansions.settingsCatalog.reason | Should -Match 'assignments-deferred: awaiting GraphKit release'
+        $manifest.expansions.settingsCatalog.reason | Should -BeNullOrEmpty
 
         $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store
         Test-Path -LiteralPath $jsonlPath -PathType Leaf | Should -BeTrue
@@ -124,9 +126,88 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         # raw payload dataset persisted
         $manifest.datasets.'configurationPolicySettings-policy-1'.status | Should -Be 'Collected'
         Test-Path -LiteralPath (Join-Path $script:store.DatasetsPath 'configurationPolicySettings-policy-1.json') -PathType Leaf | Should -BeTrue
+        $manifest.datasets.'configurationPolicyAssignments-policy-1'.status | Should -Be 'Collected'
+        Test-Path -LiteralPath (Join-Path $script:store.DatasetsPath 'configurationPolicyAssignments-policy-1.json') -PathType Leaf | Should -BeTrue
 
         # no orphaned .tmp file left behind
         @(Get-ChildItem -LiteralPath $script:store.ExpandedPath -Filter '*.tmp' -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It 'collects and preserves Settings Catalog assignment targets and reports an unavailable assignment payload as a partial policy gap' {
+        $assignedPolicy = New-TestPolicy -Id 'policy-assigned'
+        $unavailablePolicy = New-TestPolicy -Id 'policy-assignment-unavailable'
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
+        } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta' -and $Parameters.id -eq 'policy-assigned'
+        } {
+            @(
+                [ordered]@{
+                    id     = 'assignment-include'
+                    intent = 'include'
+                    target = [ordered]@{
+                        '@odata.type'                              = '#microsoft.graph.groupAssignmentTarget'
+                        groupId                                   = 'group-include'
+                        deviceAndAppManagementAssignmentFilterId   = 'filter-include'
+                        deviceAndAppManagementAssignmentFilterType = 'include'
+                    }
+                }
+                [ordered]@{
+                    id     = 'assignment-exclude'
+                    intent = 'exclude'
+                    target = [ordered]@{
+                        '@odata.type'                              = '#microsoft.graph.exclusionGroupAssignmentTarget'
+                        groupId                                   = 'group-exclude'
+                        deviceAndAppManagementAssignmentFilterId   = $null
+                        deviceAndAppManagementAssignmentFilterType = 'none'
+                    }
+                }
+            )
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta' -and $Parameters.id -eq 'policy-assignment-unavailable'
+        } { throw 'simulated assignment endpoint unavailable' }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $assignedPolicy, $unavailablePolicy, $index {
+            param($store, $context, $assignedPolicy, $unavailablePolicy, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($assignedPolicy, $unavailablePolicy) -DefinitionIndex $index
+        }
+
+        $summary.Status | Should -Be 'Partial'
+        $summary.RowCount | Should -Be 1
+        $summary.Gaps.Count | Should -Be 1
+        $summary.Gaps[0].policyId | Should -Be 'policy-assignment-unavailable'
+        $summary.Gaps[0].reason | Should -Match 'category:AssignmentFetchFailed'
+
+        $row = Get-Content -LiteralPath (Get-PulseExpandedJsonlPath -Store $script:store) | ConvertFrom-Json
+        $row.assignments.Count | Should -Be 2
+        $row.assignments[0].intent | Should -Be 'include'
+        $row.assignments[0].targetType | Should -Be 'group'
+        $row.assignments[0].groupId | Should -Be 'group-include'
+        $row.assignments[0].filterId | Should -Be 'filter-include'
+        $row.assignments[0].filterType | Should -Be 'include'
+        $row.assignments[1].intent | Should -Be 'exclude'
+        $row.assignments[1].targetType | Should -Be 'exclusionGroup'
+        $row.assignments[1].groupId | Should -Be 'group-exclude'
+        $row.assignments[1].filterId | Should -BeNullOrEmpty
+        $row.assignments[1].filterType | Should -Be 'none'
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.datasets.'configurationPolicyAssignments-policy-assigned'.status | Should -Be 'Collected'
+
+        $liveJsonl = Get-Content -LiteralPath (Get-PulseExpandedJsonlPath -Store $script:store) -Raw
+        $capturedSummary = InModuleScope TenantPulse -ArgumentList $script:store, $assignedPolicy, $unavailablePolicy, $index {
+            param($store, $assignedPolicy, $unavailablePolicy, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies @($assignedPolicy, $unavailablePolicy) `
+                -DefinitionIndex $index -FromCapturedPayloads
+        }
+        $capturedSummary.Status | Should -Be 'Partial'
+        $capturedSummary.Gaps[0].reason | Should -Match 'category:AssignmentPayloadMissing'
+        (Get-Content -LiteralPath (Get-PulseExpandedJsonlPath -Store $script:store) -Raw) | Should -Be $liveJsonl
     }
 
     It 'a policy fetch failure yields Partial status with a STRUCTURED {policyId;reason} gap (P0-3: no raw exception text), other policies still succeed' {
@@ -274,7 +355,12 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
             Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policyA, $policyB) -DefinitionIndex $index
         }
 
-        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Parameters.id -eq 'shared-id' }
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Parameters.id -eq 'shared-id' -and $Type -eq 'ConfigurationPolicySetting'
+        }
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Parameters.id -eq 'shared-id' -and $Type -eq 'ConfigurationPolicyAssignment'
+        }
         $summary.Status | Should -Be 'Partial'
         $summary.Gaps.Count | Should -Be 1
         $summary.Gaps[0].policyId | Should -Be 'shared-id'
@@ -296,7 +382,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         $summary.Status | Should -Be 'Partial'
         ($summary.Gaps | Where-Object { $_.reason -match 'category:EmptyPolicyId' }).Count | Should -Be 1
-        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 2 -Exactly
     }
 
     It 'WHITESPACE-ID (re-review fix): a policy whose id is whitespace-only gaps immediately, prevalidation rejects it, and it is never fetched' {
@@ -314,7 +400,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $summary.Status | Should -Be 'Partial'
         ($summary.Gaps | Where-Object { $_.reason -match 'category:EmptyPolicyId' }).Count | Should -Be 1
         # zero Graph calls for the whitespace-id policy - only the good policy is fetched
-        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 2 -Exactly
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Parameters.id -match '^\s+$' }
     }
 
@@ -504,6 +590,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - sequential-only (Part D, T3.4: 
             InModuleScope TenantPulse -ArgumentList $script:store, $id, $response {
                 param($store, $id, $response)
                 Write-PulseDataset -Store $store -Name "configurationPolicySettings-$id" -Data $response -ApiVersion 'beta' -Status 'Collected'
+                Write-PulseDataset -Store $store -Name "configurationPolicyAssignments-$id" -Data @() -ApiVersion 'beta' -Status 'Collected'
             }
         }
         # $missingId is intentionally never written - Read-PulseDataset will fail for it.
