@@ -320,6 +320,15 @@
 - The repo-local Secret/PII/control-byte gate passed inside the full suite. Local `gitleaks` is not installed and was not substituted or claimed; the exact-head CI gitleaks job remains pending together with independent whole-branch review, push/PR/CodeRabbit, exact-head matrix CI, merge, and merged-main CI.
 - The evidence-only documentation follow-up initially failed two of 823 focused safety/release cases because placing a run UUID within the scanner's 200-character window of a dotted archive name resembles a tenant/domain pair. The evidence was reformatted rather than allowlisted; the same focused gate then passed 823/823 with zero failures, skips, NotRun, or failed containers.
 
+**Task 7 whole-branch review correction evidence (2026-08-30):**
+
+- Review reproduced one remaining adapter hole: a caller-supplied provider plan that threw a GraphKit-shaped `ErrorRecord` was flattened to `ProviderFailed` / `provider-plan-failed`, did not set the shared authentication-abort state, and allowed the next network-backed plan to run. The focused red gate discovered 16 cases: the two new structured thrown-record reproductions failed, 14 existing cases passed, and the pre-existing arbitrary-exception bounded-text case remained green.
+- Commit `2757ca09e87548cfcf535b7e6b3afa298dce68ca` routes the caught record through the sole canonical mapper. Structured authentication is persisted as `AuthenticationFailed` / `authentication-failed`, sets the existing provider-plan `collectionFailure` and shared abort state, and suppresses later network work. Structured non-authentication failures remain isolated. Unstructured execution or validation exceptions retain the prior bounded `ProviderFailed` / `provider-plan-failed` contract, and neither path persists provider text.
+- The corrected provider-plan file passed 16/16. The final collector, built-in provider-plan, expansion, snapshot-orchestration, privacy, and whole-source interpreter set passed 557/557 with zero failures, skips, NotRun, or failed containers.
+- The package-first gate then passed 10 pack tasks and 11 test tasks with zero errors or warnings. The full gate measured 2,510/2,510 with zero failures, errors, skips, NotRun, or failed containers against the unchanged 2,508 minimum. This review-fix task deliberately did not ratchet the synchronized floor; the final Task 7 gate owner will do so after all whole-branch findings are closed.
+- Authoritative review-fix proof run: `3c0403f2-8d55-44d4-849b-446d3b3df10f`. The proof binds all 59 shipped files and the exact NUnit/Pester result pair.
+- Candidate archive SHA-256: `abd35d920b16d6c4685d818b092124ee0f6d9446e823bc22f2696a4418aa377f`. Built manifest SHA-256: `9d644284774346fa7e9e4ce6a725f306288b426ed8cda74d35493b56fc086de8`. Built module SHA-256: `16bb0074f414ec34dcc828d72b9053c52d507970fea4bd6215adf9e40fdc1c08`. Source manifest SHA-256: `90f6987936c5c9791b4ddcbd7e0282c2be8de161ec5269a0046968fdcf954d87`.
+
 ## Completion evidence for R1a
 
 R1a is complete only when all of the following are true:
