@@ -8,7 +8,7 @@
 
 **Tech Stack:** PowerShell 7.4/7.6, Pester 6.1.0, Sampler 0.120.1, ModuleBuilder 3.2.18, GitHub Actions, PSGallery.
 
-**Spec:** `/Users/Adam.Gell/repo/GraphKit/.worktrees/program-completion/docs/superpowers/specs/2026-08-19-graphkit-tenantpulse-product-program-design.md`
+**Spec:** GraphKit repository file `docs/superpowers/specs/2026-08-19-graphkit-tenantpulse-product-program-design.md`
 
 ## Global Constraints
 
