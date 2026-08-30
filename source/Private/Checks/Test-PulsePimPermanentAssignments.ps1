@@ -8,14 +8,14 @@
     was dropped and this check evaluates live. Both PIM datasets use v1.0 List operations.
 
     LICENSE GATE IS A FIRST-CLASS OUTCOME, PER THE RESEARCH ENTRY: this check's own
-    descriptor declares Data.Gates = @('EntraP2') - PIM's roleAssignmentScheduleInstances/
-    roleEligibilityScheduleInstances endpoints 400/403 on a non-P2 tenant. Once the
-    datasets ship and gate detection goes live (Get-PulseGateStatus is presently a Phase 1
-    stub that never returns 'Unavailable' - see that function's own docstring), an
-    unlicensed tenant degrades to NotApplicable with an explicit "gate 'EntraP2'
-    unavailable" reason - never a silent Pass. This function does not implement that
-    detection itself; it only declares the gate so the engine's existing NotApplicable
-    wiring covers this case once real detection exists.
+    descriptor declares Data.Gates = @('EntraP2'). Get-PulseGateStatus is implemented; for
+    snapshot evaluation, only successfully collected subscribedSkus gate evidence can prove
+    that Entra P2 is absent. A 400/403 from roleAssignmentScheduleInstances or
+    roleEligibilityScheduleInstances is a provider/permission outcome, not license proof.
+    When collected gate evidence proves EntraP2 unavailable, evaluation assigns
+    NotApplicable with an explicit "gate 'EntraP2' unavailable" reason - never a silent
+    Pass. This function does not implement gate detection itself; the evaluator resolves its
+    declared gate before invoking the rule.
 
     PERMANENT-ACTIVE DEFINITION: a roleAssignmentScheduleInstance row is "permanent active"
     when assignmentType == 'Assigned' (a direct/standing active assignment, not an

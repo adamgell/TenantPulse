@@ -17,7 +17,7 @@
 - Keep exact GraphKit `RequiredVersion = '0.3.0'` in the runtime manifest and restore pin. This tranche consumes the public GraphKit contract; it does not rebuild or relabel GraphKit.
 - Work only in `.worktrees/program-completion` on `codex/r1a-outcomes-partial`; do not touch the dirty primary checkout.
 - Pack before test. Never publish from this tranche. Publication remains a later exact-artifact gate.
-- Snapshot schema remains 2.0 and findings schema remains 1.0. These changes expose no new serialized schema field.
+- Snapshot schema remains 2.0.0 and findings schema remains 1.0. These changes expose no new serialized schema field.
 - A live tenant is not required to prove deterministic error mapping or evaluator branching. Do not manufacture a live timeout, cancellation, permission failure, or ambiguous response merely for evidence.
 - Reasons and findings may state aggregate gap counts, operation names, and bounded failure classes. They must not surface raw gap scopes, raw provider detail, tenant identifiers, tokens, or PII.
 - Function rules are trusted, reviewed code: the evaluator provides the structured `Gaps` projection but cannot prevent an arbitrary rule from copying raw projected values into a finding. The four built-in opt-ins must therefore prove with canaries that they emit only aggregate gap counts and reviewed row evidence.
@@ -169,7 +169,7 @@
 - [x] Prove both inputs are isolated: a malicious test rule mutating dataset rows, `Gaps[].Detail`, `Operations`, projection keys, or the projection root cannot change the dataset cache, manifest object, or what a later check sees.
 - [x] Fail closed with `Error` if an opted-in Partial entry has zero usable rows, absent/empty/null-containing/structurally invalid `Gaps`, or cannot be projected or cloned safely. Reuse the complete `New-PulseCollectionOutcome` gap structure contract, not merely `Gaps.Count`. Reserve `NotApplicable` for a structurally valid Partial dataset whose usable rows do not prove the monotonic decision.
 - [x] Exercise all four Function invocation combinations: legacy `Datasets` only; `Datasets + Context`; `Datasets + DatasetOutcomes`; and all three. Pass `DatasetOutcomes` only when `Data.PartialDatasets` is present and validated; existing `Context` opt-in remains independent.
-- [x] Prove the non-aware Partial reason contains only dataset name and gap count, with canary manifest/gap text absent. Do not serialize `DatasetOutcomes` into findings or scoring documents. Findings schema stays 1.0; snapshot schema stays 2.0.
+- [x] Prove the non-aware Partial reason contains only dataset name and gap count, with canary manifest/gap text absent. Do not serialize `DatasetOutcomes` into findings or scoring documents. Findings schema stays 1.0; snapshot schema stays 2.0.0.
 - [x] Run evaluator and collection-outcome tests green and commit as `feat: evaluate approved partial datasets`.
 
 **Task 4 evidence (2026-08-30):**
@@ -223,7 +223,7 @@
 - [x] Pin monotonic precedence and row-order independence: Partial + valid offender/witness + malformed unrelated row returns the monotonic `Fail`/`Pass`; Partial + no proof + all known rows valid returns `NotApplicable`; Partial + no proof + malformed known row returns `Error`; Complete + any malformed row returns `Error`. Test both row orders.
 - [x] Update all four check fixture helpers to forward the full real outcome surface: `Status`, `FailureClass`, `ReasonCode`, `Detail`, `Provider`, `ApiVersion`, `Operations`, and structurally valid `Gaps`.
 - [x] Add hostile fixtures: zero usable rows, multiple gaps, mixed good/bad known rows, missing required row fields, malformed outcome projection, and mutation attempts. Add GUID, UPN, secret-like, raw scope, and provider-detail canaries and prove none reaches reasons, evidence, serialized findings, or score documents. Preserve every existing complete, pending, gate-degraded, and field-absence assertion.
-- [x] Prove scoring consequences: Partial Pass for TP.INT.0014/.0015 contributes earned, possible, and assessed weight; Partial Fail for TP.INT.0013/.0029 contributes possible and assessed but no earned weight; non-decisive Partial is excluded and increases not-assessed coverage. Findings schema remains 1.0, snapshot schema 2.0, and scoring model 1.0.
+- [x] Prove scoring consequences: Partial Pass for TP.INT.0014/.0015 contributes earned, possible, and assessed weight; Partial Fail for TP.INT.0013/.0029 contributes possible and assessed but no earned weight; non-decisive Partial is excluded and increases not-assessed coverage. Findings schema remains 1.0, snapshot schema 2.0.0, and scoring model 1.0.
 - [x] Run the four check containers together, then evaluator/catalog containers, then `pack` + full suite.
 - [x] Commit as `feat: make four Intune checks partial aware`.
 
@@ -277,7 +277,13 @@
 - README, status, descriptor guidance, and findings-schema guidance now record the canonical direct/composite/expansion failure mapping, request-time `403` as `Failed` / `PermissionDenied`, authentication as the sole run-wide network abort, the exact four asymmetric partial-aware checks, native-Boolean witness requirements, and malformed-input `Error` boundary. Findings schema `1.0`, snapshot schema `2.0.0`, and scoring model `1.0` remain unchanged.
 - The immutable TenantPulse `0.2.0` archive hash, reviewed and merged SHAs, CI run IDs, test/live/publication evidence boundaries, and no-user/no-legacy premise were left unchanged. The PIM guidance now requires collected `subscribedSkus`/gate evidence before claiming Entra ID P2 is absent; a PIM `400`/`403` is not license proof.
 - Documentation-first package gate: `pack` succeeded with 10 tasks, 0 errors, and 0 warnings. Pinned Pester `6.1.0` then ran `tests/QA/ModuleManifest.tests.ps1` plus `tests/QA/ReleaseTruth.tests.ps1`: 10/10 passed, 0 failed, 0 skipped, 0 NotRun, and 0 failed containers.
-- Post-documentation candidate hashes: `TenantPulse.0.3.0.nupkg` SHA-256 `3eac93491504e78a4d96aefd22b300ad7ec736953f1e4a1fa8090e897d68894c`; built manifest SHA-256 `9d644284774346fa7e9e4ce6a725f306288b426ed8cda74d35493b56fc086de8`; built module SHA-256 `382583ecfa3edc99bbf75a30498168e431b86ffb37b018365b48d3b6c868e87e`. These identify this Task 6 pack candidate only; they are not Task 7 full-suite, exact-head CI, live-service, merged-release, or publication proof. Earlier Task 5 hashes remain pre-documentation evidence rather than final Task 6 evidence.
+- Pre-review Task 6 candidate hashes: `TenantPulse.0.3.0.nupkg` SHA-256 `3eac93491504e78a4d96aefd22b300ad7ec736953f1e4a1fa8090e897d68894c`; built manifest SHA-256 `9d644284774346fa7e9e4ce6a725f306288b426ed8cda74d35493b56fc086de8`; built module SHA-256 `382583ecfa3edc99bbf75a30498168e431b86ffb37b018365b48d3b6c868e87e`. These identify the pre-review Task 6 pack candidate only; the review correction below changes a source comment and was deliberately not repacked. None of these hashes is Task 7 full-suite, current exact-head CI, live-service, merged-release, or publication proof. Earlier Task 5 hashes remain pre-documentation evidence rather than final Task 6 evidence.
+
+**Task 6 independent-review correction evidence (2026-08-30):**
+
+- Independent review found one stale PIM rule docstring that still inferred license absence from a PIM `400`/`403` and called `Get-PulseGateStatus` a stub. It now records the implemented contract: for snapshot evaluation, only successfully collected `subscribedSkus` gate evidence can prove Entra P2 absent; a PIM `400`/`403` remains a provider/permission outcome; the evaluator resolves the declared gate before invoking the rule.
+- Three plan statements now use the exact snapshot schema value `2.0.0` instead of the ambiguous `2.0` shorthand. Findings schema remains `1.0` and scoring model remains `1.0`.
+- Pinned Pester `6.1.0` release-truth gate: `ModuleManifest.tests.ps1` plus `ReleaseTruth.tests.ps1` passed 10/10 with zero failures, skips, NotRun, or failed containers. PIM license/gate/outcome gate: `SubscribedSkuLicensePlan.Tests.ps1`, `Get-PulseGateStatus.Tests.ps1`, and `PulseGateOutcomeMapping.Tests.ps1` passed 38/38 with zero failures, skips, NotRun, or failed containers.
 
 ### Task 7: Measure, ratchet, review, and merge the exact train
 
