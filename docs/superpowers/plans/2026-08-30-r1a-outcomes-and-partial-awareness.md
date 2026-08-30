@@ -298,15 +298,27 @@
 **Interfaces:**
 - Produces one exact reviewed source head, one exact tested package artifact, six-job CI plus gitleaks, and a merged-main verification run.
 
-- [ ] Run `./build.ps1 -Tasks pack`, then `./build.ps1 -Tasks test`. Record exact total, failures, errors, skipped, NotRun, package SHA-256, built manifest SHA-256, and built module SHA-256.
-- [ ] Ratchet every synchronized minimum to the measured total only after the authoritative result exists. Update the floor history comment with an honest breakdown; set the negative floor fixture to measured minus one.
-- [ ] Re-run `pack` then full `test` after the floor change. Confirm zero failures/errors/skips/NotRun and exact GraphKit 0.3.0 dependency in source, built module, package, and clean child-process import.
+- [x] Run `./build.ps1 -Tasks pack`, then `./build.ps1 -Tasks test`. Record exact total, failures, errors, skipped, NotRun, package SHA-256, built manifest SHA-256, and built module SHA-256.
+- [x] Ratchet every synchronized minimum to the measured total only after the authoritative result exists. Update the floor history comment with an honest breakdown; set the negative floor fixture to measured minus one.
+- [x] Re-run `pack` then full `test` after the floor change. Confirm zero failures/errors/skips/NotRun and exact GraphKit 0.3.0 dependency in source, built module, package, and clean child-process import.
 - [ ] Run the repo-local Secret/PII/control-byte scan and gitleaks. Inspect the diff for raw tenant IDs, client IDs, secrets, tokens, PII, gap scopes, or provider detail.
 - [ ] Obtain independent task reviews and a final whole-branch review. Resolve every actionable finding; rerun the affected focused tests and authoritative full gate after fixes.
 - [ ] Push `codex/r1a-outcomes-partial`, open one PR, run CodeRabbit, independently validate its findings, and resolve all threads.
 - [ ] Require exact-head CI: PowerShell 7.4 and 7.6 on Windows, Ubuntu, and macOS, plus gitleaks, all green for the reviewed SHA.
 - [ ] Merge only that reviewed SHA. Require the same merged-main matrix plus gitleaks green for the merge commit before starting R1b.
 - [ ] Do not publish TenantPulse 0.3.0 from this train. Publication waits for the applicable R0-R11 program set and final package/live gates.
+
+**Task 7 local pre-review evidence (2026-08-30):**
+
+- Read-only preflight fetched `origin` and confirmed `origin/main` and the merge base were both `4b00f4991cdc254dce4e82aab0cda73a73cd58d1`. The isolated branch was clean at `6a4291d2b269d3841674059840f73f2864f3ca43` before this task; no primary checkout was touched.
+- Pinned dependency resolution passed. The required pre-ratchet package-first measurement produced proof run `1ffaa3bf-003c-436c-9868-c1de232fa728` and executed 2,508 tests with zero failures, errors, skips, NotRun, or failed containers. Only after that result existed was the synchronized floor changed from 2,288 to 2,508, the negative floor fixture changed to 2,507, and the active build/CI/publisher `AllowNotRun` policy changed from 1 to 0.
+- The history accounts honestly for all 220 cases above the prior floor: +2 tracked-plan discovery safety cases, +118 canonical Graph-failure mapper and adapter cases, +21 strict `PartialDatasets` catalog cases, +31 isolated partial-evaluator and review-correction cases, and +48 four-check monotonic-evaluation, scoring, privacy, and review-correction cases.
+- Post-change `build` passed 7 tasks with zero errors/warnings. The focused ratchet/publisher/proof set passed 35/35 with zero failures, skips, NotRun, or failed containers. The final `pack` passed 10 tasks with zero errors/warnings; the subsequent and final full `test` passed 2,508/2,508 with zero failures, errors, skips, NotRun, or failed containers and 11 build tasks with zero errors/warnings.
+- Exact tested commit: `f02aeae9952507b5f275e4f456d4eb9af5a97fe9` (`chore: ratchet R1a release gate`). Authoritative proof run: `5e536aac-dea2-4867-9e22-b5fb5e50bbd2`. The proof binds all 59 shipped files and the exact NUnit/Pester pair to candidate archive SHA-256 `5b5c326fead6d93c7c2508c1556266d60d3a97e08058c3c25f50d096656820cc`. Built manifest SHA-256: `9d644284774346fa7e9e4ce6a725f306288b426ed8cda74d35493b56fc086de8`; built module SHA-256: `d56e624b38a34a088556537c3ccaf13ab7eb36eba0c28a0f57973468e2f295ec`; source manifest SHA-256: `90f6987936c5c9791b4ddcbd7e0282c2be8de161ec5269a0046968fdcf954d87`.
+- Source manifest, built manifest, packaged manifest, and the clean child-process dependency-chain import all require/load exact GraphKit `0.3.0`. The proof-named NUnit file reports exactly 2,508 tests and zero failures/errors/skips. `TransitiveRuntimePackaging.tests.ps1` passed all 13 cases, including restore and import from an isolated root with a newer compatible global dependency already loaded.
+- The publisher accepted only the proof-named NUnit path, revalidated the package and 59-file manifest, and completed a no-key/no-`-Publish` dry run: 418,042-byte package, the same SHA-256, and `Nothing was published`. No rebuild or repack occurred after the authoritative run.
+- The repo-local Secret/PII/control-byte gate passed inside the full suite. Local `gitleaks` is not installed and was not substituted or claimed; the exact-head CI gitleaks job remains pending together with independent whole-branch review, push/PR/CodeRabbit, exact-head matrix CI, merge, and merged-main CI.
+- The evidence-only documentation follow-up initially failed two of 823 focused safety/release cases because placing a run UUID within the scanner's 200-character window of a dotted archive name resembles a tenant/domain pair. The evidence was reformatted rather than allowlisted; the same focused gate then passed 823/823 with zero failures, skips, NotRun, or failed containers.
 
 ## Completion evidence for R1a
 

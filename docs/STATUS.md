@@ -37,9 +37,23 @@ decisive proof, zero rows or malformed outcome, gap, or row data is `Error`. Fin
 snapshot schema `2.0.0`, and scoring model `1.0` remain unchanged.
 
 This tranche's evidence is deterministic source/package testing only. It adds no new live-service
-or publication proof, and the final exact-head/full-suite/CI gate remains Task 7 work. The immutable
-TenantPulse `0.2.0` evidence table and exact-package live record below are historical release proof,
-not proof for the unreleased `0.3.0` source.
+or publication proof. The local Task 7 gate is complete at exact tested commit
+`f02aeae9952507b5f275e4f456d4eb9af5a97fe9`: the synchronized minimum is 2,508, the active
+NotRun allowance is zero, and the package-first full gate passed 2,508/2,508 with zero failures,
+errors, skips, NotRun, or failed containers. Proof run
+`5e536aac-dea2-4867-9e22-b5fb5e50bbd2` binds all 59 shipped files and the exact result pair to
+the local candidate archive SHA-256
+`5b5c326fead6d93c7c2508c1556266d60d3a97e08058c3c25f50d096656820cc`. The built manifest
+SHA-256 is `9d644284774346fa7e9e4ce6a725f306288b426ed8cda74d35493b56fc086de8`; the built module
+SHA-256 is `d56e624b38a34a088556537c3ccaf13ab7eb36eba0c28a0f57973468e2f295ec`.
+
+Source, built, packaged, and clean child-process import gates all preserve exact GraphKit `0.3.0`.
+The publisher revalidated that proof and completed a no-key/no-`-Publish` dry run; nothing was
+published. Independent whole-branch review, push/PR/CodeRabbit, exact-head six-job CI plus
+gitleaks, merge, and merged-main CI remain pending. Local `gitleaks` is not installed, so only the
+repo-local Secret/PII/control-byte gate is locally proven. The immutable TenantPulse `0.2.0`
+evidence table and exact-package live record below are historical release proof, not proof for the
+unreleased `0.3.0` source.
 
 | Evidence state | Proof |
 |---|---|
