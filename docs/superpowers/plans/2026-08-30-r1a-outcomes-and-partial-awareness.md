@@ -163,14 +163,23 @@
 - `DatasetOutcomes[<name>]` exposes only `Status`, `FailureClass`, `ReasonCode`, `Detail`, `Provider`, `ApiVersion`, `Operations`, and `Gaps`.
 - Append optional `DatasetOutcomes = @{}` after the existing optional `Context` parameter in each opted-in Function to preserve positional compatibility.
 
-- [ ] Add red evaluator tests proving every non-opted-in check still returns `NotApplicable` for `Partial`; Expression rules can never receive partial rows; missing/Failed/Skipped/unknown statuses remain fail-closed.
-- [ ] For non-aware `Partial`, synthesize a bounded reason containing dataset name and gap count only. Do not quote manifest reason, scope, gap detail, or provider detail.
-- [ ] For an opted-in Function check, read the usable rows from a valid Partial dataset, deep-clone them through the existing canonical JSON path, construct an allowlisted outcome projection for every declared dataset, deep-clone that projection independently, and pass it as `DatasetOutcomes`. Pin the exact projection keys/casing and prove manifest-only `reason`, `sha256`, `itemCount`, and `collectedUtc` are absent.
-- [ ] Prove both inputs are isolated: a malicious test rule mutating dataset rows, `Gaps[].Detail`, `Operations`, projection keys, or the projection root cannot change the dataset cache, manifest object, or what a later check sees.
-- [ ] Fail closed with `Error` if an opted-in Partial entry has zero usable rows, absent/empty/null-containing/structurally invalid `Gaps`, or cannot be projected or cloned safely. Reuse the complete `New-PulseCollectionOutcome` gap structure contract, not merely `Gaps.Count`. Reserve `NotApplicable` for a structurally valid Partial dataset whose usable rows do not prove the monotonic decision.
-- [ ] Exercise all four Function invocation combinations: legacy `Datasets` only; `Datasets + Context`; `Datasets + DatasetOutcomes`; and all three. Pass `DatasetOutcomes` only when `Data.PartialDatasets` is present and validated; existing `Context` opt-in remains independent.
-- [ ] Prove the non-aware Partial reason contains only dataset name and gap count, with canary manifest/gap text absent. Do not serialize `DatasetOutcomes` into findings or scoring documents. Findings schema stays 1.0; snapshot schema stays 2.0.
-- [ ] Run evaluator and collection-outcome tests green and commit as `feat: evaluate approved partial datasets`.
+- [x] Add red evaluator tests proving every non-opted-in check still returns `NotApplicable` for `Partial`; Expression rules can never receive partial rows; missing/Failed/Skipped/unknown statuses remain fail-closed.
+- [x] For non-aware `Partial`, synthesize a bounded reason containing dataset name and gap count only. Do not quote manifest reason, scope, gap detail, or provider detail.
+- [x] For an opted-in Function check, read the usable rows from a valid Partial dataset, deep-clone them through the existing canonical JSON path, construct an allowlisted outcome projection for every declared dataset, deep-clone that projection independently, and pass it as `DatasetOutcomes`. Pin the exact projection keys/casing and prove manifest-only `reason`, `sha256`, `itemCount`, and `collectedUtc` are absent.
+- [x] Prove both inputs are isolated: a malicious test rule mutating dataset rows, `Gaps[].Detail`, `Operations`, projection keys, or the projection root cannot change the dataset cache, manifest object, or what a later check sees.
+- [x] Fail closed with `Error` if an opted-in Partial entry has zero usable rows, absent/empty/null-containing/structurally invalid `Gaps`, or cannot be projected or cloned safely. Reuse the complete `New-PulseCollectionOutcome` gap structure contract, not merely `Gaps.Count`. Reserve `NotApplicable` for a structurally valid Partial dataset whose usable rows do not prove the monotonic decision.
+- [x] Exercise all four Function invocation combinations: legacy `Datasets` only; `Datasets + Context`; `Datasets + DatasetOutcomes`; and all three. Pass `DatasetOutcomes` only when `Data.PartialDatasets` is present and validated; existing `Context` opt-in remains independent.
+- [x] Prove the non-aware Partial reason contains only dataset name and gap count, with canary manifest/gap text absent. Do not serialize `DatasetOutcomes` into findings or scoring documents. Findings schema stays 1.0; snapshot schema stays 2.0.
+- [x] Run evaluator and collection-outcome tests green and commit as `feat: evaluate approved partial datasets`.
+
+**Task 4 evidence (2026-08-30):**
+
+- Focused red gate against the pre-evaluator implementation: 104 examples discovered; 89 passed and 15 failed. The failures pinned bounded non-aware Partial reasons, partial-aware invocation, invalid-gap/zero-row errors, clone failures, mutation isolation, and canary-free serialization.
+- Focused green gate under Pester 6.1.0: 105/105 passed across `CollectionOutcomeEvaluation.Tests.ps1` and `Evaluator.Tests.ps1`; zero failures, skips, NotRun, or failed containers.
+- `DatasetOutcomes` is built only for validated Function opt-ins, independently canonical-JSON-cloned, and contains exactly `Status`, `FailureClass`, `ReasonCode`, `Detail`, `Provider`, `ApiVersion`, `Operations`, and `Gaps` for every declared dataset. Dataset rows use a separate canonical clone. Expression and non-aware rules never receive Partial rows.
+- Structural validation reuses `New-PulseCollectionOutcome` and fails closed for zero rows, absent/empty/null/invalid gaps, unsafe projection, and either clone failure. Privacy fixtures prove manifest reason/detail, gap scope/detail, provider, and operation canaries do not enter non-aware reasons, findings, or score documents.
+- Package-first authoritative gate: `pack` succeeded with 10 tasks, 0 errors, and 0 warnings; subsequent `test` succeeded with 2,452 tests, 0 failures, 0 errors, 0 skipped, 0 NotRun, and 11 build tasks with 0 errors/warnings.
+- Tested TenantPulse 0.3.0 package SHA-256: `9ce0a35f98e2c30dd44dc911e4250c755f8ee261b353d7c502b7e8266933d2ce`; built manifest SHA-256: `4693f670b62e1c84aa83effa967f0692a252681a897c2e730e73586803f38f06`; built module SHA-256: `e635f83aa132f5aef8a76fb68a57563bd3a8eef7587f797b2a139ef95b0610ac`. Exact package/test binding is recorded in `output/testResults/tested-release-proof.json`.
 
 ### Task 5: Opt in the four monotonic Intune checks
 

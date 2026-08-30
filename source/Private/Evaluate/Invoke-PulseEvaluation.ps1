@@ -59,20 +59,24 @@
            unavailable: <detail>"; Unknown degrades it to NotApplicable with a GateUnknown
            outcome and reason "gate '<name>' unknown: <detail>". No unresolved gate may reach
            the rule as a successful evaluation.
-        2. Every dataset the check declares (Data.Datasets) must have a manifest entry with
-           status 'Collected'. A missing entry, or one recorded Failed/Skipped, degrades the
-           check to NotApplicable - the reason is the manifest's own (already-redacted,
-           Task 1.5) reason string, quoted verbatim, or a synthesized one for a missing
-           entry / a Failed-or-Skipped entry with no reason on file.
-        3. Only once every declared dataset is confirmed Collected are the datasets actually
-           read (Read-PulseDataset, cached per dataset name across the whole run - the same
-           dataset is frequently declared by more than one check), then DEEP-CLONED per
-           check via ConvertTo-PulseClonedDatasets (see that function below) before being
-           handed to the rule - no rule, Function or Expression, ever receives a live
-           reference into the shared cache. This closes an isolation gap proven during
-           review: an in-place mutation by one check's rule must never change what a LATER
-           check sees, and results must never depend on check evaluation order.
-             - Rule.Type 'Function': `& <Rule.Function> -Datasets <cloned hashtable>` (its
+        2. Every dataset the check declares (Data.Datasets) must have a manifest entry.
+           Collected is usable by every rule. Partial remains NotApplicable unless the
+           descriptor is a validated Function rule that explicitly lists that dataset in
+           Data.PartialDatasets; its bounded engine reason names only the dataset and gap
+           count. Missing/Failed/Skipped/unknown statuses remain fail-closed. An opted-in
+           Partial entry must have usable rows and satisfy New-PulseCollectionOutcome's
+           complete structured-gap contract or the check is Error before its rule runs.
+        3. Once every declared dataset is usable, rows are read (Read-PulseDataset, cached
+           per dataset name across the whole run), then DEEP-CLONED per check via
+           ConvertTo-PulseClonedDatasets before being handed to the rule - no rule,
+           Function or Expression, ever receives a live reference into the shared cache.
+           A partial-aware Function additionally receives an independently deep-cloned
+           DatasetOutcomes projection for every declared dataset, containing only Status,
+           FailureClass, ReasonCode, Detail, Provider, ApiVersion, Operations, and Gaps.
+           Neither input shares a mutable reference with the cache or manifest.
+             - Rule.Type 'Function': `& <Rule.Function> -Datasets <cloned hashtable>` plus
+               independently optional `-Context` and catalog-validated
+               `-DatasetOutcomes` parameters (its
                2>&1 stream partitioned so a non-terminating error is captured, never
                silently dropped - see below) must emit EXACTLY ONE output that is a
                TenantPulse.RuleResult-shaped object (Status/Evidence/Reason) -
@@ -493,6 +497,65 @@ function Invoke-PulseCheckEvaluation {
     $datasetNames = @($Check.Data.Datasets) | Where-Object { -not [string]::IsNullOrEmpty($_) }
     $datasets = @{}
 
+    # R1a partial-awareness is a positive, catalog-validated Function-rule contract.
+    # The evaluator still fails closed for hand-built descriptors that bypass catalog
+    # validation: the optional field must be a non-empty array of unique, exact members
+    # of Data.Datasets, and an Expression rule can never opt in. This is deliberately an
+    # evaluation permission, not a collection dependency.
+    $partialAwarenessDeclared = $false
+    $partialDatasetNames = @()
+    try {
+        $partialAwarenessDeclared = $Check.Data -is [System.Collections.IDictionary] -and
+            $Check.Data.Contains('PartialDatasets')
+        if ($partialAwarenessDeclared) {
+            if ($Check.Rule.Type -ne 'Function' -or
+                $null -eq $Check.Data.PartialDatasets -or
+                $Check.Data.PartialDatasets -isnot [array]) {
+                return @{
+                    Status   = 'Error'
+                    Evidence = @()
+                    Reason   = 'check partial-awareness contract is invalid.'
+                }
+            }
+
+            $partialDatasetNames = @($Check.Data.PartialDatasets)
+            if ($partialDatasetNames.Count -eq 0) {
+                return @{
+                    Status   = 'Error'
+                    Evidence = @()
+                    Reason   = 'check partial-awareness contract is invalid.'
+                }
+            }
+
+            $seenPartialNames = [System.Collections.Generic.HashSet[string]]::new(
+                [System.StringComparer]::OrdinalIgnoreCase
+            )
+            foreach ($partialName in $partialDatasetNames) {
+                if ($partialName -isnot [string] -or
+                    [string]::IsNullOrWhiteSpace([string] $partialName) -or
+                    -not $seenPartialNames.Add([string] $partialName) -or
+                    $datasetNames -cnotcontains [string] $partialName) {
+                    return @{
+                        Status   = 'Error'
+                        Evidence = @()
+                        Reason   = 'check partial-awareness contract is invalid.'
+                    }
+                }
+            }
+        }
+    } catch {
+        return @{
+            Status   = 'Error'
+            Evidence = @()
+            Reason   = 'check partial-awareness contract is invalid.'
+        }
+    }
+
+    # Built only for a partial-aware Function. Each declared dataset contributes exactly
+    # the allowlisted outcome surface; manifest-only reason/hash/count/time fields never
+    # enter this object. It is canonical-JSON-cloned independently from $datasets below.
+    $datasetOutcomeProjection = [ordered]@{}
+
     foreach ($name in $datasetNames) {
         $manifestDatasets = $Manifest.datasets
 
@@ -505,19 +568,18 @@ function Invoke-PulseCheckEvaluation {
         }
 
         $entry = $manifestDatasets[$name]
+        $entryStatus = $null
+        try { $entryStatus = [string] $entry.status } catch { $entryStatus = $null }
 
-        # Fail-closed gate (post-review fix): compares against the ONE known-good status
-        # ('Collected') rather than enumerating the known-bad ones ('Failed'/'Skipped').
-        # Enumerating bad statuses means a novel, unrecognized status string (a future
-        # collector status this evaluator has never heard of, or a corrupted manifest
-        # value) falls through as if it were 'Collected' and gets read - exactly the
-        # silent-gap failure this module forbids everywhere else. Gating on `-ne 'Collected'`
-        # instead means ANY status other than the one this evaluator actually trusts is
-        # degraded to NotApplicable, including one that does not exist yet.
-        if ($entry.status -ne 'Collected') {
-            $reason = $entry.reason
+        # Fail-closed gate: only the two statuses this evaluator understands as carrying
+        # rows may continue. Partial is subjected to the explicit opt-in and structural
+        # validation below; every other value, including a future/corrupted status this
+        # evaluator has never heard of, remains NotApplicable.
+        if ($entryStatus -notin @('Collected', 'Partial')) {
+            $reason = $null
+            try { $reason = $entry.reason } catch { $reason = $null }
             if ([string]::IsNullOrEmpty($reason)) {
-                $reason = "dataset '$name' has status '$($entry.status)' with no reason recorded."
+                $reason = "dataset '$name' has status '$entryStatus' with no reason recorded."
             }
             return @{
                 Status   = 'NotApplicable'
@@ -526,11 +588,92 @@ function Invoke-PulseCheckEvaluation {
             }
         }
 
-        if (-not $DatasetCache.ContainsKey($name)) {
-            $DatasetCache[$name] = Read-PulseDataset -Store $Store -Name $name
+        if ($entryStatus -eq 'Partial') {
+            $gapCount = 0
+            try {
+                if ($null -ne $entry.gaps) { $gapCount = @($entry.gaps).Count }
+            } catch {
+                $gapCount = 0
+            }
+            $gapWord = if ($gapCount -eq 1) { 'gap' } else { 'gaps' }
+
+            # Omission, a Partial dataset outside the descriptor's explicit allowlist,
+            # and every Expression rule all retain the historical fail-closed outcome.
+            # The synthesized reason is intentionally bounded: no manifest reason,
+            # scope, provider detail, operation, or per-gap detail is copied into it.
+            if (-not $partialAwarenessDeclared -or
+                $Check.Rule.Type -ne 'Function' -or
+                $partialDatasetNames -cnotcontains $name) {
+                return @{
+                    Status   = 'NotApplicable'
+                    Evidence = @()
+                    Reason   = "dataset '$name' is Partial with $gapCount unresolved $gapWord."
+                }
+            }
         }
 
-        $datasets[$name] = $DatasetCache[$name]
+        try {
+            if (-not $DatasetCache.ContainsKey($name)) {
+                $DatasetCache[$name] = Read-PulseDataset -Store $Store -Name $name
+            }
+            $datasets[$name] = $DatasetCache[$name]
+        } catch {
+            return @{
+                Status   = 'Error'
+                Evidence = @()
+                Reason   = "dataset '$name' could not be read safely for evaluation."
+            }
+        }
+
+        if ($entryStatus -eq 'Partial') {
+            if (@($datasets[$name]).Count -eq 0) {
+                return @{
+                    Status   = 'Error'
+                    Evidence = @()
+                    Reason   = "dataset '$name' has no usable rows for Partial evaluation."
+                }
+            }
+
+            # Re-run the complete collection-outcome constructor against the persisted
+            # manifest surface and the usable rows. This intentionally reuses the one
+            # authoritative gap contract (all six fields, supported failure class,
+            # non-empty string fields, hashtable-or-null Detail) instead of accepting a
+            # merely non-zero Gaps.Count. Its detailed exception is suppressed because it
+            # can contain hostile manifest text; the engine returns one bounded reason.
+            try {
+                New-PulseCollectionOutcome -Dataset $name -Status Partial -Rows @($datasets[$name]) `
+                    -Gaps $entry.gaps -FailureClass $entry.failureClass `
+                    -ReasonCode $entry.reasonCode -Detail $entry.detail -Provider $entry.provider `
+                    -ApiVersion $entry.apiVersion -Operations $entry.operations | Out-Null
+            } catch {
+                return @{
+                    Status   = 'Error'
+                    Evidence = @()
+                    Reason   = "dataset '$name' has an invalid Partial outcome."
+                }
+            }
+        }
+
+        if ($partialAwarenessDeclared) {
+            try {
+                $datasetOutcomeProjection[$name] = [ordered]@{
+                    Status       = $entryStatus
+                    FailureClass = $entry.failureClass
+                    ReasonCode   = $entry.reasonCode
+                    Detail       = $entry.detail
+                    Provider     = $entry.provider
+                    ApiVersion   = $entry.apiVersion
+                    Operations   = $entry.operations
+                    Gaps         = $entry.gaps
+                }
+            } catch {
+                return @{
+                    Status   = 'Error'
+                    Evidence = @()
+                    Reason   = "dataset '$name' outcome could not be projected safely."
+                }
+            }
+        }
     }
 
     try {
@@ -541,7 +684,29 @@ function Invoke-PulseCheckEvaluation {
         # dependent - proven empirically: a hashtable handed to a nested runspace via
         # SessionStateProxy.SetVariable is still the SAME object, so an unclonded mutation
         # inside a sandboxed Expression rule was observed to corrupt the shared cache too.
-        $clonedDatasets = ConvertTo-PulseClonedDatasets -Datasets $datasets
+        try {
+            $clonedDatasets = ConvertTo-PulseClonedDatasets -Datasets $datasets
+        } catch {
+            return @{
+                Status   = 'Error'
+                Evidence = @()
+                Reason   = 'check input datasets could not be cloned safely.'
+            }
+        }
+
+        $clonedDatasetOutcomes = $null
+        if ($partialAwarenessDeclared) {
+            try {
+                $clonedDatasetOutcomes = ConvertTo-PulseClonedDatasetOutcomes `
+                    -DatasetOutcomes $datasetOutcomeProjection
+            } catch {
+                return @{
+                    Status   = 'Error'
+                    Evidence = @()
+                    Reason   = 'dataset outcomes could not be cloned safely.'
+                }
+            }
+        }
 
         if ($Check.Rule.Type -eq 'Function') {
             $ruleFunction = $Check.Rule.Function
@@ -558,6 +723,15 @@ function Invoke-PulseCheckEvaluation {
             # -Datasets) working completely unchanged.
             $ruleCommand = Get-Command -Name $ruleFunction -ErrorAction SilentlyContinue
             $ruleAcceptsContext = ($null -ne $ruleCommand) -and $ruleCommand.Parameters.ContainsKey('Context')
+            $ruleAcceptsDatasetOutcomes = ($null -ne $ruleCommand) -and $ruleCommand.Parameters.ContainsKey('DatasetOutcomes')
+
+            if ($partialAwarenessDeclared -and -not $ruleAcceptsDatasetOutcomes) {
+                return @{
+                    Status   = 'Error'
+                    Evidence = @()
+                    Reason   = 'check partial-awareness contract is invalid.'
+                }
+            }
 
             # $PSBoundParameters.ContainsKey('Context') is NOT checked here (post-review
             # fix - a dead condition removed): Invoke-PulseEvaluation's own -Context
@@ -584,8 +758,14 @@ function Invoke-PulseCheckEvaluation {
             $ruleContext = @{}
             foreach ($key in $Context.Keys) { $ruleContext[$key] = $Context[$key] }
 
-            $rawOutputs = if ($ruleAcceptsContext) {
+            $rawOutputs = if ($ruleAcceptsContext -and $partialAwarenessDeclared) {
+                @(& $ruleFunction -Datasets $clonedDatasets -Context $ruleContext `
+                    -DatasetOutcomes $clonedDatasetOutcomes 2>&1)
+            } elseif ($ruleAcceptsContext) {
                 @(& $ruleFunction -Datasets $clonedDatasets -Context $ruleContext 2>&1)
+            } elseif ($partialAwarenessDeclared) {
+                @(& $ruleFunction -Datasets $clonedDatasets `
+                    -DatasetOutcomes $clonedDatasetOutcomes 2>&1)
             } else {
                 @(& $ruleFunction -Datasets $clonedDatasets 2>&1)
             }
@@ -728,6 +908,27 @@ function ConvertTo-PulseClonedDatasets {
     }
 
     $json = ConvertTo-PulseCanonicalJson -InputObject $Datasets
+    return ConvertFrom-Json -InputObject $json -AsHashtable -Depth 64
+}
+
+# Private helper (not exported): independently deep-clones the dataset-outcome projection
+# supplied only to catalog-validated partial-aware Function rules. Keeping this as a
+# separate canonical JSON round-trip from ConvertTo-PulseClonedDatasets is deliberate: a
+# rule must never gain a shared nested reference between its row input, the manifest, and
+# the outcome metadata it may mutate while deciding a monotonic Partial result.
+function ConvertTo-PulseClonedDatasetOutcomes {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary] $DatasetOutcomes
+    )
+
+    if ($DatasetOutcomes.Count -eq 0) {
+        return @{}
+    }
+
+    $json = ConvertTo-PulseCanonicalJson -InputObject $DatasetOutcomes
     return ConvertFrom-Json -InputObject $json -AsHashtable -Depth 64
 }
 
