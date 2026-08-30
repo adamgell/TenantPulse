@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 2255 / -AllowNotRun 1 (see
+    # MinimumTests 2288 / -AllowNotRun 1 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -286,12 +286,13 @@ else {
     # filter/gap, dependency-byte, proof-ordering, command-resolution, and archive-TOCTOU
     # regressions; 2247 -> 2255 for pre-test artifact/result-pair proof binding and its
     # multiline ratchet-parser regression.
+    # 2255 -> 2288 after publication closeout: the merged tree actually executed 2277 tests; +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 2255 `
+        -MinimumTests 2288 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 1 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {

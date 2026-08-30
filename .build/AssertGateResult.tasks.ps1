@@ -517,8 +517,9 @@
 # dependency provenance, proof-ordering, module-qualified publisher, and archive-TOCTOU
 # regressions. 2247 -> 2255 after the release-proof binding closeout: +7 pre-test
 # artifact/result-pair authorization regressions and +1 multiline-ratchet parser regression.
-# 2255 is the real, measured `./build.ps1 -Tasks test` total.
-$script:tenantPulseGateMinimumTests = 2255
+# 2255 -> 2288 after publication closeout: the merged tree actually executed 2277 tests; +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.
+# 2288 is the real, measured `./build.ps1 -Tasks test` total.
+$script:tenantPulseGateMinimumTests = 2288
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

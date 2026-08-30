@@ -734,7 +734,8 @@ jobs:
           # +27 final independent-review regressions for evidence coherence, filter/gap
           # semantics, dependency bytes, test-proof ordering, and exact publication.
           # 2247 -> 2255: +8 release-proof binding and multiline-ratchet regressions.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2255 -AllowedSkips $allowedSkips -AllowNotRun 1
+          # 2255 -> 2288 after publication closeout: the merged tree actually executed 2277 tests; +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2288 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
