@@ -334,6 +334,129 @@ Describe 'Invoke-PulseCheckEvaluation partial-awareness contract' {
         $result.Reason | Should -Not -Match 'manifest-reason-canary|manifest-detail-canary|gap-detail-canary|provider-detail-canary|scope-safe|Child\.List'
     }
 
+    It 'fails closed before rule invocation for malformed persisted Partial gap shape: <Case>' -ForEach @(
+        @{ Case = 'scalar Gaps'; Field = $null }
+        @{ Case = 'Int64 Scope'; Field = 'Scope' }
+        @{ Case = 'Int64 ReasonCode'; Field = 'ReasonCode' }
+        @{ Case = 'Int64 Operation'; Field = 'Operation' }
+        @{ Case = 'Int64 ApiVersion'; Field = 'ApiVersion' }
+    ) {
+        $check = New-PulseEvaluationCheckFixture
+        $entry = New-PulsePartialEntryFixture
+        if ($null -eq $Field) {
+            $entry.gaps = $entry.gaps[0]
+        } else {
+            $entry.gaps[0].$Field = [long] 7
+        }
+
+        $observed = InModuleScope TenantPulse -ArgumentList $check, $entry {
+            param($check, $entry)
+            $script:PulseMalformedGapRuleInvoked = $false
+            function Test-PulsePartialAwareFixtureRule {
+                param($Datasets, $DatasetOutcomes)
+                $script:PulseMalformedGapRuleInvoked = $true
+                New-PulseFinding -Status Pass
+            }
+
+            $evaluation = Invoke-PulseCheckEvaluation -Check $check -Store ([pscustomobject]@{}) `
+                -Manifest @{ datasets = @{ partialA = $entry } } `
+                -DatasetCache @{ partialA = @([pscustomobject]@{ id = 'row-1' }) }
+            [pscustomobject]@{
+                Evaluation = $evaluation
+                RuleInvoked = $script:PulseMalformedGapRuleInvoked
+            }
+        }
+
+        $observed.Evaluation.Status | Should -Be 'Error'
+        $observed.RuleInvoked | Should -BeFalse
+        $observed.Evaluation.Reason | Should -Not -Match 'manifest-reason-canary|manifest-detail-canary|gap-detail-canary|provider-detail-canary|scope-safe|Child\.List'
+    }
+
+    It 'fails closed before rule invocation when a Partial dataset contains only one null row' {
+        $check = New-PulseEvaluationCheckFixture
+        $entry = New-PulsePartialEntryFixture
+
+        $observed = InModuleScope TenantPulse -ArgumentList $check, $entry {
+            param($check, $entry)
+            $script:PulseNullOnlyRuleInvoked = $false
+            function Test-PulsePartialAwareFixtureRule {
+                param($Datasets, $DatasetOutcomes)
+                $script:PulseNullOnlyRuleInvoked = $true
+                New-PulseFinding -Status Pass
+            }
+            $nullOnlyRows = [object[]]::new(1)
+
+            $evaluation = Invoke-PulseCheckEvaluation -Check $check -Store ([pscustomobject]@{}) `
+                -Manifest @{ datasets = @{ partialA = $entry } } `
+                -DatasetCache @{ partialA = $nullOnlyRows }
+            [pscustomobject]@{
+                Evaluation = $evaluation
+                RuleInvoked = $script:PulseNullOnlyRuleInvoked
+            }
+        }
+
+        $observed.Evaluation.Status | Should -Be 'Error'
+        $observed.RuleInvoked | Should -BeFalse
+    }
+
+    It 'removes null elements from mixed Partial rows before the rule receives its clone' {
+        $check = New-PulseEvaluationCheckFixture
+        $entry = New-PulsePartialEntryFixture
+
+        $observed = InModuleScope TenantPulse -ArgumentList $check, $entry {
+            param($check, $entry)
+            function Test-PulsePartialAwareFixtureRule {
+                param($Datasets, $DatasetOutcomes)
+                $rows = @($Datasets.partialA)
+                $isUsable = $rows.Count -eq 1 -and $null -ne $rows[0] -and $rows[0].id -eq 'row-1'
+                New-PulseFinding -Status $(if ($isUsable) { 'Pass' } else { 'Fail' })
+            }
+            $mixedRows = [object[]]::new(2)
+            $mixedRows[1] = [pscustomobject]@{ id = 'row-1' }
+            $cache = @{ partialA = $mixedRows }
+
+            $evaluation = Invoke-PulseCheckEvaluation -Check $check -Store ([pscustomobject]@{}) `
+                -Manifest @{ datasets = @{ partialA = $entry } } `
+                -DatasetCache $cache
+            [pscustomobject]@{
+                Evaluation = $evaluation
+                CachedRows = $cache.partialA
+            }
+        }
+
+        $observed.Evaluation.Status | Should -Be 'Pass'
+        @($observed.CachedRows).Count | Should -Be 2
+        $observed.CachedRows[0] | Should -BeNullOrEmpty
+        $observed.CachedRows[1].id | Should -Be 'row-1'
+    }
+
+    It 'projects canonical gap objects rather than raw manifest objects with extra keys' {
+        $check = New-PulseEvaluationCheckFixture
+        $entry = New-PulsePartialEntryFixture
+        $entry.gaps[0].PSObject.Properties.Add(
+            [System.Management.Automation.PSNoteProperty]::new('PrivateGapCanary', 'must-not-reach-rule')
+        )
+
+        $result = InModuleScope TenantPulse -ArgumentList $check, $entry {
+            param($check, $entry)
+            function Test-PulsePartialAwareFixtureRule {
+                param($Datasets, $DatasetOutcomes)
+                $expected = @('Scope', 'FailureClass', 'ReasonCode', 'Detail', 'Operation', 'ApiVersion')
+                $actual = @($DatasetOutcomes.partialA.Gaps[0].Keys)
+                $isCanonical = $actual.Count -eq $expected.Count -and
+                    @($expected | Where-Object { $actual -cnotcontains $_ }).Count -eq 0
+                New-PulseFinding -Status $(if ($isCanonical) { 'Pass' } else { 'Fail' })
+            }
+
+            Invoke-PulseCheckEvaluation -Check $check -Store ([pscustomobject]@{}) `
+                -Manifest @{ datasets = @{ partialA = $entry } } `
+                -DatasetCache @{ partialA = @([pscustomobject]@{ id = 'row-1' }) }
+        }
+
+        $result.Status | Should -Be 'Pass'
+        $result.Reason | Should -Not -Match 'must-not-reach-rule'
+    }
+
     It 'returns a bounded Error when dataset-row cloning fails' {
         $check = New-PulseEvaluationCheckFixture
         $entry = New-PulsePartialEntryFixture

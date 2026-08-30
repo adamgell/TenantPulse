@@ -626,7 +626,17 @@ function Invoke-PulseCheckEvaluation {
         }
 
         if ($entryStatus -eq 'Partial') {
-            if (@($datasets[$name]).Count -eq 0) {
+            # A persisted JSON null is not usable evidence. Preserve the shared cache
+            # exactly as read, but construct this check's local row set from non-null
+            # members only so neither the outcome validator nor the rule can mistake a
+            # one-element [null] array for one usable row.
+            $usablePartialRows = [System.Collections.Generic.List[object]]::new()
+            foreach ($row in [object[]] $datasets[$name]) {
+                if ($null -ne $row) { $usablePartialRows.Add($row) }
+            }
+            $datasets[$name] = $usablePartialRows.ToArray()
+
+            if ($datasets[$name].Count -eq 0) {
                 return @{
                     Status   = 'Error'
                     Evidence = @()
@@ -634,43 +644,32 @@ function Invoke-PulseCheckEvaluation {
                 }
             }
 
-            # Re-run the complete collection-outcome constructor against the persisted
-            # manifest surface and the usable rows. This intentionally reuses the one
-            # authoritative gap contract (all six fields, supported failure class,
-            # non-empty string fields, hashtable-or-null Detail) instead of accepting a
-            # merely non-zero Gaps.Count. Its detailed exception is suppressed because it
-            # can contain hostile manifest text; the engine returns one bounded reason.
-            try {
-                New-PulseCollectionOutcome -Dataset $name -Status Partial -Rows @($datasets[$name]) `
-                    -Gaps $entry.gaps -FailureClass $entry.failureClass `
-                    -ReasonCode $entry.reasonCode -Detail $entry.detail -Provider $entry.provider `
-                    -ApiVersion $entry.apiVersion -Operations $entry.operations | Out-Null
-            } catch {
-                return @{
-                    Status   = 'Error'
-                    Evidence = @()
-                    Reason   = "dataset '$name' has an invalid Partial outcome."
-                }
-            }
         }
 
         if ($partialAwarenessDeclared) {
             try {
+                # Validate and normalize the complete persisted outcome exactly once.
+                # Only this canonical result is projected below; raw manifest objects
+                # never cross the rule boundary after a separate validation pass.
+                $validatedOutcome = ConvertTo-PulseValidatedEvaluationOutcome `
+                    -Dataset $name -Status $entryStatus -Rows ([object[]] $datasets[$name]) `
+                    -Entry $entry
+
                 $datasetOutcomeProjection[$name] = [ordered]@{
-                    Status       = $entryStatus
-                    FailureClass = $entry.failureClass
-                    ReasonCode   = $entry.reasonCode
-                    Detail       = $entry.detail
-                    Provider     = $entry.provider
-                    ApiVersion   = $entry.apiVersion
-                    Operations   = $entry.operations
-                    Gaps         = $entry.gaps
+                    Status       = $validatedOutcome.Status
+                    FailureClass = $validatedOutcome.FailureClass
+                    ReasonCode   = $validatedOutcome.ReasonCode
+                    Detail       = $validatedOutcome.Detail
+                    Provider     = $validatedOutcome.Provider
+                    ApiVersion   = $validatedOutcome.ApiVersion
+                    Operations   = $validatedOutcome.Operations
+                    Gaps         = $validatedOutcome.Gaps
                 }
             } catch {
                 return @{
                     Status   = 'Error'
                     Evidence = @()
-                    Reason   = "dataset '$name' outcome could not be projected safely."
+                    Reason   = "dataset '$name' has an invalid $entryStatus outcome."
                 }
             }
         }
@@ -909,6 +908,89 @@ function ConvertTo-PulseClonedDatasets {
 
     $json = ConvertTo-PulseCanonicalJson -InputObject $Datasets
     return ConvertFrom-Json -InputObject $json -AsHashtable -Depth 64
+}
+
+# Private helper (not exported): validates the persisted outcome surface used by a
+# partial-aware rule and returns a canonical New-PulseCollectionOutcome result. Persisted
+# Gaps must retain their JSON array shape; every required gap string must already be a
+# string rather than merely be string-coercible. Each accepted gap is rebuilt through
+# New-PulseCollectionGap so extra raw manifest keys cannot cross the rule boundary.
+function ConvertTo-PulseValidatedEvaluationOutcome {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $Dataset,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('Collected', 'Partial')]
+        [string] $Status,
+
+        [Parameter()]
+        [AllowNull()]
+        [object[]] $Rows = @(),
+
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary] $Entry
+    )
+
+    if (-not $Entry.Contains('reasonCode') -or
+        $Entry['reasonCode'] -isnot [string] -or
+        [string]::IsNullOrWhiteSpace([string] $Entry['reasonCode'])) {
+        throw 'Persisted dataset outcome has an invalid ReasonCode.'
+    }
+
+    if (-not $Entry.Contains('gaps') -or
+        $null -eq $Entry['gaps'] -or
+        $Entry['gaps'] -isnot [array]) {
+        throw 'Persisted dataset outcome Gaps must be an array.'
+    }
+
+    $canonicalGaps = [System.Collections.Generic.List[object]]::new()
+    foreach ($gap in [object[]] $Entry['gaps']) {
+        if ($null -eq $gap) {
+            throw 'Persisted dataset outcome Gaps cannot contain null values.'
+        }
+
+        $isDictionary = $gap -is [System.Collections.IDictionary]
+        $propertyNames = if ($isDictionary) {
+            @($gap.Keys)
+        } else {
+            @($gap.PSObject.Properties.Name)
+        }
+        $values = @{}
+        foreach ($requiredProperty in @('Scope', 'FailureClass', 'ReasonCode', 'Detail', 'Operation', 'ApiVersion')) {
+            if ($propertyNames -cnotcontains $requiredProperty) {
+                throw "Persisted dataset gap is missing '$requiredProperty'."
+            }
+            $values[$requiredProperty] = if ($isDictionary) {
+                $gap[$requiredProperty]
+            } else {
+                $gap.PSObject.Properties[$requiredProperty].Value
+            }
+        }
+
+        foreach ($requiredStringProperty in @('Scope', 'FailureClass', 'ReasonCode', 'Operation', 'ApiVersion')) {
+            if ($values[$requiredStringProperty] -isnot [string] -or
+                [string]::IsNullOrWhiteSpace([string] $values[$requiredStringProperty])) {
+                throw "Persisted dataset gap has an invalid $requiredStringProperty."
+            }
+        }
+        if ($null -ne $values.Detail -and $values.Detail -isnot [hashtable]) {
+            throw 'Persisted dataset gap Detail must be a hashtable or null.'
+        }
+
+        $canonicalGaps.Add((New-PulseCollectionGap `
+            -Scope $values.Scope -FailureClass $values.FailureClass `
+            -ReasonCode $values.ReasonCode -Detail $values.Detail `
+            -Operation $values.Operation -ApiVersion $values.ApiVersion))
+    }
+
+    return New-PulseCollectionOutcome -Dataset $Dataset -Status $Status -Rows $Rows `
+        -Gaps $canonicalGaps.ToArray() -FailureClass $Entry['failureClass'] `
+        -ReasonCode $Entry['reasonCode'] -Detail $Entry['detail'] -Provider $Entry['provider'] `
+        -ApiVersion $Entry['apiVersion'] -Operations $Entry['operations']
 }
 
 # Private helper (not exported): independently deep-clones the dataset-outcome projection

@@ -139,9 +139,11 @@ For each check, in order:
    `Collected` is usable. Missing, `Failed`, `Skipped`, unknown, and non-opted `Partial`
    degrade to `NotApplicable`, and the rule is never invoked. Only a catalog-validated
    Function descriptor may name a dataset in `Data.PartialDatasets`; that opted-in
-   `Partial` entry is usable only when it has one or more rows and its gaps satisfy the full
-   `New-PulseCollectionOutcome` structure contract. Invalid opted-in Partial input is
-   `Error`, not an inapplicable decision.
+   `Partial` entry is usable only when it has one or more non-null rows and its gaps satisfy
+   the full `New-PulseCollectionOutcome` structure contract. Accepted gaps are rebuilt into
+   canonical `New-PulseCollectionGap` objects before projection; raw manifest objects and
+   merely string-coercible required fields never cross the rule boundary. Invalid opted-in
+   Partial input is `Error`, not an inapplicable decision.
 3. Once every declared dataset is usable, rows are read (`Read-PulseDataset`, cached once
    per dataset name across the whole evaluation run) and handed to the rule as an
    independently deep-cloned `$Datasets` hashtable. A partial-aware Function also receives
