@@ -36,8 +36,13 @@ function Resolve-PulseProviderPlanRegistry {
         param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
         Invoke-PulseSecurityBaselinePlan @PSBoundParameters
     }
+    $subscribedSkuLicensePlan = {
+        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+        Invoke-PulseSubscribedSkuLicensePlan @PSBoundParameters
+    }
 
     $registry = @{
+        subscribedSkus                                      = $subscribedSkuLicensePlan
         dataProcessorServiceForWindowsFeaturesOnboarding = $windowsDataProcessorPlan
         intuneRbacGroupProtection                         = $intuneRbacPlan
         endpointSecurityDiskEncryptionPolicies           = $endpointSecurityPlan

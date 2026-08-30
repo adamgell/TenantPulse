@@ -16,7 +16,9 @@
     skipped, contributing no rows and no gap. A family whose entry claims Expanded/Partial
     but whose on-disk file is missing or no longer matches its recorded hash IS a genuine
     integrity failure and is recorded as an index-artifact gap so it is visible in the
-    manifest rather than silently dropped.
+    manifest rather than silently dropped. A verified Partial family contributes both its
+    usable rows AND every recorded source gap: policies omitted upstream must remain
+    uncertainty here rather than becoming authoritative setting absence.
 
     ZERO FAMILIES AVAILABLE -> NotExpanded (Publish-PulseSettingPresenceIndex's own
     -PolicyCount 0 path), naming which case applies. ZERO DISTINCT SETTINGS from >=1 usable
@@ -63,7 +65,37 @@ function Invoke-PulseSettingPresenceIndexBuild {
 
         try {
             $familyRows = Get-PulseExpansionRows -Store $Store -Name $familyName
+            $familyGaps = [System.Collections.Generic.List[object]]::new()
+            if ($entryStatus -eq 'Partial') {
+                $sourceEntry = $manifest.expansions[$familyName]
+                # Assign directly rather than through an `if` expression: PowerShell
+                # enumerates array output from statement blocks, collapsing a valid one-gap
+                # array to its single dictionary element.
+                $sourceGaps = $null
+                if ($sourceEntry.Contains('gaps')) { $sourceGaps = $sourceEntry['gaps'] }
+                if ($sourceGaps -isnot [System.Collections.IList] -or $sourceGaps.Count -eq 0) {
+                    throw "Partial source expansion '$familyName' has no usable gap array."
+                }
+                foreach ($sourceGap in $sourceGaps) {
+                    if ($sourceGap -isnot [System.Collections.IDictionary] -or
+                        -not $sourceGap.Contains('policyId') -or $sourceGap['policyId'] -isnot [string] -or
+                        -not $sourceGap.Contains('reason') -or $sourceGap['reason'] -isnot [string] -or
+                        [string]::IsNullOrWhiteSpace([string] $sourceGap['reason'])) {
+                        throw "Partial source expansion '$familyName' has a malformed gap entry."
+                    }
+                    $sourcePolicyId = [string] $sourceGap['policyId']
+                    $sourceReason = [string] $sourceGap['reason']
+                    $safePolicyId = Protect-PulseReason -Message $sourcePolicyId -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+                    $safeReason = Protect-PulseReason -Message $sourceReason -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+                    if (-not [string]::Equals($sourcePolicyId, $safePolicyId, [System.StringComparison]::Ordinal) -or
+                        -not [string]::Equals($sourceReason, $safeReason, [System.StringComparison]::Ordinal)) {
+                        throw "Partial source expansion '$familyName' has a privacy-unsafe gap entry."
+                    }
+                    $familyGaps.Add([pscustomobject]@{ policyId = $sourcePolicyId; reason = $sourceReason }) | Out-Null
+                }
+            }
             foreach ($row in $familyRows) { $allRows.Add($row) | Out-Null }
+            foreach ($sourceGap in $familyGaps) { $gapEntries.Add($sourceGap) | Out-Null }
             # Counted once per family whose read succeeded, regardless of row count - a
             # verified family with zero rows (a legitimate "Expanded, empty" outcome) still
             # counts as ONE verified family, never zero (see Publish-PulseSettingPresenceIndex's
@@ -80,6 +112,8 @@ function Invoke-PulseSettingPresenceIndexBuild {
     $sortedGaps = @($gapEntries.ToArray())
     $gapComparison = [System.Comparison[object]] {
         param($a, $b)
+        $policyComparison = [string]::CompareOrdinal([string] $a.policyId, [string] $b.policyId)
+        if ($policyComparison -ne 0) { return $policyComparison }
         return [string]::CompareOrdinal([string] $a.reason, [string] $b.reason)
     }
     [System.Array]::Sort($sortedGaps, $gapComparison)

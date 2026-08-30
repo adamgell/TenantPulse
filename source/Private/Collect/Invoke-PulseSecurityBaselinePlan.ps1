@@ -1,10 +1,11 @@
 <#
     Private: collect TP.INT.0029 security-baseline assignment/version state.
 
-    Current baselines are configurationPolicies whose templateReference.templateFamily is
-    one of the four families in the check contract. Their template ids join to the distinct
-    configurationPolicyTemplates resource, whose lifecycleState establishes whether the
-    referenced version is active or obsolete. Their assignments are read through the
+    Current baselines are configurationPolicies whose template ids join to a
+    configurationPolicyTemplates record in one of the four families in the check contract.
+    The joined template metadata is authoritative; a missing or disagreeing policy-side
+    template family remains structured uncertainty. The template lifecycleState establishes
+    whether the referenced version is active or obsolete. Assignments are read through the
     per-policy assignment operation. Read-only legacy intent records retain their separate
     join to deviceManagement/templates because existing profiles can remain on that surface.
 
@@ -206,6 +207,13 @@ function Invoke-PulseSecurityBaselinePlan {
         }
         $templatesById.Add($templateId, $template)
     }
+    $duplicateTemplateIdArray = [string[]]@($duplicateTemplateIds)
+    if ($duplicateTemplateIdArray.Count -gt 1) { [System.Array]::Sort($duplicateTemplateIdArray, [System.StringComparer]::Ordinal) }
+    foreach ($templateId in $duplicateTemplateIdArray) {
+        $gaps.Add((New-PulseCollectionGap -Scope "template:$templateId" -FailureClass 'InvalidProviderData' `
+                -ReasonCode 'invalid-provider-data' -Detail @{ duplicateTemplateId = $templateId } `
+                -Operation 'DeviceManagementTemplate.ListBeta' -ApiVersion 'beta'))
+    }
 
     $currentTemplatesById = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $duplicateCurrentTemplateIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -225,6 +233,13 @@ function Invoke-PulseSecurityBaselinePlan {
             continue
         }
         $currentTemplatesById.Add($templateId, $template)
+    }
+    $duplicateCurrentTemplateIdArray = [string[]]@($duplicateCurrentTemplateIds)
+    if ($duplicateCurrentTemplateIdArray.Count -gt 1) { [System.Array]::Sort($duplicateCurrentTemplateIdArray, [System.StringComparer]::Ordinal) }
+    foreach ($templateId in $duplicateCurrentTemplateIdArray) {
+        $gaps.Add((New-PulseCollectionGap -Scope "current-template:$templateId" -FailureClass 'InvalidProviderData' `
+                -ReasonCode 'invalid-provider-data' -Detail @{ duplicateTemplateId = $templateId } `
+                -Operation 'DeviceManagementConfigurationPolicyTemplate.ListBeta' -ApiVersion 'beta'))
     }
 
     $duplicatePolicyIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -246,15 +261,22 @@ function Invoke-PulseSecurityBaselinePlan {
     $rowsByKey = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($policy in (Sort-BaselineObjectsById -Items $policies)) {
         $templateReference = Get-BaselinePropertyValue -InputObject $policy -Name 'templateReference'
-        $family = [string] (Get-BaselinePropertyValue -InputObject $templateReference -Name 'templateFamily')
-        if (-not $currentFamilies.Contains($family)) { continue }
-
+        $policyFamily = [string] (Get-BaselinePropertyValue -InputObject $templateReference -Name 'templateFamily')
         $policyId = [string] (Get-BaselinePropertyValue -InputObject $policy -Name 'id')
         $templateId = [string] (Get-BaselinePropertyValue -InputObject $templateReference -Name 'templateId')
         $scope = if ([string]::IsNullOrWhiteSpace($policyId)) { 'policy:unknown' } else { "policy:$policyId" }
         if ($duplicatePolicyIds.Contains($policyId)) { continue }
-        if ([string]::IsNullOrWhiteSpace($policyId) -or [string]::IsNullOrWhiteSpace($templateId) -or
-            -not $currentTemplatesById.ContainsKey($templateId) -or $duplicateCurrentTemplateIds.Contains($templateId)) {
+
+        if ([string]::IsNullOrWhiteSpace($templateId)) {
+            if ([string]::IsNullOrWhiteSpace($policyFamily) -or $currentFamilies.Contains($policyFamily)) {
+                $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                        -ReasonCode 'invalid-provider-data' -Detail @{ missing = 'id-templateReference-or-template-join' } `
+                        -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta'))
+            }
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace($policyId) -or -not $currentTemplatesById.ContainsKey($templateId) -or
+            $duplicateCurrentTemplateIds.Contains($templateId)) {
             $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
                     -ReasonCode 'invalid-provider-data' -Detail @{ missing = 'id-templateReference-or-template-join' } `
                     -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta'))
@@ -262,6 +284,25 @@ function Invoke-PulseSecurityBaselinePlan {
         }
 
         $template = $currentTemplatesById[$templateId]
+        $family = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'templateFamily')
+        if ([string]::IsNullOrWhiteSpace($family)) {
+            $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{ invalid = 'templateFamily'; value = $family } `
+                    -Operation 'DeviceManagementConfigurationPolicyTemplate.ListBeta' -ApiVersion 'beta'))
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace($policyFamily) -or
+            -not [string]::Equals($policyFamily, $family, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'invalid-provider-data' -Detail @{
+                        invalid              = 'templateFamily'
+                        policyTemplateFamily = $policyFamily
+                        joinedTemplateFamily = $family
+                    } -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta'))
+            continue
+        }
+        if (-not $currentFamilies.Contains($family)) { continue }
+
         $lifecycleState = [string] (Get-BaselinePropertyValue -InputObject $template -Name 'lifecycleState')
         $isDeprecated = switch ($lifecycleState.ToLowerInvariant()) {
             'active' { $false }
@@ -287,7 +328,7 @@ function Invoke-PulseSecurityBaselinePlan {
         $positiveAssignmentCount = 0
         $assignmentDataInvalid = $false
         foreach ($assignment in $assignments) {
-            $assignmentId = [string] (Get-BaselinePropertyValue -InputObject $assignment -Name 'id')
+            $assignmentIdValue = Get-BaselinePropertyValue -InputObject $assignment -Name 'id'
             $target = Get-BaselinePropertyValue -InputObject $assignment -Name 'target'
             $targetType = [string] (Get-BaselinePropertyValue -InputObject $target -Name '@odata.type')
             $normalizedTargetType = $targetType.TrimStart('#').ToLowerInvariant()
@@ -295,9 +336,13 @@ function Invoke-PulseSecurityBaselinePlan {
                 'microsoft.graph.groupassignmenttarget'
                 'microsoft.graph.exclusiongroupassignmenttarget'
             )
-            $groupId = [string] (Get-BaselinePropertyValue -InputObject $target -Name 'groupId')
-            if ([string]::IsNullOrWhiteSpace($assignmentId) -or [string]::IsNullOrWhiteSpace($normalizedTargetType) -or
-                ($requiresGroupId -and [string]::IsNullOrWhiteSpace($groupId))) {
+            $groupIdValue = Get-BaselinePropertyValue -InputObject $target -Name 'groupId'
+            $hasValidAssignmentId = $assignmentIdValue -is [string] -and
+                -not [string]::IsNullOrWhiteSpace($assignmentIdValue)
+            $hasValidGroupId = -not $requiresGroupId -or
+                ($groupIdValue -is [string] -and -not [string]::IsNullOrWhiteSpace($groupIdValue))
+            if (-not $hasValidAssignmentId -or [string]::IsNullOrWhiteSpace($normalizedTargetType) -or
+                -not $hasValidGroupId) {
                 $assignmentDataInvalid = $true
                 break
             }

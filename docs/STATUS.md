@@ -4,28 +4,43 @@ This is internal development/task narrative, moved out of README.md (post-review
 README.md is meant to read as a PSGallery landing page, not an implementation log). Nothing
 here is required to install or use TenantPulse; see README.md for that.
 
-## Next-release outcome/composite handoff (2026-08-29)
+## Next-release candidate evidence (2026-08-29)
 
-GraphKit `0.3.0` and TenantPulse `0.2.0` are the coordinated next-release candidates. These
-repositories have no adopted customer or legacy runtime to migrate; the remaining release
-work is therefore package, live read-only, review, and exact-SHA CI verification. Historical
-GraphKit `0.2.2` and TenantPulse `0.1.3` package identities remain recorded below.
+GraphKit `0.3.0` and TenantPulse `0.2.0` are coordinated greenfield, pre-adoption release
+candidates. Nobody is using TenantPulse: there is no installed user base, customer estate,
+prior runtime, or migration/repoint/cutover task. The release gates are package construction,
+read-only lab verification, review, and exact-SHA CI verification. Historical GraphKit `0.2.2`
+and TenantPulse `0.1.3` package identities remain recorded below.
 
 The source implementation is wired through TenantPulse's public snapshot path. Synthetic
 `Pending` map entries for composite datasets are implementation placeholders, not the runtime
 outcome: the built-in provider registry intercepts each one before the ordinary descriptor
 fallback. Evidence levels are kept separate below.
 
-| Dataset/check | Candidate disposition |
+| Dataset/check | Exact-package evidence |
 |---|---|
-| `managedDeviceCleanupRules` / `TP.INT.0007` | Direct GraphKit `ManagedDeviceCleanupRule.ListBeta` Read/Safe collection. The descriptor was live-proven against Ivy24 and is carried by the GraphKit `0.3.0` candidate; the exact TenantPulse package path still requires its coordinated live gate. |
+| `managedDeviceCleanupRules` / `TP.INT.0007` | Live: the exact package collected 1 row and the check passed. |
 | `dataProcessorServiceForWindowsFeaturesOnboarding` / `TP.INT.0009` | Built-in no-network plan returns `PlatformUnavailable`. Microsoft publishes the resource shape but no official GET/application-permission contract, so neither project guesses a descriptor. Recheck only when that service contract changes. |
-| `intuneRbacGroupProtection` / `TP.INT.0013` | Built-in provider plan consumes GraphKit's expanded unified-role-assignment and template primitives. The primitive response shape was live-proven; exact packaged TenantPulse evaluation remains a candidate gate. |
-| `endpointSecurityDiskEncryptionPolicies` / `TP.INT.0014` | Built-in BitLocker provider plan is enabled by default and focused-tested. Exact packaged live evaluation remains a candidate gate. |
-| `endpointSecurityLapsPolicies` / `TP.INT.0015` | Built-in LAPS provider plan is enabled by default and focused-tested. Exact packaged live evaluation remains a candidate gate. |
-| `securityBaselinesAssignedAndCurrent` / `TP.INT.0029` | Built-in provider plan covers current Settings Catalog and legacy intent baselines, their templates, and assignment disposition. Exact packaged live evaluation remains a candidate gate. |
+| `intuneRbacGroupProtection` / `TP.INT.0013` | Live: the exact package collected 3 rows. The check failed on tenant posture, not collection or execution. |
+| `endpointSecurityDiskEncryptionPolicies` / `TP.INT.0014` | Live (partial): the exact package returned 1 usable row and 2 explicit `missing-setting` gaps. The check failed closed as `NotApplicable`. |
+| `endpointSecurityLapsPolicies` / `TP.INT.0015` | Live: the exact package collected an authoritative empty set. The check failed because no qualifying policy exists, not because collection failed. |
+| `securityBaselinesAssignedAndCurrent` / `TP.INT.0029` | Live: the exact package collected 3 rows. The check failed on tenant posture, not collection or execution. |
 
-**Package handoff and evidence boundary.** GraphKit `0.2.2` is the stable producer released
+**TenantPulse `0.2.0` candidate evidence.** The final local suite passed 2255/2255 tests with
+zero failures, errors, skips, or NotRun tests. The exact candidate archive is
+`TenantPulse.0.2.0.nupkg`, SHA-256
+`041591C3C4CA8402BFCFC77F302246E6FFD315D02D0DB053DF9F5D4771159888`. A read-only live
+gate installed that archive into an isolated root and loaded TenantPulse `0.2.0`, GraphKit
+`0.3.0`, and Microsoft.Graph.Authentication `2.38.1` from that root. All seven selected checks
+completed: 3 Pass, 3 posture Fail, and 1 fail-closed NotApplicable from partial BitLocker
+evidence. The large expansion paths also completed: Settings Catalog 781 policies / 4302 rows /
+64 gaps; compliance 40 / 606 / 6; device configuration 15 / 244 / 0; conflicts 3 / 165 / 70;
+and the setting-presence index 3 / 2320 / 70. Across 1629 generated artifacts, the raw tenant
+id was absent, profile provenance metadata was absent, and the profile label was absent from
+the manifest and redacted report. This is local and live package evidence only: TenantPulse's
+exact source SHA has not yet passed remote CI, and `0.2.0` has not been published.
+
+**Package identity and evidence boundary.** GraphKit `0.2.2` is the stable producer released
 before R1. On 2026-08-29, the PSGallery archive downloaded for GraphKit `0.2.2` was 201750
 bytes with SHA-256 `8993BFD6C78F6143069208F79F82D7EC9C72F87AB876DF6769C8733AAAB46385`.
 Its `GraphKit.psm1` was 416488 bytes with SHA-256
@@ -313,7 +328,7 @@ hardware, and method.
   `intent` from the assignment target, preserve filter metadata, sort deterministically, and
   gap a policy rather than publishing a false unassigned row when a target is malformed.
 
-## Phase 3 (T3.1-T3.6): engine and catalog work complete; T3.6 live gate honestly incomplete
+## Phase 3 (T3.1-T3.6): engine and catalog complete; T3.6 live gate executed
 
 Task 3.1 shipped the Maester attribution shim and TP.INT.0006 (Intune device cleanup rule
 conflict check). Task 3.2 ported nine further Intune checks (TP.INT.0007-0009/0011-0015) and
@@ -493,8 +508,9 @@ not errors. **Historical (GraphKit 0.1.1 pin, T4.5 gate):** `TP.ENT.0012` (the
 cross-tenant access) were `descriptor-pending: awaiting GraphKit release` - written,
 tested, cited, waiting on GraphKit descriptors this catalog's research already scoped.
 GraphKit 0.2.2 later shipped official GET/List descriptors for those six Entra datasets
-(and six more Intune GET/List datasets). They are no longer Pending. Five Walk /
-data-processor datasets remain Pending; see the GraphKit 0.2.2 consume section above.
+(and six more Intune GET/List datasets). They are no longer Pending. At that GraphKit 0.2.2
+point, five Walk/data-processor datasets remained Pending; see the historical GraphKit 0.2.2
+consume section above.
 `TP.ENT.0001` (Security Defaults) is a genuine, correct `NotApplicable`: this tenant
 runs Conditional Access, not Security Defaults, so the check declines to evaluate a
 control the tenant deliberately superseded.

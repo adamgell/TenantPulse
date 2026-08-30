@@ -269,7 +269,49 @@ function Invoke-PulseSettingsCatalogPolicy {
         $filterIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId'
         $filterTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType'
 
-        $targetType = if ($null -ne $targetTypeRaw) { [string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '' } else { $null }
+        $targetTypeCandidate = if ($null -ne $targetTypeRaw) {
+            ([string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '').Trim()
+        } else { $null }
+        $targetType = switch ($targetTypeCandidate) {
+            'group' { 'group'; break }
+            'exclusionGroup' { 'exclusionGroup'; break }
+            'allDevices' { 'allDevices'; break }
+            'allLicensedUsers' { 'allLicensedUsers'; break }
+            default { $null }
+        }
+        # Graph identifiers are strings. Do not stringify numbers, dictionaries, or other
+        # unexpected JSON shapes into plausible-looking ids: doing so would turn an
+        # unrepresentable assignment target into authoritative assignment metadata.
+        $groupId = if ($groupIdRaw -is [string]) { $groupIdRaw } else { $null }
+        if ([string]::IsNullOrWhiteSpace($targetType) -or
+            ($targetType -in @('group', 'exclusionGroup') -and [string]::IsNullOrWhiteSpace($groupId))) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
+        if (($null -ne $filterIdRaw -and $filterIdRaw -isnot [string]) -or
+            ($null -ne $filterTypeRaw -and $filterTypeRaw -isnot [string])) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
+        $filterId = if ($filterIdRaw -is [string]) { $filterIdRaw } else { $null }
+        $filterType = if ($filterTypeRaw -is [string]) { $filterTypeRaw } else { $null }
+        # Graph's assignment-filter contract has three exact enum values and two valid
+        # unfiltered shapes: both fields omitted/null, or type 'none' with a null id.
+        # include/exclude require a real id; conversely, an id with null/'none' type is
+        # contradictory. Reject the whole policy rather than publishing metadata that could
+        # change assignment-overlap conclusions downstream.
+        $filterShapeValid = if ($null -eq $filterTypeRaw) {
+            $null -eq $filterIdRaw
+        } elseif ([string]::Equals($filterType, 'none', [System.StringComparison]::Ordinal)) {
+            $null -eq $filterIdRaw
+        } elseif ([string]::Equals($filterType, 'include', [System.StringComparison]::Ordinal) -or
+            [string]::Equals($filterType, 'exclude', [System.StringComparison]::Ordinal)) {
+            -not [string]::IsNullOrWhiteSpace($filterId)
+        } else {
+            $false
+        }
+        if (-not $filterShapeValid) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
+
         $intent = if ($null -ne $intentRaw) {
             [string] $intentRaw
         } elseif ([string]::Equals($targetType, 'exclusionGroup', [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -283,9 +325,9 @@ function Invoke-PulseSettingsCatalogPolicy {
         $normalizedAssignments += [pscustomobject]@{
             intent     = $intent
             targetType = $targetType
-            groupId    = if ($null -ne $groupIdRaw) { [string] $groupIdRaw } else { $null }
-            filterId   = if ($null -ne $filterIdRaw) { [string] $filterIdRaw } else { $null }
-            filterType = if ($null -ne $filterTypeRaw) { [string] $filterTypeRaw } else { $null }
+            groupId    = $groupId
+            filterId   = $filterId
+            filterType = $filterType
         }
     }
 

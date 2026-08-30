@@ -34,6 +34,26 @@ function Get-PulseGateProperty {
     return $null
 }
 
+function Test-PulseGateDecisionTuple {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [AllowNull()]
+        [string] $Status,
+
+        [AllowNull()]
+        [string] $FailureClass
+    )
+
+    $hasFailureClass = -not [string]::IsNullOrWhiteSpace($FailureClass)
+    switch ($Status) {
+        'Available' { return -not $hasFailureClass }
+        'Unavailable' { return -not $hasFailureClass -or $FailureClass -eq 'LicenseRequired' }
+        'Unknown' { return -not $hasFailureClass -or $FailureClass -in @('GateUnknown', 'PermissionDenied') }
+        default { return $false }
+    }
+}
+
 function New-PulseGateStatusRecord {
     [CmdletBinding()]
     param(
@@ -105,8 +125,9 @@ function Resolve-PulseGateEvidence {
     }
 
     # A subscribedSkus row is usable only when its collection outcome is explicit. A
-    # missing entry, a failed read, or a collected entry with no summarized gate evidence
-    # is Unknown, never Unavailable. PermissionDenied is deliberately retained.
+    # missing entry, failed read, or complete entry with no summarized gate evidence is
+    # Unknown, never Unavailable. Partial evidence may retain an independently proven
+    # Available decision, but it can never prove Unavailable. PermissionDenied is retained.
     $datasets = Get-PulseGateProperty -Node $Manifest -Name 'datasets'
     $licenseEntry = Get-PulseGateProperty -Node $datasets -Name 'subscribedSkus'
     if ($null -ne $licenseEntry) {
@@ -116,14 +137,43 @@ function Resolve-PulseGateEvidence {
         if ($entryFailure -eq 'PermissionDenied') {
             return [pscustomobject]@{ Status = 'Unknown'; Detail = $entryReason; FailureClass = 'PermissionDenied' }
         }
-        if ($entryStatus -ne 'Collected') {
+        if ($entryStatus -notin @('Collected', 'Partial')) {
             return [pscustomobject]@{ Status = 'Unknown'; Detail = $entryReason; FailureClass = 'GateUnknown' }
         }
-        if ($entryFailure -eq 'LicenseRequired') {
+        if ($entryStatus -eq 'Collected' -and $entryFailure -eq 'LicenseRequired') {
             return [pscustomobject]@{ Status = 'Unavailable'; Detail = $entryReason; FailureClass = 'LicenseRequired' }
         }
 
         $detailNode = Get-PulseGateProperty -Node $licenseEntry -Name 'detail'
+        # Current snapshots persist one independent decision per supported gate beneath
+        # subscribedSkus.detail.Gates. Keep the older flat detail.Status shape below as a
+        # compatibility fallback for already-captured fixtures/snapshots.
+        $gateContainer = Get-PulseGateProperty -Node $detailNode -Name 'Gates'
+        $gateDecision = Get-PulseGateProperty -Node $gateContainer -Name $Gate
+        if ($entryStatus -eq 'Partial') {
+            $partialStatus = [string] (Get-PulseGateProperty -Node $gateDecision -Name 'Status')
+            $partialFailureClass = [string] (Get-PulseGateProperty -Node $gateDecision -Name 'FailureClass')
+            if ($partialStatus -eq 'Available') {
+                return [pscustomobject]@{
+                    Status       = 'Available'
+                    Detail       = 'A qualifying provisioned service plan was found in collected license evidence.'
+                    FailureClass = $partialFailureClass
+                }
+            }
+            return [pscustomobject]@{
+                Status       = 'Unknown'
+                Detail       = 'Collected license evidence was incomplete or malformed; absence was not proven.'
+                FailureClass = 'GateUnknown'
+            }
+        }
+        if ($null -ne $gateDecision) {
+            return [pscustomobject]@{
+                Status       = [string] (Get-PulseGateProperty -Node $gateDecision -Name 'Status')
+                Detail       = [string] (Get-PulseGateProperty -Node $gateDecision -Name 'Detail')
+                FailureClass = [string] (Get-PulseGateProperty -Node $gateDecision -Name 'FailureClass')
+            }
+        }
+
         $status = [string] (Get-PulseGateProperty -Node $detailNode -Name 'Status')
         if ([string]::IsNullOrEmpty($status)) {
             $available = Get-PulseGateProperty -Node $detailNode -Name 'Available'
@@ -182,6 +232,9 @@ function Get-PulseGateStatus {
     $status = [string] (Get-PulseGateProperty -Node $evidence -Name 'Status')
     $detail = [string] (Get-PulseGateProperty -Node $evidence -Name 'Detail')
     $failureClass = [string] (Get-PulseGateProperty -Node $evidence -Name 'FailureClass')
+    if ([string]::IsNullOrWhiteSpace($failureClass)) {
+        $failureClass = $null
+    }
     if ($status -notin @('Available', 'Unavailable', 'Unknown')) {
         $status = 'Unknown'
         if ([string]::IsNullOrEmpty($detail)) { $detail = 'Gate evidence did not provide a recognized status.' }
@@ -191,8 +244,14 @@ function Get-PulseGateStatus {
     # the gate from being mistaken for a proven license absence.
     if ($failureClass -eq 'PermissionDenied') {
         $status = 'Unknown'
-    } elseif ($failureClass -notin @('LicenseRequired', 'GateUnknown', 'PermissionDenied', '')) {
-        $failureClass = $null
+    }
+
+    if (-not (Test-PulseGateDecisionTuple -Status $status -FailureClass $failureClass)) {
+        $status = 'Unknown'
+        $failureClass = 'GateUnknown'
+        if ([string]::IsNullOrEmpty($detail)) {
+            $detail = 'Gate evidence contained a contradictory status and failure class.'
+        }
     }
 
     return New-PulseGateStatusRecord -Gate $Gate -Status $status -Detail $detail -FailureClass $failureClass

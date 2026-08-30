@@ -101,6 +101,24 @@ Describe 'Get-PulseCollectionManifest' {
         ($manifest | ForEach-Object Dataset) | Should -Contain 'deviceCompliancePolicies'
     }
 
+    It 'adds subscribedSkus when a selected check declares a license gate' {
+        $check = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies')
+        $check.Data | Add-Member -NotePropertyName Gates -NotePropertyValue @('Intune')
+        $map = @{
+            deviceCompliancePolicies = @{ Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'v1.0' }
+            subscribedSkus           = @{ Type = 'SubscribedSku'; Operation = 'List'; ApiVersion = 'v1.0' }
+        }
+
+        $manifest = InModuleScope TenantPulse -ArgumentList @($check), $map {
+            param($checks, $map)
+            Get-PulseCollectionManifest -Checks $checks -DatasetMap $map
+        }
+
+        @($manifest).Count | Should -Be 2
+        ($manifest | ForEach-Object Dataset) | Should -Contain 'deviceCompliancePolicies'
+        ($manifest | ForEach-Object Dataset) | Should -Contain 'subscribedSkus'
+    }
+
     It 'throws naming the check id when a check references an unknown dataset' {
         $check = New-TestCheck -Id 'TP.ENT.0099' -Datasets @('notInTheMap')
         $map = @{ conditionalAccessPolicies = @{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' } }

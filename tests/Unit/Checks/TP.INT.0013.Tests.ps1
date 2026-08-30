@@ -190,6 +190,15 @@ Describe 'TP.INT.0013 - Intune RBAC groups protected via RMAU or role-assignable
         $finding.reason | Should -Match 'isManagementRestricted'
     }
 
+    It 'Error: string-valued protection flags are not native booleans and cannot become a false Pass' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g1'; groupDisplayName = 'App Admins'; isManagementRestricted = 'false'; isAssignableToRole = 'false' }) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'native boolean'
+    }
+
     It 'Pass still holds: present-$false on both fields is decidable and correctly Fails (not a false Pass, not an Error)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
             @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g1'; groupDisplayName = 'App Admins'; isManagementRestricted = $false; isAssignableToRole = $false }) }

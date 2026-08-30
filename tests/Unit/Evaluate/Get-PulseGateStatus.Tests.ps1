@@ -165,6 +165,68 @@ Describe 'Get-PulseGateStatus' {
         $unavailable.FailureClass | Should -Be 'LicenseRequired'
     }
 
+    It 'selects the requested decision from collected per-gate subscribedSkus evidence' {
+        $manifest = @{
+            datasets = @{
+                subscribedSkus = @{
+                    status = 'Collected'
+                    detail = @{
+                        Gates = @{
+                            Intune  = @{ Status = 'Available'; Detail = 'Intune evidence collected.' }
+                            EntraP2 = @{ Status = 'Unavailable'; Detail = 'No P2 evidence collected.' }
+                        }
+                    }
+                }
+            }
+        }
+
+        $intune = InModuleScope TenantPulse -ArgumentList $manifest {
+            param($manifest)
+            Get-PulseGateStatus -Gate 'Intune' -Manifest $manifest
+        }
+        $entraP2 = InModuleScope TenantPulse -ArgumentList $manifest {
+            param($manifest)
+            Get-PulseGateStatus -Gate 'EntraP2' -Manifest $manifest
+        }
+
+        $intune.Status | Should -Be 'Available'
+        $intune.FailureClass | Should -BeNullOrEmpty
+        $entraP2.Status | Should -Be 'Unavailable'
+        $entraP2.FailureClass | Should -Be 'LicenseRequired'
+    }
+
+    It 'fails closed when a <OutcomeStatus> persisted Available decision carries LicenseRequired' -ForEach @(
+        @{ OutcomeStatus = 'Partial' }
+        @{ OutcomeStatus = 'Collected' }
+    ) {
+        $manifest = @{
+            datasets = @{
+                subscribedSkus = @{
+                    status = $OutcomeStatus
+                    detail = @{
+                        Gates = @{
+                            EntraP2 = @{
+                                Status = 'Available'
+                                Detail = 'synthetic contradictory gate evidence'
+                                FailureClass = 'LicenseRequired'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        $status = InModuleScope TenantPulse -ArgumentList $manifest {
+            param($manifest)
+            Get-PulseGateStatus -Gate 'EntraP2' -Manifest $manifest
+        }
+
+        $status.Status | Should -Be 'Unknown'
+        $status.FailureClass | Should -Be 'GateUnknown'
+        $status.Outcome.Status | Should -Be 'Skipped'
+        $status.Outcome.FailureClass | Should -Be 'GateUnknown'
+    }
+
     It 'uses an explicit collected license-evidence decision when present' {
         $available = InModuleScope TenantPulse {
             Get-PulseGateStatus -Gate 'EntraP2' -Manifest @{

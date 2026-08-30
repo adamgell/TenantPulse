@@ -4,7 +4,7 @@
     Microsoft Learn publishes the beta resource type and its two Boolean properties, and a
     controlled Ivy24 read-only GET returned the expected singleton shape. It does not publish
     an official GET method page or an application-permission contract for this resource, and
-    released GraphKit 0.3.0 has no matching descriptor. The plan therefore records a
+    the GraphKit 0.3.0 candidate has no matching descriptor. The plan therefore records a
     PlatformUnavailable outcome rather than inventing a descriptor or silently treating a
     missing catalog entry as a transient GraphKit release wait.
 

@@ -7,9 +7,12 @@
     and is made in deterministic sequence; there is deliberately no generic Walk or parallel
     fan-out.
 
-    A child group failure is a structured collection gap. Rows from successful child reads
-    remain usable as a Partial outcome, while a run with no usable rows is Failed so the
-    evaluator cannot mistake an unresolved walk for an authoritative empty collection.
+    Only expanded principals whose @odata.type is microsoft.graph.group are passed to
+    Group.Get; known user and service-principal records are outside this group-protection
+    check, while a missing, base-directory-object, or unknown discriminator is invalid
+    provider data. A child group failure is a structured collection gap. Rows from successful
+    child reads remain usable as a Partial outcome, while a run with no usable rows is Failed
+    so the evaluator cannot mistake an unresolved walk for an authoritative empty collection.
 #>
 
 function Invoke-PulseIntuneRbacGroupProtectionPlan {
@@ -138,12 +141,38 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         $hasInvalidPrincipal = $false
         foreach ($principal in $principals) {
             $groupId = $null
+            $principalType = $null
             if ($principal -is [System.Collections.IDictionary]) {
                 if ($principal.Contains('id')) { $groupId = [string] $principal['id'] }
-            } elseif ($null -ne $principal -and $principal.PSObject.Properties['id']) {
-                $groupId = [string] $principal.id
+                if ($principal.Contains('@odata.type')) { $principalType = [string] $principal['@odata.type'] }
+            } elseif ($null -ne $principal) {
+                if ($principal.PSObject.Properties['id']) { $groupId = [string] $principal.id }
+                if ($principal.PSObject.Properties['@odata.type']) { $principalType = [string] $principal.'@odata.type' }
             }
 
+            if ([string]::IsNullOrWhiteSpace($principalType)) {
+                $hasInvalidPrincipal = $true
+                continue
+            }
+            $normalizedPrincipalType = $principalType.Trim().TrimStart('#')
+            $isGroup = [string]::Equals(
+                $normalizedPrincipalType,
+                'microsoft.graph.group',
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+            if (-not $isGroup) {
+                $isKnownNonGroup = [string]::Equals(
+                    $normalizedPrincipalType,
+                    'microsoft.graph.user',
+                    [System.StringComparison]::OrdinalIgnoreCase
+                ) -or [string]::Equals(
+                    $normalizedPrincipalType,
+                    'microsoft.graph.servicePrincipal',
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
+                if (-not $isKnownNonGroup) { $hasInvalidPrincipal = $true }
+                continue
+            }
             if ([string]::IsNullOrWhiteSpace($groupId)) {
                 $hasInvalidPrincipal = $true
                 continue
@@ -203,11 +232,18 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         $hasAssignable = $propertyNames -contains 'isAssignableToRole'
         $restricted = if ($hasRestricted) { if ($group -is [System.Collections.IDictionary]) { $group['isManagementRestricted'] } else { $group.isManagementRestricted } } else { $null }
         $assignable = if ($hasAssignable) { if ($group -is [System.Collections.IDictionary]) { $group['isAssignableToRole'] } else { $group.isAssignableToRole } } else { $null }
-        if (-not $hasRestricted -or -not $hasAssignable -or $null -eq $restricted -or $null -eq $assignable) {
+        # Graph declares both flags nullable. Present-null means the protection is not
+        # enabled and is normalized to native false; an absent property or any non-null,
+        # non-Boolean value is still invalid provider data and remains fail-closed.
+        if (-not $hasRestricted -or -not $hasAssignable -or
+            ($null -ne $restricted -and $restricted -isnot [bool]) -or
+            ($null -ne $assignable -and $assignable -isnot [bool])) {
             $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass 'InvalidProviderData' `
                     -ReasonCode 'invalid-provider-data' -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
             continue
         }
+        $restricted = if ($null -eq $restricted) { [bool] $false } else { [bool] $restricted }
+        $assignable = if ($null -eq $assignable) { [bool] $false } else { [bool] $assignable }
 
         $displayName = if ($group -is [System.Collections.IDictionary]) {
             if ($group.Contains('displayName')) { [string] $group['displayName'] } else { $groupId }
@@ -242,7 +278,32 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
             -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
     }
 
+    $topFailureClass = 'ProviderFailed'
+    $topReasonCode = 'provider-failed'
+    if ($gapArray.Count -gt 0) {
+        $candidateFailureClass = [string] $gapArray[0].FailureClass
+        $uniformFailureClass = $true
+        foreach ($gap in $gapArray) {
+            if ([string] $gap.FailureClass -ne $candidateFailureClass) {
+                $uniformFailureClass = $false
+                break
+            }
+        }
+        if ($uniformFailureClass) {
+            switch ($candidateFailureClass) {
+                'PermissionDenied' {
+                    $topFailureClass = 'PermissionDenied'
+                    $topReasonCode = 'permission-denied'
+                }
+                'AuthenticationFailed' {
+                    $topFailureClass = 'AuthenticationFailed'
+                    $topReasonCode = 'authentication-failed'
+                }
+            }
+        }
+    }
+
     return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gapArray `
-        -FailureClass 'ProviderFailed' -ReasonCode 'provider-failed' `
+        -FailureClass $topFailureClass -ReasonCode $topReasonCode `
         -Detail @{ gapCount = $gapArray.Count } -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
 }

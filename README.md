@@ -23,7 +23,7 @@ Install-PSResource -Name TenantPulse -Repository PSGallery
 #    - see GraphKit's own documentation for profile registration (app registration /
 #      certificate or client secret setup). TenantPulse never touches credentials itself;
 #      it only resolves an already-registered profile by name.
-Register-GraphProfile -ProfileId 'contoso' -TenantId '<tenant-id>' -ClientId '<app-id>' ...
+Register-GraphTenant -ProfileId 'contoso' -TenantId '<tenant-id>' -ClientId '<app-id>' ...
 
 # 3. Run a full assessment
 Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out'
@@ -171,7 +171,9 @@ constitute a claim of CIS Benchmark compliance."*
 
 GraphKit `0.2.2` and TenantPulse `0.1.3` remain the immutable current PSGallery releases.
 The source documented here is the next candidate pair: GraphKit `0.3.0` plus TenantPulse
-`0.2.0`. It adds the cleanup-rule primitive, Settings Catalog assignments, expanded Intune
+`0.2.0`. This is greenfield, pre-adoption work: there is no installed TenantPulse user base,
+customer estate, prior runtime, or migration/cutover task. The candidate adds the cleanup-rule
+primitive, Settings Catalog assignments, expanded Intune
 RBAC primitives, and default TenantPulse provider plans for RBAC, BitLocker, LAPS, and current
 plus legacy security baselines. The Windows data-processor path is explicitly classified as
 platform-unavailable because Microsoft has not published the GET/application-permission
@@ -198,9 +200,11 @@ the ScuBA/CISA-cited Conditional Access, privileged-role, and credential-hygiene
 (`TP.ENT.0017`-`0024`). Not a comprehensive tenant-health product - a deliberately scoped,
 verified-against-a-real-tenant catalog.
 
-"Live" below means the check's dataset path has been exercised against a live tenant.
-"Candidate" means the implementation is wired and deterministic but its exact packaged
-candidate still needs the recorded live/CI gate. "Platform unavailable" means TenantPulse
+"Live" below means the exact packaged candidate's dataset and evaluation path completed
+against a live tenant; it is separate from exact-SHA CI and publication. "Candidate" means
+that exact packaged path still needs its recorded live gate. "Live (partial)" means the path
+completed but the service evidence contained explicit gaps, so evaluation failed closed.
+"Platform unavailable" means TenantPulse
 returns an explicit non-collecting disposition because the service contract needed for a
 supported read does not exist. A raw `Pending = $true` map placeholder is still never sent to
 Graph directly; a built-in provider plan must resolve it first or it degrades honestly to
@@ -209,7 +213,7 @@ once collected; a 400/403 on a non-P2 tenant is itself a rendered finding ("PIM
 posture unassessable - Entra ID P2 required"), per its own research entry - not a collection
 failure hidden from the report.
 
-| Id | Category | Severity | Dataset | Title |
+| Id | Category | Severity | Evidence | Title |
 |---|---|---|---|---|
 | TP.ENT.0001 | Entra.Identity | High | Live | Security Defaults state is appropriate |
 | TP.ENT.0002 | Entra.PrivilegedRoles | High | Live | Fewer than 5 Global Administrators |
@@ -240,14 +244,14 @@ failure hidden from the report.
 | TP.INT.0004 | Intune.Updates | Medium | Live | At least 2 Windows Update rings have deadlines configured |
 | TP.INT.0005 | Intune.DeviceLifecycle | Medium | Live | Devices inactive for more than 90 days |
 | TP.INT.0006 | Intune.SettingsCatalog | Medium | Live | Conflicting security-setting values across policies |
-| TP.INT.0007 | Intune.Governance | Low | Candidate | Intune device clean-up rule configured |
+| TP.INT.0007 | Intune.Governance | Low | Live | Intune device clean-up rule configured |
 | TP.INT.0008 | Intune.Governance | Medium | Live | Intune Multi Admin Approval policy configured |
 | TP.INT.0009 | Intune.Governance | Low | Platform unavailable | Windows diagnostic data processor configuration enabled |
 | TP.INT.0011 | Intune.Governance | Low | Live | Default branding profile customized |
 | TP.INT.0012 | Intune.Updates | High | Live | Windows Feature Update policy avoids end-of-support builds |
-| TP.INT.0013 | Intune.Governance | High | Candidate | Intune RBAC groups protected via RMAU or role-assignable groups |
-| TP.INT.0014 | Intune.EndpointSecurity | Critical | Candidate | BitLocker full-disk encryption enforced via Endpoint Security policy |
-| TP.INT.0015 | Intune.EndpointSecurity | High | Candidate | LAPS configuration policy meets minimum security bar |
+| TP.INT.0013 | Intune.Governance | High | Live | Intune RBAC groups protected via RMAU or role-assignable groups |
+| TP.INT.0014 | Intune.EndpointSecurity | Critical | Live (partial) | BitLocker full-disk encryption enforced via Endpoint Security policy |
+| TP.INT.0015 | Intune.EndpointSecurity | High | Live | LAPS configuration policy meets minimum security bar |
 | TP.INT.0016 | Intune.SettingsCatalog | High | Live | Attack Surface Reduction "Standard Protection" baseline rules configured |
 | TP.INT.0017 | Intune.SettingsCatalog | High | Live | App Control for Business policy enforcing (not audit-only) |
 | TP.INT.0018 | Intune.SettingsCatalog | High | Live | Managed Installer rules paired with an enforcing App Control policy |
@@ -261,7 +265,7 @@ failure hidden from the report.
 | TP.INT.0026 | Intune.Enrollment | Medium | Live | Windows Autopilot deployment profile exists and is assigned |
 | TP.INT.0027 | Intune.Enrollment | Low | Live | No orphaned Windows Autopilot device identities |
 | TP.INT.0028 | Intune.Enrollment | Medium | Live | Enrollment Status Page configured with blocking failure behavior |
-| TP.INT.0029 | Intune.SecurityBaselines | Medium | Candidate | Security baselines assigned and not on a deprecated version |
+| TP.INT.0029 | Intune.SecurityBaselines | Medium | Live | Security baselines assigned and not on a deprecated version |
 | TP.INT.0030 | Intune.Compliance | Medium | Live | Fleet compliance rate below acceptable threshold |
 | TP.INT.0031 | Intune.SettingsCatalog | Critical | Live | BitLocker CSP settings present and correct across all Settings Catalog policies |
 
@@ -279,8 +283,8 @@ silent gap), assignment verification for every Intune policy family (Settings Ca
 security-baseline provider do preserve assignment disposition; other existence checks may not),
 transitive/group-assigned role-assignment expansion
 for `TP.ENT.0021`'s privileged-role count (direct assignments only - documented in that check's
-own evidence text), `TP.ENT.0019`'s scope (only `servicePrincipal` credentials are read - GraphKit
-0.2.2 has no `Application` type yet, so app-**registration** client secrets/certificates are not
+own evidence text), `TP.ENT.0019`'s scope (only `servicePrincipal` credentials are read - the
+GraphKit `0.3.0` catalog has no `Application` type, so app-**registration** client secrets/certificates are not
 visible to this check at all until a future GraphKit release adds one; evidence is also capped to
 the top 50 worst offenders by design, not exhaustive), and a rendering format other than JSON.
 

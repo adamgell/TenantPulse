@@ -211,6 +211,36 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
     }
 
+    It 'fails closed when a policy omits both template id and template family metadata' {
+        $result = Invoke-SecurityBaselinePlanFixture -Policies @(
+            [pscustomobject]@{ id = 'policy-unclassified'; name = 'Unclassified'; templateReference = [pscustomobject]@{} }
+        )
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:policy-unclassified'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicy.ListBeta'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be 'invalid-provider-data'
+        @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicyAssignment' }).Count | Should -Be 0
+    }
+
+    It 'skips an explicitly classified non-baseline policy without a template id' {
+        $result = Invoke-SecurityBaselinePlanFixture -Policies @(
+            [pscustomobject]@{
+                id = 'policy-disk-encryption'
+                name = 'Disk encryption'
+                templateReference = [pscustomobject]@{ templateFamily = 'endpointSecurityDiskEncryption' }
+            }
+        )
+
+        $result.Outcome.Status | Should -Be 'Collected'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 0
+        @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicyAssignment' }).Count | Should -Be 0
+    }
+
     It 'fails closed when a tracked template reports legacy intents but the intent collection is empty' {
         $result = Invoke-SecurityBaselinePlanFixture -Templates @(
             [pscustomobject]@{ id = 'template-current'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 1 }
@@ -320,6 +350,40 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
     }
 
+    It 'rejects <InvalidKind> before counting a positive current-policy assignment' -ForEach @(
+        @{ InvalidKind = 'numeric assignment id'; AssignmentId = 42; GroupId = 'group-a' }
+        @{ InvalidKind = 'object assignment id'; AssignmentId = [pscustomobject]@{ value = 'assignment-a' }; GroupId = 'group-a' }
+        @{ InvalidKind = 'numeric group id'; AssignmentId = 'assignment-a'; GroupId = 42 }
+        @{ InvalidKind = 'object group id'; AssignmentId = 'assignment-a'; GroupId = [pscustomobject]@{ value = 'group-a' } }
+    ) {
+        $result = Invoke-SecurityBaselinePlanFixture -CurrentTemplates @(
+            [pscustomobject]@{ id = 'template-current'; lifecycleState = 'active'; templateFamily = 'baseline' }
+        ) -Policies @(
+            [pscustomobject]@{
+                id = 'policy-malformed-id'
+                name = 'Malformed identifier'
+                templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline' }
+            }
+        ) -Assignments @{
+            'policy-malformed-id' = @(
+                [pscustomobject]@{
+                    id = $AssignmentId
+                    target = [pscustomobject]@{
+                        '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                        groupId = $GroupId
+                    }
+                }
+            )
+        }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:policy-malformed-id'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].Detail.invalid | Should -Be 'assignment-target'
+    }
+
     It 'gaps a tracked legacy template when intentCount is absent' {
         $result = Invoke-SecurityBaselinePlanFixture -Templates @(
             [pscustomobject]@{ id = 'template-missing-count'; templateType = 'securityBaseline'; isDeprecated = $false }
@@ -338,6 +402,82 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
         $result.Outcome.Status | Should -Be 'Failed'
         $result.Outcome.Gaps[0].Scope | Should -Be 'template:unknown'
         $result.Outcome.Gaps[0].Detail.missing | Should -Be 'id'
+    }
+
+    It 'emits one structured gap for a duplicate legacy template id even when no intent references it' {
+        $templates = @(
+            [pscustomobject]@{ id = 'template-duplicate'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 0 }
+            [pscustomobject]@{ id = 'template-duplicate'; templateType = 'securityBaseline'; isDeprecated = $true; intentCount = 1 }
+        )
+
+        $first = Invoke-SecurityBaselinePlanFixture -Templates $templates
+        $second = Invoke-SecurityBaselinePlanFixture -Templates @($templates[1], $templates[0])
+
+        $first.Outcome.Status | Should -Be 'Failed'
+        @($first.Outcome.Rows).Count | Should -Be 0
+        ($first.Outcome | ConvertTo-Json -Depth 8 -Compress) | Should -Be ($second.Outcome | ConvertTo-Json -Depth 8 -Compress)
+        @($first.Outcome.Gaps).Count | Should -Be 1
+        $first.Outcome.Gaps[0].Scope | Should -Be 'template:template-duplicate'
+        $first.Outcome.Gaps[0].Operation | Should -Be 'DeviceManagementTemplate.ListBeta'
+        $first.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $first.Outcome.Gaps[0].Detail.duplicateTemplateId | Should -Be 'template-duplicate'
+    }
+
+    It 'emits one structured gap for a duplicate current template id even when no policy references it' {
+        $templates = @(
+            [pscustomobject]@{ id = 'template-duplicate'; lifecycleState = 'active'; templateFamily = 'baseline' }
+            [pscustomobject]@{ id = 'template-duplicate'; lifecycleState = 'superseded'; templateFamily = 'baseline' }
+        )
+
+        $first = Invoke-SecurityBaselinePlanFixture -CurrentTemplates $templates
+        $second = Invoke-SecurityBaselinePlanFixture -CurrentTemplates @($templates[1], $templates[0])
+
+        $first.Outcome.Status | Should -Be 'Failed'
+        @($first.Outcome.Rows).Count | Should -Be 0
+        ($first.Outcome | ConvertTo-Json -Depth 8 -Compress) | Should -Be ($second.Outcome | ConvertTo-Json -Depth 8 -Compress)
+        @($first.Outcome.Gaps).Count | Should -Be 1
+        $first.Outcome.Gaps[0].Scope | Should -Be 'current-template:template-duplicate'
+        $first.Outcome.Gaps[0].Operation | Should -Be 'DeviceManagementConfigurationPolicyTemplate.ListBeta'
+        $first.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $first.Outcome.Gaps[0].Detail.duplicateTemplateId | Should -Be 'template-duplicate'
+    }
+
+    It 'fails closed when a joined baseline policy omits its policy-side template family' {
+        $result = Invoke-SecurityBaselinePlanFixture -CurrentTemplates @(
+            [pscustomobject]@{ id = 'template-current'; lifecycleState = 'active'; templateFamily = 'baseline' }
+        ) -Policies @(
+            [pscustomobject]@{ id = 'policy-missing-family'; name = 'Missing family'; templateReference = [pscustomobject]@{ templateId = 'template-current' } }
+        )
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:policy-missing-family'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicy.ListBeta'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].Detail.invalid | Should -Be 'templateFamily'
+        $result.Outcome.Gaps[0].Detail.policyTemplateFamily | Should -BeNullOrEmpty
+        $result.Outcome.Gaps[0].Detail.joinedTemplateFamily | Should -Be 'baseline'
+        @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicyAssignment' }).Count | Should -Be 0
+    }
+
+    It 'fails closed when policy-side template family disagrees with its joined template metadata' {
+        $result = Invoke-SecurityBaselinePlanFixture -CurrentTemplates @(
+            [pscustomobject]@{ id = 'template-current'; lifecycleState = 'active'; templateFamily = 'baseline' }
+        ) -Policies @(
+            [pscustomobject]@{ id = 'policy-mismatched-family'; name = 'Mismatched family'; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'endpointSecurityDiskEncryption' } }
+        )
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:policy-mismatched-family'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicy.ListBeta'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].Detail.invalid | Should -Be 'templateFamily'
+        $result.Outcome.Gaps[0].Detail.policyTemplateFamily | Should -Be 'endpointSecurityDiskEncryption'
+        $result.Outcome.Gaps[0].Detail.joinedTemplateFamily | Should -Be 'baseline'
+        @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicyAssignment' }).Count | Should -Be 0
     }
 
     It 'drops duplicate current-policy ids deterministically instead of retaining either row' {

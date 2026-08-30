@@ -71,6 +71,7 @@
     authenticationMethodsPolicy = @{ Type = 'AuthenticationMethodsPolicy'; Operation = 'Get'; ApiVersion = 'beta' }
     autopilotDevices             = @{ Type = 'AutopilotDevice'; Operation = 'List'; ApiVersion = 'beta' }
     domains                       = @{ Type = 'Domain'; Operation = 'List'; ApiVersion = 'beta' }
+    subscribedSkus                = @{ Type = 'SubscribedSku'; Operation = 'List'; ApiVersion = 'beta' }
 
     # Read live against a real tenant this week; not marked Pending.
     #

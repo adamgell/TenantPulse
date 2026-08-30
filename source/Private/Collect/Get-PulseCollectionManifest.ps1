@@ -1,7 +1,9 @@
 <#
     Private: build the deduped, ordinally-sorted collection manifest for a set of checks.
 
-    Every check descriptor names the datasets it needs in Data.Datasets. Multiple checks
+    Every check descriptor names the datasets it needs in Data.Datasets. A check that names
+    one or more Data.Gates also implicitly needs subscribedSkus, because Intune/Entra gate
+    decisions are derived from that collected license evidence. Multiple checks
     routinely share a dataset (e.g. two Conditional Access checks both reading
     conditionalAccessPolicies) - this walks every check exactly once, resolves each
     dataset name through the shared DatasetMap.psd1 table (the same map
@@ -101,6 +103,16 @@ function Get-PulseCollectionManifest {
     }
 
     foreach ($check in $Checks) {
+        # Gate evidence is a collection dependency just as real as Data.Datasets. Without
+        # this implicit dependency, a narrowed assessment can collect every check dataset
+        # successfully and then mark every gated check NotApplicable because subscribedSkus
+        # was never requested. Resolve it through the same map so it is deduplicated,
+        # validated, and deterministically ordered like every explicit dataset.
+        $gateNames = @($check.Data.Gates) | Where-Object { -not [string]::IsNullOrEmpty($_) }
+        if ($gateNames.Count -gt 0) {
+            Resolve-Entry -Name 'subscribedSkus' -RequestedBy "$($check.Id) gate evidence"
+        }
+
         # Data.Expansions (Task 3.2): an artifact-only check (e.g. TP.INT.0006) has no
         # Data.Datasets at all, so $check.Data.Datasets is $null - `@($null)` wraps that
         # into a one-element array containing $null rather than an empty array (see

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-08-29
 
+This commit prepares the greenfield, pre-adoption `0.2.0` candidate. There is no installed
+TenantPulse user base, customer estate, prior runtime, or migration/cutover task. It does not
+publish the package; PSGallery `0.1.3` remains immutable.
+
 ### Added
 
 - Built-in read-only provider plans for Intune RBAC, Endpoint Security BitLocker and LAPS,
@@ -20,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Migrated `TP.INT.0007` from the obsolete cleanup-settings singleton to the supported
+- Replaced the obsolete `TP.INT.0007` cleanup-settings singleton with the supported
   per-platform managed-device cleanup-rule collection.
 - Requires exact GraphKit `0.3.0`, which supplies the new live-proven operation primitives
   and makes SecretManagement a lazy persisted-vault boundary instead of an unconditional
@@ -28,6 +32,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reclassified the Windows data-processor check as explicitly platform-unavailable through
   its built-in provider plan. It remains non-collecting until Microsoft publishes a GET and
   application-permission contract; it is no longer presented as ordinary release backlog.
+
+### Verification
+
+- The final local suite passed 2255/2255 tests with zero failures, errors, skips, or NotRun
+  tests. The tested `TenantPulse.0.2.0.nupkg` SHA-256 is
+  `041591C3C4CA8402BFCFC77F302246E6FFD315D02D0DB053DF9F5D4771159888`.
+- A read-only live gate installed that exact archive into an isolated root and loaded the
+  TenantPulse `0.2.0` -> GraphKit `0.3.0` -> Microsoft.Graph.Authentication `2.38.1` chain
+  from that root. All seven selected checks completed: 3 Pass, 3 tenant-posture Fail, and 1
+  fail-closed NotApplicable from partial BitLocker evidence.
+- The exact package collected cleanup rules (1 row), RBAC group-protection evidence (3),
+  BitLocker evidence (1 usable row plus 2 explicit `missing-setting` gaps), an authoritative
+  empty LAPS set, security-baseline evidence (3), 781 Settings Catalog policies, 40 compliance
+  policies, 15 device configurations, and 13 managed devices. Expansion produced 4302 Settings
+  Catalog rows, 606 compliance rows, 244 device-configuration rows, 165 conflicts, and 2320
+  setting-presence rows while preserving explicit partial-gap counts.
+- Privacy assertions passed across 1629 generated artifacts: the raw tenant id was absent,
+  profile provenance metadata was absent, and the profile label was absent from the manifest
+  and redacted report.
+- This records local and live exact-package evidence only. Remote exact-SHA CI and publication
+  remain separate gates; `0.2.0` has not been published.
 
 ## [0.1.3] - 2026-08-19
 
@@ -262,7 +287,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Get-PulseTenantSnapshot -Path` and `Get-PulseCheckCatalog -Path`: renamed to
   `-OutputPath` and `-CatalogPath` respectively. `-Path` still works as an alias for one
-  release; migrate to the new names before it is removed.
+  release and is then scheduled for removal.
 
 ### Fixed
 

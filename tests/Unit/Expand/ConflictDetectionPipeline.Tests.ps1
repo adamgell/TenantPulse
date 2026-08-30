@@ -85,6 +85,97 @@ Describe 'Invoke-PulseConflictDetection' {
         }
     }
 
+    It 'propagates a Partial source family gap so an omitted policy cannot produce an unqualified zero-conflict result' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            $rows = @([pscustomobject]@{
+                    schemaVersion = '1'; policyId = 'policy-valid'; policyType = 'settingsCatalog'; policyName = 'Valid'
+                    templateFamily = $null; isBaseline = $false; settingPath = 'def-x'; settingDefinitionId = 'def-x'
+                    settingName = 'x'; nameResolved = $true; instanceId = 'policy-valid/p:def-x'; value = 'v'
+                    valueLabel = $null; labelResolved = $false; redacted = $false; valueState = $null; applicability = $null
+                    assignments = @()
+                })
+            $sourceGap = [pscustomobject]@{ policyId = 'policy-invalid'; reason = 'category:InvalidAssignmentTarget' }
+            Publish-PulseExpansionRows -Store $store -Name 'settingsCatalog' -Rows $rows -Gaps @($sourceGap) -PolicyCount 2 | Out-Null
+
+            $result = Invoke-PulseConflictDetection -Store $store
+            $result.Status | Should -Be 'Partial'
+            $result.ConflictCount | Should -Be 0
+            $result.Gaps.Count | Should -Be 1
+            $result.Gaps[0].policyId | Should -Be 'policy-invalid'
+            $result.Gaps[0].reason | Should -Be 'category:InvalidAssignmentTarget'
+
+            $artifact = Get-PulseConflictArtifact -Store $store
+            $artifact.Status | Should -Be 'Available'
+            $artifact.Gaps.Count | Should -Be 1
+        }
+    }
+
+    It 'fails closed when a Partial source family has <GapShape> gaps instead of laundering conflicts into Expanded' -ForEach @(
+        @{ GapShape = 'missing' }
+        @{ GapShape = 'null' }
+        @{ GapShape = 'empty' }
+        @{ GapShape = 'malformed' }
+        @{ GapShape = 'privacy-unsafe' }
+    ) {
+        InModuleScope TenantPulse -ArgumentList $script:store, $GapShape {
+            param($store, $gapShape)
+            $sharedAssignment = @([pscustomobject]@{
+                    intent = 'include'; targetType = 'group'; groupId = 'group-shared'; filterId = $null; filterType = $null
+                })
+            $settingsRows = @([pscustomobject]@{
+                    schemaVersion = '1'; policyId = 'settings-source'; policyType = 'settingsCatalog'; policyName = 'Settings Source'
+                    templateFamily = $null; isBaseline = $false; settingPath = 'shared-def'; settingDefinitionId = 'shared-def'
+                    settingName = 'sharedSetting'; nameResolved = $true; instanceId = 'settings-source/p:shared-def'; value = 'valueA'
+                    valueLabel = $null; labelResolved = $false; redacted = $false; valueState = $null; applicability = $null
+                    assignments = $sharedAssignment
+                })
+            $complianceRows = @([pscustomobject]@{
+                    schemaVersion = '1'; policyId = 'compliance-valid'; policyType = 'compliance'; policyName = 'Compliance Valid'
+                    templateFamily = $null; isBaseline = $false; settingPath = 'shared-def'; settingDefinitionId = 'shared-def'
+                    settingName = 'sharedSetting'; nameResolved = $true; instanceId = 'compliance-valid/p:shared-def'; value = 'valueB'
+                    valueLabel = $null; labelResolved = $false; redacted = $false; valueState = $null; applicability = $null
+                    assignments = $sharedAssignment
+                })
+            $validGap = [pscustomobject]@{ policyId = 'settings-omitted'; reason = 'category:FetchFailed' }
+            Publish-PulseExpansionRows -Store $store -Name 'settingsCatalog' -Rows $settingsRows -Gaps @($validGap) -PolicyCount 2 | Out-Null
+            Publish-PulseExpansionRows -Store $store -Name 'compliance' -Rows $complianceRows -Gaps @() -PolicyCount 1 | Out-Null
+
+            $manifest = Get-PulseSnapshotManifest -Store $store
+            $sourceEntry = $manifest.expansions.settingsCatalog
+            switch ($gapShape) {
+                'missing' { $sourceEntry.Remove('gaps') }
+                'null' { $sourceEntry['gaps'] = $null }
+                'empty' { $sourceEntry['gaps'] = [object[]]@() }
+                'malformed' {
+                    $sourceEntry['gaps'] = [object[]]@([ordered]@{
+                            policyId = 'settings-omitted'
+                            reason = [ordered]@{ raw = 'tenant-guid profile-secret' }
+                        })
+                }
+                'privacy-unsafe' {
+                    $sourceEntry['gaps'] = [object[]]@([ordered]@{
+                            policyId = 'tenant-guid'
+                            reason = 'category:FetchFailed;detail:tenant-guid profile-secret'
+                        })
+                }
+            }
+            Set-PulseAtomicFileContent -Path $store.ManifestPath -Value (ConvertTo-PulseCanonicalJson -InputObject $manifest)
+
+            $result = Invoke-PulseConflictDetection -Store $store -ProfileId 'profile-secret' -TenantId 'tenant-guid' -Pseudonym 'tp-safe'
+            $result.Status | Should -Be 'Partial' -Because "the $gapShape Partial source gap contract is invalid"
+            $result.ConflictCount | Should -Be 0 -Because "rows from the $gapShape Partial source are not trustworthy"
+            $result.FamilyCount | Should -Be 1
+            $result.Gaps.Count | Should -Be 1
+            $result.Gaps[0].policyId | Should -BeNullOrEmpty
+            $result.Gaps[0].reason | Should -Be 'category:FamilyUnavailable;family:settingsCatalog'
+
+            $artifact = Get-PulseConflictArtifact -Store $store
+            $artifact.Conflicts.Count | Should -Be 0
+            ($artifact.Gaps | ConvertTo-Json -Compress) | Should -Not -Match 'tenant-guid|profile-secret'
+        }
+    }
+
     It 'gaps a family whose file no longer matches its recorded hash, still succeeds Partial from the other families' {
         InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)

@@ -140,7 +140,7 @@ SOFTWARE.
 
 | Component | License | Notes |
 |-----------|---------|-------|
-| [GraphKit](https://github.com/AdamGell/GraphKit) | See GraphKit's own repository | The sole Graph-access layer TenantPulse calls through. `source/TenantPulse.psd1` requires exact GraphKit `0.2.2`; `RequiredModules.psd1` separately pins `0.2.2` for build restore. GraphKit is not vendored and resolves from PSGallery. |
+| [GraphKit](https://github.com/AdamGell/GraphKit) | See GraphKit's own repository | The sole Graph-access layer TenantPulse calls through. `source/TenantPulse.psd1` requires exact GraphKit `0.3.0`; `RequiredModules.psd1` separately pins `0.3.0` for build restore. GraphKit is not vendored; release installs resolve it from the selected package repository, while coordinated candidate verification may use a local package source before PSGallery publication. |
 
 ## Build/test-only dependencies
 

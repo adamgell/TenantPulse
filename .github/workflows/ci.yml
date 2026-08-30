@@ -721,7 +721,20 @@ jobs:
           # dependency assertions across source, restore pin, built manifest, nupkg, and publisher file-set proof; +1 case-sensitivity regression.
           # 2123 -> 2135 (default-plan and current/legacy baseline coverage): +12.
           # 2135 -> 2142 (security-baseline provider-shape closeout): +7 focused regressions.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2142 -AllowedSkips $allowedSkips -AllowNotRun 1
+          # 2142 -> 2162 (integrated 0.2.0 closeout): +20 typed-assignment hardening,
+          # transitive package-chain QA/discovery coverage, NuGet-wrapper integrity, and
+          # a clean-process dependency restore/import proof.
+          # 2162 -> 2175 (final independent-review closeout): +11 fail-closed provider/
+          # assignment regressions and +2 default-workflow/publisher safety regressions.
+          # 2175 -> 2187 (post-review fail-closed closeout): +12 source-gap, typed-id,
+          # unknown-principal, malformed-baseline, and exact-archive publisher regressions.
+          # 2187 -> 2199: +12 persisted license-gate, nullable-RBAC-shape, and dataset-map contract regressions.
+          # 2199 -> 2220: +21 fail-closed license-evidence, assignment-filter typing,
+          # and publisher archive/authorization boundary regressions. 2220 -> 2247:
+          # +27 final independent-review regressions for evidence coherence, filter/gap
+          # semantics, dependency bytes, test-proof ordering, and exact publication.
+          # 2247 -> 2255: +8 release-proof binding and multiline-ratchet regressions.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2255 -AllowedSkips $allowedSkips -AllowNotRun 1
 
   secret-scan:
     name: Secret/PII scan (gitleaks)
