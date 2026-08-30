@@ -523,9 +523,13 @@
 # discovery safety cases; +118 canonical Graph-failure mapper and direct/composite/
 # expansion adapter cases; +21 strict PartialDatasets catalog cases; +31 isolated
 # partial-evaluator and review-correction cases; and +48 four-check monotonic-evaluation,
-# scoring, privacy, and review-correction cases. 2508 is the real, measured
-# `./build.ps1 -Tasks test` total before this ratchet changed.
-$script:tenantPulseGateMinimumTests = 2508
+# scoring, privacy, and review-correction cases. 2508 was the real, measured
+# `./build.ps1 -Tasks test` total before that ratchet changed.
+# 2508 -> 2510 after the whole-branch provider-plan review correction: +2
+# regressions proving that thrown structured Graph failures preserve their canonical
+# provider-plan outcome and that authentication aborts later network-backed plans.
+# 2510 is the real, measured `./build.ps1 -Tasks test` total before this ratchet changed.
+$script:tenantPulseGateMinimumTests = 2510
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

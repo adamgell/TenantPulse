@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 2508 / -AllowNotRun 0 (see
+    # MinimumTests 2510 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -290,14 +290,17 @@ else {
     # merged-main baseline; 2288 is the measured post-closeout gate, incorporating +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.
     # 2288 -> 2508 for R1a: +2 plan-discovery safety cases, +118 canonical Graph-failure/
     # adapter cases, +21 PartialDatasets catalog cases, +31 isolated partial-evaluator
-    # cases, and +48 monotonic-check/scoring/privacy cases. The authoritative pre-ratchet
-    # run had zero NotRun, so publication accepts no NotRun block.
+    # cases, and +48 monotonic-check/scoring/privacy cases.
+    # 2508 -> 2510 after the whole-branch provider-plan review correction: +2 thrown
+    # structured Graph-failure regressions preserving the canonical outcome and
+    # authentication abort. The authoritative pre-ratchet run had zero NotRun, so
+    # publication accepts no NotRun block.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 2508 `
+        -MinimumTests 2510 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {
