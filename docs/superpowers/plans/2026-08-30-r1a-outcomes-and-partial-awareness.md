@@ -55,20 +55,20 @@
 - Output: exactly one `TenantPulse.GraphFailureResolution` object with `FailureClass`, `ReasonCode`, `AbortCollection`, `HasStructuredSignal`, and nullable `StatusCode`.
 - Precedence: `Outcome = DeadlineExpired`; `Outcome = Cancelled`; otherwise `Certainty = Indeterminate`; then explicit 403/permission; then 401/authentication; then provider failure.
 
-- [ ] Write parameterized failing tests for real-shaped GraphKit envelopes: `DeadlineExpired/Indeterminate`, `Cancelled/Indeterminate`, `Failed/Indeterminate`, HTTP 403, HTTP 401, HTTP 404/429/5xx, and a structure-free provider error.
-- [ ] Prove envelope outcome/certainty wins over lossy status or message fallback: a deadline carrying status 403 remains `DeadlineExpired`; a cancelled envelope carrying auth-shaped text remains `Cancelled`; a non-special indeterminate envelope remains `Indeterminate`.
-- [ ] Test enum and integer status codes, CategoryInfo fallback, message-only AADSTS/unauthorized/forbidden fallback, missing telemetry, null input, hostile property getters, malformed collections, and values whose string conversion throws. The mapper must never throw.
-- [ ] Implement one exception-contained mapper. Use safe property access and `TryParse`; never bare-cast untrusted values. Map:
+- [x] Write parameterized failing tests for real-shaped GraphKit envelopes: `DeadlineExpired/Indeterminate`, `Cancelled/Indeterminate`, `Failed/Indeterminate`, HTTP 403, HTTP 401, HTTP 404/429/5xx, and a structure-free provider error.
+- [x] Prove envelope outcome/certainty wins over lossy status or message fallback: a deadline carrying status 403 remains `DeadlineExpired`; a cancelled envelope carrying auth-shaped text remains `Cancelled`; a non-special indeterminate envelope remains `Indeterminate`.
+- [x] Test enum and integer status codes, CategoryInfo fallback, message-only AADSTS/unauthorized/forbidden fallback, missing telemetry, null input, hostile property getters, malformed collections, and values whose string conversion throws. The mapper must never throw.
+- [x] Implement one exception-contained mapper. Use safe property access and `TryParse`; never bare-cast untrusted values. Map:
   - `DeadlineExpired` -> `FailureClass = DeadlineExpired`, `ReasonCode = deadline-expired`, `AbortCollection = false`.
   - `Cancelled` -> `Cancelled`, `cancelled`, `false`.
   - remaining `Certainty = Indeterminate` -> `Indeterminate`, `indeterminate`, `false`.
   - 403/permission -> `PermissionDenied`, `permission-denied`, `false`.
   - 401/AADSTS/token acquisition/unauthorized -> `AuthenticationFailed`, `authentication-failed`, `true`.
   - everything else -> `ProviderFailed`, `provider-failed`, `false`.
-- [ ] `HasStructuredSignal` is true for a readable envelope `Outcome`/`Certainty`, a known GraphKit category, or readable last-attempt status. Message matching alone does not make it structured.
-- [ ] Keep old private helpers only as logic-free transition wrappers if a same-task caller still needs them. By Task 2 completion there must be no production caller outside the canonical mapper; remove dead wrappers and migrate their tests if safe.
-- [ ] Run the new mapper container and the migrated failure-classifier tests green.
-- [ ] Commit as `feat: preserve Graph failure outcomes`.
+- [x] `HasStructuredSignal` is true for a readable envelope `Outcome`/`Certainty`, a known GraphKit category, or readable last-attempt status. Message matching alone does not make it structured.
+- [x] Keep old private helpers only as logic-free transition wrappers if a same-task caller still needs them. By Task 2 completion there must be no production caller outside the canonical mapper; remove dead wrappers and migrate their tests if safe.
+- [x] Run the new mapper container and the migrated failure-classifier tests green.
+- [x] Commit as `feat: preserve Graph failure outcomes`.
 
 ### Task 2: Migrate every collection adapter atomically
 
@@ -93,18 +93,27 @@
 - Consumes: `Resolve-PulseGraphFailure` DTO.
 - Produces: identical structured failure classes/reason codes in top-level outcomes and child gaps across all Graph-backed collection paths.
 
-- [ ] Add focused red tests at every adapter boundary. Mock or inject real-shaped errors and assert `DeadlineExpired`, `Cancelled`, `Indeterminate`, `PermissionDenied`, `AuthenticationFailed`, and `ProviderFailed` survive into the persisted outcome or gap.
-- [ ] Replace each `Get-PulseFailureClass` call and every local switch that re-collapses it with one mapper call. Use the DTO fields directly; no adapter may invent a second translation table.
-- [ ] In `Invoke-PulseCollection`, persist a caught request failure as dataset `Status = Failed` for permission denied, deadline, cancellation, indeterminate certainty, and ordinary provider failure. A service-returned 403 is an attempted request and is not `Skipped`.
-- [ ] Only `AuthenticationFailed` sets the run-wide network abort flag. Deadline, cancellation, permission, indeterminate certainty, and provider failures remain isolated to their dataset; later independent network work is still attempted.
-- [ ] Preserve explicit no-request states outside this mapper: descriptor pending, platform unavailable, license/gate failures, and dependency unavailable may remain `Skipped` or their existing status because no service request was attempted.
-- [ ] Preserve child operation identity, API version, row ordering, gap ordering, and provider name. Do not change the stable Endpoint Security operation set fixed in the prior train.
-- [ ] Preserve existing expansion artifact category spellings for the three old cases: Settings Catalog settings/assignment failures remain `PermissionDenied`/`AssignmentPermissionDenied`, `AuthFailure`/`AssignmentAuthFailure`, and `FetchFailed`/`AssignmentFetchFailed`. Add distinct `DeadlineExpired`, `Cancelled`, and `Indeterminate` categories with the same `Assignment` prefix on the assignment side; do not silently break existing artifact consumers.
-- [ ] Where a composite promotes child gaps to a top-level failure, preserve any uniform canonical `(FailureClass, ReasonCode)` tuple across all six classes and fall back to `ProviderFailed/provider-failed` only for mixed tuples. Do not special-case only permission and authentication.
-- [ ] Add a collection dependency regression proving a `Partial` provider-plan result is persisted but is not inserted into `$collectedRows`; a later `IdFromDataset` child remains `DependencyUnavailable`. Only `Collected` satisfies collection dependencies.
-- [ ] Add a source-contract assertion that production source outside `Resolve-PulseGraphFailure.ps1` contains no `Get-PulseFailureClass` or duplicate status/message classifier.
-- [ ] Run all touched collector/expansion containers green, then run `pack` + the full suite before committing.
-- [ ] Commit as `refactor: unify Graph failure mapping`.
+- [x] Add focused red tests at every adapter boundary. Mock or inject real-shaped errors and assert `DeadlineExpired`, `Cancelled`, `Indeterminate`, `PermissionDenied`, `AuthenticationFailed`, and `ProviderFailed` survive into the persisted outcome or gap.
+- [x] Replace each `Get-PulseFailureClass` call and every local switch that re-collapses it with one mapper call. Use the DTO fields directly; no adapter may invent a second translation table.
+- [x] In `Invoke-PulseCollection`, persist a caught request failure as dataset `Status = Failed` for permission denied, deadline, cancellation, indeterminate certainty, and ordinary provider failure. A service-returned 403 is an attempted request and is not `Skipped`.
+- [x] Only `AuthenticationFailed` sets the run-wide network abort flag. Deadline, cancellation, permission, indeterminate certainty, and provider failures remain isolated to their dataset; later independent network work is still attempted.
+- [x] Preserve explicit no-request states outside this mapper: descriptor pending, platform unavailable, license/gate failures, and dependency unavailable may remain `Skipped` or their existing status because no service request was attempted.
+- [x] Preserve child operation identity, API version, row ordering, gap ordering, and provider name. Do not change the stable Endpoint Security operation set fixed in the prior train.
+- [x] Preserve existing expansion artifact category spellings for the three old cases: Settings Catalog settings/assignment failures remain `PermissionDenied`/`AssignmentPermissionDenied`, `AuthFailure`/`AssignmentAuthFailure`, and `FetchFailed`/`AssignmentFetchFailed`. Add distinct `DeadlineExpired`, `Cancelled`, and `Indeterminate` categories with the same `Assignment` prefix on the assignment side; do not silently break existing artifact consumers.
+- [x] Where a composite promotes child gaps to a top-level failure, preserve any uniform canonical `(FailureClass, ReasonCode)` tuple across all six classes and fall back to `ProviderFailed/provider-failed` only for mixed tuples. Do not special-case only permission and authentication.
+- [x] Add a collection dependency regression proving a `Partial` provider-plan result is persisted but is not inserted into `$collectedRows`; a later `IdFromDataset` child remains `DependencyUnavailable`. Only `Collected` satisfies collection dependencies.
+- [x] Add a source-contract assertion that production source outside `Resolve-PulseGraphFailure.ps1` contains no `Get-PulseFailureClass` or duplicate status/message classifier.
+- [x] Run all touched collector/expansion containers green, then run `pack` + the full suite before committing.
+- [x] Commit as `refactor: unify Graph failure mapping`.
+
+**Tasks 1-2 evidence (2026-08-30):**
+
+- Task 1 red: 21 focused examples failed because `Resolve-PulseGraphFailure` did not exist. Task 1 green: 21/21 passed. Implementation commit: `8228993` (`feat: preserve Graph failure outcomes`).
+- Task 2 red: 38 of 68 adapter-contract examples failed against the prior adapter behavior. Task 2 green: 68/68 passed. Implementation commit: `e623440` (`refactor: unify Graph failure mapping`).
+- Focused collector/expansion gate: 300 tests across the mapper, direct collection, provider plans, and expansion adapters; 300 passed, 0 failed, 0 skipped, 0 NotRun.
+- Package-first authoritative gate: `pack` succeeded with 10 tasks, 0 errors, 0 warnings; subsequent `test` succeeded with 2,381 tests, 0 failures, 0 errors, 0 skipped, 0 NotRun, and 11 build tasks with 0 errors/warnings.
+- Tested TenantPulse 0.3.0 package SHA-256: `4d6dcb44776d42e07c7d05968014d5076da7e97f4a7470574bb4b12bf820ff13`; built manifest SHA-256: `4693f670b62e1c84aa83effa967f0692a252681a897c2e730e73586803f38f06`; built module SHA-256: `d5ad01ff02fca83cfbd250934b156c3111f6febe3d5bc8d08dce16b2bbe5bbbe`.
+- Exact test/package binding was recorded to `output/testResults/tested-release-proof.json`. Production source contains no legacy `Get-PulseFailureClass`, `Test-PulseErrorRecordHasStructuredSignal`, or duplicate `Get-PulseGraphErrorStatusCode` interpreter.
 
 ### Task 3: Add the strict partial-awareness descriptor contract
 
