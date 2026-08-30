@@ -924,9 +924,9 @@ Describe 'Invoke-PulseEvaluation' {
         $evaluation = InModuleScope TenantPulse -ArgumentList $script:store, $script:keyPath, $check {
             param($store, $keyPath, $check)
 
-            # Overrides the real (Phase 1 stub) Get-PulseGateStatus for this scope only, so
-            # the evaluator's 'Unavailable' wiring can be exercised even though the stub
-            # itself never returns it.
+            # Injects a deterministic Unavailable decision for this scope only so the
+            # evaluator's gate-to-NotApplicable wiring is covered independently of the
+            # manifest evidence used by Get-PulseGateStatus in normal evaluation.
             function Get-PulseGateStatus {
                 param($Gate, $Manifest)
                 return [pscustomobject]@{ Status = 'Unavailable'; Detail = 'no EntraP1 license data collected' }
