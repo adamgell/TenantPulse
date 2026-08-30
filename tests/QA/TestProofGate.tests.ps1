@@ -48,7 +48,9 @@ task Write_Synthetic_Test_Result {
     $failureKind = $env:TP_TEST_PROOF_FAILURE_KIND
     $resultsDir = Join-Path $BuildRoot 'output/testResults'
     $total = if ($failureKind -eq 'Floor') { 2254 } else { 2255 }
-    $skipped = if ($failureKind -eq 'Skip') { 1 } else { 0 }
+    # The real gate permits two known Windows-only permission skips. Three is above
+    # every platform's allowance, so this fixture always exercises the rejection path.
+    $skipped = if ($failureKind -eq 'Skip') { 3 } else { 0 }
     $overallResult = if ($failureKind -eq 'Skip') { 'Ignored' } else { 'Passed' }
 
     $nunitSuffix = 'TenantPulse_v9.9.9.Fixture.xml'

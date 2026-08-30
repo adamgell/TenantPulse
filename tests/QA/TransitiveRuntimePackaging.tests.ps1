@@ -224,7 +224,7 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
         }
     }
 
-    It 'restores and imports the exact dependency chain in a clean PowerShell process' {
+    It 'restores exact packages and imports with a newer compatible global dependency already loaded' {
         $feedName = 'TenantPulseTest_' + [guid]::NewGuid().ToString('N')
         $installRoot = Join-Path $TestDrive 'clean-install'
         New-Item -ItemType Directory -Path $installRoot | Out-Null
@@ -257,11 +257,36 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
         Test-Path -LiteralPath (Join-Path $installRoot 'Microsoft.PowerShell.SecretManagement') |
             Should -BeFalse
 
+        # GitHub's Ubuntu runner exposes a newer Graph Authentication module through
+        # its Azure module path. Reproduce that host contamination explicitly so the
+        # probe proves the restored dependency bytes, not whichever compatible module
+        # happens to be globally discoverable first.
+        $globalModuleRoot = Join-Path $TestDrive 'global-modules'
+        $globalModuleParent = Join-Path $globalModuleRoot 'Microsoft.Graph.Authentication'
+        $newerGlobalModule = Join-Path $globalModuleParent '2.39.0'
+        New-Item -ItemType Directory -Path $globalModuleParent -Force | Out-Null
+        Copy-Item `
+            -LiteralPath (Join-Path $installRoot 'Microsoft.Graph.Authentication/2.38.1') `
+            -Destination $newerGlobalModule `
+            -Recurse `
+            -Force
+        $newerManifestPath = Join-Path $newerGlobalModule 'Microsoft.Graph.Authentication.psd1'
+        $newerManifestText = Get-Content -LiteralPath $newerManifestPath -Raw
+        $newerManifestText = $newerManifestText -replace "ModuleVersion\s*=\s*'2\.38\.1'", "ModuleVersion = '2.39.0'"
+        Set-Content -LiteralPath $newerManifestPath -Value $newerManifestText -NoNewline
+        [string] (Import-PowerShellDataFile -LiteralPath $newerManifestPath).ModuleVersion |
+            Should -Be '2.39.0'
+
         $originalModulePath = $env:PSModulePath
         try {
-            $env:PSModulePath = $installRoot + [System.IO.Path]::PathSeparator + (Join-Path $PSHOME 'Modules')
+            $env:PSModulePath = @(
+                $globalModuleRoot
+                $installRoot
+                (Join-Path $PSHOME 'Modules')
+            ) -join [System.IO.Path]::PathSeparator
             $childOutput = @(& ([System.Environment]::ProcessPath) -NoLogo -NoProfile -Command @'
 $ErrorActionPreference = 'Stop'
+Import-Module Microsoft.Graph.Authentication -RequiredVersion 2.39.0 -Force
 Import-Module TenantPulse -RequiredVersion 0.2.0 -Force
 [pscustomobject]@{
     TenantPulse = [string] (Get-Module TenantPulse).Version
@@ -280,7 +305,11 @@ Import-Module TenantPulse -RequiredVersion 0.2.0 -Force
         $probe = $childOutput[-1] | ConvertFrom-Json
         $probe.TenantPulse | Should -Be '0.2.0'
         $probe.GraphKit | Should -Be '0.3.0'
-        $probe.GraphAuthentication | Should -Be '2.38.1'
+        # The build/feed assertions above pin the restored package to 2.38.1.
+        # GraphKit's runtime ModuleVersion constraint is a minimum, so a compatible
+        # version already loaded in the process must remain valid rather than being
+        # replaced behind another module's back.
+        $probe.GraphAuthentication | Should -Be '2.39.0'
         $probe.SecretManagementLoaded | Should -BeFalse
     }
 }

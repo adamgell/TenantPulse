@@ -831,11 +831,17 @@ function Import-Module {
             try {
                 $null = $powerShell.Invoke()
                 $hadErrors = $powerShell.HadErrors
-                $errorText = $powerShell.Streams.Error | Out-String
+                $errorText = @($powerShell.Streams.Error | ForEach-Object {
+                    $_.Exception.Message
+                }) -join [System.Environment]::NewLine
             }
             catch {
                 $hadErrors = $true
-                $errorText = @($powerShell.Streams.Error, $_) | Out-String
+                $errorMessages = @($powerShell.Streams.Error | ForEach-Object {
+                    $_.Exception.Message
+                })
+                $errorMessages += $_.Exception.Message
+                $errorText = $errorMessages -join [System.Environment]::NewLine
             }
         }
         finally {
