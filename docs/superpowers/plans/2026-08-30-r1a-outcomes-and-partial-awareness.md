@@ -132,14 +132,21 @@
 - New optional descriptor field: `Data.PartialDatasets = [string[]]`.
 - The field is an evaluator opt-in, never a collection dependency declaration.
 
-- [ ] Write failing catalog tests for a scalar value, null/empty array, blank member, exact duplicate, case-only duplicate, case-only alias of a canonical dataset, unknown dataset, dataset not listed in `Data.Datasets`, Expression rule use, and Function rule whose command lacks a `DatasetOutcomes` parameter.
-- [ ] Write a passing test for a Function rule with one or more unique `PartialDatasets`, each a member of `Data.Datasets`, whose command declares `DatasetOutcomes`.
-- [ ] Validate `PartialDatasets` only when present. It must be a non-empty string array, be unique under `OrdinalIgnoreCase`, use the exact canonical casing from `Data.Datasets` and the dataset map, be a subset of `Data.Datasets`, and be legal only for `Rule.Type = Function`.
-- [ ] Resolve `Rule.Function` first, then require its command metadata to declare a `DatasetOutcomes` parameter whenever `PartialDatasets` is present. A descriptor cannot claim partial awareness without an implementation able to receive the outcome projection.
-- [ ] Do not add `PartialDatasets` to `Data.Datasets`, the dataset map, the collection manifest, or dependency ordering. It changes evaluation only.
-- [ ] Prove `Import-PulseCheckCatalog` retains `Data.PartialDatasets` exactly and `Get-PulseCollectionManifest` remains driven only by `Data.Datasets`.
-- [ ] Document the field and monotonic safety rule in `source/Data/Checks/README.md`: universal checks may fail on a known offender but cannot pass with gaps; existential checks may pass on a known witness but cannot fail with gaps. Correct the stale claim that `Data.Datasets` is always required/non-empty, because expansion-only descriptors are valid.
-- [ ] Run catalog tests green and commit as `feat: validate partial-aware checks`.
+- [x] Write failing catalog tests for a scalar value, null/empty array, blank member, exact duplicate, case-only duplicate, case-only alias of a canonical dataset, unknown dataset, dataset not listed in `Data.Datasets`, Expression rule use, and Function rule whose command lacks a `DatasetOutcomes` parameter.
+- [x] Write a passing test for a Function rule with one or more unique `PartialDatasets`, each a member of `Data.Datasets`, whose command declares `DatasetOutcomes`.
+- [x] Validate `PartialDatasets` only when present. It must be a non-empty string array, be unique under `OrdinalIgnoreCase`, use the exact canonical casing from `Data.Datasets` and the dataset map, be a subset of `Data.Datasets`, and be legal only for `Rule.Type = Function`.
+- [x] Resolve `Rule.Function` first, then require its command metadata to declare a `DatasetOutcomes` parameter whenever `PartialDatasets` is present. A descriptor cannot claim partial awareness without an implementation able to receive the outcome projection.
+- [x] Do not add `PartialDatasets` to `Data.Datasets`, the dataset map, the collection manifest, or dependency ordering. It changes evaluation only.
+- [x] Prove `Import-PulseCheckCatalog` retains `Data.PartialDatasets` exactly and `Get-PulseCollectionManifest` remains driven only by `Data.Datasets`.
+- [x] Document the field and monotonic safety rule in `source/Data/Checks/README.md`: universal checks may fail on a known offender but cannot pass with gaps; existential checks may pass on a known witness but cannot fail with gaps. Correct the stale claim that `Data.Datasets` is always required/non-empty, because expansion-only descriptors are valid.
+- [x] Run catalog tests green and commit as `feat: validate partial-aware checks`.
+
+**Task 3 evidence (2026-08-30):**
+
+- Focused red gate: 60 catalog/manifest examples discovered; 48 passed and the 12 new rejection cases failed against the pre-contract validator, which ignored `Data.PartialDatasets`.
+- Focused green gate: 60/60 passed. The cases pin scalar/null/empty/blank rejection, ordinal-ignore-case uniqueness, exact dataset/map casing, subset membership, Function-only use, command-resolution precedence, required `DatasetOutcomes` metadata, exact catalog projection, expansion-only compatibility, and collection-manifest isolation.
+- Package-first authoritative gate: `pack` succeeded with 10 tasks, 0 errors, and 0 warnings; subsequent `test` succeeded with 2,424 tests, 0 failures, 0 errors, 0 skipped, 0 NotRun, and 11 build tasks with 0 errors/warnings.
+- Tested TenantPulse 0.3.0 package SHA-256: `897113b31311bc175ab83f76cde0add16bebb42a4c5344dce4a29b409aa330ad`; built manifest SHA-256: `4693f670b62e1c84aa83effa967f0692a252681a897c2e730e73586803f38f06`; built module SHA-256: `7cafd47f644948647d712a1f94f85ad0cf937826cb81d201f045692c8fbdeaa5`.
 
 ### Task 4: Add fail-closed partial evaluation and an isolated outcome projection
 

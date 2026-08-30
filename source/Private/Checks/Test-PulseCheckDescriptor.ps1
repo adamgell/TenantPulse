@@ -202,8 +202,10 @@ function Test-PulseCheckDescriptor {
         $errors.Add("${Label}: Impact: '$impact' is not one of: $($validEffortImpact -join '|').")
     }
 
-    # Data.Datasets / Data.Expansions / Data.Gates
+    # Data.Datasets / Data.Expansions / Data.Gates / Data.PartialDatasets
     $datasets = $null
+    $partialDatasets = $null
+    $partialDatasetsPresent = $false
     if (-not $Descriptor.ContainsKey('Data') -or $Descriptor.Data -isnot [hashtable]) {
         $errors.Add("${Label}: Data: is required and must be a hashtable.")
     } else {
@@ -217,6 +219,18 @@ function Test-PulseCheckDescriptor {
         $datasets = Test-PulseStringArrayField -Container $data -Key 'Datasets' -FieldPath 'Data.Datasets' -AllowEmpty -AllowMissing
         $expansions = Test-PulseStringArrayField -Container $data -Key 'Expansions' -FieldPath 'Data.Expansions' -AllowEmpty -AllowMissing
         Test-PulseStringArrayField -Container $data -Key 'Gates' -FieldPath 'Data.Gates' -AllowEmpty | Out-Null
+
+        # R1a: PartialDatasets is an explicit evaluation opt-in, not another collection
+        # dependency. Omission preserves the existing fail-closed behavior. Presence is a
+        # positive contract and therefore cannot be null or empty; the ordinary string-
+        # array helper supplies the same strict scalar/element checks as Data.Datasets.
+        $partialDatasetsPresent = $data.ContainsKey('PartialDatasets')
+        if ($partialDatasetsPresent) {
+            $partialDatasets = Test-PulseStringArrayField `
+                -Container $data `
+                -Key 'PartialDatasets' `
+                -FieldPath 'Data.PartialDatasets'
+        }
 
         foreach ($name in @($expansions)) {
             if ($knownExpansionArtifacts -notcontains $name) {
@@ -249,6 +263,57 @@ function Test-PulseCheckDescriptor {
         }
     }
 
+    # PartialDatasets has deliberately stricter identity rules than the older
+    # Data.Datasets field. A partial-aware check will use these names to select rows and
+    # structured outcomes at evaluation time, so case aliases and duplicates must not
+    # create two spellings for one logical dataset. Compare explicitly with ordinal .NET
+    # comparers: PowerShell's -contains and ordinary hashtables are case-insensitive and
+    # would otherwise accept precisely the aliases this contract forbids.
+    if ($null -ne $partialDatasets) {
+        $seenPartialDatasets = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::OrdinalIgnoreCase
+        )
+        $datasetNames = [string[]] @($datasets)
+        $mapNames = if ($DatasetMap) { [string[]] @($DatasetMap.Keys | ForEach-Object { [string] $_ }) } else { [string[]] @() }
+
+        foreach ($name in $partialDatasets) {
+            if (-not $seenPartialDatasets.Add($name)) {
+                $errors.Add("${Label}: Data.PartialDatasets: duplicate dataset '$name' under OrdinalIgnoreCase uniqueness.")
+            }
+
+            $declaredExact = @($datasetNames | Where-Object {
+                    [string]::Equals($_, $name, [System.StringComparison]::Ordinal)
+                })
+            if ($declaredExact.Count -eq 0) {
+                $declaredAlias = @($datasetNames | Where-Object {
+                        [string]::Equals($_, $name, [System.StringComparison]::OrdinalIgnoreCase)
+                    })
+                if ($declaredAlias.Count -gt 0) {
+                    $errors.Add("${Label}: Data.PartialDatasets: dataset '$name' must use exact Data.Datasets casing '$($declaredAlias[0])'.")
+                } else {
+                    $errors.Add("${Label}: Data.PartialDatasets: dataset '$name' must also be listed in Data.Datasets.")
+                }
+            }
+
+            if ($DatasetMap) {
+                $mapExact = @($mapNames | Where-Object {
+                        [string]::Equals($_, $name, [System.StringComparison]::Ordinal)
+                    })
+                if ($mapExact.Count -eq 0) {
+                    $mapAlias = @($mapNames | Where-Object {
+                            [string]::Equals($_, $name, [System.StringComparison]::OrdinalIgnoreCase)
+                        })
+                    if ($mapAlias.Count -gt 0) {
+                        $errors.Add("${Label}: Data.PartialDatasets: dataset '$name' must use exact dataset-map casing '$($mapAlias[0])'.")
+                    } else {
+                        $mapSuffix = if ($DatasetMapPath) { " ($DatasetMapPath)" } else { '' }
+                        $errors.Add("${Label}: Data.PartialDatasets: dataset '$name' is not present in the shared dataset map${mapSuffix}.")
+                    }
+                }
+            }
+        }
+    }
+
     # Rule
     if (-not $Descriptor.ContainsKey('Rule') -or $Descriptor.Rule -isnot [hashtable]) {
         $errors.Add("${Label}: Rule: is required and must be a hashtable.")
@@ -259,10 +324,22 @@ function Test-PulseCheckDescriptor {
             $errors.Add("${Label}: Rule.Type: '$ruleType' is not one of: $($validRuleTypes -join '|').")
         } elseif ($ruleType -eq 'Function') {
             $ruleFunction = Test-PulseScalarStringField -Container $rule -Key 'Function' -FieldPath 'Rule.Function' -Required
-            if ($null -ne $ruleFunction -and -not (Get-Command -Name $ruleFunction -ErrorAction SilentlyContinue)) {
-                $errors.Add("${Label}: Rule.Function: command '$ruleFunction' does not resolve at import time.")
+            if ($null -ne $ruleFunction) {
+                # Resolve once, then inspect only real command metadata. This ordering is
+                # important: an unresolved function has no meaningful parameter surface,
+                # so report the authoring error rather than adding a misleading secondary
+                # "missing DatasetOutcomes" diagnosis.
+                $ruleCommand = Get-Command -Name $ruleFunction -ErrorAction SilentlyContinue
+                if (-not $ruleCommand) {
+                    $errors.Add("${Label}: Rule.Function: command '$ruleFunction' does not resolve at import time.")
+                } elseif ($partialDatasetsPresent -and -not $ruleCommand.Parameters.ContainsKey('DatasetOutcomes')) {
+                    $errors.Add("${Label}: Rule.Function: command '$ruleFunction' must declare a DatasetOutcomes parameter when Data.PartialDatasets is present.")
+                }
             }
         } elseif ($ruleType -eq 'Expression') {
+            if ($partialDatasetsPresent) {
+                $errors.Add("${Label}: Data.PartialDatasets: is valid only when Rule.Type is Function.")
+            }
             $expressionText = Test-PulseScalarStringField -Container $rule -Key 'Expression' -FieldPath 'Rule.Expression' -Required
             # Parse-check at import time (post-review, do-now minor): a syntax typo in
             # Rule.Expression previously only surfaced as a per-check Error at evaluation
