@@ -947,22 +947,39 @@ Describe 'Test-PulseCheckDescriptor' {
         It 'rejects a native application Rule.Function without dereferencing null parameter metadata' {
             $result = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
                 param($base, $map)
+                # Get-Command reports the executable's real command name. Windows keeps
+                # the .exe suffix while Unix hosts report pwsh, and this validator
+                # intentionally compares names with Ordinal exactness.
+                $nativeCommandName = if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' }
+                $nativeCommands = @(Get-Command -Name $nativeCommandName -CommandType Application -ErrorAction Stop)
                 $descriptor = $base.Clone()
                 $descriptor.Data = $base.Data.Clone()
-                $descriptor.Rule = @{ Type = 'Function'; Function = 'pwsh' }
+                $descriptor.Rule = @{ Type = 'Function'; Function = $nativeCommandName }
 
                 try {
                     [pscustomobject]@{
-                        Threw  = $false
-                        Errors = @(Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map)
+                        Threw               = $false
+                        Errors              = @(Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map)
+                        NativeCommandName   = $nativeCommandName
+                        NativeCommandCount  = $nativeCommands.Count
+                        NonApplicationCount = @($nativeCommands | Where-Object CommandType -ne 'Application').Count
                     }
                 } catch {
-                    [pscustomobject]@{ Threw = $true; Errors = @($_.Exception.Message) }
+                    [pscustomobject]@{
+                        Threw               = $true
+                        Errors              = @($_.Exception.Message)
+                        NativeCommandName   = $nativeCommandName
+                        NativeCommandCount  = $nativeCommands.Count
+                        NonApplicationCount = @($nativeCommands | Where-Object CommandType -ne 'Application').Count
+                    }
                 }
             }
 
             $result.Threw | Should -BeFalse
-            ($result.Errors -join "`n") | Should -Match "Rule\.Function: command 'pwsh' must resolve to exactly one exact Function command"
+            $result.NativeCommandCount | Should -BeGreaterThan 0
+            $result.NonApplicationCount | Should -Be 0
+            $expectedMessage = "Rule.Function: command '$($result.NativeCommandName)' must resolve to exactly one exact Function command."
+            ($result.Errors -join "`n") | Should -Match ([regex]::Escape($expectedMessage))
             ($result.Errors -join "`n") | Should -Not -Match 'must declare a DatasetOutcomes parameter'
         }
 
