@@ -81,10 +81,11 @@ Validation failures include:
   `[string[]]`, but may be empty.
 - `Id`, `Severity`, `Effort`, or `Impact` not matching their allowed pattern/values
 - `Rule.Type` not `Function` or `Expression`
-- `Rule.Function` naming a command that does not resolve (via `Get-Command`) at import
-  time - this is treated as a module-authoring bug and hard-fails catalog import; a
-  runtime throw from a *resolvable* function is a different, later concern (the
-  evaluator's per-check `Error` status, Task 1.6)
+- `Rule.Function` not resolving to exactly one ordinal-exact PowerShell Function at
+  import time. Wildcard names, ambiguous matches, aliases, cmdlets, and native
+  applications are not Function rules and are rejected as aggregated catalog errors. A
+  runtime throw from one resolvable Function is a different, later concern (the
+  evaluator's per-check `Error` status, Task 1.6).
 - both `Data.Datasets` and `Data.Expansions` absent/empty, or empty
   `References.Authorities`
 - a dataset name in `Data.Datasets` not present in the shared dataset map (see below)
@@ -105,12 +106,14 @@ Validation failures include:
 names TenantPulse knows how to collect, added by Task 1.5. That file is parsed **exactly
 once per catalog load** (not once per descriptor) and validated to be a hashtable. Until
 the file exists, the `Data.Datasets` membership cross-check above is skipped (with a
-`Write-Verbose` note) - descriptors are not rejected for referencing datasets the map
-does not know about yet. Once Task 1.5 lands `DatasetMap.psd1`, every dataset name
-referenced by a descriptor's `Data.Datasets` must be a top-level key in that map, or
-catalog import fails. A present-but-malformed map file (parse failure, or a root value
-that isn't a hashtable) is reported through the same aggregated-errors mechanism as any
-other catalog problem, not as a raw, unrelated error.
+`Write-Verbose` note) - legacy descriptors without `PartialDatasets` are not rejected for
+referencing datasets the map does not know about yet. Partial awareness depends on
+canonical dataset identity, so a descriptor containing `PartialDatasets` fails closed
+when the map is missing or unavailable. Once Task 1.5 lands `DatasetMap.psd1`, every
+dataset name referenced by a descriptor's `Data.Datasets` must be a top-level key in that
+map, or catalog import fails. A present-but-malformed map file (parse failure, or a root
+value that isn't a hashtable) is reported through the same aggregated-errors mechanism
+as any other catalog problem, not as a raw, unrelated error.
 
 ### Partial-aware Function checks
 

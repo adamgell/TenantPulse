@@ -145,8 +145,10 @@
 
 - Focused red gate: 60 catalog/manifest examples discovered; 48 passed and the 12 new rejection cases failed against the pre-contract validator, which ignored `Data.PartialDatasets`.
 - Focused green gate: 60/60 passed. The cases pin scalar/null/empty/blank rejection, ordinal-ignore-case uniqueness, exact dataset/map casing, subset membership, Function-only use, command-resolution precedence, required `DatasetOutcomes` metadata, exact catalog projection, expansion-only compatibility, and collection-manifest isolation.
-- Package-first authoritative gate: `pack` succeeded with 10 tasks, 0 errors, and 0 warnings; subsequent `test` succeeded with 2,424 tests, 0 failures, 0 errors, 0 skipped, 0 NotRun, and 11 build tasks with 0 errors/warnings.
-- Tested TenantPulse 0.3.0 package SHA-256: `897113b31311bc175ab83f76cde0add16bebb42a4c5344dce4a29b409aa330ad`; built manifest SHA-256: `4693f670b62e1c84aa83effa967f0692a252681a897c2e730e73586803f38f06`; built module SHA-256: `7cafd47f644948647d712a1f94f85ad0cf937826cb81d201f045692c8fbdeaa5`.
+- Independent review correction red gate: 65 examples discovered; 61 passed and four failed. The failures reproduced a wildcard Rule.Function that ambiguously matched several functions without error, a native application whose null parameter metadata threw out of validation, a null DatasetMap that admitted a partial-aware descriptor, and the same missing-map bypass with a case-aliased dataset spelling. The unresolved literal still surfaced through the catalog's aggregated validation path.
+- Independent review correction green gate: 65/65 passed. Function rules now require one ordinal-exact PowerShell Function before null-safe parameter inspection, while every partial-aware descriptor requires an available canonical dataset map. Legacy mapless descriptors without `PartialDatasets` retain their prior behavior.
+- Package-first authoritative gate: `pack` succeeded with 10 tasks, 0 errors, and 0 warnings; subsequent `test` succeeded with 2,429 tests, 0 failures, 0 errors, 0 skipped, 0 NotRun, and 11 build tasks with 0 errors/warnings.
+- Tested TenantPulse 0.3.0 package SHA-256: `b97ab79b204407f35266a8d5c853e503c12b657bd5ada6efc223bbb3285d1bdb`; built manifest SHA-256: `4693f670b62e1c84aa83effa967f0692a252681a897c2e730e73586803f38f06`; built module SHA-256: `487745ffe476a8839dffeafef62bb49ea6c1b34713fc6b055a030f7b0bbcdc3d`.
 
 ### Task 4: Add fail-closed partial evaluation and an isolated outcome projection
 

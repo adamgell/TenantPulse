@@ -269,12 +269,17 @@ function Test-PulseCheckDescriptor {
     # create two spellings for one logical dataset. Compare explicitly with ordinal .NET
     # comparers: PowerShell's -contains and ordinary hashtables are case-insensitive and
     # would otherwise accept precisely the aliases this contract forbids.
+    $partialDatasetMapAvailable = $null -ne $DatasetMap
+    if ($partialDatasetsPresent -and -not $partialDatasetMapAvailable) {
+        $errors.Add("${Label}: Data.PartialDatasets: canonical dataset identity cannot be verified because the shared dataset map is unavailable.")
+    }
+
     if ($null -ne $partialDatasets) {
         $seenPartialDatasets = [System.Collections.Generic.HashSet[string]]::new(
             [System.StringComparer]::OrdinalIgnoreCase
         )
         $datasetNames = [string[]] @($datasets)
-        $mapNames = if ($DatasetMap) { [string[]] @($DatasetMap.Keys | ForEach-Object { [string] $_ }) } else { [string[]] @() }
+        $mapNames = if ($partialDatasetMapAvailable) { [string[]] @($DatasetMap.Keys | ForEach-Object { [string] $_ }) } else { [string[]] @() }
 
         foreach ($name in $partialDatasets) {
             if (-not $seenPartialDatasets.Add($name)) {
@@ -295,7 +300,7 @@ function Test-PulseCheckDescriptor {
                 }
             }
 
-            if ($DatasetMap) {
+            if ($partialDatasetMapAvailable) {
                 $mapExact = @($mapNames | Where-Object {
                         [string]::Equals($_, $name, [System.StringComparison]::Ordinal)
                     })
@@ -325,15 +330,44 @@ function Test-PulseCheckDescriptor {
         } elseif ($ruleType -eq 'Function') {
             $ruleFunction = Test-PulseScalarStringField -Container $rule -Key 'Function' -FieldPath 'Rule.Function' -Required
             if ($null -ne $ruleFunction) {
-                # Resolve once, then inspect only real command metadata. This ordering is
-                # important: an unresolved function has no meaningful parameter surface,
-                # so report the authoring error rather than adding a misleading secondary
-                # "missing DatasetOutcomes" diagnosis.
-                $ruleCommand = Get-Command -Name $ruleFunction -ErrorAction SilentlyContinue
-                if (-not $ruleCommand) {
-                    $errors.Add("${Label}: Rule.Function: command '$ruleFunction' does not resolve at import time.")
-                } elseif ($partialDatasetsPresent -and -not $ruleCommand.Parameters.ContainsKey('DatasetOutcomes')) {
-                    $errors.Add("${Label}: Rule.Function: command '$ruleFunction' must declare a DatasetOutcomes parameter when Data.PartialDatasets is present.")
+                # Get-Command -Name accepts wildcard syntax and can return several
+                # commands. It can also resolve applications/cmdlets whose Parameters
+                # surface is absent or irrelevant to a Function rule. Escape the lookup,
+                # retain ordinal-exact names only, and require one unambiguous Function
+                # before inspecting metadata. This makes malformed descriptors aggregate
+                # as validation errors instead of throwing from a Boolean array or a null
+                # Parameters property.
+                $containsWildcard = [System.Management.Automation.WildcardPattern]::ContainsWildcardCharacters($ruleFunction)
+                $ruleCommands = @()
+                if (-not $containsWildcard) {
+                    $escapedRuleFunction = [System.Management.Automation.WildcardPattern]::Escape($ruleFunction)
+                    # Restrict the normal lookup to Function commands. Without this
+                    # filter, Get-Command -All scans every command family for every one
+                    # of the catalog's descriptors, turning catalog validation into a
+                    # repeated hundreds-of-milliseconds operation. Non-Function lookup
+                    # is needed only on the invalid zero-Function path below.
+                    $ruleCommands = @(Get-Command -Name $escapedRuleFunction -CommandType Function -All -ErrorAction SilentlyContinue | Where-Object {
+                            [string]::Equals([string] $_.Name, $ruleFunction, [System.StringComparison]::Ordinal)
+                        })
+                }
+
+                if ($containsWildcard -or $ruleCommands.Count -gt 1) {
+                    $errors.Add("${Label}: Rule.Function: command '$ruleFunction' must resolve to exactly one exact Function command.")
+                } elseif ($ruleCommands.Count -eq 0) {
+                    $anyExactCommand = @(Get-Command -Name $escapedRuleFunction -All -ErrorAction SilentlyContinue | Where-Object {
+                            [string]::Equals([string] $_.Name, $ruleFunction, [System.StringComparison]::Ordinal)
+                        })
+                    if ($anyExactCommand.Count -eq 0) {
+                        $errors.Add("${Label}: Rule.Function: command '$ruleFunction' does not resolve at import time.")
+                    } else {
+                        $errors.Add("${Label}: Rule.Function: command '$ruleFunction' must resolve to exactly one exact Function command.")
+                    }
+                } else {
+                    $ruleParameters = $ruleCommands[0].Parameters
+                    if ($partialDatasetsPresent -and
+                        ($null -eq $ruleParameters -or -not $ruleParameters.ContainsKey('DatasetOutcomes'))) {
+                        $errors.Add("${Label}: Rule.Function: command '$ruleFunction' must declare a DatasetOutcomes parameter when Data.PartialDatasets is present.")
+                    }
                 }
             }
         } elseif ($ruleType -eq 'Expression') {

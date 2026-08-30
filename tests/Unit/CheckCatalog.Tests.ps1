@@ -919,6 +919,68 @@ Describe 'Test-PulseCheckDescriptor' {
             $joined | Should -Match "Rule\.Function: command 'Test-PulseFunctionThatDoesNotExist' does not resolve at import time"
             $joined | Should -Not -Match 'must declare a DatasetOutcomes parameter'
         }
+
+        It 'rejects a wildcard Rule.Function that ambiguously matches multiple functions without throwing' {
+            $result = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialWildcardOne { param($Datasets) }
+                function Test-PulsePartialWildcardTwo { param($Datasets) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Rule = @{ Type = 'Function'; Function = 'Test-PulsePartialWildcard*' }
+
+                try {
+                    [pscustomobject]@{
+                        Threw  = $false
+                        Errors = @(Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map)
+                    }
+                } catch {
+                    [pscustomobject]@{ Threw = $true; Errors = @($_.Exception.Message) }
+                }
+            }
+
+            $result.Threw | Should -BeFalse
+            ($result.Errors -join "`n") | Should -Match "Rule\.Function: command 'Test-PulsePartialWildcard\*' must resolve to exactly one exact Function command"
+            ($result.Errors -join "`n") | Should -Not -Match 'must declare a DatasetOutcomes parameter'
+        }
+
+        It 'rejects a native application Rule.Function without dereferencing null parameter metadata' {
+            $result = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Rule = @{ Type = 'Function'; Function = 'pwsh' }
+
+                try {
+                    [pscustomobject]@{
+                        Threw  = $false
+                        Errors = @(Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map)
+                    }
+                } catch {
+                    [pscustomobject]@{ Threw = $true; Errors = @($_.Exception.Message) }
+                }
+            }
+
+            $result.Threw | Should -BeFalse
+            ($result.Errors -join "`n") | Should -Match "Rule\.Function: command 'pwsh' must resolve to exactly one exact Function command"
+            ($result.Errors -join "`n") | Should -Not -Match 'must declare a DatasetOutcomes parameter'
+        }
+
+        It 'fails closed when PartialDatasets canonical identity cannot be checked because DatasetMap is null' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor {
+                param($base)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{
+                    Datasets        = @('ConfigurationPolicies')
+                    PartialDatasets = @('ConfigurationPolicies')
+                    Gates           = @()
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $null
+            }
+
+            (@($errors) -join "`n") | Should -Match 'Data\.PartialDatasets: canonical dataset identity cannot be verified because the shared dataset map is unavailable\.'
+        }
     }
 }
 
@@ -987,5 +1049,33 @@ Describe 'Data.PartialDatasets catalog projection and collection isolation (R1a)
     It 'keeps the collection-manifest implementation independent of PartialDatasets' {
         $manifestSource = Get-Content -LiteralPath (Join-Path $script:repoRoot 'source/Private/Collect/Get-PulseCollectionManifest.ps1') -Raw
         $manifestSource | Should -Not -Match '\bPartialDatasets\b'
+    }
+
+    It 'aggregates an unresolved literal partial-aware Rule.Function as a catalog validation error' {
+        $descriptorPath = Join-Path $script:tempRoot 'partial.psd1'
+        $descriptorText = (Get-Content -LiteralPath $descriptorPath -Raw) -replace 'Test-PulsePartialAwareImportRule', 'Test-PulseFunctionThatDoesNotExist'
+        Set-Content -LiteralPath $descriptorPath -Value $descriptorText -Encoding utf8NoBOM
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:tempRoot {
+                param($path)
+                Import-PulseCheckCatalog -Path $path
+            }
+        } | Should -Throw -ExpectedMessage "*partial.psd1*Rule.Function*Test-PulseFunctionThatDoesNotExist*does not resolve at import time*"
+    }
+
+    It 'rejects a case-aliased partial-aware descriptor when its DatasetMapPath is missing' {
+        $descriptorPath = Join-Path $script:tempRoot 'partial.psd1'
+        $descriptorText = (Get-Content -LiteralPath $descriptorPath -Raw) -creplace 'configurationPolicies', 'ConfigurationPolicies'
+        Set-Content -LiteralPath $descriptorPath -Value $descriptorText -Encoding utf8NoBOM
+        $missingMapPath = Join-Path $script:tempRoot 'missing-DatasetMap.psd1'
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:tempRoot, $missingMapPath {
+                param($path, $mapPath)
+                function Test-PulsePartialAwareImportRule { param($Datasets, $DatasetOutcomes) }
+                Import-PulseCheckCatalog -Path $path -DatasetMapPath $mapPath
+            }
+        } | Should -Throw -ExpectedMessage '*partial.psd1*Data.PartialDatasets*canonical dataset identity cannot be verified*dataset map is unavailable*'
     }
 }
