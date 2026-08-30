@@ -235,13 +235,35 @@ function Invoke-PulseCollection {
                     $collectedRows[$entry.Dataset] = @($outcome.Rows)
                 }
             } catch {
-                $reason = Protect-PulseReason -Message 'provider-plan-failed: execution or validation error' `
-                    -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
-                Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion `
-                    -Status 'Failed' -Reason $reason -ReasonCode 'provider-plan-failed' `
-                    -Detail @{ dataset = $entry.Dataset } -FailureClass 'ProviderFailed' `
-                    -Provider 'GraphKit' -Operations @($entry.Operation) `
-                    -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+                $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+                if ($failure.HasStructuredSignal) {
+                    $statusCodeText = if ($null -eq $failure.StatusCode) { 'unknown' } else { [string] $failure.StatusCode }
+                    $canonicalReason = "graph-request-failed: failureClass=$($failure.FailureClass); reasonCode=$($failure.ReasonCode); statusCode=$statusCodeText"
+                    $reason = Protect-PulseReason -Message $canonicalReason `
+                        -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                    Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion `
+                        -Status 'Failed' -Reason $reason -ReasonCode $failure.ReasonCode `
+                        -Detail @{ statusCode = $failure.StatusCode; hasStructuredSignal = $failure.HasStructuredSignal } `
+                        -FailureClass $failure.FailureClass -Provider 'GraphKit' -Operations @($entry.Operation) `
+                        -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+
+                    if ($failure.AbortCollection) {
+                        $collectionFailureReason = Protect-PulseReason -Message 'authentication-failed' `
+                            -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                        Set-PulseManifestEntry -Store $Store -CollectionFailure $collectionFailureReason
+                        $NetworkAbortState.AuthenticationAborted = $true
+                        $NetworkAbortState.Reason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
+                            -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                    }
+                } else {
+                    $reason = Protect-PulseReason -Message 'provider-plan-failed: execution or validation error' `
+                        -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                    Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion `
+                        -Status 'Failed' -Reason $reason -ReasonCode 'provider-plan-failed' `
+                        -Detail @{ dataset = $entry.Dataset } -FailureClass 'ProviderFailed' `
+                        -Provider 'GraphKit' -Operations @($entry.Operation) `
+                        -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+                }
             }
             continue
         }
