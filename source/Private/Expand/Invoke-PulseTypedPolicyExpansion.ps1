@@ -238,9 +238,32 @@ function Invoke-PulseTypedPolicyExpansion {
                 default { $null }
             }
 
-            $groupId = if ($null -ne $groupIdRaw) { [string] $groupIdRaw } else { $null }
-            if ([string]::IsNullOrWhiteSpace($targetType) -or
-                ($targetType -in @('group', 'exclusionGroup') -and [string]::IsNullOrWhiteSpace($groupId))) {
+            $groupId = if ($groupIdRaw -is [string]) { $groupIdRaw } else { $null }
+            if (($null -ne $groupIdRaw -and $groupIdRaw -isnot [string]) -or
+                [string]::IsNullOrWhiteSpace($targetType) -or
+                ($targetType -in @('group', 'exclusionGroup') -and [string]::IsNullOrWhiteSpace($groupId)) -or
+                ($targetType -in @('allDevices', 'allLicensedUsers') -and $null -ne $groupIdRaw)) {
+                $invalidAssignmentTarget = $true
+                break
+            }
+            if (($null -ne $filterIdRaw -and $filterIdRaw -isnot [string]) -or
+                ($null -ne $filterTypeRaw -and $filterTypeRaw -isnot [string])) {
+                $invalidAssignmentTarget = $true
+                break
+            }
+            $filterId = if ($filterIdRaw -is [string]) { $filterIdRaw } else { $null }
+            $filterType = if ($filterTypeRaw -is [string]) { $filterTypeRaw } else { $null }
+            $filterShapeValid = if ($null -eq $filterTypeRaw) {
+                $null -eq $filterIdRaw
+            } elseif ([string]::Equals($filterType, 'none', [System.StringComparison]::Ordinal)) {
+                $null -eq $filterIdRaw
+            } elseif ([string]::Equals($filterType, 'include', [System.StringComparison]::Ordinal) -or
+                [string]::Equals($filterType, 'exclude', [System.StringComparison]::Ordinal)) {
+                -not [string]::IsNullOrWhiteSpace($filterId)
+            } else {
+                $false
+            }
+            if (-not $filterShapeValid) {
                 $invalidAssignmentTarget = $true
                 break
             }
@@ -254,8 +277,8 @@ function Invoke-PulseTypedPolicyExpansion {
                 intent     = $intent
                 targetType = $targetType
                 groupId    = $groupId
-                filterId   = if ($null -ne $filterIdRaw) { [string] $filterIdRaw } else { $null }
-                filterType = if ($null -ne $filterTypeRaw) { [string] $filterTypeRaw } else { $null }
+                filterId   = $filterId
+                filterType = $filterType
             }) | Out-Null
         }
 

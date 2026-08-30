@@ -11,7 +11,7 @@ function Resolve-PulseLapsPolicyValues {
 
     function Get-CriterionRows {
         param([string] $Pattern)
-        @($settingRows | Where-Object { ([string] $_.DefinitionId) -match $Pattern })
+        return , [object[]]@($settingRows | Where-Object { ([string] $_.DefinitionId) -match $Pattern })
     }
 
     function Get-TrailingNumber {
@@ -24,7 +24,9 @@ function Resolve-PulseLapsPolicyValues {
 
     function Test-CriterionValue {
         param(
-            [Parameter(Mandatory)] [object[]] $Rows,
+            [Parameter(Mandatory)]
+            [AllowEmptyCollection()]
+            [object[]] $Rows,
             [Parameter(Mandatory)] [ValidateSet('Backup', 'Complexity', 'Length', 'PostAuthentication')] [string] $Criterion
         )
 
@@ -49,7 +51,7 @@ function Resolve-PulseLapsPolicyValues {
                     }
                     'PostAuthentication' {
                         if ($token -match '(?i)(reset|rotate)') { return [bool] $true }
-                        if ($number -in @(1, 3)) { return [bool] $true }
+                        if ($number -in @(1, 3, 5, 11)) { return [bool] $true }
                     }
                 }
             }

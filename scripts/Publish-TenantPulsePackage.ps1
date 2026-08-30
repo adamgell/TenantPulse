@@ -48,9 +48,9 @@
         (SupportsShouldProcess's own mechanism) or simply omitting BOTH -Confirm and a
         non-empty API key also leaves this script in report-only mode. An actual outward
         publication to PSGallery requires ALL of: the whole-result proof passing, the
-        digest check passing, an explicit API key, and confirmation. Sending a package to
-        a public, permanent gallery must never happen as a side effect of checking the
-        publisher mechanics.
+        digest check passing, explicit -Publish authorization, an explicit API key, and
+        confirmation. Sending a package to a public, permanent gallery must never happen
+        as a side effect of checking the publisher mechanics.
 
         THIS SCRIPT DOES NOT RUN ITSELF. It is the explicit operator boundary for the
         permanent PSGallery action; nothing in this repository's build or CI pipeline

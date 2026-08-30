@@ -34,6 +34,12 @@ function Invoke-PulseWindowsDataProcessorPlan {
         [string] $TenantPseudonym
     )
 
+    # Required by the common provider-plan contract; this no-network plan needs only Dataset.
+    $null = $Context
+    $null = $ManifestEntry
+    $null = $ProfileId
+    $null = $TenantPseudonym
+
     $detail = [ordered]@{
         Contract = 'DataProcessorServiceForWindowsFeaturesOnboarding.Get'
         Method   = 'GET'

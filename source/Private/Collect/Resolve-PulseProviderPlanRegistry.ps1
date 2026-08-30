@@ -42,8 +42,14 @@ function Resolve-PulseProviderPlanRegistry {
     }
 
     $registry = @{
-        subscribedSkus                                      = $subscribedSkuLicensePlan
-        dataProcessorServiceForWindowsFeaturesOnboarding = $windowsDataProcessorPlan
+        subscribedSkus                                    = $subscribedSkuLicensePlan
+        # This disposition is the one built-in plan that is safe to run after an
+        # authentication abort: it records a fixed platform outcome and performs no Graph
+        # call. Unmarked plans, including caller overrides below, remain network-backed.
+        dataProcessorServiceForWindowsFeaturesOnboarding = @{
+            Command         = $windowsDataProcessorPlan
+            RequiresNetwork = $false
+        }
         intuneRbacGroupProtection                         = $intuneRbacPlan
         endpointSecurityDiskEncryptionPolicies           = $endpointSecurityPlan
         endpointSecurityLapsPolicies                     = $endpointSecurityPlan
@@ -56,7 +62,22 @@ function Resolve-PulseProviderPlanRegistry {
             if ($null -eq $override) {
                 throw "ProviderPlanRegistry override for '$dataset' cannot be null."
             }
-            $registry[$dataset] = $override
+
+            # RequiresNetwork = false is reserved for the built-in Windows disposition
+            # above. A caller may use the same registration shape to supply its command,
+            # but cannot grant its own plan the post-auth-abort exemption.
+            if ($override -is [System.Collections.IDictionary] -and $override.Contains('Command')) {
+                if ($null -eq $override.Command) {
+                    throw "ProviderPlanRegistry override for '$dataset' command cannot be null."
+                }
+
+                $registry[$dataset] = @{
+                    Command         = $override.Command
+                    RequiresNetwork = $true
+                }
+            } else {
+                $registry[$dataset] = $override
+            }
         }
     }
 

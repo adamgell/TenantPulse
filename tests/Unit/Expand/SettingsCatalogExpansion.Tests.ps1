@@ -148,6 +148,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
             @(
                 [ordered]@{
                     id     = 'assignment-include'
+                    intent = 'include'
                     target = [ordered]@{
                         '@odata.type'                              = '#microsoft.graph.groupAssignmentTarget'
                         groupId                                   = 'group-include'
@@ -157,6 +158,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                 }
                 [ordered]@{
                     id     = 'assignment-exclude'
+                    intent = 'exclude'
                     target = [ordered]@{
                         '@odata.type'                              = '#microsoft.graph.exclusionGroupAssignmentTarget'
                         groupId                                   = 'group-exclude'
@@ -291,6 +293,106 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
             'target-missing-discriminator'
             'target-unsupported'
         )
+        Get-PulseExpandedJsonlPath -Store $script:store | Should -BeNullOrEmpty
+    }
+
+    It 'gaps allDevices and allLicensedUsers targets that supply any non-null groupId' {
+        $caseIds = @(
+            'target-all-devices-string-id'
+            'target-all-devices-numeric-id'
+            'target-all-licensed-users-string-id'
+            'target-all-licensed-users-object-id'
+        )
+        $policies = @($caseIds | ForEach-Object { New-TestPolicy -Id $_ })
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
+        } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
+        } {
+            $target = switch ($Parameters.id) {
+                'target-all-devices-string-id' {
+                    [ordered]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'; groupId = 'stray-group' }
+                }
+                'target-all-devices-numeric-id' {
+                    [ordered]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'; groupId = 12345 }
+                }
+                'target-all-licensed-users-string-id' {
+                    [ordered]@{ '@odata.type' = '#microsoft.graph.allLicensedUsersAssignmentTarget'; groupId = 'stray-group' }
+                }
+                'target-all-licensed-users-object-id' {
+                    [ordered]@{ '@odata.type' = '#microsoft.graph.allLicensedUsersAssignmentTarget'; groupId = [ordered]@{ value = 'stray-group' } }
+                }
+            }
+            @([ordered]@{ id = "assignment-$($Parameters.id)"; target = $target })
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $index {
+            param($store, $context, $policies, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies $policies -DefinitionIndex $index
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.RowCount | Should -Be 0
+        $summary.Gaps.Count | Should -Be $caseIds.Count
+        @($summary.Gaps.reason | Sort-Object -Unique) | Should -Be @('category:InvalidAssignmentTarget')
+        @($summary.Gaps.policyId | Sort-Object) | Should -Be @($caseIds | Sort-Object)
+        Get-PulseExpandedJsonlPath -Store $script:store | Should -BeNullOrEmpty
+    }
+
+    It 'gaps policies whose supplied assignment intent is not the exact target-derived row-schema intent' {
+        $caseIds = @(
+            'intent-non-string'
+            'intent-unknown'
+            'intent-wrong-case'
+            'intent-include-on-exclusion'
+            'intent-exclude-on-group'
+        )
+        $policies = @($caseIds | ForEach-Object { New-TestPolicy -Id $_ })
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
+        } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
+        } {
+            $intent = switch ($Parameters.id) {
+                'intent-non-string' { [ordered]@{ value = 'include' } }
+                'intent-unknown' { 'futureValue' }
+                'intent-wrong-case' { 'Include' }
+                'intent-include-on-exclusion' { 'include' }
+                'intent-exclude-on-group' { 'exclude' }
+            }
+            $targetType = if ($Parameters.id -eq 'intent-include-on-exclusion') {
+                '#microsoft.graph.exclusionGroupAssignmentTarget'
+            } else {
+                '#microsoft.graph.groupAssignmentTarget'
+            }
+            @([ordered]@{
+                    id = "assignment-$($Parameters.id)"
+                    intent = $intent
+                    target = [ordered]@{
+                        '@odata.type' = $targetType
+                        groupId = "group-$($Parameters.id)"
+                    }
+                })
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $index {
+            param($store, $context, $policies, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies $policies -DefinitionIndex $index
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.RowCount | Should -Be 0
+        $summary.Gaps.Count | Should -Be $caseIds.Count
+        @($summary.Gaps.reason | Sort-Object -Unique) | Should -Be @('category:InvalidAssignmentTarget')
+        @($summary.Gaps.policyId | Sort-Object) | Should -Be @($caseIds | Sort-Object)
         Get-PulseExpandedJsonlPath -Store $script:store | Should -BeNullOrEmpty
     }
 
@@ -466,6 +568,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                     id = 'assignment-explicit-null'
                     target = [ordered]@{
                         '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'
+                        groupId = $null
                         deviceAndAppManagementAssignmentFilterId = $null
                         deviceAndAppManagementAssignmentFilterType = $null
                     }
@@ -496,10 +599,12 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $omitted.filterType | Should -BeNullOrEmpty
 
         $explicitNull = $row.assignments | Where-Object targetType -EQ 'allDevices'
+        $explicitNull.groupId | Should -BeNullOrEmpty
         $explicitNull.filterId | Should -BeNullOrEmpty
         $explicitNull.filterType | Should -BeNullOrEmpty
 
         $none = $row.assignments | Where-Object targetType -EQ 'allLicensedUsers'
+        $none.groupId | Should -BeNullOrEmpty
         $none.filterId | Should -BeNullOrEmpty
         $none.filterType | Should -Be 'none'
     }

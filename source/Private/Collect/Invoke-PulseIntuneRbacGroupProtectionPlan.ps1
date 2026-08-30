@@ -36,6 +36,10 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         [string] $TenantPseudonym
     )
 
+    # Required by the common provider-plan contract; this plan does not use either value.
+    $null = $ProfileId
+    $null = $TenantPseudonym
+
     $descriptorSpecs = @(
         @{ Type = 'DeviceManagementUnifiedRoleAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         @{ Type = 'Group'; Operation = 'Get'; ApiVersion = 'v1.0' }

@@ -16,6 +16,27 @@
     license absence.
 #>
 
+function ConvertTo-PulseOrdinalStringArray {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [System.Collections.IEnumerable] $Values
+    )
+
+    $copy = [System.Collections.Generic.List[string]]::new()
+    foreach ($value in $Values) {
+        $copy.Add([string] $value) | Out-Null
+    }
+
+    $sorted = $copy.ToArray()
+    if ($sorted.Count -gt 1) {
+        [System.Array]::Sort($sorted, [System.StringComparer]::Ordinal)
+    }
+    return , $sorted
+}
+
 function Invoke-PulseSubscribedSkuLicensePlan {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -192,7 +213,7 @@ function Invoke-PulseSubscribedSkuLicensePlan {
 
     $gaps = [object[]]@()
     if ($hasMalformedEvidence) {
-        $categories = [string[]]@($malformedCategories | Sort-Object)
+        $categories = ConvertTo-PulseOrdinalStringArray -Values $malformedCategories
         $gaps = @(
             New-PulseCollectionGap -Scope 'license-evidence' -FailureClass 'InvalidProviderData' `
                 -ReasonCode 'invalid-provider-data' -Detail @{ Categories = $categories } `

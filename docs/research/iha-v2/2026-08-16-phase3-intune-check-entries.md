@@ -66,10 +66,9 @@ Whether at least one per-platform managed-device clean-up rule has a positive
 
 - Authority: Maester https://maester.dev/docs/tests/MT.1053 ; https://learn.microsoft.com/en-us/intune/governance/configure-cleanup-rules
 - Origin: Maester MT.1053 (`Test-MtManagedDeviceCleanupSettings`, MIT, port)
-- Data: `beta/deviceManagement/managedDeviceCleanupRules`; descriptor candidate:
-  `ManagedDeviceCleanupRule.ListBeta` (beta collection). TenantPulse remains pinned to
-  immutable GraphKit 0.2.2, so this dataset is Pending until a later GraphKit release
-  carries that exact operation.
+- Data: `beta/deviceManagement/managedDeviceCleanupRules`; released descriptor:
+  `ManagedDeviceCleanupRule.ListBeta` (beta collection). TenantPulse 0.2.0 requires
+  immutable GraphKit 0.3.0, which carries that exact operation, so this dataset is Live.
 - Severity rationale: Low - hygiene/reporting-accuracy issue, not a direct exposure. A
   successful empty collection or a collection whose well-formed rows are all `0` fails;
   missing or malformed day values produce Error rather than authoritative success.

@@ -51,6 +51,36 @@ Describe 'Get-PulseGateStatus' {
         $status.Outcome.FailureClass | Should -Be 'GateUnknown'
     }
 
+    It 'caps provider detail at the gate-status boundary' {
+        $longDetail = 'x' * 1000
+        $status = InModuleScope TenantPulse -ArgumentList $longDetail {
+            param($detail)
+            Get-PulseGateStatus -Gate 'EntraP2' -Manifest @{} -Provider @{
+                EntraP2 = @{ Status = 'Unknown'; Detail = $detail }
+            }
+        }
+
+        $status.Status | Should -Be 'Unknown'
+        $status.FailureClass | Should -Be 'GateUnknown'
+        $status.Detail.Length | Should -Be 500
+        $status.Outcome.Detail.detail.Length | Should -Be 500
+    }
+
+    It 'maps a throwing provider to fixed non-sensitive Unknown detail' {
+        $status = InModuleScope TenantPulse {
+            Get-PulseGateStatus -Gate 'EntraP2' -Manifest @{} -Provider {
+                throw 'SENSITIVE-PROVIDER-SENTINEL tenant-guid-or-upn'
+            }
+        }
+
+        $status.Status | Should -Be 'Unknown'
+        $status.FailureClass | Should -Be 'GateUnknown'
+        $status.Outcome.Status | Should -Be 'Skipped'
+        $status.Outcome.FailureClass | Should -Be 'GateUnknown'
+        $status.Detail | Should -Be 'Gate provider failed.'
+        ($status | ConvertTo-Json -Depth 10) | Should -Not -Match 'SENSITIVE-PROVIDER-SENTINEL'
+    }
+
     It 'does not infer Unavailable from a missing license dataset' {
         $status = InModuleScope TenantPulse {
             Get-PulseGateStatus -Gate 'EntraP2' -Manifest @{ datasets = @{} }

@@ -20,7 +20,8 @@
               permissions>' (read from the descriptor's own RequiredPermissions - the
               uncollected-with-reason outcome the spec requires, without a new GraphKit
               permission-preflight API).
-            * AuthFailure means no further read in this run can possibly succeed -
+            * AuthFailure means no further network-backed read in this run can possibly
+              succeed -
               GraphKit's Get-GraphContext performs zero network calls and never acquires a
               token (see its own docstring), so a real authentication failure is only ever
               discovered here, at the first dataset attempt that actually talks to Graph,
@@ -28,11 +29,11 @@
               redacted failure reason, the snapshot's top-level collectionFailure is set
               to that same reason, every REMAINING (not yet attempted) dataset in the
               manifest is written Failed with reason 'auth-failure: collection aborted'
-              with NO further Graph calls (they would all fail identically), and
-              collection stops - EXCEPT a remaining entry that is itself Pending
-              (post-review fix): it keeps its normal descriptor-pending Skipped outcome
-              rather than being overwritten to auth-failure, since it was never going to
-              be attempted this run regardless of the auth failure.
+              with NO further Graph calls (they would all fail identically). Remaining
+              Pending entries keep their normal descriptor-pending Skipped outcome, and a
+              built-in provider plan explicitly marked RequiresNetwork = false still runs
+              so its fixed, no-network disposition is not overwritten by an unrelated auth
+              failure. Unmarked plans and caller overrides remain network-backed.
             * Anything else writes Failed with the caught exception's (redacted) message
               as the reason.
 
@@ -123,6 +124,12 @@ function Invoke-PulseCollection {
     # file's own docstring).
     $pendingDatasets = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
+    # Once authentication fails, later network-backed work is classified without invoking
+    # it. The loop still advances so an explicitly no-network built-in plan can persist its
+    # own outcome and an ordinary Pending entry can retain descriptor-pending.
+    $authenticationAborted = $false
+    $authenticationAbortReason = $null
+
     for ($i = 0; $i -lt $Manifest.Count; $i++) {
         $entry = $Manifest[$i]
 
@@ -130,8 +137,29 @@ function Invoke-PulseCollection {
         # registered plan takes precedence over Pending because Pending is a temporary
         # catalog state, not a runtime implementation for a capability with a plan.
         $planCommand = $null
+        $planRequiresNetwork = $true
         if ($null -ne $ProviderPlanRegistry -and $ProviderPlanRegistry.ContainsKey($entry.Dataset)) {
-            $planCommand = $ProviderPlanRegistry[$entry.Dataset]
+            $planRegistration = $ProviderPlanRegistry[$entry.Dataset]
+            if ($planRegistration -is [System.Collections.IDictionary] -and $planRegistration.Contains('Command')) {
+                $planCommand = $planRegistration.Command
+                if ($planRegistration.Contains('RequiresNetwork') -and $planRegistration.RequiresNetwork -is [bool]) {
+                    $planRequiresNetwork = [bool] $planRegistration.RequiresNetwork
+                }
+            } else {
+                $planCommand = $planRegistration
+            }
+        }
+
+        # Registry membership alone does not make a plan safe after auth failure. Only the
+        # built-in registration carrying an explicit Boolean RequiresNetwork = false may
+        # dispatch; raw scriptblocks/commands (the caller override contract) default true.
+        $isPendingWithoutPlan = $entry.Pending -and $null -eq $planCommand
+        if ($authenticationAborted -and -not $isPendingWithoutPlan -and
+            ($null -eq $planCommand -or $planRequiresNetwork)) {
+            Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
+                -Reason $authenticationAbortReason -ReasonCode 'auth-failure' -Detail @{ status = 'collection aborted' } `
+                -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations @($entry.Operation)
+            continue
         }
         if ($null -ne $planCommand) {
             try {
@@ -313,30 +341,10 @@ function Invoke-PulseCollection {
                     -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations @($entry.Operation)
                 Set-PulseManifestEntry -Store $Store -CollectionFailure $redactedReason
 
-                # No further Graph calls: every remaining dataset would fail identically
-                # against the same broken auth context. A remaining entry that is itself
-                # Pending (post-review fix) is the ONE exception: it was never going to be
-                # attempted this run regardless of the auth failure (see the Pending branch
-                # above - no descriptor exists for it yet), so overwriting its reason to
-                # 'auth-failure: collection aborted' would replace an accurate, unrelated
-                # explanation ('descriptor-pending: ...') with a misleading one that blames
-                $remainingReason = Protect-PulseReason -Message 'auth-failure: collection aborted' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
-                for ($j = $i + 1; $j -lt $Manifest.Count; $j++) {
-                    $remaining = $Manifest[$j]
-                    if ($remaining.Pending -and -not ($null -ne $ProviderPlanRegistry -and $ProviderPlanRegistry.ContainsKey($remaining.Dataset))) {
-                        $pendingDatasets.Add($remaining.Dataset) | Out-Null
-                        $pendingReason = Protect-PulseReason -Message 'descriptor-pending: awaiting GraphKit release' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
-                        Write-PulseDataset -Store $Store -Name $remaining.Dataset -ApiVersion $remaining.ApiVersion -Status 'Skipped' `
-                            -Reason $pendingReason -ReasonCode 'descriptor-pending' -Detail @{ status = 'awaiting GraphKit release' } `
-                            -FailureClass 'DescriptorPending' -Provider 'GraphKit' -Operations @($remaining.Operation)
-                        continue
-                    }
-                    Write-PulseDataset -Store $Store -Name $remaining.Dataset -ApiVersion $remaining.ApiVersion -Status 'Failed' `
-                        -Reason $remainingReason -ReasonCode 'auth-failure' -Detail @{ status = 'collection aborted' } `
-                        -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations @($remaining.Operation)
-                }
-
-                return
+                $authenticationAborted = $true
+                $authenticationAbortReason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
+                    -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                continue
             } else {
                 # GraphKit 0.1.1: the ErrorRecord itself is the only signal source now (see
                 # Get-PulseFailureClass's docstring - no supplemental out-of-band recovery

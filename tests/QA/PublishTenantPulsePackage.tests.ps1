@@ -875,6 +875,8 @@ function Import-Module {
 Describe 'Publisher workflow boundary' {
     It 'does not expose Sampler gallery publication as a build workflow that bypasses the verified-package script' {
         $buildYaml = Get-Content -LiteralPath (Join-Path $script:repoRoot 'build.yaml') -Raw
+        $buildYaml | Should -Not -Match '(?m)^  publish:\s*$'
+
         $publishWorkflow = [regex]::Match(
             $buildYaml,
             '(?ms)^  publish:\s*$(?<body>.*?)(?=^  [a-zA-Z0-9_.-]+:\s*$|^#{10,})'

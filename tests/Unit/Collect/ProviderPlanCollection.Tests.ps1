@@ -155,6 +155,120 @@ Describe 'Invoke-PulseCollection provider plans' {
         Test-Path -LiteralPath (Join-Path $script:store.DatasetsPath 'unresolvedPartial.json') | Should -BeFalse
     }
 
+    It 'preserves a built-in no-network plan after auth abort while failing network-backed plans without another Graph call' {
+        Mock Get-GraphOperation -ModuleName TenantPulse {
+            @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @() }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            throw 'Get-GraphObject failed: AADSTS700016: Application not found in the directory.'
+        }
+
+        $planRegistry = InModuleScope TenantPulse { Resolve-PulseProviderPlanRegistry }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
+            [pscustomobject]@{ Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'; Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'subscribedSkus'; Type = 'SubscribedSku'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.conditionalAccessPolicies.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Skipped'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'PlatformUnavailable'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'platform-unavailable'
+        $saved.datasets.subscribedSkus.status | Should -Be 'Failed'
+        $saved.datasets.subscribedSkus.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.subscribedSkus.reasonCode | Should -Be 'auth-failure'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
+    }
+
+    It 'treats a caller override for the built-in no-network dataset as networked after auth abort' {
+        Mock Get-GraphOperation -ModuleName TenantPulse {
+            @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @() }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            throw 'Get-GraphObject failed: AADSTS700016: Application not found in the directory.'
+        }
+
+        $planRegistry = InModuleScope TenantPulse {
+            Resolve-PulseProviderPlanRegistry -Overrides @{
+                dataProcessorServiceForWindowsFeaturesOnboarding = {
+                    throw 'caller override must not run after authentication has failed'
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
+            [pscustomobject]@{ Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'; Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Failed'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'auth-failure'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
+    }
+
+    It 'treats a registration-shaped caller override claiming no network as networked after auth abort' {
+        Mock Get-GraphOperation -ModuleName TenantPulse {
+            @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @() }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            throw 'Get-GraphObject failed: AADSTS700016: Application not found in the directory.'
+        }
+
+        $planRegistry = InModuleScope TenantPulse {
+            Resolve-PulseProviderPlanRegistry -Overrides @{
+                dataProcessorServiceForWindowsFeaturesOnboarding = @{
+                    Command = {
+                        throw 'caller override claiming no network must not run after authentication has failed'
+                    }
+                    RequiresNetwork = $false
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
+            [pscustomobject]@{ Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'; Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Failed'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'auth-failure'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
+    }
+
+    It 'rejects a registration-shaped caller override with a null command' {
+        {
+            InModuleScope TenantPulse {
+                Resolve-PulseProviderPlanRegistry -Overrides @{
+                    dataProcessorServiceForWindowsFeaturesOnboarding = @{
+                        Command         = $null
+                        RequiresNetwork = $false
+                    }
+                }
+            }
+        } | Should -Throw -ExpectedMessage "ProviderPlanRegistry override for 'dataProcessorServiceForWindowsFeaturesOnboarding' command cannot be null."
+    }
+
 
     It 'records a structured dependency failure instead of silently dropping the dependent dataset' {
         Mock Get-GraphOperation -ModuleName TenantPulse {

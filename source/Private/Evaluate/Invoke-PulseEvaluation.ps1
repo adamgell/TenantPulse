@@ -464,7 +464,11 @@ function Invoke-PulseCheckEvaluation {
                 'no detail provided'
             }
             $verb = if ($gateStatus.Status -eq 'Unavailable') { 'unavailable' } else { 'unknown' }
-            $reason = "gate '$gate' ${verb}: $detail"
+            # Gate details are capped at their provider boundary, but the complete reason
+            # adds a prefix and therefore needs the established whole-reason cap as well.
+            # ProfileId is deliberately empty: no heuristic identifier scanning is added.
+            $reason = Protect-PulseReason -Message "gate '$gate' ${verb}: $detail" `
+                -ProfileId '' -Pseudonym 'tp-gate'
             return @{
                 Status          = 'NotApplicable'
                 Evidence        = @()

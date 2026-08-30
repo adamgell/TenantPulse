@@ -139,6 +139,61 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         )
         $rows[3].Tokens[0] | Should -Be 'device_vendor_msft_laps_postauthenticationactions_0'
     }
+
+    It 'resolves LAPS criteria nested under groupSettingCollectionValue children' {
+        $children = @(
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1').settingInstance
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4').settingInstance
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple).settingInstance
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_3').settingInstance
+        )
+        $settings = @(
+            [pscustomobject]@{
+                id = 'laps-group'
+                settingInstance = [pscustomobject]@{
+                    settingDefinitionId       = 'device_vendor_msft_laps_group'
+                    groupSettingCollectionValue = @(
+                        [pscustomobject]@{ children = $children }
+                    )
+                }
+            }
+        )
+
+        $fixture = [pscustomobject]@{ Settings = $settings }
+        $resolved = InModuleScope TenantPulse -ArgumentList $fixture {
+            param($fixture)
+            Resolve-PulseLapsPolicyValues -Settings $fixture.Settings
+        }
+
+        $resolved.backsUpToEntra | Should -BeTrue
+        $resolved.hasSufficientComplexity | Should -BeTrue
+        $resolved.hasSufficientLength | Should -BeTrue
+        $resolved.hasPostAuthAction | Should -BeTrue
+    }
+
+    It 'maps numeric LAPS PostAuthenticationActions <Value> to <Expected>' -ForEach @(
+        @{ Value = 1; Expected = $true }
+        @{ Value = 3; Expected = $true }
+        @{ Value = 5; Expected = $true }
+        @{ Value = 11; Expected = $true }
+        @{ Value = 0; Expected = $false }
+    ) {
+        $settings = @(
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4')
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value "device_vendor_msft_laps_postauthenticationactions_$Value")
+        )
+
+        $fixture = [pscustomobject]@{ Settings = $settings }
+        $resolved = InModuleScope TenantPulse -ArgumentList $fixture {
+            param($fixture)
+            Resolve-PulseLapsPolicyValues -Settings $fixture.Settings
+        }
+
+        $resolved.hasPostAuthAction | Should -Be $Expected
+    }
+
     It 'collects BitLocker full and used-space-only policies with native booleans and one settings read per policy' {
         $full = New-EndpointPolicy -Id 'bitlocker-full' -Name 'Full encryption' -Family 'endpointSecurityDiskEncryption'
         $used = New-EndpointPolicy -Id 'bitlocker-used' -Name 'Used-space-only' -Family 'endpointSecurityDiskEncryption'
@@ -274,6 +329,7 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'policy:laps-missing'
         $result.Outcome.Gaps[0].ReasonCode | Should -Be 'missing-setting'
+        $result.Outcome.Gaps[0].Detail.message | Should -Be 'LAPS Complexity setting was not returned.'
     }
 
     It 'asserts the released beta descriptors before the policy list and settings reads' {

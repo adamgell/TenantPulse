@@ -355,4 +355,29 @@ Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
         $registry.ContainsKey('subscribedSkus') | Should -BeTrue
         $registry.subscribedSkus | Should -BeOfType ([scriptblock])
     }
+
+    It 'sorts persisted category names ordinally regardless of the current culture' {
+        $result = InModuleScope TenantPulse {
+            $command = Get-Command ConvertTo-PulseOrdinalStringArray -ErrorAction SilentlyContinue
+            if ($null -eq $command) {
+                return [pscustomobject]@{ Exists = $false; Values = [string[]]@() }
+            }
+
+            $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+            try {
+                [System.Threading.Thread]::CurrentThread.CurrentCulture =
+                    [System.Globalization.CultureInfo]::GetCultureInfo('tr-TR')
+                $values = ConvertTo-PulseOrdinalStringArray -Values @('ı', 'I', 'i', 'İ')
+                return [pscustomobject]@{ Exists = $true; Values = [string[]]@($values) }
+            }
+            finally {
+                [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+            }
+        }
+
+        $result.Exists | Should -BeTrue
+        if ($result.Exists) {
+            @($result.Values) -join '|' | Should -Be 'I|i|İ|ı'
+        }
+    }
 }

@@ -283,8 +283,10 @@ function Invoke-PulseSettingsCatalogPolicy {
         # unexpected JSON shapes into plausible-looking ids: doing so would turn an
         # unrepresentable assignment target into authoritative assignment metadata.
         $groupId = if ($groupIdRaw -is [string]) { $groupIdRaw } else { $null }
-        if ([string]::IsNullOrWhiteSpace($targetType) -or
-            ($targetType -in @('group', 'exclusionGroup') -and [string]::IsNullOrWhiteSpace($groupId))) {
+        if (($null -ne $groupIdRaw -and $groupIdRaw -isnot [string]) -or
+            [string]::IsNullOrWhiteSpace($targetType) -or
+            ($targetType -in @('group', 'exclusionGroup') -and [string]::IsNullOrWhiteSpace($groupId)) -or
+            ($targetType -in @('allDevices', 'allLicensedUsers') -and $null -ne $groupIdRaw)) {
             return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
         }
         if (($null -ne $filterIdRaw -and $filterIdRaw -isnot [string]) -or
@@ -312,15 +314,20 @@ function Invoke-PulseSettingsCatalogPolicy {
             return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
         }
 
-        $intent = if ($null -ne $intentRaw) {
-            [string] $intentRaw
-        } elseif ([string]::Equals($targetType, 'exclusionGroup', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $expectedIntent = if ([string]::Equals($targetType, 'exclusionGroup', [System.StringComparison]::Ordinal)) {
             'exclude'
-        } elseif ($targetType -in @('group', 'allDevices', 'allLicensedUsers')) {
-            'include'
         } else {
-            $null
+            'include'
         }
+        # Row schema v1 has one membership intent for each supported target shape. An
+        # unexpected provider field must not override that target-derived meaning or be
+        # stringified into authoritative evidence.
+        if ($null -ne $intentRaw -and
+            ($intentRaw -isnot [string] -or
+                -not [string]::Equals([string] $intentRaw, $expectedIntent, [System.StringComparison]::Ordinal))) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
+        $intent = $expectedIntent
 
         $normalizedAssignments += [pscustomobject]@{
             intent     = $intent

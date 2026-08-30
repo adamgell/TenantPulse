@@ -223,7 +223,9 @@ function Get-PulseGateStatus {
                 throw "provider must be a ScriptBlock, IDictionary, or status string, got '$($Provider.GetType().FullName)'"
             }
         } catch {
-            return New-PulseGateStatusRecord -Gate $Gate -Status 'Unknown' -Detail "Gate provider failed: $($_.Exception.Message)"
+            # Provider exceptions are not artifact-safe. Preserve the decision class while
+            # never forwarding arbitrary exception text into a finding or provider outcome.
+            return New-PulseGateStatusRecord -Gate $Gate -Status 'Unknown' -Detail 'Gate provider failed.'
         }
     } else {
         $evidence = Resolve-PulseGateEvidence -Gate $Gate -Manifest $Manifest
@@ -231,6 +233,9 @@ function Get-PulseGateStatus {
 
     $status = [string] (Get-PulseGateProperty -Node $evidence -Name 'Status')
     $detail = [string] (Get-PulseGateProperty -Node $evidence -Name 'Detail')
+    if ($detail.Length -gt 500) {
+        $detail = $detail.Substring(0, 500)
+    }
     $failureClass = [string] (Get-PulseGateProperty -Node $evidence -Name 'FailureClass')
     if ([string]::IsNullOrWhiteSpace($failureClass)) {
         $failureClass = $null

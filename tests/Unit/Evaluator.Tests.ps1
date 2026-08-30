@@ -933,6 +933,50 @@ Describe 'Invoke-PulseEvaluation' {
         $finding.reason | Should -Be "gate 'EntraP1' unavailable: no EntraP1 license data collected"
     }
 
+    It 'caps the complete gate reason after adding the gate name and status prefix' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Gates @('EntraP1') -Rule @{ Type = 'Expression'; Expression = '$true' }
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:store, $script:keyPath, $check {
+            param($store, $keyPath, $check)
+            Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{
+                EntraP1 = @{ Status = 'Unknown'; Detail = ('x' * 1000) }
+            }
+        }
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match "^gate 'EntraP1' unknown:"
+        $finding.reason.Length | Should -Be 500
+    }
+
+    It 'keeps a throwing gate provider non-sensitive while preserving the NotApplicable outcome' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Gates @('EntraP1') -Rule @{ Type = 'Expression'; Expression = '$true' }
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:store, $script:keyPath, $check {
+            param($store, $keyPath, $check)
+            Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider {
+                throw 'SENSITIVE-PROVIDER-SENTINEL tenant-guid-or-upn'
+            }
+        }
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Be "gate 'EntraP1' unknown: Gate provider failed."
+        $finding.reason | Should -Not -Match 'SENSITIVE-PROVIDER-SENTINEL'
+    }
+
+    It 'retains the no-detail gate fallback when sanitizing gate reasons' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Gates @('EntraP1') -Rule @{ Type = 'Expression'; Expression = '$true' }
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:store, $script:keyPath, $check {
+            param($store, $keyPath, $check)
+            Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{
+                EntraP1 = @{ Status = 'Unknown'; Detail = $null }
+            }
+        }
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Be "gate 'EntraP1' unknown: no detail provided"
+    }
+
     # ---- IMPORTANT: reason redaction on the evaluate path ----
 
     It 'routes an Error reason through Protect-PulseReason (caps at 500 characters)' {

@@ -36,7 +36,7 @@ function Get-PulseEndpointSecuritySettingTokens {
         else { $definitionId = '' }
 
         $valueTokens = [System.Collections.Generic.List[string]]::new()
-        foreach ($valuePropertyName in @('choiceSettingValue', 'choiceSettingCollectionValue', 'simpleSettingValue', 'simpleSettingCollectionValue')) {
+        foreach ($valuePropertyName in @('choiceSettingValue', 'choiceSettingCollectionValue', 'simpleSettingValue', 'simpleSettingCollectionValue', 'groupSettingCollectionValue')) {
             $valueContainer = Get-PulseEndpointSecurityNodeProperty -Node $Node -PropertyName $valuePropertyName
             foreach ($valueNode in @($valueContainer)) {
                 if ($null -eq $valueNode) { continue }

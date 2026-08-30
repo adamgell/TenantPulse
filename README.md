@@ -376,9 +376,10 @@ It never builds and enforces pack-first-then-verify: it compares every shipped f
 the package against the digest manifest recorded at test time, and refuses to publish on
 any mismatch (packaging bytes nothing tested is exactly the failure this exists to
 prevent). It defaults to a dry run - it prints what it would publish and does not call
-PSGallery - and only publishes for real when given a resolved API key (via
-`-NuGetApiKeySecure` or the `TENANTPULSE_NUGET_API_KEY` environment variable - there is no
-plain-string API key parameter) and `-Confirm`.
+PSGallery - and only publishes for real when explicitly authorized with `-Publish`, given
+a resolved API key (via `-NuGetApiKeySecure` or the `TENANTPULSE_NUGET_API_KEY`
+environment variable - there is no plain-string API key parameter), and confirmed through
+the normal `ShouldProcess` confirmation boundary.
 
 `source/TenantPulse.psd1` declares GraphKit `0.3.0` with `RequiredVersion`, the exact runtime
 contract. `RequiredModules.psd1` separately pins `GraphKit = '0.3.0'` for build-time staging.
