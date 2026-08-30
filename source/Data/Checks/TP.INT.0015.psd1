@@ -6,8 +6,9 @@
     Effort     = 'Medium'
     Impact     = 'High'
     Data       = @{
-        Datasets = @('endpointSecurityLapsPolicies')
-        Gates    = @('Intune')
+        Datasets        = @('endpointSecurityLapsPolicies')
+        PartialDatasets = @('endpointSecurityLapsPolicies')
+        Gates           = @('Intune')
     }
     Rule       = @{
         Type     = 'Function'

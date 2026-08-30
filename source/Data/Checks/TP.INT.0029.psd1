@@ -6,8 +6,9 @@
     Effort     = 'Medium'
     Impact     = 'Medium'
     Data       = @{
-        Datasets = @('securityBaselinesAssignedAndCurrent')
-        Gates    = @('Intune')
+        Datasets        = @('securityBaselinesAssignedAndCurrent')
+        PartialDatasets = @('securityBaselinesAssignedAndCurrent')
+        Gates           = @('Intune')
     }
     Rule       = @{
         Type     = 'Function'

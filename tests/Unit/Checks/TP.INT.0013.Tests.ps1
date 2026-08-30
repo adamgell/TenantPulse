@@ -9,19 +9,37 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
+    function script:New-PulsePartialGapFixture {
+        param(
+            [string] $Scope,
+            [string] $ProviderDetail
+        )
+
+        if ([string]::IsNullOrEmpty($Scope)) { $Scope = 'scope-canary-' + (@('7f3f19ea', '8af2', '4ca9', 'b708', '80e6688cc8e0') -join '-') }
+        if ([string]::IsNullOrEmpty($ProviderDetail)) { $ProviderDetail = 'provider-detail-canary ' + ('admin' + [char] 64 + 'example' + '.invalid') + ' ' + ('sec' + 'ret=fixture-only') }
+
+        InModuleScope TenantPulse -ArgumentList $Scope, $ProviderDetail {
+            param($scope, $providerDetail)
+            New-PulseCollectionGap -Scope $scope -FailureClass 'PermissionDenied' `
+                -ReasonCode 'permission-denied' -Detail @{ message = $providerDetail } `
+                -Operation 'Group.Get' -ApiVersion 'v1.0'
+        }
+    }
+
     function script:Invoke-PulseCheckFixture {
         param(
             [Parameter(Mandatory)] [string] $CheckId,
             [Parameter(Mandatory)] [hashtable[]] $Datasets,
-            [Parameter()] $GateProvider = @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
+            [Parameter()] $GateProvider = @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } },
+            [switch] $ReturnFixture
         )
 
         $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $keyPath = Join-Path $storeRoot '.opkey/operator.key'
 
         try {
-            $evaluation = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $CheckId, $Datasets, $GateProvider {
-                param($storeRoot, $keyPath, $checkId, $datasets, $gateProvider)
+            $result = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $CheckId, $Datasets, $GateProvider, ([bool] $ReturnFixture) {
+                param($storeRoot, $keyPath, $checkId, $datasets, $gateProvider, $returnFixture)
 
                 $catalog = @(Import-PulseCheckCatalog)
                 $check = $catalog | Where-Object { $_.Id -eq $checkId }
@@ -36,8 +54,9 @@ BeforeAll {
                         Status     = $d.Status
                     }
                     if ($d.ContainsKey('Data')) { $params.Data = $d.Data }
-                    if ($d.ContainsKey('Gaps')) { $params.Gaps = $d.Gaps }
-                    if ($d.ContainsKey('Reason')) { $params.Reason = $d.Reason }
+                    foreach ($field in @('Reason', 'ReasonCode', 'Detail', 'FailureClass', 'Provider', 'Operations', 'Gaps')) {
+                        if ($d.ContainsKey($field)) { $params[$field] = $d[$field] }
+                    }
                     Write-PulseDataset @params
                 }
 
@@ -61,11 +80,38 @@ BeforeAll {
                     }
                 }
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider $gateProvider
+                foreach ($d in $datasets) {
+                    if (-not $d.ContainsKey('ManifestOverrides')) { continue }
+                    foreach ($key in $d.ManifestOverrides.Keys) {
+                        $manifest.datasets[$d.Name][$key] = $d.ManifestOverrides[$key]
+                    }
+                }
+                if (@($datasets | Where-Object { $_.ContainsKey('ManifestOverrides') }).Count -gt 0) {
+                    $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $manifest
+                    Set-PulseAtomicFileContent -Path $store.ManifestPath -Value $canonicalJson
+                    $manifest = Get-PulseSnapshotManifest -Store $store
+                }
+
+                $evaluation = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider $gateProvider
+                if (-not $returnFixture) { return $evaluation.Document.findings[0] }
+
+                $scored = Add-PulseScores -Findings $evaluation.Document
+                return [pscustomobject]@{
+                    Finding          = $evaluation.Document.findings[0]
+                    Evaluation       = $evaluation
+                    ScoredDocument   = $scored
+                    FindingJson      = ConvertTo-PulseCanonicalJson -InputObject $evaluation.Document.findings[0]
+                    ScoreJson        = ConvertTo-PulseCanonicalJson -InputObject $scored
+                    SnapshotManifest = $manifest
+                    Store            = $store
+                    StoreRoot        = $storeRoot
+                }
             }
-            return $evaluation.Document.findings[0]
+            return $result
         } finally {
-            Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+            if (-not $ReturnFixture) {
+                Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 }
@@ -73,7 +119,143 @@ BeforeAll {
 Describe 'TP.INT.0013 - Intune RBAC groups protected via RMAU or role-assignable groups' {
     It 'catalog: loads and validates cleanly via Import-PulseCheckCatalog (self-check)' {
         $catalog = InModuleScope TenantPulse { @(Import-PulseCheckCatalog) }
-        ($catalog | Where-Object { $_.Id -eq 'TP.INT.0013' }) | Should -Not -BeNullOrEmpty
+        $check = $catalog | Where-Object { $_.Id -eq 'TP.INT.0013' }
+        $check | Should -Not -BeNullOrEmpty
+        @($check.Data.PartialDatasets).Count | Should -Be 1
+        $check.Data.PartialDatasets[0] | Should -BeExactly 'intuneRbacGroupProtection'
+        InModuleScope TenantPulse { (Get-Command Test-PulseRbacGroupsProtected).Parameters.Keys } | Should -Contain 'DatasetOutcomes'
+    }
+
+    It 'Partial: a known unprotected group proves Fail despite an unrelated malformed row in either order, exposes only gap count, and scores 0/6' {
+        $gaps = @(
+            (New-PulsePartialGapFixture)
+            (New-PulsePartialGapFixture -Scope 'second-scope-canary' -ProviderDetail 'second-provider-detail-canary')
+        )
+        $offender = [pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g-offender'; groupDisplayName = 'Unsafe'; isManagementRestricted = $false; isAssignableToRole = $false }
+        $malformed = [pscustomobject]@{ roleDefinitionName = 'Broken'; groupId = 'g-broken'; groupDisplayName = 'Broken'; isManagementRestricted = 'false'; isAssignableToRole = $false }
+        $upnCanary = 'admin' + [char] 64 + 'example' + '.invalid'
+        $secretCanary = 'sec' + 'ret=fixture-only'
+
+        foreach ($rows in @(@($offender, $malformed), @($malformed, $offender))) {
+            $fixture = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -ReturnFixture -Datasets @(
+                @{
+                    Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Partial'; Data = $rows
+                    FailureClass = $null; ReasonCode = 'partial-provider'; Detail = @{ canary = 'top-detail-canary' }
+                    Provider = 'provider-canary'; Operations = @('RoleDefinition.List', 'Group.Get'); Gaps = $gaps
+                }
+            )
+            try {
+                $fixture.Finding.status | Should -Be 'Fail'
+                @($fixture.Finding.evidence).Count | Should -Be 1
+                $fixture.Finding.evidence[0].identity | Should -Be 'g-offender'
+                $fixture.Finding.reason | Should -Match '2 unresolved gaps'
+                $fixture.Finding.reason | Should -Match 'known unprotected'
+                $fixture.ScoredDocument.scores.overall.earned | Should -Be 0
+                $fixture.ScoredDocument.scores.overall.possible | Should -Be 6
+                $fixture.ScoredDocument.coverage.overall.assessed | Should -Be 1
+                $fixture.ScoredDocument.coverage.overall.applicable | Should -Be 1
+                $fixture.Evaluation.Document.schemaVersion | Should -Be '1.0'
+                $fixture.SnapshotManifest.schemaVersion | Should -Be '2.0.0'
+                $fixture.Evaluation.Document.producer.scoringModelVersion | Should -Be '1.0'
+                foreach ($canary in @('scope-canary', 'provider-detail-canary', $upnCanary, $secretCanary, 'top-detail-canary', 'provider-canary', 'second-scope-canary', 'second-provider-detail-canary')) {
+                    $fixture.FindingJson | Should -Not -Match ([regex]::Escape($canary))
+                    $fixture.ScoreJson | Should -Not -Match ([regex]::Escape($canary))
+                }
+            } finally {
+                Remove-Item -LiteralPath $fixture.StoreRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    It 'Partial: protected known rows cannot prove universal success and are not assessed' {
+        $gap = New-PulsePartialGapFixture
+        $fixture = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -ReturnFixture -Datasets @(
+            @{
+                Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Partial'
+                Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g1'; groupDisplayName = 'Protected'; isManagementRestricted = $true; isAssignableToRole = $false })
+                FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('Group.Get'); Gaps = @($gap)
+            }
+        )
+        try {
+            $fixture.Finding.status | Should -Be 'NotApplicable'
+            $fixture.Finding.reason | Should -Match '1 unresolved gap'
+            $fixture.Finding.reason | Should -Match 'cannot prove universal protection'
+            $fixture.ScoredDocument.scores.overall.earned | Should -Be 0
+            $fixture.ScoredDocument.scores.overall.possible | Should -Be 0
+            $fixture.ScoredDocument.coverage.overall.assessed | Should -Be 0
+            $fixture.ScoredDocument.coverage.overall.applicable | Should -Be 1
+            ($fixture.ScoredDocument.coverage.overall.applicable - $fixture.ScoredDocument.coverage.overall.assessed) | Should -Be 1
+        } finally {
+            Remove-Item -LiteralPath $fixture.StoreRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'Partial: malformed known rows without a decisive offender return Error' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{
+                Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Partial'
+                Data = @([pscustomobject]@{ roleDefinitionName = 'Broken'; groupId = 'g1'; groupDisplayName = 'Broken'; isManagementRestricted = 'false'; isAssignableToRole = $false })
+                FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('Group.Get'); Gaps = @((New-PulsePartialGapFixture))
+            }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'native boolean'
+    }
+
+    It 'Collected: any malformed row returns Error even when a valid offender exists, in either order' {
+        $offender = [pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g-offender'; groupDisplayName = 'Unsafe'; isManagementRestricted = $false; isAssignableToRole = $false }
+        $malformed = [pscustomobject]@{ roleDefinitionName = 'Broken'; groupId = 'g-broken'; groupDisplayName = 'Broken'; isManagementRestricted = 'false'; isAssignableToRole = $false }
+        foreach ($rows in @(@($offender, $malformed), @($malformed, $offender))) {
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+                @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rows }
+            )
+            $finding.status | Should -Be 'Error'
+        }
+    }
+
+    It 'Partial: zero usable rows fail closed before the rule can manufacture a decision' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{
+                Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Partial'; Data = @()
+                FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('Group.Get'); Gaps = @((New-PulsePartialGapFixture))
+            }
+        )
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'no usable rows'
+    }
+
+    It 'Partial: a malformed persisted outcome projection fails closed' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+            @{
+                Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Partial'
+                Data = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g1'; groupDisplayName = 'Unsafe'; isManagementRestricted = $false; isAssignableToRole = $false })
+                FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('Group.Get'); Gaps = @((New-PulsePartialGapFixture))
+                ManifestOverrides = @{ gaps = 'not-an-array' }
+            }
+        )
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'invalid Partial outcome'
+    }
+
+    It 'does not mutate direct caller datasets or outcome projections' {
+        $datasets = @{ intuneRbacGroupProtection = @([pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g1'; groupDisplayName = 'Unsafe'; isManagementRestricted = $false; isAssignableToRole = $false }) }
+        $outcomes = @{ intuneRbacGroupProtection = @{ Status = 'Partial'; Gaps = @(@{ Scope = 'x' }) } }
+        $before = $datasets | ConvertTo-Json -Depth 20 -Compress
+        $outcomeBefore = $outcomes | ConvertTo-Json -Depth 20 -Compress
+
+        $result = InModuleScope TenantPulse -ArgumentList $datasets, $outcomes {
+            param($datasets, $outcomes)
+            Test-PulseRbacGroupsProtected -Datasets $datasets -DatasetOutcomes $outcomes
+        }
+
+        $result.Status | Should -Be 'Fail'
+        ($datasets | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $before
+        ($outcomes | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $outcomeBefore
     }
 
     It 'Pass: zero role-assignment groups exist at all (mirrors Maester, never a skip)' {

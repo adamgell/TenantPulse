@@ -48,26 +48,98 @@ function Test-PulseLapsConfigurationMeetsBar {
         [hashtable] $Datasets,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [hashtable] $DatasetOutcomes = @{}
     )
+
+    $datasetName = 'endpointSecurityLapsPolicies'
+    $isPartial = $false
+    $unresolvedGapCount = 0
+    if ($DatasetOutcomes.ContainsKey($datasetName)) {
+        $outcome = $DatasetOutcomes[$datasetName]
+        $outcomePropertyNames = if ($outcome -is [System.Collections.IDictionary]) {
+            @($outcome.Keys)
+        } else {
+            @($outcome.PSObject.Properties.Name)
+        }
+        if ($null -eq $outcome -or $outcomePropertyNames -cnotcontains 'Status') {
+            throw 'Test-PulseLapsConfigurationMeetsBar: the dataset outcome projection is missing Status.'
+        }
+
+        $outcomeStatus = [string] $outcome.Status
+        if ($outcomeStatus -notin @('Collected', 'Partial')) {
+            throw "Test-PulseLapsConfigurationMeetsBar: unsupported dataset outcome Status '$outcomeStatus'."
+        }
+        $isPartial = $outcomeStatus -eq 'Partial'
+        if ($isPartial) {
+            if ($outcomePropertyNames -cnotcontains 'Gaps' -or $null -eq $outcome.Gaps -or $outcome.Gaps -isnot [array] -or @($outcome.Gaps).Count -eq 0) {
+                throw 'Test-PulseLapsConfigurationMeetsBar: the Partial dataset outcome projection must contain a non-empty Gaps array.'
+            }
+            $unresolvedGapCount = @($outcome.Gaps).Count
+        }
+    }
 
     $policies = @($Datasets.endpointSecurityLapsPolicies)
 
     $criteriaFields = @('backsUpToEntra', 'hasSufficientComplexity', 'hasSufficientLength', 'hasPostAuthAction')
+    $compliantPolicies = [System.Collections.Generic.List[object]]::new()
+    $malformedReason = $null
     foreach ($policy in $policies) {
+        $rowMalformed = $false
         foreach ($fieldName in $criteriaFields) {
             if ($null -eq $policy.$fieldName) {
-                throw "Test-PulseLapsConfigurationMeetsBar: LAPS policy '$($policy.policyName)' has no $fieldName value - an absent criterion is not decidable as 'does not meet the bar', it means this rule cannot tell whether the resolved boolean was ever produced for this policy."
+                if ($null -eq $malformedReason) {
+                    $malformedReason = "Test-PulseLapsConfigurationMeetsBar: a LAPS policy has no $fieldName value - the row cannot be classified safely."
+                }
+                $rowMalformed = $true
+                break
             }
+            if ($policy.$fieldName -isnot [bool]) {
+                if ($null -eq $malformedReason) {
+                    $malformedReason = "Test-PulseLapsConfigurationMeetsBar: a LAPS policy has a non-Boolean $fieldName value - expected a native boolean and refusing to coerce it."
+                }
+                $rowMalformed = $true
+                break
+            }
+        }
+        if ($rowMalformed) { continue }
+
+        $meetsBar = ([bool] $policy.backsUpToEntra) -and
+            ([bool] $policy.hasSufficientComplexity) -and
+            ([bool] $policy.hasSufficientLength) -and
+            ([bool] $policy.hasPostAuthAction)
+        if ($meetsBar) {
+            $policyId = [string] $policy.policyId
+            if ([string]::IsNullOrWhiteSpace($policyId)) {
+                if ($null -eq $malformedReason) {
+                    $malformedReason = 'Test-PulseLapsConfigurationMeetsBar: a qualifying policy has no policyId value - decisive evidence must have a usable identity.'
+                }
+                continue
+            }
+            $compliantPolicies.Add($policy)
         }
     }
 
-    $compliant = @($policies | Where-Object {
-            ($_.backsUpToEntra -eq $true) -and
-            ($_.hasSufficientComplexity -eq $true) -and
-            ($_.hasSufficientLength -eq $true) -and
-            ($_.hasPostAuthAction -eq $true)
-        })
+    if (-not $isPartial -and $null -ne $malformedReason) {
+        throw $malformedReason
+    }
+
+    if ($isPartial -and $compliantPolicies.Count -gt 0) {
+        $witnesses = @($compliantPolicies.ToArray())
+        $evidence = ConvertTo-PulseMaesterEvidence -Rows $witnesses -IdentityProperty 'policyId' -SortKeyProperty 'policyName' -DetailProperties @('policyName', 'backsUpToEntra', 'hasSufficientComplexity', 'hasSufficientLength', 'hasPostAuthAction')
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status Pass -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; $($witnesses.Count) known qualifying LAPS policy witness(es) prove this existential check passes despite unresolved scope." -Evidence $evidence
+    }
+
+    if ($isPartial) {
+        if ($null -ne $malformedReason) { throw $malformedReason }
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status NotApplicable -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; no known qualifying all-four-criteria LAPS policy witness exists, so the unresolved scope prevents an existential Fail."
+    }
+
+    $compliant = @($compliantPolicies.ToArray())
 
     if ($compliant.Count -gt 0) {
         $evidence = ConvertTo-PulseMaesterEvidence -Rows $policies -IdentityProperty 'policyId' -SortKeyProperty 'policyName' -DetailProperties @('policyName', 'backsUpToEntra', 'hasSufficientComplexity', 'hasSufficientLength', 'hasPostAuthAction')

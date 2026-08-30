@@ -106,18 +106,87 @@ function Test-PulseBitLockerFullDiskEncryption {
         [hashtable] $Datasets,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [hashtable] $DatasetOutcomes = @{}
     )
 
-    $policies = @($Datasets.endpointSecurityDiskEncryptionPolicies)
+    $datasetName = 'endpointSecurityDiskEncryptionPolicies'
+    $isPartial = $false
+    $unresolvedGapCount = 0
+    if ($DatasetOutcomes.ContainsKey($datasetName)) {
+        $outcome = $DatasetOutcomes[$datasetName]
+        $outcomePropertyNames = if ($outcome -is [System.Collections.IDictionary]) {
+            @($outcome.Keys)
+        } else {
+            @($outcome.PSObject.Properties.Name)
+        }
+        if ($null -eq $outcome -or $outcomePropertyNames -cnotcontains 'Status') {
+            throw 'Test-PulseBitLockerFullDiskEncryption: the dataset outcome projection is missing Status.'
+        }
 
-    foreach ($policy in $policies) {
-        if ($null -eq $policy.isFullDiskEncryption) {
-            throw "Test-PulseBitLockerFullDiskEncryption: Endpoint Security Disk Encryption policy '$($policy.policyName)' has no isFullDiskEncryption value - an absent value here is not decidable as 'not full-disk encryption', it means this rule cannot tell whether the resolved suffix-matched boolean was ever produced for this policy."
+        $outcomeStatus = [string] $outcome.Status
+        if ($outcomeStatus -notin @('Collected', 'Partial')) {
+            throw "Test-PulseBitLockerFullDiskEncryption: unsupported dataset outcome Status '$outcomeStatus'."
+        }
+        $isPartial = $outcomeStatus -eq 'Partial'
+        if ($isPartial) {
+            if ($outcomePropertyNames -cnotcontains 'Gaps' -or $null -eq $outcome.Gaps -or $outcome.Gaps -isnot [array] -or @($outcome.Gaps).Count -eq 0) {
+                throw 'Test-PulseBitLockerFullDiskEncryption: the Partial dataset outcome projection must contain a non-empty Gaps array.'
+            }
+            $unresolvedGapCount = @($outcome.Gaps).Count
         }
     }
 
-    $fullyEncrypted = @($policies | Where-Object { $_.isFullDiskEncryption -eq $true })
+    $policies = @($Datasets.endpointSecurityDiskEncryptionPolicies)
+
+    $qualifyingPolicies = [System.Collections.Generic.List[object]]::new()
+    $malformedReason = $null
+    foreach ($policy in $policies) {
+        if ($null -eq $policy.isFullDiskEncryption) {
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseBitLockerFullDiskEncryption: a policy has no isFullDiskEncryption value - the row cannot be classified safely.'
+            }
+            continue
+        }
+        if ($policy.isFullDiskEncryption -isnot [bool]) {
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseBitLockerFullDiskEncryption: a policy has a non-Boolean isFullDiskEncryption value - expected a native boolean and refusing to coerce it.'
+            }
+            continue
+        }
+
+        if ([bool] $policy.isFullDiskEncryption) {
+            $policyId = [string] $policy.policyId
+            if ([string]::IsNullOrWhiteSpace($policyId)) {
+                if ($null -eq $malformedReason) {
+                    $malformedReason = 'Test-PulseBitLockerFullDiskEncryption: a qualifying policy has no policyId value - decisive evidence must have a usable identity.'
+                }
+                continue
+            }
+            $qualifyingPolicies.Add($policy)
+        }
+    }
+
+    if (-not $isPartial -and $null -ne $malformedReason) {
+        throw $malformedReason
+    }
+
+    if ($isPartial -and $qualifyingPolicies.Count -gt 0) {
+        $witnesses = $qualifyingPolicies.ToArray()
+        $evidence = ConvertTo-PulseMaesterEvidence -Rows $witnesses -IdentityProperty 'policyId' -SortKeyProperty 'policyName' -DetailProperties @('policyName', 'isFullDiskEncryption')
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status Pass -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; $($witnesses.Count) known qualifying full-disk encryption policy witness(es) prove this existential check passes despite unresolved scope." -Evidence $evidence
+    }
+
+    if ($isPartial) {
+        if ($null -ne $malformedReason) { throw $malformedReason }
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status NotApplicable -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; no known qualifying full-disk encryption policy witness exists, so the unresolved scope prevents an existential Fail."
+    }
+
+    $fullyEncrypted = $qualifyingPolicies.ToArray()
 
     if ($fullyEncrypted.Count -gt 0) {
         $evidence = ConvertTo-PulseMaesterEvidence -Rows $policies -IdentityProperty 'policyId' -SortKeyProperty 'policyName' -DetailProperties @('policyName', 'isFullDiskEncryption')

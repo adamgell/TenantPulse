@@ -67,24 +67,67 @@ function Test-PulseRbacGroupsProtected {
         [hashtable] $Datasets,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [hashtable] $DatasetOutcomes = @{}
     )
+
+    $datasetName = 'intuneRbacGroupProtection'
+    $isPartial = $false
+    $unresolvedGapCount = 0
+    if ($DatasetOutcomes.ContainsKey($datasetName)) {
+        $outcome = $DatasetOutcomes[$datasetName]
+        $outcomePropertyNames = if ($outcome -is [System.Collections.IDictionary]) {
+            @($outcome.Keys)
+        } else {
+            @($outcome.PSObject.Properties.Name)
+        }
+        if ($null -eq $outcome -or $outcomePropertyNames -cnotcontains 'Status') {
+            throw 'Test-PulseRbacGroupsProtected: the dataset outcome projection is missing Status.'
+        }
+
+        $outcomeStatus = [string] $outcome.Status
+        if ($outcomeStatus -notin @('Collected', 'Partial')) {
+            throw "Test-PulseRbacGroupsProtected: unsupported dataset outcome Status '$outcomeStatus'."
+        }
+        $isPartial = $outcomeStatus -eq 'Partial'
+        if ($isPartial) {
+            if ($outcomePropertyNames -cnotcontains 'Gaps' -or $null -eq $outcome.Gaps -or $outcome.Gaps -isnot [array] -or @($outcome.Gaps).Count -eq 0) {
+                throw 'Test-PulseRbacGroupsProtected: the Partial dataset outcome projection must contain a non-empty Gaps array.'
+            }
+            $unresolvedGapCount = @($outcome.Gaps).Count
+        }
+    }
 
     $rows = @($Datasets.intuneRbacGroupProtection)
 
     $unprotectedByGroupId = [ordered]@{}
+    $malformedReason = $null
     foreach ($row in $rows) {
         if ($null -eq $row.isManagementRestricted) {
-            throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has no isManagementRestricted value - this rule's input is a 4-call Graph fan-out and an absent value here means a sub-call failed or returned an unreadable shape, not that the group is unprotected. Refusing to read absence as unprotected."
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseRbacGroupsProtected: a row has no isManagementRestricted value - this rule cannot classify the row safely.'
+            }
+            continue
         }
         if ($null -eq $row.isAssignableToRole) {
-            throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has no isAssignableToRole value - this rule's input is a 4-call Graph fan-out and an absent value here means a sub-call failed or returned an unreadable shape, not that the group is unprotected. Refusing to read absence as unprotected."
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseRbacGroupsProtected: a row has no isAssignableToRole value - this rule cannot classify the row safely.'
+            }
+            continue
         }
+        $rowMalformed = $false
         foreach ($propertyName in @('isManagementRestricted', 'isAssignableToRole')) {
             if ($row.$propertyName -isnot [bool]) {
-                throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has a non-Boolean $propertyName value - expected a native boolean and refusing to coerce it."
+                if ($null -eq $malformedReason) {
+                    $malformedReason = "Test-PulseRbacGroupsProtected: a row has a non-Boolean $propertyName value - expected a native boolean and refusing to coerce it."
+                }
+                $rowMalformed = $true
+                break
             }
         }
+        if ($rowMalformed) { continue }
 
         $isManagementRestricted = ([bool] $row.isManagementRestricted -eq $true)
         $isAssignableToRole = ([bool] $row.isAssignableToRole -eq $true)
@@ -92,11 +135,31 @@ function Test-PulseRbacGroupsProtected {
 
         $groupId = [string] $row.groupId
         if ([string]::IsNullOrEmpty($groupId)) {
-            throw "Test-PulseRbacGroupsProtected: an unprotected row (roleDefinitionName '$($row.roleDefinitionName)') has no groupId value - this row cannot be identified or deduplicated, and silently dropping it would let an unprotected group vanish into a false Pass. Refusing to skip it."
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseRbacGroupsProtected: an unprotected row has no groupId value - decisive evidence must have a usable identity.'
+            }
+            continue
         }
         if (-not $unprotectedByGroupId.Contains($groupId)) {
             $unprotectedByGroupId[$groupId] = $row
         }
+    }
+
+    if (-not $isPartial -and $null -ne $malformedReason) {
+        throw $malformedReason
+    }
+
+    if ($isPartial -and $unprotectedByGroupId.Count -gt 0) {
+        $offendingRows = @($unprotectedByGroupId.Values)
+        $evidence = ConvertTo-PulseMaesterEvidence -Rows $offendingRows -IdentityProperty 'groupId' -SortKeyProperty 'groupDisplayName' -DetailProperties @('groupDisplayName', 'roleDefinitionName', 'isManagementRestricted', 'isAssignableToRole')
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status Fail -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; $($unprotectedByGroupId.Count) known unprotected group(s) prove this universal RBAC protection check fails despite unresolved scope." -Evidence $evidence
+    }
+
+    if ($isPartial) {
+        if ($null -ne $malformedReason) { throw $malformedReason }
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status NotApplicable -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; known rows contain no unprotected group, but unresolved scope means they cannot prove universal protection."
     }
 
     if ($unprotectedByGroupId.Count -eq 0) {
