@@ -51,35 +51,14 @@ function Test-PulseLapsConfigurationMeetsBar {
         [hashtable] $Context = @{},
 
         [Parameter()]
+        [AllowNull()]
         [hashtable] $DatasetOutcomes = @{}
     )
 
     $datasetName = 'endpointSecurityLapsPolicies'
-    $isPartial = $false
-    $unresolvedGapCount = 0
-    if ($DatasetOutcomes.ContainsKey($datasetName)) {
-        $outcome = $DatasetOutcomes[$datasetName]
-        $outcomePropertyNames = if ($outcome -is [System.Collections.IDictionary]) {
-            @($outcome.Keys)
-        } else {
-            @($outcome.PSObject.Properties.Name)
-        }
-        if ($null -eq $outcome -or $outcomePropertyNames -cnotcontains 'Status') {
-            throw 'Test-PulseLapsConfigurationMeetsBar: the dataset outcome projection is missing Status.'
-        }
-
-        $outcomeStatus = [string] $outcome.Status
-        if ($outcomeStatus -notin @('Collected', 'Partial')) {
-            throw "Test-PulseLapsConfigurationMeetsBar: unsupported dataset outcome Status '$outcomeStatus'."
-        }
-        $isPartial = $outcomeStatus -eq 'Partial'
-        if ($isPartial) {
-            if ($outcomePropertyNames -cnotcontains 'Gaps' -or $null -eq $outcome.Gaps -or $outcome.Gaps -isnot [array] -or @($outcome.Gaps).Count -eq 0) {
-                throw 'Test-PulseLapsConfigurationMeetsBar: the Partial dataset outcome projection must contain a non-empty Gaps array.'
-            }
-            $unresolvedGapCount = @($outcome.Gaps).Count
-        }
-    }
+    $outcomeState = Resolve-PulseDatasetOutcomeState -DatasetOutcomes $DatasetOutcomes -DatasetName $datasetName -Caller $MyInvocation.MyCommand.Name
+    $isPartial = $outcomeState.IsPartial
+    $unresolvedGapCount = $outcomeState.UnresolvedGapCount
 
     $policies = @($Datasets.endpointSecurityLapsPolicies)
 
@@ -87,6 +66,14 @@ function Test-PulseLapsConfigurationMeetsBar {
     $compliantPolicies = [System.Collections.Generic.List[object]]::new()
     $malformedReason = $null
     foreach ($policy in $policies) {
+        $policyId = [string] $policy.policyId
+        if ([string]::IsNullOrWhiteSpace($policyId)) {
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseLapsConfigurationMeetsBar: a LAPS policy has no usable policyId value - every row must have a stable identity.'
+            }
+            continue
+        }
+
         $rowMalformed = $false
         foreach ($fieldName in $criteriaFields) {
             if ($null -eq $policy.$fieldName) {
@@ -111,13 +98,6 @@ function Test-PulseLapsConfigurationMeetsBar {
             ([bool] $policy.hasSufficientLength) -and
             ([bool] $policy.hasPostAuthAction)
         if ($meetsBar) {
-            $policyId = [string] $policy.policyId
-            if ([string]::IsNullOrWhiteSpace($policyId)) {
-                if ($null -eq $malformedReason) {
-                    $malformedReason = 'Test-PulseLapsConfigurationMeetsBar: a qualifying policy has no policyId value - decisive evidence must have a usable identity.'
-                }
-                continue
-            }
             $compliantPolicies.Add($policy)
         }
     }

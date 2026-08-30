@@ -205,6 +205,49 @@ Describe 'TP.INT.0013 - Intune RBAC groups protected via RMAU or role-assignable
         $finding.reason | Should -Match 'native boolean'
     }
 
+    It 'Complete and non-decisive Partial reject every protected row without a usable groupId, including whitespace' {
+        $invalidRows = @(
+            [pscustomobject]@{ roleDefinitionName = 'Protected'; groupDisplayName = 'Missing identity'; isManagementRestricted = $true; isAssignableToRole = $false }
+            [pscustomobject]@{ roleDefinitionName = 'Protected'; groupId = '   '; groupDisplayName = 'Whitespace identity'; isManagementRestricted = $true; isAssignableToRole = $false }
+        )
+
+        foreach ($row in $invalidRows) {
+            $complete = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+                @{ Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($row) }
+            )
+            $complete.status | Should -Be 'Error'
+            $complete.reason | Should -Match 'groupId'
+
+            $partial = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+                @{
+                    Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Partial'; Data = @($row)
+                    FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                    Operations = @('Group.Get'); Gaps = @((New-PulsePartialGapFixture))
+                }
+            )
+            $partial.status | Should -Be 'Error'
+            $partial.reason | Should -Match 'groupId'
+        }
+    }
+
+    It 'Partial: a valid offender outranks a protected row with no identity in either row order' {
+        $offender = [pscustomobject]@{ roleDefinitionName = 'Unsafe'; groupId = 'g-offender'; groupDisplayName = 'Unsafe'; isManagementRestricted = $false; isAssignableToRole = $false }
+        $malformed = [pscustomobject]@{ roleDefinitionName = 'Protected'; groupId = '   '; groupDisplayName = 'Unidentified'; isManagementRestricted = $true; isAssignableToRole = $false }
+
+        foreach ($rows in @(@($offender, $malformed), @($malformed, $offender))) {
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0013' -Datasets @(
+                @{
+                    Name = 'intuneRbacGroupProtection'; ApiVersion = 'beta'; Status = 'Partial'; Data = $rows
+                    FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                    Operations = @('Group.Get'); Gaps = @((New-PulsePartialGapFixture))
+                }
+            )
+            $finding.status | Should -Be 'Fail'
+            @($finding.evidence).Count | Should -Be 1
+            $finding.evidence[0].identity | Should -Be 'g-offender'
+        }
+    }
+
     It 'Collected: any malformed row returns Error even when a valid offender exists, in either order' {
         $offender = [pscustomobject]@{ roleDefinitionName = 'App Manager'; groupId = 'g-offender'; groupDisplayName = 'Unsafe'; isManagementRestricted = $false; isAssignableToRole = $false }
         $malformed = [pscustomobject]@{ roleDefinitionName = 'Broken'; groupId = 'g-broken'; groupDisplayName = 'Broken'; isManagementRestricted = 'false'; isAssignableToRole = $false }
@@ -256,6 +299,36 @@ Describe 'TP.INT.0013 - Intune RBAC groups protected via RMAU or role-assignable
         $result.Status | Should -Be 'Fail'
         ($datasets | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $before
         ($outcomes | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $outcomeBefore
+    }
+
+    It 'direct calls reject null, unsupported, and non-scalar outcome projections with one bounded canary-free error' {
+        $observed = InModuleScope TenantPulse {
+            $datasets = @{ intuneRbacGroupProtection = @([pscustomobject]@{ roleDefinitionName = 'Safe'; groupId = 'g1'; groupDisplayName = 'Safe'; isManagementRestricted = $true; isAssignableToRole = $false }) }
+            $statusCanary = 'unsupported-status-canary'
+            $cases = @(
+                @{ Name = 'null root'; Outcomes = $null }
+                @{ Name = 'null entry'; Outcomes = @{ intuneRbacGroupProtection = $null } }
+                @{ Name = 'non-dictionary entry'; Outcomes = @{ intuneRbacGroupProtection = 'not-a-dictionary' } }
+                @{ Name = 'unsupported scalar'; Outcomes = @{ intuneRbacGroupProtection = @{ Status = $statusCanary } } }
+                @{ Name = 'non-scalar'; Outcomes = @{ intuneRbacGroupProtection = @{ Status = @('Partial') } } }
+            )
+
+            @($cases | ForEach-Object {
+                try {
+                    $null = Test-PulseRbacGroupsProtected -Datasets $datasets -DatasetOutcomes $_.Outcomes
+                    [pscustomobject]@{ Name = $_.Name; Threw = $false; Message = '' }
+                } catch {
+                    [pscustomobject]@{ Name = $_.Name; Threw = $true; Message = $_.Exception.Message }
+                }
+            })
+        }
+
+        $observed.Count | Should -Be 5
+        foreach ($case in $observed) {
+            $case.Threw | Should -BeTrue -Because $case.Name
+            $case.Message | Should -BeExactly 'Test-PulseRbacGroupsProtected: the dataset outcome projection is invalid.' -Because $case.Name
+            $case.Message | Should -Not -Match 'unsupported-status-canary|System\.Object|null-valued' -Because $case.Name
+        }
     }
 
     It 'Pass: zero role-assignment groups exist at all (mirrors Maester, never a skip)' {

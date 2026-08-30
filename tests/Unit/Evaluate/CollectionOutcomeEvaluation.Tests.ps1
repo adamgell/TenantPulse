@@ -194,6 +194,30 @@ Describe 'Invoke-PulseCheckEvaluation partial-awareness contract' {
         $result.Reason | Should -Not -Match 'rule-must-not-run-canary'
     }
 
+    It 'returns one bounded reason without copying unsupported persisted status or reason canaries: <Case>' -ForEach @(
+        @{ Case = 'scalar status'; StatusValue = 'persisted-status-canary' }
+        @{ Case = 'non-scalar status'; StatusValue = @('persisted', 'status-canary') }
+    ) {
+        $check = New-PulseEvaluationCheckFixture
+        $entry = New-PulsePartialEntryFixture
+        $entry.status = $StatusValue
+        $entry.reason = 'persisted-reason-canary'
+
+        $result = InModuleScope TenantPulse -ArgumentList $check, $entry {
+            param($check, $entry)
+            function Test-PulsePartialAwareFixtureRule {
+                param($Datasets, $DatasetOutcomes)
+                throw 'rule-must-not-run-canary'
+            }
+            Invoke-PulseCheckEvaluation -Check $check -Store ([pscustomobject]@{}) `
+                -Manifest @{ datasets = @{ partialA = $entry } } -DatasetCache @{}
+        }
+
+        $result.Status | Should -Be 'NotApplicable'
+        $result.Reason | Should -BeExactly "dataset 'partialA' has an unsupported collection status."
+        $result.Reason | Should -Not -Match 'persisted-status-canary|persisted-reason-canary|System\.Object|rule-must-not-run-canary'
+    }
+
     It 'passes usable Partial rows and an exact independently projected outcome for every declared dataset' {
         $check = New-PulseEvaluationCheckFixture -Datasets @('partialA', 'collectedB')
         $partial = New-PulsePartialEntryFixture

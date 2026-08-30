@@ -241,6 +241,50 @@ Describe 'TP.INT.0015 - LAPS configuration policy meets minimum security bar' {
         }
     }
 
+    It 'Complete and non-decisive Partial reject a non-witness row without a usable policyId' {
+        $row = [pscustomobject]@{
+            policyName = 'Short'; backsUpToEntra = $true; hasSufficientComplexity = $true
+            hasSufficientLength = $false; hasPostAuthAction = $true
+        }
+
+        $complete = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($row) }
+        )
+        $complete.status | Should -Be 'Error'
+        $complete.reason | Should -Match 'policyId'
+
+        $partial = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{
+                Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Partial'; Data = @($row)
+                FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('ConfigurationPolicySettings.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
+            }
+        )
+        $partial.status | Should -Be 'Error'
+        $partial.reason | Should -Match 'policyId'
+    }
+
+    It 'Partial: a valid witness outranks a non-witness row with no identity in either row order' {
+        $witness = New-PulseLapsPolicyFixture -PolicyId 'p-witness' -PolicyName 'Compliant'
+        $malformed = [pscustomobject]@{
+            policyName = 'Short'; backsUpToEntra = $true; hasSufficientComplexity = $true
+            hasSufficientLength = $false; hasPostAuthAction = $true
+        }
+
+        foreach ($rows in @(@($witness, $malformed), @($malformed, $witness))) {
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+                @{
+                    Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Partial'; Data = $rows
+                    FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                    Operations = @('ConfigurationPolicySettings.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
+                }
+            )
+            $finding.status | Should -Be 'Pass'
+            @($finding.evidence).Count | Should -Be 1
+            $finding.evidence[0].identity | Should -Be 'p-witness'
+        }
+    }
+
     It 'Collected: any malformed row returns Error even when a valid witness exists, in either order' {
         $witness = New-PulseLapsPolicyFixture -PolicyId 'p-witness' -PolicyName 'Compliant'
         $malformed = New-PulseLapsPolicyFixture -PolicyId 'p-broken' -PolicyName 'Broken' -HasSufficientLength 1
@@ -305,6 +349,36 @@ Describe 'TP.INT.0015 - LAPS configuration policy meets minimum security bar' {
         $result.Status | Should -Be 'Pass'
         ($datasets | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $before
         ($outcomes | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $outcomeBefore
+    }
+
+    It 'direct calls reject null, unsupported, and non-scalar outcome projections with one bounded canary-free error' {
+        $observed = InModuleScope TenantPulse {
+            $datasets = @{ endpointSecurityLapsPolicies = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Compliant'; backsUpToEntra = $true; hasSufficientComplexity = $true; hasSufficientLength = $true; hasPostAuthAction = $true }) }
+            $statusCanary = 'unsupported-status-canary'
+            $cases = @(
+                @{ Name = 'null root'; Outcomes = $null }
+                @{ Name = 'null entry'; Outcomes = @{ endpointSecurityLapsPolicies = $null } }
+                @{ Name = 'non-dictionary entry'; Outcomes = @{ endpointSecurityLapsPolicies = 'not-a-dictionary' } }
+                @{ Name = 'unsupported scalar'; Outcomes = @{ endpointSecurityLapsPolicies = @{ Status = $statusCanary } } }
+                @{ Name = 'non-scalar'; Outcomes = @{ endpointSecurityLapsPolicies = @{ Status = @('Partial') } } }
+            )
+
+            @($cases | ForEach-Object {
+                try {
+                    $null = Test-PulseLapsConfigurationMeetsBar -Datasets $datasets -DatasetOutcomes $_.Outcomes
+                    [pscustomobject]@{ Name = $_.Name; Threw = $false; Message = '' }
+                } catch {
+                    [pscustomobject]@{ Name = $_.Name; Threw = $true; Message = $_.Exception.Message }
+                }
+            })
+        }
+
+        $observed.Count | Should -Be 5
+        foreach ($case in $observed) {
+            $case.Threw | Should -BeTrue -Because $case.Name
+            $case.Message | Should -BeExactly 'Test-PulseLapsConfigurationMeetsBar: the dataset outcome projection is invalid.' -Because $case.Name
+            $case.Message | Should -Not -Match 'unsupported-status-canary|System\.Object|null-valued' -Because $case.Name
+        }
     }
 
     It 'Pass: a single policy meets all four criteria' {

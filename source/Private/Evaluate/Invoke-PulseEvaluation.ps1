@@ -569,22 +569,37 @@ function Invoke-PulseCheckEvaluation {
 
         $entry = $manifestDatasets[$name]
         $entryStatus = $null
-        try { $entryStatus = [string] $entry.status } catch { $entryStatus = $null }
+        try {
+            $rawEntryStatus = $entry.status
+            if ($rawEntryStatus -is [string]) {
+                $entryStatus = $rawEntryStatus
+            }
+        } catch {
+            $entryStatus = $null
+        }
 
         # Fail-closed gate: only the two statuses this evaluator understands as carrying
         # rows may continue. Partial is subjected to the explicit opt-in and structural
         # validation below; every other value, including a future/corrupted status this
         # evaluator has never heard of, remains NotApplicable.
-        if ($entryStatus -notin @('Collected', 'Partial')) {
-            $reason = $null
-            try { $reason = $entry.reason } catch { $reason = $null }
-            if ([string]::IsNullOrEmpty($reason)) {
-                $reason = "dataset '$name' has status '$entryStatus' with no reason recorded."
+        if ($entryStatus -cnotin @('Collected', 'Partial')) {
+            if ($entryStatus -cin @('Pending', 'Failed', 'Skipped')) {
+                $reason = $null
+                try { $reason = $entry.reason } catch { $reason = $null }
+                if ([string]::IsNullOrEmpty($reason)) {
+                    $reason = "dataset '$name' is unavailable for evaluation."
+                }
+                return @{
+                    Status   = 'NotApplicable'
+                    Evidence = @()
+                    Reason   = $reason
+                }
             }
+
             return @{
                 Status   = 'NotApplicable'
                 Evidence = @()
-                Reason   = $reason
+                Reason   = "dataset '$name' has an unsupported collection status."
             }
         }
 

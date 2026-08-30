@@ -202,6 +202,44 @@ Describe 'TP.INT.0029 - Security baselines assigned and not on a deprecated vers
         $finding.reason | Should -Match 'native boolean'
     }
 
+    It 'Complete and non-decisive Partial reject an assigned/current row without a usable id or name' {
+        $row = [pscustomobject]@{ templateFamily = 'baseline'; hasAssignment = $true; isDeprecated = $false }
+
+        $complete = Invoke-PulseCheckFixture -CheckId 'TP.INT.0029' -Datasets @(
+            @{ Name = 'securityBaselinesAssignedAndCurrent'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($row) }
+        )
+        $complete.status | Should -Be 'Error'
+        $complete.reason | Should -Match 'identity'
+
+        $partial = Invoke-PulseCheckFixture -CheckId 'TP.INT.0029' -Datasets @(
+            @{
+                Name = 'securityBaselinesAssignedAndCurrent'; ApiVersion = 'beta'; Status = 'Partial'; Data = @($row)
+                FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('ConfigurationPolicyAssignment.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
+            }
+        )
+        $partial.status | Should -Be 'Error'
+        $partial.reason | Should -Match 'identity'
+    }
+
+    It 'Partial: a valid offender outranks an assigned/current row with no identity in either row order' {
+        $offender = [pscustomobject]@{ id = 'b-offender'; name = 'Unsafe'; templateFamily = 'baseline'; hasAssignment = $false; isDeprecated = $false }
+        $malformed = [pscustomobject]@{ templateFamily = 'baseline'; hasAssignment = $true; isDeprecated = $false }
+
+        foreach ($rows in @(@($offender, $malformed), @($malformed, $offender))) {
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0029' -Datasets @(
+                @{
+                    Name = 'securityBaselinesAssignedAndCurrent'; ApiVersion = 'beta'; Status = 'Partial'; Data = $rows
+                    FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                    Operations = @('ConfigurationPolicyAssignment.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
+                }
+            )
+            $finding.status | Should -Be 'Fail'
+            @($finding.evidence).Count | Should -Be 1
+            $finding.evidence[0].identity | Should -Be 'b-offender'
+        }
+    }
+
     It 'Collected: any malformed row returns Error even when a valid offender exists, in either order' {
         $offender = [pscustomobject]@{ id = 'b-offender'; name = 'Unsafe'; templateFamily = 'baseline'; hasAssignment = $false; isDeprecated = $false }
         $malformed = [pscustomobject]@{ id = 'b-broken'; name = 'Broken'; templateFamily = 'baseline'; hasAssignment = 'false'; isDeprecated = $false }
@@ -266,6 +304,36 @@ Describe 'TP.INT.0029 - Security baselines assigned and not on a deprecated vers
         $result.Status | Should -Be 'Fail'
         ($datasets | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $before
         ($outcomes | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $outcomeBefore
+    }
+
+    It 'direct calls reject null, unsupported, and non-scalar outcome projections with one bounded canary-free error' {
+        $observed = InModuleScope TenantPulse {
+            $datasets = @{ securityBaselinesAssignedAndCurrent = @([pscustomobject]@{ id = 'b1'; name = 'Current'; templateFamily = 'baseline'; hasAssignment = $true; isDeprecated = $false }) }
+            $statusCanary = 'unsupported-status-canary'
+            $cases = @(
+                @{ Name = 'null root'; Outcomes = $null }
+                @{ Name = 'null entry'; Outcomes = @{ securityBaselinesAssignedAndCurrent = $null } }
+                @{ Name = 'non-dictionary entry'; Outcomes = @{ securityBaselinesAssignedAndCurrent = 'not-a-dictionary' } }
+                @{ Name = 'unsupported scalar'; Outcomes = @{ securityBaselinesAssignedAndCurrent = @{ Status = $statusCanary } } }
+                @{ Name = 'non-scalar'; Outcomes = @{ securityBaselinesAssignedAndCurrent = @{ Status = @('Partial') } } }
+            )
+
+            @($cases | ForEach-Object {
+                try {
+                    $null = Test-PulseSecurityBaselinesAssignedAndCurrent -Datasets $datasets -DatasetOutcomes $_.Outcomes
+                    [pscustomobject]@{ Name = $_.Name; Threw = $false; Message = '' }
+                } catch {
+                    [pscustomobject]@{ Name = $_.Name; Threw = $true; Message = $_.Exception.Message }
+                }
+            })
+        }
+
+        $observed.Count | Should -Be 5
+        foreach ($case in $observed) {
+            $case.Threw | Should -BeTrue -Because $case.Name
+            $case.Message | Should -BeExactly 'Test-PulseSecurityBaselinesAssignedAndCurrent: the dataset outcome projection is invalid.' -Because $case.Name
+            $case.Message | Should -Not -Match 'unsupported-status-canary|System\.Object|null-valued' -Because $case.Name
+        }
     }
 
     It 'Pass: every baseline instance is assigned and current' {

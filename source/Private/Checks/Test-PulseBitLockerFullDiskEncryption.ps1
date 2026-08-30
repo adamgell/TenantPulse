@@ -109,41 +109,27 @@ function Test-PulseBitLockerFullDiskEncryption {
         [hashtable] $Context = @{},
 
         [Parameter()]
+        [AllowNull()]
         [hashtable] $DatasetOutcomes = @{}
     )
 
     $datasetName = 'endpointSecurityDiskEncryptionPolicies'
-    $isPartial = $false
-    $unresolvedGapCount = 0
-    if ($DatasetOutcomes.ContainsKey($datasetName)) {
-        $outcome = $DatasetOutcomes[$datasetName]
-        $outcomePropertyNames = if ($outcome -is [System.Collections.IDictionary]) {
-            @($outcome.Keys)
-        } else {
-            @($outcome.PSObject.Properties.Name)
-        }
-        if ($null -eq $outcome -or $outcomePropertyNames -cnotcontains 'Status') {
-            throw 'Test-PulseBitLockerFullDiskEncryption: the dataset outcome projection is missing Status.'
-        }
-
-        $outcomeStatus = [string] $outcome.Status
-        if ($outcomeStatus -notin @('Collected', 'Partial')) {
-            throw "Test-PulseBitLockerFullDiskEncryption: unsupported dataset outcome Status '$outcomeStatus'."
-        }
-        $isPartial = $outcomeStatus -eq 'Partial'
-        if ($isPartial) {
-            if ($outcomePropertyNames -cnotcontains 'Gaps' -or $null -eq $outcome.Gaps -or $outcome.Gaps -isnot [array] -or @($outcome.Gaps).Count -eq 0) {
-                throw 'Test-PulseBitLockerFullDiskEncryption: the Partial dataset outcome projection must contain a non-empty Gaps array.'
-            }
-            $unresolvedGapCount = @($outcome.Gaps).Count
-        }
-    }
+    $outcomeState = Resolve-PulseDatasetOutcomeState -DatasetOutcomes $DatasetOutcomes -DatasetName $datasetName -Caller $MyInvocation.MyCommand.Name
+    $isPartial = $outcomeState.IsPartial
+    $unresolvedGapCount = $outcomeState.UnresolvedGapCount
 
     $policies = @($Datasets.endpointSecurityDiskEncryptionPolicies)
 
     $qualifyingPolicies = [System.Collections.Generic.List[object]]::new()
     $malformedReason = $null
     foreach ($policy in $policies) {
+        $policyId = [string] $policy.policyId
+        if ([string]::IsNullOrWhiteSpace($policyId)) {
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseBitLockerFullDiskEncryption: a policy has no usable policyId value - every row must have a stable identity.'
+            }
+            continue
+        }
         if ($null -eq $policy.isFullDiskEncryption) {
             if ($null -eq $malformedReason) {
                 $malformedReason = 'Test-PulseBitLockerFullDiskEncryption: a policy has no isFullDiskEncryption value - the row cannot be classified safely.'
@@ -158,13 +144,6 @@ function Test-PulseBitLockerFullDiskEncryption {
         }
 
         if ([bool] $policy.isFullDiskEncryption) {
-            $policyId = [string] $policy.policyId
-            if ([string]::IsNullOrWhiteSpace($policyId)) {
-                if ($null -eq $malformedReason) {
-                    $malformedReason = 'Test-PulseBitLockerFullDiskEncryption: a qualifying policy has no policyId value - decisive evidence must have a usable identity.'
-                }
-                continue
-            }
             $qualifyingPolicies.Add($policy)
         }
     }

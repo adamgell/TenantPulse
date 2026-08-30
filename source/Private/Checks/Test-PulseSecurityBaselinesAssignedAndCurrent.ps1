@@ -90,35 +90,14 @@ function Test-PulseSecurityBaselinesAssignedAndCurrent {
         [hashtable] $Context = @{},
 
         [Parameter()]
+        [AllowNull()]
         [hashtable] $DatasetOutcomes = @{}
     )
 
     $datasetName = 'securityBaselinesAssignedAndCurrent'
-    $isPartial = $false
-    $unresolvedGapCount = 0
-    if ($DatasetOutcomes.ContainsKey($datasetName)) {
-        $outcome = $DatasetOutcomes[$datasetName]
-        $outcomePropertyNames = if ($outcome -is [System.Collections.IDictionary]) {
-            @($outcome.Keys)
-        } else {
-            @($outcome.PSObject.Properties.Name)
-        }
-        if ($null -eq $outcome -or $outcomePropertyNames -cnotcontains 'Status') {
-            throw 'Test-PulseSecurityBaselinesAssignedAndCurrent: the dataset outcome projection is missing Status.'
-        }
-
-        $outcomeStatus = [string] $outcome.Status
-        if ($outcomeStatus -notin @('Collected', 'Partial')) {
-            throw "Test-PulseSecurityBaselinesAssignedAndCurrent: unsupported dataset outcome Status '$outcomeStatus'."
-        }
-        $isPartial = $outcomeStatus -eq 'Partial'
-        if ($isPartial) {
-            if ($outcomePropertyNames -cnotcontains 'Gaps' -or $null -eq $outcome.Gaps -or $outcome.Gaps -isnot [array] -or @($outcome.Gaps).Count -eq 0) {
-                throw 'Test-PulseSecurityBaselinesAssignedAndCurrent: the Partial dataset outcome projection must contain a non-empty Gaps array.'
-            }
-            $unresolvedGapCount = @($outcome.Gaps).Count
-        }
-    }
+    $outcomeState = Resolve-PulseDatasetOutcomeState -DatasetOutcomes $DatasetOutcomes -DatasetName $datasetName -Caller $MyInvocation.MyCommand.Name
+    $isPartial = $outcomeState.IsPartial
+    $unresolvedGapCount = $outcomeState.UnresolvedGapCount
 
     $rows = @($Datasets.securityBaselinesAssignedAndCurrent)
     if ($rows.Count -eq 0) {
@@ -128,6 +107,22 @@ function Test-PulseSecurityBaselinesAssignedAndCurrent {
     $offending = [System.Collections.Generic.List[object]]::new()
     $malformedReason = $null
     foreach ($row in $rows) {
+        $id = if (Test-PulseRowPropertyPresent -Row $row -PropertyName 'id') { [string] $row.id } else { $null }
+        $name = if (Test-PulseRowPropertyPresent -Row $row -PropertyName 'name') { [string] $row.name } else { $null }
+        $identity = if (-not [string]::IsNullOrWhiteSpace($id)) {
+            $id
+        } elseif (-not [string]::IsNullOrWhiteSpace($name)) {
+            $name
+        } else {
+            $null
+        }
+        if ($null -eq $identity) {
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseSecurityBaselinesAssignedAndCurrent: a row has no usable identity in id or name - every row must have a stable identity.'
+            }
+            continue
+        }
+
         $rowMalformed = $false
         foreach ($prop in @('hasAssignment', 'isDeprecated')) {
             if (-not (Test-PulseRowPropertyPresent -Row $row -PropertyName $prop) -or $null -eq $row.$prop) {
@@ -151,13 +146,6 @@ function Test-PulseSecurityBaselinesAssignedAndCurrent {
         $isDeprecated = [bool] $row.isDeprecated
 
         if (-not $hasAssignment -or $isDeprecated) {
-            $identity = if (Test-PulseRowPropertyPresent -Row $row -PropertyName 'id') { [string] $row.id } else { [string] $row.name }
-            if ([string]::IsNullOrWhiteSpace($identity)) {
-                if ($null -eq $malformedReason) {
-                    $malformedReason = 'Test-PulseSecurityBaselinesAssignedAndCurrent: an offending row has no usable identity in id or name - decisive evidence cannot be emitted safely.'
-                }
-                continue
-            }
             $offending.Add(@{
                 Identity = $identity
                 Detail   = @{ name = $row.name; templateFamily = $row.templateFamily; hasAssignment = $hasAssignment; isDeprecated = $isDeprecated }

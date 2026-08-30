@@ -210,6 +210,44 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         }
     }
 
+    It 'Complete and non-decisive Partial reject a non-witness row without a usable policyId' {
+        $row = [pscustomobject]@{ policyName = 'Used space only'; isFullDiskEncryption = $false }
+
+        $complete = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($row) }
+        )
+        $complete.status | Should -Be 'Error'
+        $complete.reason | Should -Match 'policyId'
+
+        $partial = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{
+                Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Partial'; Data = @($row)
+                FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('ConfigurationPolicySettings.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
+            }
+        )
+        $partial.status | Should -Be 'Error'
+        $partial.reason | Should -Match 'policyId'
+    }
+
+    It 'Partial: a valid witness outranks a non-witness row with no identity in either row order' {
+        $witness = [pscustomobject]@{ policyId = 'p-witness'; policyName = 'Full'; isFullDiskEncryption = $true }
+        $malformed = [pscustomobject]@{ policyName = 'Used space only'; isFullDiskEncryption = $false }
+
+        foreach ($rows in @(@($witness, $malformed), @($malformed, $witness))) {
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+                @{
+                    Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Partial'; Data = $rows
+                    FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                    Operations = @('ConfigurationPolicySettings.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
+                }
+            )
+            $finding.status | Should -Be 'Pass'
+            @($finding.evidence).Count | Should -Be 1
+            $finding.evidence[0].identity | Should -Be 'p-witness'
+        }
+    }
+
     It 'Collected: any malformed row returns Error even when a valid witness exists, in either order' {
         $witness = [pscustomobject]@{ policyId = 'p-witness'; policyName = 'Full'; isFullDiskEncryption = $true }
         $malformed = [pscustomobject]@{ policyId = 'p-broken'; policyName = 'Broken'; isFullDiskEncryption = 1 }
@@ -260,6 +298,24 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         $finding.reason | Should -Match 'invalid Partial outcome'
     }
 
+    It 'the persisted engine bounds an unsupported status and reason without serializing either canary' {
+        $fixture = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -ReturnFixture -Datasets @(
+            @{
+                Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'
+                Data = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true })
+                ManifestOverrides = @{ status = 'persisted-status-canary'; reason = 'persisted-reason-canary' }
+            }
+        )
+        try {
+            $fixture.Finding.status | Should -Be 'NotApplicable'
+            $fixture.Finding.reason | Should -BeExactly "dataset 'endpointSecurityDiskEncryptionPolicies' has an unsupported collection status."
+            $fixture.FindingJson | Should -Not -Match 'persisted-status-canary|persisted-reason-canary'
+            $fixture.ScoreJson | Should -Not -Match 'persisted-status-canary|persisted-reason-canary'
+        } finally {
+            Remove-Item -LiteralPath $fixture.StoreRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'does not mutate direct caller datasets or outcome projections' {
         $datasets = @{ endpointSecurityDiskEncryptionPolicies = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true }) }
         $outcomes = @{ endpointSecurityDiskEncryptionPolicies = @{ Status = 'Partial'; Gaps = @(@{ Scope = 'x' }) } }
@@ -274,6 +330,36 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         $result.Status | Should -Be 'Pass'
         ($datasets | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $before
         ($outcomes | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly $outcomeBefore
+    }
+
+    It 'direct calls reject null, unsupported, and non-scalar outcome projections with one bounded canary-free error' {
+        $observed = InModuleScope TenantPulse {
+            $datasets = @{ endpointSecurityDiskEncryptionPolicies = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true }) }
+            $statusCanary = 'unsupported-status-canary'
+            $cases = @(
+                @{ Name = 'null root'; Outcomes = $null }
+                @{ Name = 'null entry'; Outcomes = @{ endpointSecurityDiskEncryptionPolicies = $null } }
+                @{ Name = 'non-dictionary entry'; Outcomes = @{ endpointSecurityDiskEncryptionPolicies = 'not-a-dictionary' } }
+                @{ Name = 'unsupported scalar'; Outcomes = @{ endpointSecurityDiskEncryptionPolicies = @{ Status = $statusCanary } } }
+                @{ Name = 'non-scalar'; Outcomes = @{ endpointSecurityDiskEncryptionPolicies = @{ Status = @('Partial') } } }
+            )
+
+            @($cases | ForEach-Object {
+                try {
+                    $null = Test-PulseBitLockerFullDiskEncryption -Datasets $datasets -DatasetOutcomes $_.Outcomes
+                    [pscustomobject]@{ Name = $_.Name; Threw = $false; Message = '' }
+                } catch {
+                    [pscustomobject]@{ Name = $_.Name; Threw = $true; Message = $_.Exception.Message }
+                }
+            })
+        }
+
+        $observed.Count | Should -Be 5
+        foreach ($case in $observed) {
+            $case.Threw | Should -BeTrue -Because $case.Name
+            $case.Message | Should -BeExactly 'Test-PulseBitLockerFullDiskEncryption: the dataset outcome projection is invalid.' -Because $case.Name
+            $case.Message | Should -Not -Match 'unsupported-status-canary|System\.Object|null-valued' -Because $case.Name
+        }
     }
 
     It 'Pass: at least one policy enforces full-disk encryption' {
