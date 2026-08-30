@@ -284,17 +284,19 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
                 $installRoot
                 (Join-Path $PSHOME 'Modules')
             ) -join [System.IO.Path]::PathSeparator
-            $childOutput = @(& ([System.Environment]::ProcessPath) -NoLogo -NoProfile -Command @'
+            $childScript = @'
 $ErrorActionPreference = 'Stop'
 Import-Module Microsoft.Graph.Authentication -RequiredVersion 2.39.0 -Force
-Import-Module TenantPulse -RequiredVersion 0.2.0 -Force
+Import-Module TenantPulse -RequiredVersion __TENANTPULSE_VERSION__ -Force
 [pscustomobject]@{
     TenantPulse = [string] (Get-Module TenantPulse).Version
     GraphKit = [string] (Get-Module GraphKit).Version
     GraphAuthentication = [string] (Get-Module Microsoft.Graph.Authentication).Version
     SecretManagementLoaded = [bool] (Get-Module Microsoft.PowerShell.SecretManagement)
 } | ConvertTo-Json -Compress
-'@)
+'@
+            $childScript = $childScript.Replace('__TENANTPULSE_VERSION__', $script:releaseVersion)
+            $childOutput = @(& ([System.Environment]::ProcessPath) -NoLogo -NoProfile -Command $childScript)
             $childExitCode = $LASTEXITCODE
         }
         finally {
@@ -303,7 +305,7 @@ Import-Module TenantPulse -RequiredVersion 0.2.0 -Force
 
         $childExitCode | Should -Be 0
         $probe = $childOutput[-1] | ConvertFrom-Json
-        $probe.TenantPulse | Should -Be '0.2.0'
+        $probe.TenantPulse | Should -Be $script:releaseVersion
         $probe.GraphKit | Should -Be '0.3.0'
         # The build/feed assertions above pin the restored package to 2.38.1.
         # GraphKit's runtime ModuleVersion constraint is a minimum, so a compatible

@@ -12,7 +12,7 @@
 RootModule = 'TenantPulse.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.2.0'
+ModuleVersion = '0.3.0'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -113,18 +113,11 @@ PrivateData = @{
 
         # ReleaseNotes of this module
         ReleaseNotes = @'
-## [0.2.0] - 2026-08-29
-
-### Added
-
-- Built-in read-only provider plans for Intune RBAC, Endpoint Security BitLocker and LAPS, and current plus legacy security baselines.
-- Settings Catalog assignment collection with include, exclude, filter, and typed intent preservation.
-- Typed compliance and device-configuration assignment intent with deterministic normalization and malformed-target gaps.
+## [0.3.0] - Unreleased
 
 ### Changed
 
-- Migrated TP.INT.0007 to the supported per-platform managed-device cleanup-rule collection.
-- Requires exact GraphKit `0.3.0` for the new live-proven operation primitives and lazy SecretManagement boundary.
+- The approved product-program completion work now uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
 '@
 
         # Prerelease string of this module

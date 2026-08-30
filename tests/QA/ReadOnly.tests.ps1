@@ -170,7 +170,7 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         # Pending = $true for (securityDefaultsPolicy, directoryRoleAssignments,
         # directoryRoleDefinitions, organization, organizationMdmAuthority, entraDevices)
         # shipped and Pending was dropped from all of them - see DatasetMap.psd1.
-        # GraphKit 0.3.0 makes managedDeviceCleanupRules a direct released-candidate
+        # GraphKit 0.3.0 makes managedDeviceCleanupRules a direct released
         # descriptor. Five placeholders remain: the Windows data processor plus the four
         # TenantPulse-owned composite provider plans (RBAC, BitLocker, LAPS, baselines).
         # The public snapshot path intercepts all five through its built-in plan registry;

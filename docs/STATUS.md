@@ -4,13 +4,21 @@ This is internal development/task narrative, moved out of README.md (post-review
 README.md is meant to read as a PSGallery landing page, not an implementation log). Nothing
 here is required to install or use TenantPulse; see README.md for that.
 
-## Next-release candidate evidence (2026-08-29)
+## Released-package evidence (2026-08-30)
 
-GraphKit `0.3.0` and TenantPulse `0.2.0` are coordinated greenfield, pre-adoption release
-candidates. Nobody is using TenantPulse: there is no installed user base, customer estate,
-prior runtime, or migration/repoint/cutover task. The release gates are package construction,
-read-only lab verification, review, and exact-SHA CI verification. Historical GraphKit `0.2.2`
-and TenantPulse `0.1.3` package identities remain recorded below.
+GraphKit `0.3.0` and TenantPulse `0.2.0` are the coordinated immutable PSGallery releases.
+TenantPulse was greenfield and pre-adoption when this release was built: there was no installed
+user base, customer estate, prior runtime, or migration/repoint/cutover task. Current source is
+the separate unreleased TenantPulse `0.3.0` product-program line; it is not the public `0.2.0`
+archive. Historical GraphKit `0.2.2` and TenantPulse `0.1.3` package identities remain recorded
+below.
+
+| Evidence state | Proof |
+|---|---|
+| Deterministic | Reviewed tree `24b3d4ebe522d9bf94d9a75c8625be438fa9b768`; 2,277 tests; zero failures/errors/skips/NotRun; bound archive hash `a0d5ff793b92753ab3efb4db20cf5bcf8b953e3cf81bf1a776c96a3d992417bd`. |
+| CI | PR-head run `33295409637` and merged-main run `33295648250` at `b2eb7a882cc1fcb7994c39a606c7b9ac22f5a114`; six OS/PowerShell matrix jobs plus gitleaks green. |
+| Live | The exact-package Ivy24 rows and expansion counts are retained below. |
+| Published | TenantPulse 0.2.0 on PSGallery at `2026-08-30T14:07:39.587Z`; the downloaded 411284-byte archive matches `a0d5ff793b92753ab3efb4db20cf5bcf8b953e3cf81bf1a776c96a3d992417bd`. |
 
 The source implementation is wired through TenantPulse's public snapshot path. Synthetic
 `Pending` map entries for composite datasets are implementation placeholders, not the runtime
@@ -26,19 +34,14 @@ fallback. Evidence levels are kept separate below.
 | `endpointSecurityLapsPolicies` / `TP.INT.0015` | Live: the exact package collected an authoritative empty set. The check failed because no qualifying policy exists, not because collection failed. |
 | `securityBaselinesAssignedAndCurrent` / `TP.INT.0029` | Live: the exact package collected 3 rows. The check failed on tenant posture, not collection or execution. |
 
-**TenantPulse `0.2.0` candidate evidence.** The final local suite passed 2255/2255 tests with
-zero failures, errors, skips, or NotRun tests. The exact candidate archive is
-`TenantPulse.0.2.0.nupkg`, SHA-256
-`041591C3C4CA8402BFCFC77F302246E6FFD315D02D0DB053DF9F5D4771159888`. A read-only live
-gate installed that archive into an isolated root and loaded TenantPulse `0.2.0`, GraphKit
-`0.3.0`, and Microsoft.Graph.Authentication `2.38.1` from that root. All seven selected checks
-completed: 3 Pass, 3 posture Fail, and 1 fail-closed NotApplicable from partial BitLocker
-evidence. The large expansion paths also completed: Settings Catalog 781 policies / 4302 rows /
-64 gaps; compliance 40 / 606 / 6; device configuration 15 / 244 / 0; conflicts 3 / 165 / 70;
-and the setting-presence index 3 / 2320 / 70. Across 1629 generated artifacts, the raw tenant
-id was absent, profile provenance metadata was absent, and the profile label was absent from
-the manifest and redacted report. This is local and live package evidence only: TenantPulse's
-exact source SHA has not yet passed remote CI, and `0.2.0` has not been published.
+The read-only live gate installed that exact archive into an isolated root and loaded
+TenantPulse `0.2.0`, GraphKit `0.3.0`, and Microsoft.Graph.Authentication `2.38.1` from that
+root. All seven selected checks completed: 3 Pass, 3 posture Fail, and 1 fail-closed
+NotApplicable from partial BitLocker evidence. The large expansion paths also completed:
+Settings Catalog 781 policies / 4302 rows / 64 gaps; compliance 40 / 606 / 6; device
+configuration 15 / 244 / 0; conflicts 3 / 165 / 70; and the setting-presence index 3 / 2320 /
+70. Across 1629 generated artifacts, the raw tenant id was absent, profile provenance metadata
+was absent, and the profile label was absent from the manifest and redacted report.
 
 **Package identity and evidence boundary.** GraphKit `0.2.2` is the stable producer released
 before R1. On 2026-08-29, the PSGallery archive downloaded for GraphKit `0.2.2` was 201750
