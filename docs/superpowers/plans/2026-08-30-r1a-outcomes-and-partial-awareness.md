@@ -181,6 +181,19 @@
 - Package-first authoritative gate: `pack` succeeded with 10 tasks, 0 errors, and 0 warnings; subsequent `test` succeeded with 2,452 tests, 0 failures, 0 errors, 0 skipped, 0 NotRun, and 11 build tasks with 0 errors/warnings.
 - Tested TenantPulse 0.3.0 package SHA-256: `9ce0a35f98e2c30dd44dc911e4250c755f8ee261b353d7c502b7e8266933d2ce`; built manifest SHA-256: `4693f670b62e1c84aa83effa967f0692a252681a897c2e730e73586803f38f06`; built module SHA-256: `e635f83aa132f5aef8a76fb68a57563bd3a8eef7587f797b2a139ef95b0610ac`. Exact package/test binding is recorded in `output/testResults/tested-release-proof.json`.
 
+**Task 4 independent-review correction evidence (2026-08-30):**
+
+- The historical green evidence above is preserved, but it was not final approval: independent review found that the evaluator validated a Partial outcome and then projected the unnormalized raw manifest values, and that a one-element null row array was counted as usable evidence.
+- Correction red gate against commit `929e08950fa38ad3f7dd97f1afa8a8afef5cdbf9`: 30 focused examples discovered; 22 passed and eight failed. The failures reproduced scalar `Gaps`, integer `Scope`, `ReasonCode`, `Operation`, and `ApiVersion` values reaching a rule, a null-only Partial row reaching a rule, null leakage in a mixed row set, and an extra raw gap key crossing the projection boundary.
+- Fix commit `4e9031dabfce693a13bd91c5f3c6367d8e834291` projects only a canonical outcome returned by the shared constructors. It requires the persisted gap collection to retain array shape, requires every mandatory gap string to already be a nonblank string, rebuilds accepted gaps through `New-PulseCollectionGap`, and excludes null rows only from the check-local dataset copy.
+- Regression coverage proves malformed input cannot invoke the rule; mixed null and valid rows deliver only the valid row while leaving the shared cache unchanged; extra gap properties are stripped; and a mixed declared set containing both Partial and writer-shaped Collected outcomes remains accepted with exact canonical projection keys.
+- Final focused correction gate: 918/918 passed across the collection-outcome, evaluator, and privacy containers; zero failures, errors, skips, NotRun, or failed containers.
+- Package-first authoritative correction gate: `pack` succeeded with 10 tasks, 0 errors, and 0 warnings; subsequent `test` succeeded with 2,460 tests, 0 failures, 0 errors, 0 skipped, 0 NotRun, and 11 build tasks with 0 errors/warnings.
+- The authoritative correction run rechecked the complete deterministic suite after both bypasses were closed, including manifest generation, dependency ordering, mixed outcome projection, row and projection mutation isolation, serialization privacy, package integrity, and the existing evaluator compatibility surface. No production descriptor or check function from the following task was changed.
+- Proof run identifier: `73f802ca-3e04-4115-b4e6-12f550044530`.
+- The proof-bound candidate was produced from the corrected source and exercised through the full package-first gate. The null filter operates on a newly allocated check-local row list, so the shared dataset cache retains its original members for later checks; canonical outcome construction similarly prevents raw manifest members or hostile extra keys from reaching a rule.
+- Corrected TenantPulse 0.3.0 package SHA-256: `6df3e676387c86d908963e1ca3e16afeffcb753a1c96d8e38fe934b1dfa8ad05`; built manifest SHA-256: `4693f670b62e1c84aa83effa967f0692a252681a897c2e730e73586803f38f06`; built module SHA-256: `1d81027c8bf4cb2d55f4f5f555de02cc7b107c136c2a16c22da666cacedba47d`.
+
 ### Task 5: Opt in the four monotonic Intune checks
 
 **Files:**
