@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The approved product-program completion work uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
 
-## [0.2.0] - 2026-08-29
+## [0.2.0] - 2026-08-30
 
 TenantPulse `0.2.0` was published to PSGallery on 2026-08-30. The release was developed as
 greenfield, pre-adoption work: there was no installed TenantPulse user base, customer estate,

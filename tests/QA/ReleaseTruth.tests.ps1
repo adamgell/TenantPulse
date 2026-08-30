@@ -28,7 +28,7 @@ Describe 'TenantPulse current release truth' -Tag 'QA' {
 
     It 'does not call the released 0.2.0 package unpublished' {
         @($readme, $changelog, $status) -join "`n" |
-            Should -Not -Match '(?i)0\.2\.0.{0,80}(?:unpublished|candidate)|(?:unpublished|candidate).{0,80}0\.2\.0'
+            Should -Not -Match '(?is)0\.2\.0.{0,80}(?:unpublished|candidate)|(?:unpublished|candidate).{0,80}0\.2\.0'
     }
 
     It 'keeps deterministic CI live and publication evidence distinct' {

@@ -286,7 +286,8 @@ else {
     # filter/gap, dependency-byte, proof-ordering, command-resolution, and archive-TOCTOU
     # regressions; 2247 -> 2255 for pre-test artifact/result-pair proof binding and its
     # multiline ratchet-parser regression.
-    # 2255 -> 2288 after publication closeout: the merged tree actually executed 2277 tests; +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.
+    # 2255 -> 2288 after publication closeout: 2277 was the exact pre-closeout
+    # merged-main baseline; 2288 is the measured post-closeout gate, incorporating +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
