@@ -25,7 +25,11 @@ tests with zero failures, errors, skips, or NotRun results across all six OS/Pow
 with gitleaks green.
 
 Current source starts the unreleased TenantPulse `0.3.0` product-program line. It has a unique
-successor identity and is not the public TenantPulse `0.2.0` archive.
+successor identity and is not the public TenantPulse `0.2.0` archive. On this line, Endpoint
+Security composite provenance uses the stable qualified primitives `ConfigurationPolicy.ListBeta`
+and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count. Legacy schema
+1.0.0/1.1.0 manifests remain fail-closed when they contain the later `Partial` state; reads reject
+that unsupported state without rewriting the manifest.
 
 ## Quick start
 

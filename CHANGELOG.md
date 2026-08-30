@@ -3,11 +3,20 @@
 The format is based on and uses the types of changes according to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Unreleased / 0.3.0 program line.** Current work stabilizes Endpoint Security composite
+> provenance as a qualified primitive set. Review finding 14 remains rejected on first-party
+> schema evidence: released schema 1.0.0/1.1.0 writers could not emit `Partial`, so migration
+> rejects that later state without rewriting the manifest.
+
 ## [Unreleased]
+
+### Fixed
+
+- Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta` and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count; child gaps name the setting primitive explicitly.
 
 ### Changed
 
-- The approved product-program completion work now uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
+- The approved product-program completion work uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
 
 ## [0.2.0] - 2026-08-29
 

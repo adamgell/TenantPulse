@@ -115,9 +115,13 @@ PrivateData = @{
         ReleaseNotes = @'
 ## [0.3.0] - Unreleased
 
+### Fixed
+
+- Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta` and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count; child gaps name the setting primitive explicitly.
+
 ### Changed
 
-- The approved product-program completion work now uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
+- The approved product-program completion work uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
 '@
 
         # Prerelease string of this module

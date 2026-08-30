@@ -148,7 +148,7 @@ Expected: five release-truth tests pass; source, built manifest, package, and cl
 ./build.ps1 -Tasks test
 ```
 
-Expected: 2282 tests execute with zero failures/errors/skips/NotRun; the existing 2255 minimum remains green pending the final ratchet task.
+Expected and measured: 2284 tests execute with zero failures/errors/skips/NotRun; the existing 2255 minimum remains green pending the final ratchet task. The two cases above the original 2282 estimate are the standing secret/PII and control-byte scans discovered for this newly tracked plan document.
 
 - [ ] **Step 9: Commit immutable-release truth and successor identity**
 
@@ -258,7 +258,7 @@ Expected: qualified provenance, legacy rejection, exact 0.3.0 identity, exact Gr
 ./build.ps1 -Tasks test
 ```
 
-Expected: 2286 tests execute with zero failures/errors/skips/NotRun and the tested-release proof names TenantPulse 0.3.0. Do not publish it.
+Expected: 2288 tests execute with zero failures/errors/skips/NotRun and the tested-release proof names TenantPulse 0.3.0. Do not publish it. Actual discovery remains authoritative.
 
 - [ ] **Step 9: Commit the provenance fix**
 
@@ -267,7 +267,7 @@ git add source/TenantPulse.psd1 source/Private/Collect/Invoke-PulseEndpointSecur
 git commit -m "fix: stabilize provider-plan provenance"
 ```
 
-### Task 3: Synchronize the 2286-test release floor
+### Task 3: Synchronize the 2288-test release floor
 
 **Files:**
 - Modify: `.build/AssertGateResult.tasks.ps1`
@@ -278,16 +278,16 @@ git commit -m "fix: stabilize provider-plan provenance"
 - Test: `tests/QA/MinimumTestsRatchetSync.tests.ps1`
 
 **Interfaces:**
-- Consumes: authoritative 2286-test result and tested-release proof from Task 2.
+- Consumes: authoritative 2288-test result and tested-release proof from Task 2.
 - Produces: one synchronized minimum-test value across build, CI, publisher, passing fixtures, and proof-failure fixtures.
 
-- [ ] **Step 1: Set every synchronized floor to 2286**
+- [ ] **Step 1: Set every synchronized floor to 2288**
 
-Replace the current 2255 floor with 2286 in `.build/AssertGateResult.tasks.ps1`, `.github/workflows/ci.yml`, the publisher gate call/comment, and the passing publisher fixture. Append the measured history comment `2255 -> 2286 after publication closeout: the merged tree actually executed 2277 tests; +5 current-release truth tests, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.` If the authoritative Task 2 result differs from 2286, stop this mechanical step, reconcile which expected test case was not discovered, and fix discovery before changing the floor.
+Replace the current 2255 floor with 2288 in `.build/AssertGateResult.tasks.ps1`, `.github/workflows/ci.yml`, the publisher gate call/comment, and the passing publisher fixture. Append the measured history comment `2255 -> 2288 after publication closeout: the merged tree actually executed 2277 tests; +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.` If the authoritative Task 2 result differs from 2288, stop this mechanical step, reconcile discovery before changing the floor, and use the measured result rather than this estimate.
 
 - [ ] **Step 2: Update rejection fixtures around the same floor**
 
-In `tests/QA/TestProofGate.tests.ps1`, set the normal total to 2286 and the `Floor` failure total to 2285. Update the synthetic NUnit total in `tests/QA/PublishTenantPulsePackage.tests.ps1` to 2286. Preserve skip/failure/mismatched-pair behavior.
+In `tests/QA/TestProofGate.tests.ps1`, set the normal total to 2288 and the `Floor` failure total to 2287. Update the synthetic NUnit total in `tests/QA/PublishTenantPulsePackage.tests.ps1` to 2288. Preserve skip/failure/mismatched-pair behavior.
 
 - [ ] **Step 3: Run the synchronization and publisher-focused gates**
 
