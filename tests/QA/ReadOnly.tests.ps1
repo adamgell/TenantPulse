@@ -15,7 +15,7 @@
     predicate through Test-PulseReadOnlyDatasetMap below, a small non-throwing walker local
     to this file, so every dataset gets its own reported result.
 
-    Unlike a unit test, this file deliberately imports the REAL GraphKit module (0.2.2,
+    Unlike a unit test, this file deliberately imports the REAL GraphKit module (0.3.0,
     installed as TenantPulse's own RequiredModules dependency) and calls its REAL
     Get-GraphOperation - metadata-catalog lookups only, never a network call, never a live
     tenant - to prove every RELEASED dataset entry resolves to an actual Read/Safe
@@ -87,9 +87,9 @@ BeforeAll {
     $script:datasetMapPath = Join-Path -Path $projectPath -ChildPath 'source/Data/DatasetMap.psd1'
     $script:fixtureDatasetMapPath = Join-Path -Path $projectPath -ChildPath 'tests/Fixtures/DatasetMap/mutation-write-op.psd1'
 
-    # Real GraphKit (0.2.2), deliberately NOT stubbed in this file - see the file-level
+    # Real GraphKit (0.3.0), deliberately NOT stubbed in this file - see the file-level
     # docstring above for why this is the one QA test allowed to import it for real.
-    Import-Module -FullyQualifiedName @{ ModuleName = 'GraphKit'; RequiredVersion = '0.2.2' } -Force -ErrorAction Stop
+    Import-Module -FullyQualifiedName @{ ModuleName = 'GraphKit'; RequiredVersion = '0.3.0' } -Force -ErrorAction Stop
 
     <#
         Walks a DatasetMap.psd1-shaped hashtable and returns every read-only-predicate
@@ -170,19 +170,14 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         # Pending = $true for (securityDefaultsPolicy, directoryRoleAssignments,
         # directoryRoleDefinitions, organization, organizationMdmAuthority, entraDevices)
         # shipped and Pending was dropped from all of them - see DatasetMap.psd1.
-        # STALE COMMENT FIXED (2026-08-16): this used to say "Zero Pending entries
-        # currently exist" - Task 3.2's own Intune-check batch added 7 new Pending
-        # datasets since (operationApprovalPolicies,
-        # dataProcessorServiceForWindowsFeaturesOnboarding, intuneBrandingProfiles,
-        # windowsFeatureUpdateProfiles, intuneRbacGroupProtection,
-        # endpointSecurityDiskEncryptionPolicies, endpointSecurityLapsPolicies - see
-        # DatasetMap.psd1 for the current count), so $script:pendingDatasetCases is no
-        # longer empty and this -ForEach now runs real per-dataset assertions. The
-        # mechanism itself (and its own synthetic-fixture unit coverage in
-        # Get-PulseTenantSnapshot.Tests.ps1's Invoke-PulseCollection Describe block) stays
-        # in place for whichever of these ships next, and for the next batch after that.
+        # GraphKit 0.3.0 makes managedDeviceCleanupRules a direct released-candidate
+        # descriptor. Five placeholders remain: the Windows data processor plus the four
+        # TenantPulse-owned composite provider plans (RBAC, BitLocker, LAPS, baselines).
+        # The public snapshot path intercepts all five through its built-in plan registry;
+        # this static block still proves that no unresolved placeholder could become a
+        # mutation if it ever fell through to ordinary descriptor collection.
         It "Pending dataset '<Name>' (<Type>/<Op>) declares ExpectedThrottleClass='Read' and ExpectedReplayPolicy='Safe'" -ForEach $script:pendingDatasetCases -AllowNullOrEmptyForEach {
-            # No live descriptor exists to resolve - GraphKit 0.2.2 genuinely does not have
+            # No live descriptor exists to resolve - GraphKit 0.3.0 genuinely does not have
             # this Type/Operation pair yet. Confirm that (rather than silently trusting the
             # Pending flag) so a descriptor that quietly shipped early is caught, then assert
             # the map's own declaration is read-only.
@@ -192,6 +187,43 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
             $ExpectedThrottleClass | Should -Be 'Read' -Because "Pending dataset '$Name' must still declare the read-only shape its future descriptor is expected to have"
             $ExpectedReplayPolicy | Should -Be 'Safe' -Because "Pending dataset '$Name' must still declare the read-only shape its future descriptor is expected to have"
         }
+    }
+
+    It 'keeps the Windows processor entry Pending while its official contract is unresolved' {
+        $map = Import-PowerShellDataFile -Path $script:datasetMapPath
+        $entry = $map['dataProcessorServiceForWindowsFeaturesOnboarding']
+
+        $entry.Pending | Should -BeTrue
+        $entry.ExpectedThrottleClass | Should -Be 'Read'
+        $entry.ExpectedReplayPolicy | Should -Be 'Safe'
+        {
+            Get-GraphOperation -Type 'DataProcessorServiceForWindowsFeaturesOnboarding' `
+                -Operation 'Get' -ErrorAction Stop
+        } | Should -Throw
+    }
+
+    It 'resolves managed-device cleanup rules through the exact GraphKit 0.3.0 Read/Safe descriptor' {
+        $map = Import-PowerShellDataFile -Path $script:datasetMapPath
+        $entry = $map['managedDeviceCleanupRules']
+
+        $entry | Should -Not -BeNullOrEmpty
+        $entry.Type | Should -Be 'ManagedDeviceCleanupRule'
+        $entry.Operation | Should -Be 'ListBeta'
+        $entry.ApiVersion | Should -Be 'beta'
+        $entry.ContainsKey('Pending') | Should -BeFalse
+        $entry.ContainsKey('ExpectedThrottleClass') | Should -BeFalse
+        $entry.ContainsKey('ExpectedReplayPolicy') | Should -BeFalse
+        $map.ContainsKey('managedDeviceCleanupSettings') | Should -BeFalse
+
+        $descriptor = Get-GraphOperation -Type 'ManagedDeviceCleanupRule' -Operation 'ListBeta' -ErrorAction Stop
+        $descriptor.PathTemplate | Should -Be '/deviceManagement/managedDeviceCleanupRules'
+        $descriptor.ApiVersion | Should -Be 'beta'
+        $descriptor.OperationKind | Should -Be 'Collection'
+        $descriptor.ThrottleClass | Should -Be 'Read'
+        $descriptor.ReplayPolicy | Should -Be 'Safe'
+        @($descriptor.RequiredPermissions).Count | Should -Be 1
+        $descriptor.RequiredPermissions[0].Type | Should -Be 'Application'
+        $descriptor.RequiredPermissions[0].Value | Should -Be 'DeviceManagementManagedDevices.Read.All'
     }
 
     Context 'the whole-map walker (Test-PulseReadOnlyDatasetMap) agrees with the per-dataset assertions above' {

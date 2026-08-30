@@ -24,17 +24,15 @@
     ChangelogManagement         = '3.1.0'
     Sampler                     = '0.120.1'
 
-    # GraphKit is a runtime dependency (see source/TenantPulse.psd1 RequiredModules,
-    # pinned to the same version) and is now published to PSGallery, so
-    # Resolve-Dependency (PSResourceGet/PowerShellGet against PSGallery) resolves it here
-    # like every other build dependency.
-    GraphKit                    = '0.2.2'
+    # GraphKit is a runtime dependency (see source/TenantPulse.psd1 RequiredModules),
+    # pinned to the same exact candidate version. For local candidate validation, stage
+    # the already-tested GraphKit package under output/RequiredModules rather than
+    # resolving an older public release from PSGallery.
+    GraphKit                    = '0.3.0'
 
-    # GraphKit's own RequiredModules (transitive runtime dependencies). Resolve-Dependency
-    # does NOT walk transitive requirements, and GraphKit's manifest demands these be
-    # loadable at import - locally they happen to be installed, so only CI failed (every
-    # matrix leg, at Import-Module time). Declare them explicitly, pinned to GraphKit
-    # 0.2.2's own declared minima (unchanged from 0.1.1).
-    'Microsoft.Graph.Authentication'        = '2.38.1'
-    'Microsoft.PowerShell.SecretManagement' = '1.1.2'
+    # Resolve-Dependency does not walk transitive requirements. GraphKit 0.3.0 still uses
+    # Microsoft.Graph.Authentication as its MSAL delivery vehicle, so stage it explicitly.
+    # SecretManagement is intentionally absent: GraphKit 0.3.0 resolves that optional
+    # boundary lazily only when a persisted-vault operation is invoked.
+    'Microsoft.Graph.Authentication' = '2.38.1'
 }

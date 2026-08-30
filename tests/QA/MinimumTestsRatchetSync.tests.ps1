@@ -18,13 +18,8 @@
         2. .github/workflows/ci.yml            - -MinimumTests <N> (the real CI invocation
                                                   of tests/QA/Assert-GateResult.ps1, not a
                                                   comment referencing it)
-        3. scripts/Publish-TenantPulsePackage.ps1 - BOTH of that script's own two
-                                                  -MinimumTests N lines (the live gate call
-                                                  AND the error-message hint text that
-                                                  quotes the same number back to the
-                                                  operator - the task brief's own "both
-                                                  lines" instruction exists because a past
-                                                  edit could update one and miss the other)
+        3. scripts/Publish-TenantPulsePackage.ps1 - -MinimumTests N in the bound-result
+                                                  gate call
         4. tests/QA/PublishTenantPulsePackage.tests.ps1 - the fabricated NUnit fixture's own
                                                   total="<N>" attribute (must track
                                                   Publish-TenantPulsePackage.ps1's own
@@ -57,7 +52,7 @@ BeforeAll {
             [string] $Text,
 
             [Parameter(Mandatory)]
-            [ValidateSet('AssertGateResultTask', 'CiYml', 'PublishScript', 'PublishScriptErrorHint', 'PublishFixtureTotal')]
+            [ValidateSet('AssertGateResultTask', 'CiYml', 'PublishScript', 'PublishFixtureTotal')]
             [string] $Kind,
 
             [Parameter(Mandatory)]
@@ -67,8 +62,10 @@ BeforeAll {
         $pattern = switch ($Kind) {
             'AssertGateResultTask' { '\$script:tenantPulseGateMinimumTests\s*=\s*(\d+)' }
             'CiYml' { '-MinimumTests\s+(\d+)\s' }
-            'PublishScript' { '-MinimumTests\s+(\d+)\s+-AllowedSkips' }
-            'PublishScriptErrorHint' { "-MinimumTests\s+'?(\d+)'?\`"" }
+            # The publisher intentionally formats the explicit result-pair gate across
+            # lines. Permit PowerShell's continuation backtick between the numeric floor
+            # and -AllowedSkips without widening the match to unrelated prose.
+            'PublishScript' { '-MinimumTests\s+(\d+)\s*`?\s*-AllowedSkips' }
             'PublishFixtureTotal' { 'total="(\d+)"' }
         }
 
@@ -97,6 +94,11 @@ Describe 'Get-PulseMinimumTestsRatchetValue (self-check against synthetic input)
         Get-PulseMinimumTestsRatchetValue -Text $text -Kind CiYml -LocationName 'synthetic' | Should -Be 1956
     }
 
+    It 'parses the publisher multiline gate call with a continuation backtick' {
+        $text = "& pwsh -File `$gate ```n    -MinimumTests 1956 ```n    -AllowedSkips `$allowedSkips"
+        Get-PulseMinimumTestsRatchetValue -Text $text -Kind PublishScript -LocationName 'synthetic' | Should -Be 1956
+    }
+
     It 'PROVES THE GATE CAN FAIL: throws when two distinct numeric values are found for the same Kind' {
         $text = "`$script:tenantPulseGateMinimumTests = 1956`n`$script:tenantPulseGateMinimumTests = 1955"
         { Get-PulseMinimumTestsRatchetValue -Text $text -Kind AssertGateResultTask -LocationName 'synthetic' } | Should -Throw -ExpectedMessage '*DISTINCT*'
@@ -123,7 +125,6 @@ Describe 'MinimumTests ratchet - all four locations agree (real repo tree)' {
 
         $publishScriptText = Get-Content -LiteralPath $publishScriptPath -Raw
         $publishScriptGateCallValue = Get-PulseMinimumTestsRatchetValue -Text $publishScriptText -Kind PublishScript -LocationName 'scripts/Publish-TenantPulsePackage.ps1 (gate call)'
-        $publishScriptErrorHintValue = Get-PulseMinimumTestsRatchetValue -Text $publishScriptText -Kind PublishScriptErrorHint -LocationName 'scripts/Publish-TenantPulsePackage.ps1 (error-message hint)'
 
         $publishFixtureTotalValue = Get-PulseMinimumTestsRatchetValue -Text (Get-Content -LiteralPath $publishFixtureTestPath -Raw) -Kind PublishFixtureTotal -LocationName 'tests/QA/PublishTenantPulsePackage.tests.ps1'
 
@@ -134,7 +135,6 @@ Describe 'MinimumTests ratchet - all four locations agree (real repo tree)' {
             '.build/AssertGateResult.tasks.ps1'                              = $assertGateResultTaskValue
             '.github/workflows/ci.yml'                                       = $ciYmlValue
             'scripts/Publish-TenantPulsePackage.ps1 (gate call)'             = $publishScriptGateCallValue
-            'scripts/Publish-TenantPulsePackage.ps1 (error-message hint)'    = $publishScriptErrorHintValue
             'tests/QA/PublishTenantPulsePackage.tests.ps1 (fixture total)'   = $publishFixtureTotalValue
         }
         $distinctValues = @($allValues.Values | Select-Object -Unique)

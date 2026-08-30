@@ -15,9 +15,9 @@
         settingPath; settingDefinitionId; settingName; nameResolved; instanceId; value;
         valueLabel; labelResolved; redacted; valueState; applicability; assignments.
 
-    ASSIGNMENTS-DEFERRED (G-gate sequencing amendment, 2026-08-16): every row this function
-    emits carries assignments:null unconditionally - ConfigurationPolicyAssignment.ListBeta
-    is unreleased GraphKit (see the plan's G-gate section).
+    -Assignments is normalized once per policy by Invoke-PulseSettingsCatalogPolicy and
+    stamped identically onto every emitted row. A successful fetch with no assignments is
+    an empty array; a failed assignment fetch prevents that policy from emitting rows.
 
     SHAPE NEUTRALITY (Task 2.2 P0 re-review - the headline defect): every raw-payload read
     in this file goes through the shared accessors in Resolve-PulseSettingsCatalogValueClassification.ps1
@@ -193,6 +193,10 @@ function ConvertTo-PulseSettingRows {
         [System.Collections.IDictionary] $DefinitionIndex,
 
         [Parameter()]
+        [AllowNull()]
+        [object[]] $Assignments,
+
+        [Parameter()]
         [ValidateRange(1, 1000)]
         [int] $MaxDepth = $script:PulseSettingsCatalogWalkerMaxDepth
     )
@@ -287,7 +291,7 @@ function ConvertTo-PulseSettingRows {
             redacted            = $Redacted
             valueState          = $ValueState
             applicability       = $applicability
-            assignments         = $null
+            assignments         = $Assignments
         }
     }
 

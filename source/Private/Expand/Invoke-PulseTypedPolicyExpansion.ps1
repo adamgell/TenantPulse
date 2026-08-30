@@ -213,26 +213,96 @@ function Invoke-PulseTypedPolicyExpansion {
             continue
         }
 
-        $normalizedAssignments = @()
+        $normalizedAssignmentList = [System.Collections.Generic.List[object]]::new()
+        $invalidAssignmentTarget = $false
         foreach ($assignment in $rawAssignments) {
             $target = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'target'
-            if ($null -eq $target) { continue }
+            if ($null -eq $target -or -not (Test-PulseSettingsCatalogNode -Node $target)) {
+                $invalidAssignmentTarget = $true
+                break
+            }
+
             $targetTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName '@odata.type'
-            $targetType = if ($null -ne $targetTypeRaw) { [string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '' } else { $null }
             $groupIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'groupId'
             $filterIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId'
             $filterTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType'
-            $normalizedAssignments += [pscustomobject]@{
-                # intent (include/exclude) is structurally present but INTENTIONALLY left
-                # $null on every row this phase - Phase 2b is where the real value gets
-                # threaded through from the raw assignment payload, so 2b lands as a data
-                # population change against this already-shipped shape, not a schema change.
-                intent     = $null
-                targetType = $targetType
-                groupId    = if ($null -ne $groupIdRaw) { [string] $groupIdRaw } else { $null }
-                filterId   = if ($null -ne $filterIdRaw) { [string] $filterIdRaw } else { $null }
-                filterType = if ($null -ne $filterTypeRaw) { [string] $filterTypeRaw } else { $null }
+
+            $targetTypeCandidate = if ($null -ne $targetTypeRaw) {
+                ([string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '').Trim()
+            } else { $null }
+            $targetType = switch ($targetTypeCandidate) {
+                'group' { 'group'; break }
+                'exclusionGroup' { 'exclusionGroup'; break }
+                'allDevices' { 'allDevices'; break }
+                'allLicensedUsers' { 'allLicensedUsers'; break }
+                default { $null }
             }
+
+            $groupId = if ($groupIdRaw -is [string]) { $groupIdRaw } else { $null }
+            if (($null -ne $groupIdRaw -and $groupIdRaw -isnot [string]) -or
+                [string]::IsNullOrWhiteSpace($targetType) -or
+                ($targetType -in @('group', 'exclusionGroup') -and [string]::IsNullOrWhiteSpace($groupId)) -or
+                ($targetType -in @('allDevices', 'allLicensedUsers') -and $null -ne $groupIdRaw)) {
+                $invalidAssignmentTarget = $true
+                break
+            }
+            if (($null -ne $filterIdRaw -and $filterIdRaw -isnot [string]) -or
+                ($null -ne $filterTypeRaw -and $filterTypeRaw -isnot [string])) {
+                $invalidAssignmentTarget = $true
+                break
+            }
+            $filterId = if ($filterIdRaw -is [string]) { $filterIdRaw } else { $null }
+            $filterType = if ($filterTypeRaw -is [string]) { $filterTypeRaw } else { $null }
+            $filterShapeValid = if ($null -eq $filterTypeRaw) {
+                $null -eq $filterIdRaw
+            } elseif ([string]::Equals($filterType, 'none', [System.StringComparison]::Ordinal)) {
+                $null -eq $filterIdRaw
+            } elseif ([string]::Equals($filterType, 'include', [System.StringComparison]::Ordinal) -or
+                [string]::Equals($filterType, 'exclude', [System.StringComparison]::Ordinal)) {
+                -not [string]::IsNullOrWhiteSpace($filterId)
+            } else {
+                $false
+            }
+            if (-not $filterShapeValid) {
+                $invalidAssignmentTarget = $true
+                break
+            }
+
+            # These v1.0 typed-assignment operations express membership through the target.
+            # A device-configuration resource's beta-only apply/remove intent is a different
+            # semantic axis and must never escape into row schema v1's include/exclude field.
+            $intent = if ($targetType -eq 'exclusionGroup') { 'exclude' } else { 'include' }
+
+            $normalizedAssignmentList.Add([pscustomobject]@{
+                intent     = $intent
+                targetType = $targetType
+                groupId    = $groupId
+                filterId   = $filterId
+                filterType = $filterType
+            }) | Out-Null
+        }
+
+        if ($invalidAssignmentTarget) {
+            $gapEntries.Add([pscustomobject]@{ policyId = $policyId; reason = (New-PulseTypedGapReason -Category 'InvalidAssignmentTarget') }) | Out-Null
+            continue
+        }
+
+        $normalizedAssignments = @($normalizedAssignmentList.ToArray())
+        if ($normalizedAssignments.Count -gt 1) {
+            $assignmentFields = @('intent', 'targetType', 'groupId', 'filterId', 'filterType')
+            $assignmentComparison = [System.Comparison[object]] {
+                param($left, $right)
+                foreach ($field in $assignmentFields) {
+                    $leftValue = $left.$field
+                    $rightValue = $right.$field
+                    if ($null -eq $leftValue -and $null -ne $rightValue) { return -1 }
+                    if ($null -ne $leftValue -and $null -eq $rightValue) { return 1 }
+                    $fieldComparison = [string]::CompareOrdinal([string] $leftValue, [string] $rightValue)
+                    if ($fieldComparison -ne 0) { return $fieldComparison }
+                }
+                return 0
+            }
+            [System.Array]::Sort($normalizedAssignments, $assignmentComparison)
         }
 
         try {

@@ -91,7 +91,7 @@ BeforeAll {
                     Invoke-PulseSettingPresenceIndexBuild -Store $store | Out-Null
                 }
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
             }
             return $evaluation.Document.findings[0]
         } finally {
@@ -221,8 +221,8 @@ Describe 'TP.INT.0017 - App Control for Business policy enforcing (not audit-onl
                 Publish-PulseExpansionRows -Store $store -Name 'settingsCatalog' -Rows $rows -Gaps @() -PolicyCount 1 | Out-Null
                 Invoke-PulseSettingPresenceIndexBuild -Store $store | Out-Null
 
-                $first = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
-                $second = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $first = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
+                $second = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
                 [pscustomobject]@{ First = $first.Document.findings[0]; Second = $second.Document.findings[0] }
             }
             $results.Second.status | Should -Be $results.First.status

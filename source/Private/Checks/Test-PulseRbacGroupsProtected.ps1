@@ -36,8 +36,9 @@
     isAssignableToRole now throws (-> engine Error), never coerces to $false. Likewise a
     row identified as unprotected with no groupId now throws instead of being silently
     dropped - dropping it would have let a real unprotected group vanish into a false
-    Pass (empirically reproduced by review). Present-and-$false on either boolean remains
-    fully decidable and participates in the Fail path exactly as before.
+    Pass (empirically reproduced by review). Both flags must also be native booleans;
+    PowerShell's [bool] cast treats the non-empty string 'false' as true. Present-and-$false
+    on either native boolean remains fully decidable and participates in the Fail path.
 
     COMPOSITE-SHAPE CAVEAT (Phase 3 whole-phase review, catalog-coherence finding M3,
     documentation-only): this rule currently cannot distinguish "zero rows because the
@@ -78,6 +79,11 @@ function Test-PulseRbacGroupsProtected {
         }
         if ($null -eq $row.isAssignableToRole) {
             throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has no isAssignableToRole value - this rule's input is a 4-call Graph fan-out and an absent value here means a sub-call failed or returned an unreadable shape, not that the group is unprotected. Refusing to read absence as unprotected."
+        }
+        foreach ($propertyName in @('isManagementRestricted', 'isAssignableToRole')) {
+            if ($row.$propertyName -isnot [bool]) {
+                throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has a non-Boolean $propertyName value - expected a native boolean and refusing to coerce it."
+            }
         }
 
         $isManagementRestricted = ([bool] $row.isManagementRestricted -eq $true)

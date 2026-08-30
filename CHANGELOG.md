@@ -5,9 +5,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-29
+
+This commit prepares the greenfield, pre-adoption `0.2.0` candidate. There is no installed
+TenantPulse user base, customer estate, prior runtime, or migration/cutover task. It does not
+publish the package; PSGallery `0.1.3` remains immutable.
+
+### Added
+
+- Built-in read-only provider plans for Intune RBAC, Endpoint Security BitLocker and LAPS,
+  and current plus legacy security baselines. The public snapshot path wires them by
+  default while still allowing a caller to replace any individual plan.
+- Settings Catalog assignment collection with normalized include/exclude targets, filter
+  metadata, typed assignment intent, deterministic ordering, and explicit policy-scoped
+  gaps for missing or malformed payloads.
+- Typed compliance and device-configuration assignments now populate include/exclude intent,
+  preserve filters, sort deterministically, and gap the whole policy if a target is malformed.
+
 ### Changed
 
-- **Exact GraphKit runtime contract (TenantPulse 0.1.2 candidate).** The module manifest now requires exactly GraphKit `0.2.2`; `RequiredModules.psd1` remains the separate restore-time `0.2.2` pin. Source, built manifest, and candidate package are checked independently. Published TenantPulse `0.1.1` remains immutable and is not republished.
+- Replaced the obsolete `TP.INT.0007` cleanup-settings singleton with the supported
+  per-platform managed-device cleanup-rule collection.
+- Requires exact GraphKit `0.3.0`, which supplies the new live-proven operation primitives
+  and makes SecretManagement a lazy persisted-vault boundary instead of an unconditional
+  import-time dependency.
+- Reclassified the Windows data-processor check as explicitly platform-unavailable through
+  its built-in provider plan. It remains non-collecting until Microsoft publishes a GET and
+  application-permission contract; it is no longer presented as ordinary release backlog.
+
+### Verification
+
+- The final local suite passed 2255/2255 tests with zero failures, errors, skips, or NotRun
+  tests. The tested `TenantPulse.0.2.0.nupkg` SHA-256 is
+  `041591C3C4CA8402BFCFC77F302246E6FFD315D02D0DB053DF9F5D4771159888`.
+- A read-only live gate installed that exact archive into an isolated root and loaded the
+  TenantPulse `0.2.0` -> GraphKit `0.3.0` -> Microsoft.Graph.Authentication `2.38.1` chain
+  from that root. All seven selected checks completed: 3 Pass, 3 tenant-posture Fail, and 1
+  fail-closed NotApplicable from partial BitLocker evidence.
+- The exact package collected cleanup rules (1 row), RBAC group-protection evidence (3),
+  BitLocker evidence (1 usable row plus 2 explicit `missing-setting` gaps), an authoritative
+  empty LAPS set, security-baseline evidence (3), 781 Settings Catalog policies, 40 compliance
+  policies, 15 device configurations, and 13 managed devices. Expansion produced 4302 Settings
+  Catalog rows, 606 compliance rows, 244 device-configuration rows, 165 conflicts, and 2320
+  setting-presence rows while preserving explicit partial-gap counts.
+- Privacy assertions passed across 1629 generated artifacts: the raw tenant id was absent,
+  profile provenance metadata was absent, and the profile label was absent from the manifest
+  and redacted report.
+- This records local and live exact-package evidence only. Remote exact-SHA CI and publication
+  remain separate gates; `0.2.0` has not been published.
+
+## [0.1.3] - 2026-08-19
+
+### Fixed
+
+- Published corrective release metadata after immutable TenantPulse `0.1.2` shipped with
+  candidate-only release notes. No runtime behavior or GraphKit dependency changed.
+
+## [0.1.2] - 2026-08-19
+
+### Changed
+
+- **Exact GraphKit runtime contract.** TenantPulse `0.1.2` and the corrective `0.1.3`
+  manifest both require exactly GraphKit `0.2.2`; `RequiredModules.psd1` remains the
+  separate restore-time `0.2.2` pin. Every published version remains immutable.
+- **R1 outcome/composite plans (2026-08-19).** Provider outcome/gate/partial-aware
+  infrastructure and sequential TenantPulse-owned plans for Intune RBAC,
+  endpoint-security BitLocker/LAPS, security baselines, and the Windows data processor are
+  implemented and focused-tested. Their five `DatasetMap.psd1` entries remain `Pending`:
+  the RBAC live shape lacks the role-definition relationship, the Windows processor lacks an
+  official Microsoft GET/application-permission contract and a GraphKit descriptor, and the
+  endpoint-security/security-baseline composite live gates were not completed. See
+  `docs/STATUS.md` for the exact dispositions and recheck gates.
+- **Published package identities.** The pre-publication `0.1.2` candidate passed
+  pack-then-test on macOS PowerShell 7.6.5 (2123 tests, 0 failed, 0 errors, 0 skipped,
+  0 NotRun), and the publisher verified 59 shipped files against the test-time digest
+  manifest. That local candidate archive was 401634 bytes with SHA-256
+  `91FF3860B6257257BBE827255FFF5E975B7521920411D31EFB3CE1496697B319`; it is not the
+  published archive identity. PSGallery's immutable `0.1.2` archive is 401753 bytes with
+  SHA-256 `51C90EA4CE8C428D7C87564715FB2EC19BDF0DA27D035131576EF341584E40E6`.
+  PSGallery's current `0.1.3` archive is 400377 bytes with SHA-256
+  `CA1A47BDC8FD9CD8D0885F61622B29DB23CA56F95042C6D789CEFAAA593F24B3`; its
+  `TenantPulse.psm1` is 1148725 bytes with SHA-256
+  `C4FAD4565747E150B21CF857C77C5F83122A7B9DC54771B05786A928D3AA8AD9`.
+  No CI result exists for source revision `771124b`; local package evidence is not an
+  exact-SHA CI claim. The remaining R1 claims are documented in `docs/STATUS.md`.
 
 ## [0.1.1] - 2026-08-19
 
@@ -206,7 +287,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Get-PulseTenantSnapshot -Path` and `Get-PulseCheckCatalog -Path`: renamed to
   `-OutputPath` and `-CatalogPath` respectively. `-Path` still works as an alias for one
-  release; migrate to the new names before it is removed.
+  release and is then scheduled for removal.
 
 ### Fixed
 

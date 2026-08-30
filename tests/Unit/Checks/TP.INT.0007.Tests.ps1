@@ -39,6 +39,26 @@ BeforeAll {
                     Write-PulseDataset @params
                 }
 
+                $manifest = Get-PulseSnapshotManifest -Store $store
+                $gates = if ($null -eq $check.Data -or $null -eq $check.Data.Gates) { @() } else { @($check.Data.Gates) }
+                if ($gates.Count -gt 0) {
+                    if (-not $manifest.Contains('licenseEvidence') -or $manifest.licenseEvidence -isnot [System.Collections.IDictionary]) {
+                        $manifest.licenseEvidence = [ordered]@{}
+                    }
+                    foreach ($gate in $gates) {
+                        if ($null -ne $gate -and -not [string]::IsNullOrWhiteSpace([string] $gate)) {
+                            $manifest.licenseEvidence[[string] $gate] = [ordered]@{
+                                Status = 'Available'
+                                Detail = 'fixture gate'
+                            }
+                        }
+                    }
+                    if ($manifest.licenseEvidence.Count -gt 0) {
+                        $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $manifest
+                        Set-PulseAtomicFileContent -Path $store.ManifestPath -Value $canonicalJson
+                    }
+                }
+
                 Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
             }
             return $evaluation.Document.findings[0]
@@ -49,61 +69,111 @@ BeforeAll {
 }
 
 Describe 'TP.INT.0007 - Intune device clean-up rule configured' {
-    It 'catalog: loads and validates cleanly via Import-PulseCheckCatalog (self-check)' {
+    It 'catalog: consumes the per-platform managed-device cleanup rules dataset' {
         $catalog = InModuleScope TenantPulse { @(Import-PulseCheckCatalog) }
-        ($catalog | Where-Object { $_.Id -eq 'TP.INT.0007' }) | Should -Not -BeNullOrEmpty
+        $check = $catalog | Where-Object { $_.Id -eq 'TP.INT.0007' }
+        $check | Should -Not -BeNullOrEmpty
+        @($check.Data.Datasets) | Should -Be @('managedDeviceCleanupRules')
     }
 
-    It 'Pass: deviceInactivityBeforeRetirementInDays is a nonzero value' {
-        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0007' -Datasets @(
-            @{ Name = 'managedDeviceCleanupSettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ deviceInactivityBeforeRetirementInDays = '90' }) }
+    It 'Pass: valid per-platform rules produce one deterministic evidence row per rule regardless of service order' {
+        $rules = @(
+            [pscustomobject]@{
+                '@odata.type' = '#microsoft.graph.managedDeviceCleanupRule'
+                id = 'rule-windows'
+                displayName = 'Windows cleanup'
+                description = 'Synthetic Windows fixture'
+                deviceCleanupRulePlatformType = 'windows'
+                lastModifiedDateTime = '2026-08-01T00:00:00Z'
+                deviceInactivityBeforeRetirementInDays = [long] 90
+            }
+            [pscustomobject]@{
+                '@odata.type' = '#microsoft.graph.managedDeviceCleanupRule'
+                id = 'rule-all'
+                displayName = 'All platforms cleanup'
+                description = 'Synthetic all-platform fixture'
+                deviceCleanupRulePlatformType = 'all'
+                lastModifiedDateTime = '2026-08-02T00:00:00Z'
+                deviceInactivityBeforeRetirementInDays = [long] 60
+            }
+        )
+        $forward = Invoke-PulseCheckFixture -CheckId 'TP.INT.0007' -Datasets @(
+            @{ Name = 'managedDeviceCleanupRules'; ApiVersion = 'beta'; Status = 'Collected'; Data = $rules }
+        )
+        $reversed = Invoke-PulseCheckFixture -CheckId 'TP.INT.0007' -Datasets @(
+            @{ Name = 'managedDeviceCleanupRules'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($rules[1], $rules[0]) }
         )
 
-        $finding.status | Should -Be 'Pass'
-        $finding.reason | Should -Match '90 day'
-        @($finding.evidence).Count | Should -Be 1
-        $finding.evidence[0].identity | Should -Be 'managedDeviceCleanupSettings'
+        $forward.status | Should -Be 'Pass'
+        $forward.reason | Should -Match '2 Intune device clean-up rules are configured'
+        @($forward.evidence).Count | Should -Be 2
+        @($forward.evidence.identity) | Should -Be @('rule-all', 'rule-windows')
+        $forward.evidence[0].detail | ConvertTo-Json -Compress | Should -Be '{"deviceCleanupRulePlatformType":"all","deviceInactivityBeforeRetirementInDays":60,"displayName":"All platforms cleanup"}'
+        ($forward.evidence | ConvertTo-Json -Depth 10 -Compress) | Should -Be ($reversed.evidence | ConvertTo-Json -Depth 10 -Compress)
     }
 
-    It 'Fail: deviceInactivityBeforeRetirementInDays is 0' {
+    It 'Fail: a successful empty collection authoritatively means no clean-up rule is configured' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0007' -Datasets @(
-            @{ Name = 'managedDeviceCleanupSettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ deviceInactivityBeforeRetirementInDays = '0' }) }
+            @{ Name = 'managedDeviceCleanupRules'; ApiVersion = 'beta'; Status = 'Collected'; Data = @() }
         )
 
         $finding.status | Should -Be 'Fail'
         $finding.reason | Should -Match 'No Intune device clean-up rule is configured'
+        @($finding.evidence).Count | Should -Be 0
     }
 
-    It 'Fail: deviceInactivityBeforeRetirementInDays is absent entirely (field-absence, never a silent Pass)' {
+    It 'Fail: a collection containing only a zero-day rule has no configured rule' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0007' -Datasets @(
-            @{ Name = 'managedDeviceCleanupSettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ someOtherProperty = 'x' }) }
+            @{ Name = 'managedDeviceCleanupRules'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{
+                    id = 'rule-disabled'
+                    displayName = 'Disabled cleanup'
+                    deviceCleanupRulePlatformType = 'all'
+                    deviceInactivityBeforeRetirementInDays = [long] 0
+                }
+            ) }
         )
 
         $finding.status | Should -Be 'Fail'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'rule-disabled'
     }
 
-    It 'Fail: deviceInactivityBeforeRetirementInDays is blank string' {
-        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0007' -Datasets @(
-            @{ Name = 'managedDeviceCleanupSettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ deviceInactivityBeforeRetirementInDays = '' }) }
+    It 'Error: missing, null, string, fractional, negative, or out-of-range days are malformed rather than unconfigured' {
+        $malformedRules = @(
+            [pscustomobject]@{ id = 'missing'; displayName = 'Missing'; deviceCleanupRulePlatformType = 'all' }
+            [pscustomobject]@{ id = 'null'; displayName = 'Null'; deviceCleanupRulePlatformType = 'all'; deviceInactivityBeforeRetirementInDays = $null }
+            [pscustomobject]@{ id = 'string'; displayName = 'String'; deviceCleanupRulePlatformType = 'all'; deviceInactivityBeforeRetirementInDays = '90' }
+            [pscustomobject]@{ id = 'fractional'; displayName = 'Fractional'; deviceCleanupRulePlatformType = 'all'; deviceInactivityBeforeRetirementInDays = 90.5 }
+            [pscustomobject]@{ id = 'negative'; displayName = 'Negative'; deviceCleanupRulePlatformType = 'all'; deviceInactivityBeforeRetirementInDays = [long] -1 }
+            [pscustomobject]@{ id = 'overflow'; displayName = 'Overflow'; deviceCleanupRulePlatformType = 'all'; deviceInactivityBeforeRetirementInDays = [long] ([int]::MaxValue) + 1 }
         )
 
-        $finding.status | Should -Be 'Fail'
+        foreach ($rule in $malformedRules) {
+            $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0007' -Datasets @(
+                @{ Name = 'managedDeviceCleanupRules'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($rule) }
+            )
+            $finding.status | Should -Be 'Error' -Because "days on rule '$($rule.id)' are malformed"
+        }
     }
 
-    It 'Error: managedDeviceCleanupSettings returning zero rows never reads as Pass or Fail' {
+    It 'Error: a malformed row beside a valid configured rule never invents authoritative success' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0007' -Datasets @(
-            @{ Name = 'managedDeviceCleanupSettings'; ApiVersion = 'beta'; Status = 'Collected'; Data = @() }
+            @{ Name = 'managedDeviceCleanupRules'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'valid'; displayName = 'Valid'; deviceCleanupRulePlatformType = 'windows'; deviceInactivityBeforeRetirementInDays = [long] 90 }
+                [pscustomobject]@{ id = 'malformed'; displayName = 'Malformed'; deviceCleanupRulePlatformType = 'ios'; deviceInactivityBeforeRetirementInDays = 'not-an-integer' }
+            ) }
         )
 
         $finding.status | Should -Be 'Error'
     }
 
-    It 'gate-degraded: NotApplicable when managedDeviceCleanupSettings failed to collect' {
+    It 'gate-degraded: NotApplicable while managedDeviceCleanupRules cannot be collected by the pinned GraphKit release' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0007' -Datasets @(
-            @{ Name = 'managedDeviceCleanupSettings'; ApiVersion = 'beta'; Status = 'Skipped'; Reason = 'permission-denied: DeviceManagementConfiguration.Read.All' }
+            @{ Name = 'managedDeviceCleanupRules'; ApiVersion = 'beta'; Status = 'Skipped'; Reason = 'descriptor-pending: awaiting a GraphKit release with ManagedDeviceCleanupRule.ListBeta' }
         )
 
         $finding.status | Should -Be 'NotApplicable'
-        $finding.reason | Should -Be 'permission-denied: DeviceManagementConfiguration.Read.All'
+        $finding.reason | Should -Be 'descriptor-pending: awaiting a GraphKit release with ManagedDeviceCleanupRule.ListBeta'
     }
 }

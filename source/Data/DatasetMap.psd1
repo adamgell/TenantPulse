@@ -71,6 +71,7 @@
     authenticationMethodsPolicy = @{ Type = 'AuthenticationMethodsPolicy'; Operation = 'Get'; ApiVersion = 'beta' }
     autopilotDevices             = @{ Type = 'AutopilotDevice'; Operation = 'List'; ApiVersion = 'beta' }
     domains                       = @{ Type = 'Domain'; Operation = 'List'; ApiVersion = 'beta' }
+    subscribedSkus                = @{ Type = 'SubscribedSku'; Operation = 'List'; ApiVersion = 'beta' }
 
     # Read live against a real tenant this week; not marked Pending.
     #
@@ -101,21 +102,22 @@
 
     # Task 2.2 (Settings Catalog expansion, -ExpandSettings): declared here so the STATIC
     # read-only gate (tests/QA/ReadOnly.tests.ps1, which walks every key in this file) also
-    # proves these two descriptors are Read/Safe - the same "single pivot, no documented
+    # proves these three descriptors are Read/Safe - the same "single pivot, no documented
     # exception" this file is for every other Get-GraphObject call TenantPulse ever makes.
-    # NEITHER is consumed by the ordinary check-driven Invoke-PulseCollection loop (no
+    # NONE is consumed by the ordinary check-driven Invoke-PulseCollection loop (no
     # T2.2-era check references either name in its own Data.Datasets, and
     # configurationPolicySettings needs a PER-POLICY id, not the single first-row
-    # IdFromDataset semantics Invoke-PulseCollection implements) - both are instead fetched
+    # IdFromDataset semantics Invoke-PulseCollection implements) - all are instead fetched
     # directly by the Settings Catalog expansion pipeline
     # (Invoke-PulseSettingsCatalogExpansionPipeline for configurationPolicies,
     # Invoke-PulseSettingsCatalogPolicy - one call per policy - for
-    # configurationPolicySettings), each of which calls Assert-PulseReadOnlyDescriptor
+    # configurationPolicySettings and configurationPolicyAssignments), each of which calls Assert-PulseReadOnlyDescriptor
     # itself against the SAME {Type;Operation} pair declared here before ever calling
     # Get-GraphObject, exactly like Invoke-PulseCollection does for every check-driven
     # dataset.
     configurationPolicies       = @{ Type = 'ConfigurationPolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
     configurationPolicySettings = @{ Type = 'ConfigurationPolicySetting'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+    configurationPolicyAssignments = @{ Type = 'ConfigurationPolicyAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
 
     # Task 2.3 (compliance + legacy typed-policy expansion, -ExpandSettings): declared here
     # for the exact same reason as the two Task 2.2 entries directly above - so the STATIC
@@ -124,21 +126,16 @@
     # IdFromDataset's single first-row semantics), but fetched directly, once per policy,
     # by Invoke-PulseTypedPolicyExpansion, which calls Assert-PulseReadOnlyDescriptor
     # itself against these SAME {Type;Operation} pairs before ever calling Get-GraphObject.
-    # Both descriptors are ALREADY RELEASED in GraphKit 0.1.1 (unlike T2.2's own
-    # ConfigurationPolicyAssignment, still G-gate-pending) - see the plan's own G-gate
-    # section for why T2.3's assignment fan-out is real, not deferred.
+    # Both descriptors are ALREADY RELEASED in GraphKit 0.1.1; GraphKit 0.2.2 now also
+    # releases the Settings Catalog assignment descriptor declared above.
     deviceCompliancePolicyAssignments = @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
     deviceConfigurationAssignments    = @{ Type = 'DeviceConfigurationAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
 
-    # Task 3.2 (TP.INT.0007, Maester MT.1053 port): the tenant-wide clean-up SETTINGS
-    # singleton, not the newer per-platform managedDeviceCleanupRules collection Maester's
-    # own function queries (that collection resource is not in GraphKit's released
-    # catalog) - see Test-PulseDeviceCleanupRuleConfigured.ps1's own docstring for the
-    # live-verified divergence. Already released in GraphKit 0.1.1 (Type
-    # 'DeviceCleanupRule', Operation 'Get', PathTemplate
-    # /deviceManagement/managedDeviceCleanupSettings) - confirmed via a live
-    # Get-GraphOperation lookup, not Pending.
-    managedDeviceCleanupSettings = @{ Type = 'DeviceCleanupRule'; Operation = 'Get'; ApiVersion = 'beta' }
+    # TP.INT.0007: GraphKit 0.3.0 replaces the obsolete undocumented cleanup-settings
+    # singleton with Microsoft's supported per-platform rules collection. The descriptor
+    # is a direct Read/Safe collection primitive, so this entry follows the ordinary static
+    # catalog gate rather than the Pending placeholder path.
+    managedDeviceCleanupRules = @{ Type = 'ManagedDeviceCleanupRule'; Operation = 'ListBeta'; ApiVersion = 'beta' }
 
     # Task 3.2 (TP.INT.0008): GraphKit 0.2.2 shipped the official
     # OperationApprovalPolicy/List descriptor. Pending dropped.
@@ -215,9 +212,15 @@
     mobileThreatDefenseConnectors = @{ Type = 'MobileThreatDefenseConnector'; Operation = 'List'; ApiVersion = 'v1.0' }
     windowsAutopilotDeploymentProfiles = @{ Type = 'WindowsAutopilotDeploymentProfile'; Operation = 'List'; ApiVersion = 'beta' }
 
-    # Task 3.3 PENDING (TP.INT.0029): still no released GraphKit descriptor for this
-    # composite Walk. ExpectedThrottleClass/ExpectedReplayPolicy declare the Read/Safe
-    # shape the static read-only gate requires for every Pending entry.
+    # TP.INT.0029 is a TenantPulse-owned provider plan over GraphKit primitives. Its current-
+    # policy branch requires DeviceManagementConfigurationPolicyTemplate.ListBeta over
+    # /deviceManagement/configurationPolicyTemplates in addition to ConfigurationPolicy and
+    # ConfigurationPolicyAssignment; the legacy branch separately uses
+    # DeviceManagementTemplate.ListBeta and DeviceManagementIntent.ListBeta.
+    # This synthetic Pending Walk entry remains the static manifest placeholder; the normal
+    # collection registry routes it through Invoke-PulseSecurityBaselinePlan before the
+    # descriptor-pending fallback. ExpectedThrottleClass/ExpectedReplayPolicy declare the
+    # Read/Safe shape enforced for every such placeholder.
     securityBaselinesAssignedAndCurrent = @{ Type = 'SecurityBaselineAssignedAndCurrentWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 
     # Task 4.2 (EIDSCA port, wave 1): GraphKit 0.2.2 shipped the official

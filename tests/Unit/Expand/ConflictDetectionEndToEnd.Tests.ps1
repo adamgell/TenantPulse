@@ -5,7 +5,7 @@
     run, proving the cross-boundary property end to end: a planted secret survives raw
     collection, the typed-policy walk's own redaction, and conflict-index construction
     without ever reaching conflicts.json, while STILL correctly participating in a real
-    conflict record (mixed redacted/plain group, deferred-assignment 'unknown' overlap).
+    conflict record (mixed redacted/plain group, authoritative empty-assignment 'none' overlap).
 
     The two families are deliberately made to COLLIDE on settingDefinitionId
     ('omaSettings/0/value') - a Settings Catalog leaf definitionId is an opaque string with
@@ -73,6 +73,7 @@ Describe 'Conflict detection end-to-end: redacted value crosses the T2.2/T2.3 ex
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' -and $Operation -eq 'ListBeta' } { $catalogPolicies }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $catalogDefinitions }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $catalogSettingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { @() }
 
         # --- T2.3: typed-policy side - a REDACTED (Sensitive) omaSettings[0].value ---
         $plantedPolicy = [pscustomobject]@{
@@ -113,10 +114,9 @@ Describe 'Conflict detection end-to-end: redacted value crosses the T2.2/T2.3 ex
         $conflictsDoc.conflicts.Count | Should -Be 1
         $conflict = $conflictsDoc.conflicts[0]
         $conflict.settingDefinitionId | Should -Be 'omaSettings/0/value'
-        # Deferred core-slice rule proven live: the settingsCatalog side's assignments:null
-        # forces 'unknown', never a fabricated proven/possible/none.
-        $conflict.assignmentOverlap | Should -Be 'unknown'
-        $conflict.assignmentOverlapReason | Should -Match 'assignments-deferred'
+        # Both policies have authoritative empty assignment sets, so overlap is decidable.
+        $conflict.assignmentOverlap | Should -Be 'none'
+        $conflict.assignmentOverlapReason | Should -BeNullOrEmpty
 
         $conflict.values.Count | Should -Be 2
         $redactedValue = $conflict.values | Where-Object { $_.redacted }

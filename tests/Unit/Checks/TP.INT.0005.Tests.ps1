@@ -39,7 +39,27 @@ BeforeAll {
                     Write-PulseDataset @params
                 }
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $manifest = Get-PulseSnapshotManifest -Store $store
+                $gates = if ($null -eq $check.Data -or $null -eq $check.Data.Gates) { @() } else { @($check.Data.Gates) }
+                if ($gates.Count -gt 0) {
+                    if (-not $manifest.Contains('licenseEvidence') -or $manifest.licenseEvidence -isnot [System.Collections.IDictionary]) {
+                        $manifest.licenseEvidence = [ordered]@{}
+                    }
+                    foreach ($gate in $gates) {
+                        if ($null -ne $gate -and -not [string]::IsNullOrWhiteSpace([string] $gate)) {
+                            $manifest.licenseEvidence[[string] $gate] = [ordered]@{
+                                Status = 'Available'
+                                Detail = 'fixture gate'
+                            }
+                        }
+                    }
+                    if ($manifest.licenseEvidence.Count -gt 0) {
+                        $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $manifest
+                        Set-PulseAtomicFileContent -Path $store.ManifestPath -Value $canonicalJson
+                    }
+                }
+
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
             }
             return $evaluation.Document.findings[0]
         } finally {
@@ -182,9 +202,9 @@ Describe 'TP.INT.0005 - Devices inactive for more than 90 days' {
                 Write-PulseDataset -Store $store -Name 'managedDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data @([pscustomobject]@{ id = 'm1'; deviceName = 'borderline'; lastSyncDateTime = $borderlineSync })
                 Write-PulseDataset -Store $store -Name 'entraDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data @()
 
-                $first = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $first = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
                 Start-Sleep -Milliseconds 1200
-                $second = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $second = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
 
                 [pscustomobject]@{
                     First  = $first.Document.findings[0]
@@ -237,7 +257,7 @@ Describe 'TP.INT.0005 - Devices inactive for more than 90 days' {
                 $manifestJson.createdUtc = 'banana'
                 Set-Content -LiteralPath $store.ManifestPath -Value ($manifestJson | ConvertTo-Json -Depth 10) -NoNewline -Encoding utf8
 
-                $evaluation = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $evaluation = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
                 $evaluation.Document.findings[0]
             }
 
@@ -268,7 +288,7 @@ Describe 'TP.INT.0005 - Devices inactive for more than 90 days' {
                 Write-PulseDataset -Store $store -Name 'managedDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data $managedData
                 Write-PulseDataset -Store $store -Name 'entraDevices' -ApiVersion 'v1.0' -Status 'Collected' -Data $entraData
 
-                $evaluation = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $evaluation = Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
                 $rule = Test-PulseStaleDevices -Datasets @{
                     managedDevices = $managedData
                     entraDevices   = $entraData

@@ -54,13 +54,11 @@
 
     Per-check resolution order (see Invoke-PulseCheckEvaluation below):
         1. Every gate the check declares (Data.Gates) is resolved via Get-PulseGateStatus,
-           which returns {Status; Detail}. Phase 1: that function always answers Status
-           'Unknown' (see its own docstring) - both 'Unknown' and 'Available' let the check
-           run; 'Unavailable' degrades it to NotApplicable with reason "gate '<name>'
-           unavailable: <detail>". This function's stub never returns 'Unavailable' today,
-           but the wiring is real and exercised in tests via an overridden
-           Get-PulseGateStatus - a later task teaching real gate detection only has to
-           change that one function.
+           which returns {Status; Detail}. Available lets the check run; Unavailable degrades
+           it to NotApplicable with a LicenseRequired outcome and reason "gate '<name>'
+           unavailable: <detail>"; Unknown degrades it to NotApplicable with a GateUnknown
+           outcome and reason "gate '<name>' unknown: <detail>". No unresolved gate may reach
+           the rule as a successful evaluation.
         2. Every dataset the check declares (Data.Datasets) must have a manifest entry with
            status 'Collected'. A missing entry, or one recorded Failed/Skipped, degrades the
            check to NotApplicable - the reason is the manifest's own (already-redacted,
@@ -155,7 +153,11 @@ function Invoke-PulseEvaluation {
         [string] $OperatorKeyPath = (Join-Path $HOME '.tenantpulse/operator.key'),
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [AllowNull()]
+        $GateProvider = $null
     )
 
     $manifest = Get-PulseSnapshotManifest -Store $Store
@@ -238,7 +240,7 @@ function Invoke-PulseEvaluation {
     $findings = [System.Collections.Generic.List[pscustomobject]]::new()
 
     foreach ($check in $sortedChecks) {
-        $result = Invoke-PulseCheckEvaluation -Check $check -Store $Store -Manifest $manifest -DatasetCache $datasetCache -Context $Context
+        $result = Invoke-PulseCheckEvaluation -Check $check -Store $Store -Manifest $manifest -DatasetCache $datasetCache -Context $Context -GateProvider $GateProvider
 
         # H2 fix: by the time control reaches here, $result.Evidence entries are guaranteed
         # (by Invoke-PulseCheckEvaluation's own try/catch around evidence normalization) to
@@ -440,29 +442,42 @@ function Invoke-PulseCheckEvaluation {
         [hashtable] $DatasetCache,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [AllowNull()]
+        $GateProvider = $null
     )
 
     $gateNames = @($Check.Data.Gates)
     foreach ($gate in $gateNames) {
-        # Gate wiring (post-review): 'Unavailable' now genuinely degrades the check -
-        # Get-PulseGateStatus's Phase 1 stub never returns it, but the branch is real and
-        # covered by tests that override the function. 'Unknown'/'Available' fall through
-        # and the check runs.
-        $gateStatus = Get-PulseGateStatus -Gate $gate -Manifest $Manifest
-        if ($gateStatus.Status -eq 'Unavailable') {
+        $gateStatus = if ($null -ne $GateProvider) {
+            Get-PulseGateStatus -Gate $gate -Manifest $Manifest -Provider $GateProvider
+        } else {
+            Get-PulseGateStatus -Gate $gate -Manifest $Manifest
+        }
+
+        if ($gateStatus.Status -in @('Unavailable', 'Unknown')) {
             $detail = if ($gateStatus.PSObject.Properties.Name -contains 'Detail' -and $gateStatus.Detail) {
                 [string] $gateStatus.Detail
             } else {
                 'no detail provided'
             }
+            $verb = if ($gateStatus.Status -eq 'Unavailable') { 'unavailable' } else { 'unknown' }
+            # Gate details are capped at their provider boundary, but the complete reason
+            # adds a prefix and therefore needs the established whole-reason cap as well.
+            # ProfileId is deliberately empty: no heuristic identifier scanning is added.
+            $reason = Protect-PulseReason -Message "gate '$gate' ${verb}: $detail" `
+                -ProfileId '' -Pseudonym 'tp-gate'
             return @{
-                Status   = 'NotApplicable'
-                Evidence = @()
-                Reason   = "gate '$gate' unavailable: $detail"
+                Status          = 'NotApplicable'
+                Evidence        = @()
+                Reason          = $reason
+                ProviderOutcome = $gateStatus.Outcome
             }
         }
     }
+
 
     # Data.Expansions (Task 3.2): Data.Datasets is now legitimately ABSENT for an
     # artifact-only check (TP.INT.0006's post-migration shape) - $Check.Data.Datasets is

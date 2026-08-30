@@ -21,11 +21,10 @@ naming exactly this).
     logic behind Maester's `MT.1054`.
   - `source/Data/Checks/TP.INT.0007.psd1` ("Intune device clean-up rule configured",
     Task 3.2) - adapts the check logic behind Maester's `MT.1053`
-    (`Test-MtManagedDeviceCleanupSettings`), against the `managedDeviceCleanupSettings`
-    singleton GraphKit actually exposes rather than Maester's own
-    `managedDeviceCleanupRules` collection call - see
-    `source/Private/Checks/Test-PulseDeviceCleanupRuleConfigured.ps1`'s own docstring for
-    that divergence.
+    (`Test-MtManagedDeviceCleanupSettings`) against the per-platform
+    `managedDeviceCleanupRules` collection. TenantPulse adds deterministic per-rule
+    evidence and fail-closed malformed-row handling; see
+    `source/Private/Checks/Test-PulseDeviceCleanupRuleConfigured.ps1`.
   - `source/Data/Checks/TP.INT.0008.psd1` ("Intune Multi Admin Approval policy
     configured", Task 3.2) - adapts the check logic behind Maester's `MT.1096`
     (`Test-MtOperationApprovalPolicies`).
@@ -141,7 +140,7 @@ SOFTWARE.
 
 | Component | License | Notes |
 |-----------|---------|-------|
-| [GraphKit](https://github.com/AdamGell/GraphKit) | See GraphKit's own repository | The sole Graph-access layer TenantPulse calls through. `source/TenantPulse.psd1` requires exact GraphKit `0.2.2`; `RequiredModules.psd1` separately pins `0.2.2` for build restore. GraphKit is not vendored and resolves from PSGallery. |
+| [GraphKit](https://github.com/AdamGell/GraphKit) | See GraphKit's own repository | The sole Graph-access layer TenantPulse calls through. `source/TenantPulse.psd1` requires exact GraphKit `0.3.0`; `RequiredModules.psd1` separately pins `0.3.0` for build restore. GraphKit is not vendored; release installs resolve it from the selected package repository, while coordinated candidate verification may use a local package source before PSGallery publication. |
 
 ## Build/test-only dependencies
 

@@ -22,6 +22,11 @@ Encoding: UTF8
 # prefix: prefix.ps1
 VersionedOutputDirectory: true
 
+# Sampler's imported publish_module_to_gallery task rebuilds/publishes from the module
+# directory and bypasses scripts/Publish-TenantPulsePackage.ps1's exact-archive proof.
+# Keep that task fail-closed even if someone invokes its internal name directly.
+SkipPublish: true
+
 ####################################################
 #      ModuleBuilder Submodules Configuration      #
 ####################################################
@@ -43,7 +48,7 @@ NestedModule:
 # Defining 'Workflows' (suite of InvokeBuild tasks) to be run using their alias
 BuildWorkflow:
   '.': # "." is the default Invoke-Build workflow. It is called when no -Tasks is specified to the build.ps1
-    - build
+    - pack
     - test
 
   build:
@@ -56,6 +61,12 @@ BuildWorkflow:
   pack:
     - build
 
+    # Sampler's PowerShellGet pack task stages direct dependencies only. GraphKit 0.3.0
+    # has a real Microsoft.Graph.Authentication package dependency, so publish that hard
+    # transitive requirement into the ephemeral local output feed before Sampler tries
+    # to publish GraphKit. The custom task resolves only exact RequiredModules.psd1 pins.
+    - Stage_Transitive_Runtime_Dependencies
+
     - package_module_nupkg
 
 
@@ -64,29 +75,26 @@ BuildWorkflow:
   test:
     # Uncomment to modify the PSModulePath in the test pipeline (also requires the build configuration section SetPSModulePath).
     #- Set_PSModulePath
+    # Capture and invalidate before Pester: the final release proof is emitted only if the
+    # same module file set, module bytes, and package archive survive the whole-result gate.
+    - Capture_Candidate_Proof_Input
     - Pester_Tests_Stop_On_Fail
     # Use this task if pipeline uses code coverage and the module is using the
     # pattern of Public, Private, Enum, Classes.
     #- Convert_Pester_Coverage
     - Pester_if_Code_Coverage_Under_Threshold
-    # Post-review fix (final fix wave, items 15 & 27): enforce the same whole-result
-    # MinimumTests gate locally that ci.yml already enforces, and record the shipped-file
-    # digest manifest Publish-TenantPulsePackage.ps1 verifies against - both defined in
-    # .build/AssertGateResult.tasks.ps1. Order matters: the digest is only worth recording
-    # once the suite has already passed (Pester_Tests_Stop_On_Fail throws first if not),
-    # and the gate check runs against the same result file the digest task just used.
-    - Record_Tested_Module_Digest
+    # Enforce the same whole-result MinimumTests gate locally that ci.yml already enforces,
+    # bind the one NUnit/Pester-object pair produced after capture, and emit the proof only
+    # after candidate and result bytes are rechecked. Both tasks live in
+    # .build/AssertGateResult.tasks.ps1; Record_Tested_Module_Digest also declares
+    # Assert_Gate_Result as a hard dependency so direct task invocation preserves this.
     - Assert_Gate_Result
+    - Record_Tested_Module_Digest
 
   # Use this task when you have multiple parallel tests, which produce multiple
   # code coverage files and needs to get merged into one file.
   #merge:
     #- Merge_CodeCoverage_Files
-
-  publish:
-
-
-    - publish_module_to_gallery
 
 ####################################################
 #              PESTER Configuration                #

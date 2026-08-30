@@ -126,12 +126,12 @@ non-empty `Reason` whenever `Status` is `NotApplicable`.
 For each check, in order:
 
 1. **Gates** (`Data.Gates`): each declared gate name is resolved via `Get-PulseGateStatus
-   -Gate <name> -Manifest <manifest>`. Phase 1: this is a stub registry that always answers
-   `'Unknown'` - no live license/feature detection exists yet. **`Unknown` never degrades a
-   check** - the check still runs. This is deliberate staging: a later task teaching real
-   gate detection only has to change `Get-PulseGateStatus` itself: the evaluator already
-   calls it per declared gate and is ready to react to a real `Unavailable`/`Available`
-   status.
+   -Gate <name> -Manifest <manifest>`. Available permits collection. A proven
+   `Unavailable` gate degrades the check to `NotApplicable` with `FailureClass =
+   LicenseRequired`; an `Unknown` gate degrades it to `NotApplicable` with
+   `FailureClass = GateUnknown`. No unknown gate may evaluate its rule as `Pass`.
+   Gate resolution is deliberately fail-closed: a missing dataset is not proof of license
+   absence, and permission-denied license evidence remains `PermissionDenied`.
 2. **Datasets** (`Data.Datasets`): each declared dataset name must have a manifest entry with
    `status: 'Collected'`. Missing, `Failed`, or `Skipped` degrades the check to
    `NotApplicable` (see Reason semantics above) and the rule is never invoked.
@@ -186,9 +186,7 @@ manifest.expansions.<name> = {
                              # PulseConflictArtifact's own docstring)
   rowCount; unresolvedNameCount; redactedSecretCount;
   gaps: [ { policyId; reason } , ... ];  # sorted ordinally on (policyId, reason)
-  reason;                   # required for NotExpanded/Failed; also carries the
-                             # 'assignments-deferred: awaiting GraphKit release' note on
-                             # every successful settingsCatalog entry (G-gate core slice)
+  reason;                   # required for NotExpanded/Failed
 }
 ```
 
@@ -214,8 +212,11 @@ per line in the family's own `.jsonl`)
   "valueLabel": "..."|[...]|null, "labelResolved": true|false,
   "redacted": true|false, "valueState": "..."|null,
   "applicability": { "platform"; "technologies" }|null,
-  "assignments": null            // ALWAYS null in the core slice - see the G-gate
-                                   // sequencing amendment; a non-null shape is Phase 2b
+  "assignments": [
+    { "intent": "include"|"exclude"|null, "targetType": "..."|null,
+      "groupId": "..."|null, "filterId": "..."|null, "filterType": "..."|null }
+  ]                              // empty means authoritatively unassigned; a failed
+                                   // assignment fetch gaps the policy instead of emitting rows
 }
 ```
 
@@ -246,10 +247,7 @@ embedded raw newlines, exactly one trailing LF per line including the last.
         // >= 2 value records per conflict entry, by construction (see below)
       ],
       "assignmentOverlap": "proven" | "possible" | "none" | "unknown",
-      "assignmentOverlapReason": "..."|null   // populated at least for 'unknown' -
-                                                // 'assignments-deferred: awaiting GraphKit
-                                                // release' for every core-slice
-                                                // settingsCatalog-involving conflict
+      "assignmentOverlapReason": "..."|null   // populated at least for 'unknown'
     }
     // sorted ordinally by settingDefinitionId; each entry's values sorted by their own
     // canonical-value text; each value record's policies sorted by policyId
@@ -270,9 +268,9 @@ always `null` in that case and the true value is never present anywhere in this 
 `'possible'` (cannot rule overlap out, but not proven either - e.g. a filter or an
 All-devices/All-users target is involved), `'none'` (every pair of contributing policies'
 assignment targets is provably disjoint), or `'unknown'` (at least one contributing row
-carries `assignments: null` - the deferred-assignments state every `settingsCatalog` row
-carries in the core slice, so overlap cannot be evaluated at all for any conflict that
-includes one).
+lacks authoritative assignment data). Settings Catalog rows always carry a normalized
+assignment array: `[]` means authoritatively unassigned, while an unavailable or invalid
+assignment payload gaps that policy before row publication.
 
 ### `settingPresenceIndex` artifact (`expanded/settingPresenceIndex.<sha256>.json`)
 
@@ -282,4 +280,3 @@ carries `policyCount` / `assignedPolicyCount` (original) plus `policyIds` /
 id arrays let a same-policy AND (TP.INT.0017/0018) intersect without streaming
 the underlying jsonl. A redacted value group still has `canonicalValue: null`
 and never carries the secret; its `policyIds` are presence-only.
-

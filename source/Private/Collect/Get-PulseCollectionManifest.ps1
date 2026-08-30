@@ -1,15 +1,19 @@
 <#
     Private: build the deduped, ordinally-sorted collection manifest for a set of checks.
 
-    Every check descriptor names the datasets it needs in Data.Datasets. Multiple checks
+    Every check descriptor names the datasets it needs in Data.Datasets. A check that names
+    one or more Data.Gates also implicitly needs subscribedSkus, because Intune/Entra gate
+    decisions are derived from that collected license evidence. Multiple checks
     routinely share a dataset (e.g. two Conditional Access checks both reading
     conditionalAccessPolicies) - this walks every check exactly once, resolves each
     dataset name through the shared DatasetMap.psd1 table (the same map
     Import-PulseCheckCatalog cross-checks Data.Datasets against at catalog-load time), and
     returns one entry per DISTINCT dataset name: { Dataset; Type; Operation; ApiVersion;
-    Pending }. Pending is carried straight through from the map (see DatasetMap.psd1's
-    header) so the collector can classify a pending dataset as Skipped without attempting
-    a Graph call or resolving a descriptor that does not exist yet.
+    Pending; Plan }. Pending is carried straight through from the map (see DatasetMap.psd1's
+    header) so the collector can classify an unplanned pending dataset as Skipped without
+    attempting a Graph call or resolving a descriptor that does not exist yet. Plan is
+    optional metadata naming the TenantPulse-owned plan selected by the dataset-keyed
+    provider-plan registry.
 
     A dataset name a check references that is absent from -DatasetMap is a hard error -
     Import-PulseCheckCatalog should already have caught this at catalog-load time when a
@@ -81,6 +85,7 @@ function Get-PulseCollectionManifest {
         $mapEntry = $DatasetMap[$Name]
         $isPending = $mapEntry.ContainsKey('Pending') -and [bool] $mapEntry.Pending
         $idFromDataset = if ($mapEntry.ContainsKey('IdFromDataset')) { [string] $mapEntry.IdFromDataset } else { $null }
+        $providerPlan = if ($mapEntry.ContainsKey('Plan')) { [string] $mapEntry.Plan } else { $null }
 
         if ($idFromDataset) {
             Resolve-Entry -Name $idFromDataset -RequestedBy $RequestedBy -Chain ($Chain + $Name)
@@ -93,10 +98,21 @@ function Get-PulseCollectionManifest {
             ApiVersion    = $mapEntry.ApiVersion
             Pending       = $isPending
             IdFromDataset = $idFromDataset
+            Plan          = $providerPlan
         }
     }
 
     foreach ($check in $Checks) {
+        # Gate evidence is a collection dependency just as real as Data.Datasets. Without
+        # this implicit dependency, a narrowed assessment can collect every check dataset
+        # successfully and then mark every gated check NotApplicable because subscribedSkus
+        # was never requested. Resolve it through the same map so it is deduplicated,
+        # validated, and deterministically ordered like every explicit dataset.
+        $gateNames = @($check.Data.Gates) | Where-Object { -not [string]::IsNullOrEmpty($_) }
+        if ($gateNames.Count -gt 0) {
+            Resolve-Entry -Name 'subscribedSkus' -RequestedBy "$($check.Id) gate evidence"
+        }
+
         # Data.Expansions (Task 3.2): an artifact-only check (e.g. TP.INT.0006) has no
         # Data.Datasets at all, so $check.Data.Datasets is $null - `@($null)` wraps that
         # into a one-element array containing $null rather than an empty array (see

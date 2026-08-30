@@ -39,7 +39,31 @@ BeforeAll {
                     Write-PulseDataset @params
                 }
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $manifest = Get-PulseSnapshotManifest -Store $store
+                # Keep the boundary fixture deterministic as the wall clock crosses UTC
+                # midnight; the rule must compare against the snapshot's cutoff, not now.
+                $manifest['createdUtc'] = '2026-08-19T00:00:00.0000000Z'
+                $gates = if ($null -eq $check.Data -or $null -eq $check.Data.Gates) { @() } else { @($check.Data.Gates) }
+                if ($gates.Count -gt 0) {
+                    if (-not $manifest.Contains('licenseEvidence') -or $manifest.licenseEvidence -isnot [System.Collections.IDictionary]) {
+                        $manifest.licenseEvidence = [ordered]@{}
+                    }
+                    foreach ($gate in $gates) {
+                        if ($null -ne $gate -and -not [string]::IsNullOrWhiteSpace([string] $gate)) {
+                            $manifest.licenseEvidence[[string] $gate] = [ordered]@{
+                                Status = 'Available'
+                                Detail = 'fixture gate'
+                            }
+                        }
+                    }
+                    if ($manifest.licenseEvidence.Count -gt 0) {
+                        $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $manifest
+                        Set-PulseAtomicFileContent -Path $store.ManifestPath -Value $canonicalJson
+                    }
+                }
+
+
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
             }
             return $evaluation.Document.findings[0]
         } finally {
@@ -118,7 +142,7 @@ Describe 'TP.INT.0019 - Apple MDM Push (APNs) certificate valid for more than 30
                     [pscustomobject]@{ id = 'cert1'; appleIdentifier = 'apnsadmin@contoso.example'; expirationDateTime = '2028-01-01T00:00:00Z' }
                 )
 
-                (Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath).RedactionMap
+                (Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }).RedactionMap
             }
 
             $redactionMap.Keys | Should -Contain 'apnsadmin@contoso.example'

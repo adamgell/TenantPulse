@@ -371,10 +371,14 @@ BeforeAll {
                 # prefix, not two independent findings.
                 'ft.graph'
                 'microsoft.graph.omasettingboolean'
+                # PowerShell/.NET type expressions (for example
+                # [System.StringComparison]) are code, not domains. The endpoint-security
+                # LAPS template GUID is intentionally adjacent to this enum comparison.
+                'system.stringcomparison'
             ),
             [System.StringComparer]::OrdinalIgnoreCase
-        )
 
+        )
         # Domain matches are computed ONCE against the FULL, untruncated $Content - never a
         # windowed substring (bug found while extending this file's own golden-fixture
         # coverage, task-2.3-review C1/I1 round: a real 'omaSettings' fixture placed
@@ -787,6 +791,16 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
         It 'does NOT flag a GUID near an ordinary dotted PowerShell property-path expression' {
             $violations = @(Get-PulseSecretScanViolations `
                 -Content "id = f47ac10b-58cc-4372-a567-0e02b2c3d479; see `$Datasets.organizationMdmAuthority.foo" `
+                -RelativePath 'source/Fake.ps1' `
+                -AllowedGuid @() `
+                -SafeDomainSuffix $script:safeDomainSuffixes)
+
+            $violations | Should -BeNullOrEmpty
+        }
+
+        It 'does NOT flag a GUID near a .NET type expression used by PowerShell code' {
+            $violations = @(Get-PulseSecretScanViolations `
+                -Content "id = adc46e5a-f4aa-4ff6-aeff-4f27bc525796; [System.StringComparison]::OrdinalIgnoreCase" `
                 -RelativePath 'source/Fake.ps1' `
                 -AllowedGuid @() `
                 -SafeDomainSuffix $script:safeDomainSuffixes)

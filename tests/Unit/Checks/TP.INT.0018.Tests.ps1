@@ -88,7 +88,7 @@ BeforeAll {
                     Invoke-PulseSettingPresenceIndexBuild -Store $store | Out-Null
                 }
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
             }
             return $evaluation.Document.findings[0]
         } finally {

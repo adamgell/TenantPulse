@@ -3,24 +3,29 @@
     deprecated version (Task 3.3, research-matrix - no Maester origin, practitioner
     judgment).
 
-    PENDING DATASET (honest NA): `securityBaselinesAssignedAndCurrent` is a COMPOSITE walk
-    (templateFamily-filtered configurationPolicies + assignments + a deprecated-template
-    catalog lookup) with no released GraphKit 0.1.1 descriptor for any of its three
-    ingredients as a combined shape - confirmed via a live Get-GraphOperation -List
-    enumeration (the raw `configurationPolicies` list itself IS released, but neither
-    `$expand=assignments` on it nor a `deviceManagement/templates` deprecated-catalog
-    lookup are). DatasetMap.psd1 marks it Pending=$true. On a live tenant this resolves
-    NotApplicable until GraphKit ships the composite descriptor.
+    PROVIDER PLAN: `securityBaselinesAssignedAndCurrent` is a TenantPulse-owned composite.
+    Invoke-PulseSecurityBaselinePlan composes configuration-policy, per-policy assignment,
+    current configuration-policy-template, legacy device-management-template, and legacy
+    intent primitives. Current policies join templateReference.templateId to
+    configurationPolicyTemplate.id and map lifecycleState; legacy intents separately join
+    intent.templateId to deviceManagementTemplate.id and use isDeprecated. Both paths keep
+    only the four tracked security-baseline families. DatasetMap.psd1 retains its synthetic
+    Pending Walk marker only as the static manifest placeholder; the normal collection path
+    routes this dataset through the built-in provider-plan registry before the Pending
+    fallback is evaluated.
 
     COMPACT ROW SHAPE this rule expects (defined here, matching the precedent set by
-    TP.INT.0013's own IntuneRbacGroupProtectionWalk compact-record contract, not raw
-    Graph): one row per security-baseline-templateFamily configurationPolicy instance -
-    {id, name, templateFamily, hasAssignment (bool), isDeprecated (bool)}. Building this
-    shape from raw Graph (configurationPolicies filtered by templateFamily in
-    baseline/baselineDefenderForEndpoint/baselineMicrosoftEdge/baselineWindows365, cross-
-    checked against a deprecated-template catalog) is deferred to whichever composite
-    descriptor eventually ships, same pattern TP.INT.0014/0015's own Endpoint Security
-    walks already established.
+    TP.INT.0013's own compact-record contract, not raw Graph): one row per joined
+    security-baseline instance -
+    {id, name, templateFamily, hasAssignment (bool), isDeprecated (bool)}. For current
+    policies the provider plan derives templateFamily from templateReference and
+    hasAssignment from the per-policy assignment collection. For legacy intents it maps the
+    template's native templateType to the same four family names and preserves
+    intent.isAssigned. Current templates map active lifecycleState to current and
+    superseded/deprecated/retired to obsolete; legacy templates use isDeprecated. Both paths
+    reject missing joins, count drift, child-read failures, malformed assignment targets,
+    duplicate ids, and invalid disposition fields rather than manufacturing a result from
+    incomplete service data.
 
     CLAIM (live-verified against
     https://learn.microsoft.com/en-us/intune/device-security/security-baselines/overview,
@@ -44,13 +49,11 @@
     STRICT TYPING, NOT [bool]-COERCION (post-review fix, MEDIUM finding): the FIRST version
     of this rule read `[bool] $row.hasAssignment` directly - PowerShell's `[bool]` cast on a
     non-empty STRING (e.g. the string `'false'`, which is exactly what a JSON/JSON-ish
-    composite descriptor could plausibly emit for a boolean-looking field before this
-    check's own composite descriptor ships) coerces to `$true` regardless of the string's
+    provider hop could plausibly emit for a boolean-looking field) coerces to `$true`
+    regardless of the string's
     apparent meaning, because `[bool]` only treats an EMPTY string as falsy. That silently
-    inverted an unassigned baseline (`hasAssignment = 'false'`) into a Pass - latent while
-    the dataset is Pending (no live data can reach this path today), but a real, live bug
-    the day GraphKit ships the composite descriptor if it (or an intermediate hop) ever
-    emits a string rather than a native boolean. This rule now requires `hasAssignment` and
+    inverted an unassigned baseline (`hasAssignment = 'false'`) into a Pass. This rule now
+    requires `hasAssignment` and
     `isDeprecated` to actually BE `[bool]` (PowerShell's own `-is [bool]` type check, which
     a string - even `'true'`/`'false'` - never satisfies) - any other type, including a
     boolean-LOOKING string, throws rather than being silently coerced one way or the other,

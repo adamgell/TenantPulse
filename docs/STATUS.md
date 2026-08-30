@@ -4,6 +4,69 @@ This is internal development/task narrative, moved out of README.md (post-review
 README.md is meant to read as a PSGallery landing page, not an implementation log). Nothing
 here is required to install or use TenantPulse; see README.md for that.
 
+## Next-release candidate evidence (2026-08-29)
+
+GraphKit `0.3.0` and TenantPulse `0.2.0` are coordinated greenfield, pre-adoption release
+candidates. Nobody is using TenantPulse: there is no installed user base, customer estate,
+prior runtime, or migration/repoint/cutover task. The release gates are package construction,
+read-only lab verification, review, and exact-SHA CI verification. Historical GraphKit `0.2.2`
+and TenantPulse `0.1.3` package identities remain recorded below.
+
+The source implementation is wired through TenantPulse's public snapshot path. Synthetic
+`Pending` map entries for composite datasets are implementation placeholders, not the runtime
+outcome: the built-in provider registry intercepts each one before the ordinary descriptor
+fallback. Evidence levels are kept separate below.
+
+| Dataset/check | Exact-package evidence |
+|---|---|
+| `managedDeviceCleanupRules` / `TP.INT.0007` | Live: the exact package collected 1 row and the check passed. |
+| `dataProcessorServiceForWindowsFeaturesOnboarding` / `TP.INT.0009` | Built-in no-network plan returns `PlatformUnavailable`. Microsoft publishes the resource shape but no official GET/application-permission contract, so neither project guesses a descriptor. Recheck only when that service contract changes. |
+| `intuneRbacGroupProtection` / `TP.INT.0013` | Live: the exact package collected 3 rows. The check failed on tenant posture, not collection or execution. |
+| `endpointSecurityDiskEncryptionPolicies` / `TP.INT.0014` | Live (partial): the exact package returned 1 usable row and 2 explicit `missing-setting` gaps. The check failed closed as `NotApplicable`. |
+| `endpointSecurityLapsPolicies` / `TP.INT.0015` | Live: the exact package collected an authoritative empty set. The check failed because no qualifying policy exists, not because collection failed. |
+| `securityBaselinesAssignedAndCurrent` / `TP.INT.0029` | Live: the exact package collected 3 rows. The check failed on tenant posture, not collection or execution. |
+
+**TenantPulse `0.2.0` candidate evidence.** The final local suite passed 2255/2255 tests with
+zero failures, errors, skips, or NotRun tests. The exact candidate archive is
+`TenantPulse.0.2.0.nupkg`, SHA-256
+`041591C3C4CA8402BFCFC77F302246E6FFD315D02D0DB053DF9F5D4771159888`. A read-only live
+gate installed that archive into an isolated root and loaded TenantPulse `0.2.0`, GraphKit
+`0.3.0`, and Microsoft.Graph.Authentication `2.38.1` from that root. All seven selected checks
+completed: 3 Pass, 3 posture Fail, and 1 fail-closed NotApplicable from partial BitLocker
+evidence. The large expansion paths also completed: Settings Catalog 781 policies / 4302 rows /
+64 gaps; compliance 40 / 606 / 6; device configuration 15 / 244 / 0; conflicts 3 / 165 / 70;
+and the setting-presence index 3 / 2320 / 70. Across 1629 generated artifacts, the raw tenant
+id was absent, profile provenance metadata was absent, and the profile label was absent from
+the manifest and redacted report. This is local and live package evidence only: TenantPulse's
+exact source SHA has not yet passed remote CI, and `0.2.0` has not been published.
+
+**Package identity and evidence boundary.** GraphKit `0.2.2` is the stable producer released
+before R1. On 2026-08-29, the PSGallery archive downloaded for GraphKit `0.2.2` was 201750
+bytes with SHA-256 `8993BFD6C78F6143069208F79F82D7EC9C72F87AB876DF6769C8733AAAB46385`.
+Its `GraphKit.psm1` was 416488 bytes with SHA-256
+`C20E30F8944EBDB38D9EFAAC7C538A4400DC5B91206E3510749FCF7E0F4091DC`, and its manifest
+was 7487 bytes with SHA-256
+`CAFFB3C39029310F9E562EBD6D90091BA329AD264A6E6728AB241C4E584A1111`. The locally
+restored `output/RequiredModules/GraphKit/0.2.2` module and manifest match those public
+payloads byte-for-byte. Earlier GraphKit hashes and the claim that the public module differed
+only by one trailing newline did not identify this public package and are not release evidence.
+
+TenantPulse `0.1.2` is published to PSGallery and its immutable embedded release notes still
+describe it as a candidate. The pre-publication local `0.1.2` archive was 401634 bytes with
+SHA-256 `91FF3860B6257257BBE827255FFF5E975B7521920411D31EFB3CE1496697B319`; it is not the
+PSGallery archive, which is 401753 bytes with SHA-256
+`51C90EA4CE8C428D7C87564715FB2EC19BDF0DA27D035131576EF341584E40E6`. TenantPulse `0.1.3`
+is also published to PSGallery as the metadata-only correction with the same exact GraphKit
+`0.2.2` dependency. Its public archive is 400377 bytes with SHA-256
+`CA1A47BDC8FD9CD8D0885F61622B29DB23CA56F95042C6D789CEFAAA593F24B3`; its
+`TenantPulse.psm1` is 1148725 bytes with SHA-256
+`C4FAD4565747E150B21CF857C77C5F83122A7B9DC54771B05786A928D3AA8AD9`, and its manifest is
+4980 bytes with SHA-256 `785B370BE4C8B70576654F0873B456476C884C05BAA8CEECED1EAAF9374ECCF7`.
+All 61 files in the current local built module match the public `0.1.3` payloads. The local
+and public `.nupkg` archives are not byte-identical because the archive entry metadata differs
+(including two public `.gitkeep` entries), so an archive SHA-256 must not be used as a local
+reproducibility claim. No CI result exists for source revision `771124b`.
+
 ## Phase 1 engine: complete
 
 Collection, evaluation, scoring, and the deterministic pseudonymized JSON report all work
@@ -120,10 +183,23 @@ DatasetMap datasets that were Pending on 0.1.1: `authorizationPolicy`,
 `endpointSecurityLapsPolicies`, `securityBaselinesAssignedAndCurrent`. Walks were
 not invented. TenantPulse 0.1.0 is already published; this is the 0.1.1 consume.
 
+**Task 7 evidence (2026-08-19):** the controlled Ivy24 probe did execute a read-only
+`GET /beta/deviceManagement/dataProcessorServiceForWindowsFeaturesOnboarding` through
+GraphKit 0.2.2's raw operation path and returned `Succeeded` with one singleton object
+whose `hasValidWindowsLicense` and `areDataProcessorServiceForWindowsFeaturesEnabled`
+fields were native Booleans. This proves the tenant endpoint and response shape, but it
+does not prove a releasable GraphKit contract: the Microsoft Learn resource page has no
+official GET method or application-permission section, and the read-only permission
+analysis did not resolve a named application permission for the certificate app. The
+DatasetMap entry therefore remains `Pending` rather than gaining a guessed descriptor or
+claiming a false platform-unavailable endpoint. Recheck when Microsoft publishes the
+method/permission contract or GraphKit ships the exact `Singleton.Default` descriptor,
+then repeat the read-only Ivy24 probe before removing `Pending`.
+
 The T4.5 Ivy24 live-gate table later in this file is the historical 0.1.1-era result.
 Those twelve GET/List datasets are no longer awaiting GraphKit.
 
-**R0 package-identity correction (2026-08-19):** published TenantPulse `0.1.1` remains the historical consumer artifact and is not overwritten. Current source is the unpublished `0.1.2` candidate because changing `RequiredModules` changes shipped bytes. Its runtime manifest requires exact GraphKit `0.2.2`; the build dependency file retains its separate `0.2.2` restore pin. Source, built manifest, `.nupkg`, full suite, and dry-run digest verification must all agree before this candidate can be called releasable.
+**R0 package-identity correction (2026-08-19):** published TenantPulse `0.1.1` remains the historical consumer artifact and is not overwritten. The `0.1.2` source first used the exact GraphKit `0.2.2` runtime requirement because changing `RequiredModules` changes shipped bytes; its build dependency file retains the separate `0.2.2` restore pin. `0.1.2` was then published with candidate-only embedded release notes. Published `0.1.3` corrects that metadata without changing runtime behavior or the GraphKit dependency.
 
 ## Phase 2 (Settings expansion, core slice T2.1-T2.7): complete, live-gated
 
@@ -149,11 +225,11 @@ conflict detection, all in one run.
   (zero gaps), 15/15 policies, `unresolvedNameCount` 0, `redactedSecretCount` 8.
 - **Unresolved-name rate: 0% across all three families** - well inside the plan's <1%
   exit criterion.
-- **Conflicts: real conflicts surfaced, not a zero-conflicts-by-luck outcome** - 165
-  conflict entries from all 3 families; `assignmentOverlap` breakdown `none`=8,
-  `possible`=34, `unknown`=123 (the 123 all involve at least one `settingsCatalog` row,
-  whose assignments are deferred per the G-gate - the 8/34 non-`unknown` verdicts come
-  from compliance/deviceConfiguration rows, which DO carry real assignment data today).
+- **Conflicts: real conflicts surfaced, not a zero-conflicts-by-luck outcome** - this
+  historical pre-assignment-collection gate produced 165 conflict entries from all 3
+  families; `assignmentOverlap` breakdown `none`=8, `possible`=34, `unknown`=123. Those
+  counts are retained as evidence for that run, not as proof of the current assignment-aware
+  runtime; Settings Catalog assignment collection now requires a fresh live-service gate.
 - `groupPolicyConfigurations` (the plan's own "9 gpConfigs" reconciliation note) is
   correctly ABSENT from this manifest - admin templates (T2.4) are Phase 2b, deferred by
   the G-gate; this dataset is not collected under the core-slice `-ExpandSettings` at all.
@@ -241,20 +317,18 @@ total as a snapshot's own manifest grows - a real cost a live 781-policy run pay
 policy). See `docs/spike/2026-08-16-t27-perf-container.md` for the full recorded numbers,
 hardware, and method.
 
-**Ledger: deferred/not-yet-populated Phase 2 data, explicit not silent**:
+**Ledger: resolved or explicitly descoped Phase 2 data**:
 
-- An **expansion-summary dataset** (an aggregate-counts view across the settingsCatalog/
-  compliance/deviceConfiguration expansion families, for a consuming report/check) is
-  scoped but explicitly **deferred to Phase 3** - its consumer moved there, so there is
-  nothing in this phase that reads or emits it. Not present anywhere in a Phase 2 snapshot;
-  do not expect it before Phase 3.
-- Every typed-assignment record `Invoke-PulseTypedPolicyExpansion` normalizes
-  (`targetType`/`groupId`/`filterId`/`filterType`/`intent`) already carries an `intent`
-  field, structurally, but it is hard-coded `$null` on every row today - unpopulated until
-  Phase 2b, which is where the real intent value (include/exclude) gets threaded through.
-  Present in the shape now so 2b is a pure data-population change, not a schema change.
+- The orphaned **expansion-summary dataset** is explicitly **descoped**. No report or check
+  consumes it, and the authoritative per-family counts and statuses already live in the
+  snapshot manifest's `expansions` entries. A second derived persisted aggregate would add
+  synchronization risk without adding information. If a future consumer needs a summary,
+  derive it from those manifest entries under that consumer's own contract.
+- Typed compliance and device-configuration assignment records now populate include/exclude
+  `intent` from the assignment target, preserve filter metadata, sort deterministically, and
+  gap a policy rather than publishing a false unassigned row when a target is malformed.
 
-## Phase 3 (T3.1-T3.6): engine and catalog work complete; T3.6 live gate honestly incomplete
+## Phase 3 (T3.1-T3.6): engine and catalog complete; T3.6 live gate executed
 
 Task 3.1 shipped the Maester attribution shim and TP.INT.0006 (Intune device cleanup rule
 conflict check). Task 3.2 ported nine further Intune checks (TP.INT.0007-0009/0011-0015) and
@@ -291,8 +365,8 @@ after which Phase 3 work continued on the merged tree:
   fixture extended with those four definitionIds. `visibility:"template"` is
   still unpublished in Microsoft's Graph schema docs - the checks key the live
   ids, not that field. Same-policy AND via presence-index `policyIds` (not a
-  tenant-wide union). Settings Catalog assignments remain deferred; matching
-  Maester, policy existence is enough.
+  tenant-wide union). Matching Maester, these two checks intentionally evaluate policy
+  existence even though the expansion now also collects Settings Catalog assignments.
 - **Task 3.5** wired `Get-PulseCaExclusionContext` into `TP.ENT.0004`/`TP.ENT.0005` so both
   checks surface honored Conditional Access group/user exclusions as evidence instead of
   silently ignoring them (`36bf53e`), then a dual-review fix round hardened both checks
@@ -434,8 +508,9 @@ not errors. **Historical (GraphKit 0.1.1 pin, T4.5 gate):** `TP.ENT.0012` (the
 cross-tenant access) were `descriptor-pending: awaiting GraphKit release` - written,
 tested, cited, waiting on GraphKit descriptors this catalog's research already scoped.
 GraphKit 0.2.2 later shipped official GET/List descriptors for those six Entra datasets
-(and six more Intune GET/List datasets). They are no longer Pending. Five Walk /
-data-processor datasets remain Pending; see the GraphKit 0.2.2 consume section above.
+(and six more Intune GET/List datasets). They are no longer Pending. At that GraphKit 0.2.2
+point, five Walk/data-processor datasets remained Pending; see the historical GraphKit 0.2.2
+consume section above.
 `TP.ENT.0001` (Security Defaults) is a genuine, correct `NotApplicable`: this tenant
 runs Conditional Access, not Security Defaults, so the check declines to evaluate a
 control the tenant deliberately superseded.
@@ -540,5 +615,5 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    TP.INT.0005 device-name keys stay unredacted under `-Redact`. Judgment boundary
    (policy display names, role names) is deliberate, not unfinished code.
 2. **`TP.INT.0010`**, DESCOPED until GraphKit ARM exists. Id reserved.
-3. Phase 2b / scale (not this catalog): Settings Catalog assignments, admin templates,
-   typed `intent`, `-ExpandSettings` default-on, dataset streaming.
+3. Phase 2b / scale (not this catalog): admin templates,
+   `-ExpandSettings` default-on, dataset streaming.

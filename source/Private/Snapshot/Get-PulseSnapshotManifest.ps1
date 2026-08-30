@@ -29,6 +29,67 @@
     sees the byte-identical source text.
 #>
 
+function ConvertTo-PulseMigratedManifest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable] $Manifest
+    )
+
+    $schemaVersion = [string] $Manifest.schemaVersion
+    if ($schemaVersion -notin @('1.0.0', '1.1.0')) {
+        return $Manifest
+    }
+
+    if ($null -eq $Manifest.datasets -or $Manifest.datasets -isnot [System.Collections.IDictionary]) {
+        throw "Get-PulseSnapshotManifest: legacy manifest schema '$schemaVersion' has no valid datasets object."
+    }
+
+    $migratedDatasets = [ordered]@{}
+    foreach ($datasetName in @($Manifest.datasets.Keys)) {
+        $legacyEntry = $Manifest.datasets[$datasetName]
+        if ($null -eq $legacyEntry -or $legacyEntry -isnot [System.Collections.IDictionary]) {
+            throw "Get-PulseSnapshotManifest: legacy manifest dataset '$datasetName' is not an object."
+        }
+
+        $status = [string] $legacyEntry.status
+        if ($status -notin @('Collected', 'Failed', 'Skipped')) {
+            throw "Get-PulseSnapshotManifest: legacy dataset '$datasetName' has unsupported status '$status'."
+        }
+
+        $legacyReason = if ($legacyEntry.Contains('reason')) { $legacyEntry.reason } else { $null }
+        $reasonCode = "legacy-$($status.ToLowerInvariant())"
+        $failureClass = switch ($status) {
+            'Collected' { $null }
+            'Failed' { 'ProviderFailed' }
+            'Skipped' { 'GateUnknown' }
+        }
+
+        $migratedDatasets[$datasetName] = [ordered]@{
+            status       = $status
+            apiVersion   = if ($legacyEntry.Contains('apiVersion')) { $legacyEntry.apiVersion } else { $null }
+            failureClass = $failureClass
+            reasonCode   = $reasonCode
+            detail       = $null
+            provider     = $null
+            operations   = @()
+            gaps         = @()
+            reason       = $legacyReason
+            sha256       = if ($legacyEntry.Contains('sha256')) { $legacyEntry.sha256 } else { $null }
+            itemCount    = if ($legacyEntry.Contains('itemCount')) { $legacyEntry.itemCount } else { $null }
+            collectedUtc = if ($legacyEntry.Contains('collectedUtc')) { $legacyEntry.collectedUtc } else { $null }
+        }
+    }
+
+    # Migration enriches legacy dataset entries in memory but deliberately preserves the
+    # declared schema and namespace capability. A 1.0.0 store must remain unable to accept
+    # reference/expansion writes; adding namespaces here would create a fake upgrade that
+    # could be serialized by a later manifest write.
+    $Manifest.datasets = $migratedDatasets
+
+    return $Manifest
+}
+
 function Get-PulseSnapshotManifest {
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -38,5 +99,37 @@ function Get-PulseSnapshotManifest {
     )
 
     $raw = Get-Content -LiteralPath $Store.ManifestPath -Raw
-    return ConvertFrom-PulseJsonPreservingStrings -Json $raw -Depth 64 -AsHashtable
+    $manifest = ConvertFrom-PulseJsonPreservingStrings -Json $raw -Depth 64 -AsHashtable
+    $manifest = ConvertTo-PulseMigratedManifest -Manifest $manifest
+    Add-PulseManifestPropertyAccessors -Value $manifest
+    return $manifest
+}
+function Add-PulseManifestPropertyAccessors {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [object] $Value
+    )
+
+    if ($null -eq $Value -or $Value -is [string]) {
+        return
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($key in @($Value.Keys)) {
+            $child = $Value[$key]
+            Add-PulseManifestPropertyAccessors -Value $child
+            if ($Value.PSObject.Properties.Name -notcontains ([string] $key)) {
+                $Value.PSObject.Properties.Add([System.Management.Automation.PSNoteProperty]::new([string] $key, $child))
+            }
+        }
+    } elseif ($Value -is [System.Collections.IEnumerable]) {
+        foreach ($item in @($Value)) {
+            Add-PulseManifestPropertyAccessors -Value $item
+        }
+    } elseif ($Value -is [System.Management.Automation.PSObject]) {
+        foreach ($property in @($Value.PSObject.Properties)) {
+            Add-PulseManifestPropertyAccessors -Value $property.Value
+        }
+    }
 }

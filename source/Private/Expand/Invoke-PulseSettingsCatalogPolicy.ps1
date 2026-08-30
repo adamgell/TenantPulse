@@ -76,6 +76,9 @@ function Invoke-PulseSettingsCatalogPolicy {
         [Parameter(Mandatory)]
         [string] $RawDatasetName,
 
+        [Parameter(Mandatory)]
+        [string] $RawAssignmentDatasetName,
+
         [Parameter()]
         [AllowNull()]
         [AllowEmptyString()]
@@ -149,6 +152,7 @@ function Invoke-PulseSettingsCatalogPolicy {
     $isBaseline = (-not [string]::IsNullOrEmpty($templateFamily)) -and ($templateFamily -like 'baseline*')
 
     $settingsPayload = $null
+    $rawAssignments = $null
     $fetchGap = $null
 
     if ($FromCapturedPayloads) {
@@ -158,6 +162,15 @@ function Invoke-PulseSettingsCatalogPolicy {
             Write-Verbose "Invoke-PulseSettingsCatalogPolicy: captured payload for '$policyId' unreadable: $($_.Exception.Message)"
             $category = if ($_.Exception.Message -match '(?i)no manifest entry|missing from the snapshot') { 'CapturedPayloadMissing' } else { 'CapturedPayloadUnreadable' }
             $fetchGap = New-PulseStructuredGapReason -Category $category
+        }
+        if (-not $fetchGap) {
+            try {
+                $rawAssignments = Read-PulseDataset -Store $Store -Name $RawAssignmentDatasetName
+            } catch {
+                Write-Verbose "Invoke-PulseSettingsCatalogPolicy: captured assignment payload for '$policyId' unreadable: $($_.Exception.Message)"
+                $category = if ($_.Exception.Message -match '(?i)no manifest entry|missing from the snapshot') { 'AssignmentPayloadMissing' } else { 'AssignmentPayloadUnreadable' }
+                $fetchGap = New-PulseStructuredGapReason -Category $category
+            }
         }
     } else {
         # READ-ONLY ENFORCEMENT (task-review Critical, symmetric with
@@ -185,6 +198,16 @@ function Invoke-PulseSettingsCatalogPolicy {
         }
 
         try {
+            Assert-PulseReadOnlyDescriptor -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' -ApiVersion 'beta'
+        } catch {
+            if ($_.Exception.Message -match 'descriptor-version-drift') {
+                Write-Verbose "Invoke-PulseSettingsCatalogPolicy: $($_.Exception.Message)"
+                return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'AssignmentFetchFailed') }
+            }
+            throw
+        }
+
+        try {
             $raw = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' -Parameters @{ id = $policyId } -ErrorAction Stop)
             $redacted = Protect-PulseSettingsCatalogSecretPayload -Data $raw -DefinitionIndex $DefinitionIndex
             # SECRET-REDACTED at write: this dataset gets the same hash-verified persistence
@@ -209,16 +232,140 @@ function Invoke-PulseSettingsCatalogPolicy {
             }
             $fetchGap = New-PulseStructuredGapReason -Category $category -StatusCode $statusCode
         }
+
+        if (-not $fetchGap) {
+            try {
+                $rawAssignments = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' -Parameters @{ id = $policyId } -ErrorAction Stop)
+                Write-PulseDataset -Store $Store -Name $RawAssignmentDatasetName -Data $rawAssignments -ApiVersion 'beta' -Status 'Collected' `
+                    -TenantId $TenantId -Pseudonym $Pseudonym
+            } catch {
+                Write-Verbose "Invoke-PulseSettingsCatalogPolicy: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
+                $failureClass = Get-PulseFailureClass -ErrorRecord $_
+                $statusCode = Get-PulseGraphErrorStatusCode -ErrorRecord $_
+                $category = switch ($failureClass) {
+                    'PermissionDenied' { 'AssignmentPermissionDenied' }
+                    'AuthFailure' { 'AssignmentAuthFailure' }
+                    default { 'AssignmentFetchFailed' }
+                }
+                $fetchGap = New-PulseStructuredGapReason -Category $category -StatusCode $statusCode
+            }
+        }
     }
 
     if ($fetchGap) {
         return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = $fetchGap }
     }
 
+    $normalizedAssignments = @()
+    foreach ($assignment in $rawAssignments) {
+        $target = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'target'
+        if ($null -eq $target -or -not (Test-PulseSettingsCatalogNode -Node $target)) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
+
+        $intentRaw = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'intent'
+        $targetTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName '@odata.type'
+        $groupIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'groupId'
+        $filterIdRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId'
+        $filterTypeRaw = Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType'
+
+        $targetTypeCandidate = if ($null -ne $targetTypeRaw) {
+            ([string] $targetTypeRaw -replace '^#microsoft\.graph\.', '' -replace 'AssignmentTarget$', '').Trim()
+        } else { $null }
+        $targetType = switch ($targetTypeCandidate) {
+            'group' { 'group'; break }
+            'exclusionGroup' { 'exclusionGroup'; break }
+            'allDevices' { 'allDevices'; break }
+            'allLicensedUsers' { 'allLicensedUsers'; break }
+            default { $null }
+        }
+        # Graph identifiers are strings. Do not stringify numbers, dictionaries, or other
+        # unexpected JSON shapes into plausible-looking ids: doing so would turn an
+        # unrepresentable assignment target into authoritative assignment metadata.
+        $groupId = if ($groupIdRaw -is [string]) { $groupIdRaw } else { $null }
+        if (($null -ne $groupIdRaw -and $groupIdRaw -isnot [string]) -or
+            [string]::IsNullOrWhiteSpace($targetType) -or
+            ($targetType -in @('group', 'exclusionGroup') -and [string]::IsNullOrWhiteSpace($groupId)) -or
+            ($targetType -in @('allDevices', 'allLicensedUsers') -and $null -ne $groupIdRaw)) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
+        if (($null -ne $filterIdRaw -and $filterIdRaw -isnot [string]) -or
+            ($null -ne $filterTypeRaw -and $filterTypeRaw -isnot [string])) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
+        $filterId = if ($filterIdRaw -is [string]) { $filterIdRaw } else { $null }
+        $filterType = if ($filterTypeRaw -is [string]) { $filterTypeRaw } else { $null }
+        # Graph's assignment-filter contract has three exact enum values and two valid
+        # unfiltered shapes: both fields omitted/null, or type 'none' with a null id.
+        # include/exclude require a real id; conversely, an id with null/'none' type is
+        # contradictory. Reject the whole policy rather than publishing metadata that could
+        # change assignment-overlap conclusions downstream.
+        $filterShapeValid = if ($null -eq $filterTypeRaw) {
+            $null -eq $filterIdRaw
+        } elseif ([string]::Equals($filterType, 'none', [System.StringComparison]::Ordinal)) {
+            $null -eq $filterIdRaw
+        } elseif ([string]::Equals($filterType, 'include', [System.StringComparison]::Ordinal) -or
+            [string]::Equals($filterType, 'exclude', [System.StringComparison]::Ordinal)) {
+            -not [string]::IsNullOrWhiteSpace($filterId)
+        } else {
+            $false
+        }
+        if (-not $filterShapeValid) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
+
+        $expectedIntent = if ([string]::Equals($targetType, 'exclusionGroup', [System.StringComparison]::Ordinal)) {
+            'exclude'
+        } else {
+            'include'
+        }
+        # Row schema v1 has one membership intent for each supported target shape. An
+        # unexpected provider field must not override that target-derived meaning or be
+        # stringified into authoritative evidence.
+        if ($null -ne $intentRaw -and
+            ($intentRaw -isnot [string] -or
+                -not [string]::Equals([string] $intentRaw, $expectedIntent, [System.StringComparison]::Ordinal))) {
+            return [pscustomobject]@{ PolicyId = $policyId; Rows = @(); Gap = (New-PulseStructuredGapReason -Category 'InvalidAssignmentTarget') }
+        }
+        $intent = $expectedIntent
+
+        $normalizedAssignments += [pscustomobject]@{
+            intent     = $intent
+            targetType = $targetType
+            groupId    = $groupId
+            filterId   = $filterId
+            filterType = $filterType
+        }
+    }
+
+    if ($normalizedAssignments.Count -gt 1) {
+        $assignmentFields = @('intent', 'targetType', 'groupId', 'filterId', 'filterType')
+        $order = [int[]] (0..($normalizedAssignments.Count - 1))
+        $comparison = [System.Comparison[int]] {
+            param($a, $b)
+            foreach ($field in $assignmentFields) {
+                $left = $normalizedAssignments[$a].$field
+                $right = $normalizedAssignments[$b].$field
+                if ($null -eq $left -and $null -ne $right) { return -1 }
+                if ($null -ne $left -and $null -eq $right) { return 1 }
+                $fieldComparison = [string]::CompareOrdinal([string] $left, [string] $right)
+                if ($fieldComparison -ne 0) { return $fieldComparison }
+            }
+            return 0
+        }
+        [System.Array]::Sort($order, $comparison)
+        $sortedAssignments = [object[]]::new($normalizedAssignments.Count)
+        for ($i = 0; $i -lt $order.Count; $i++) {
+            $sortedAssignments[$i] = $normalizedAssignments[$order[$i]]
+        }
+        $normalizedAssignments = $sortedAssignments
+    }
+
     try {
         $walkResult = ConvertTo-PulseSettingRows -PolicyId $policyId -PolicyType 'settingsCatalog' `
             -PolicyName $policyName -TemplateFamily $templateFamily -IsBaseline $isBaseline `
-            -SettingsPayload $settingsPayload -DefinitionIndex $DefinitionIndex -MaxDepth $script:PulseSettingsCatalogWalkerMaxDepth
+            -SettingsPayload $settingsPayload -DefinitionIndex $DefinitionIndex -Assignments $normalizedAssignments `
+            -MaxDepth $script:PulseSettingsCatalogWalkerMaxDepth
     } catch {
         # An instanceId collision (or any other internal walk invariant failure) is a
         # data-integrity anomaly scoped to THIS policy - see ConvertTo-PulseSettingRows's

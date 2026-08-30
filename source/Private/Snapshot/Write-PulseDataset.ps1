@@ -48,16 +48,39 @@ function Write-PulseDataset {
         [string] $ApiVersion,
 
         [Parameter(Mandatory)]
-        [ValidateSet('Collected', 'Failed', 'Skipped')]
+        [ValidateSet('Collected', 'Partial', 'Failed', 'Skipped')]
         [string] $Status,
 
-        # Deliberately untyped: a [string] parameter left unbound here defaults to ""
-        # rather than $null (PowerShell's normal behavior for value-shaped types), which
-        # would turn "no reason given" into a stored empty string instead of the absent/
-        # null the manifest schema and Set-PulseManifestEntry distinguish.
+        # Reason is the legacy compatibility adapter. New callers should use ReasonCode and
+        # Detail; retaining this parameter keeps existing collectors source-compatible.
         [Parameter()]
         [AllowNull()]
         $Reason,
+
+        [Parameter()]
+        [AllowNull()]
+        [ValidateNotNullOrEmpty()]
+        [string] $ReasonCode,
+
+        [Parameter()]
+        [AllowNull()]
+        [hashtable] $Detail = $null,
+
+        [Parameter()]
+        [AllowNull()]
+        $FailureClass = $null,
+
+        [Parameter()]
+        [AllowNull()]
+        $Provider = $null,
+
+        [Parameter()]
+        [AllowNull()]
+        [object[]] $Gaps = @(),
+
+        [Parameter()]
+        [AllowNull()]
+        [object[]] $Operations = @(),
 
         [Parameter()]
         [AllowNull()]
@@ -76,20 +99,36 @@ function Write-PulseDataset {
 
     Assert-PulseDatasetName -Name $Name
 
-    if ($Status -ne 'Collected') {
-        Set-PulseManifestEntry -Store $Store -Name $Name -Status $Status -Reason $Reason -ApiVersion $ApiVersion
+    $effectiveReasonCode = if (-not [string]::IsNullOrWhiteSpace($ReasonCode)) {
+        $ReasonCode
+    } elseif ($null -ne $Reason -and -not [string]::IsNullOrWhiteSpace([string] $Reason)) {
+        [string] $Reason
+    } else {
+        $Status.ToLowerInvariant()
+    }
+
+    $effectiveFailureClass = $FailureClass
+    if ($Status -in @('Failed', 'Skipped') -and $null -eq $effectiveFailureClass) {
+        # Legacy callers supplied only free-form -Reason. Never parse that text to infer a
+        # class; use the contract's conservative compatibility defaults instead.
+        $effectiveFailureClass = if ($Status -eq 'Skipped') { 'GateUnknown' } else { 'ProviderFailed' }
+    }
+
+    $outcome = New-PulseCollectionOutcome -Dataset $Name -Status $Status -Rows $Data -Gaps $Gaps `
+        -FailureClass $effectiveFailureClass -ReasonCode $effectiveReasonCode -Detail $Detail `
+        -Provider $Provider -ApiVersion $ApiVersion -Operations $Operations
+
+    if ($Status -in @('Failed', 'Skipped')) {
+        Set-PulseManifestEntry -Store $Store -Name $Name -Status $Status -Reason $Reason `
+            -ReasonCode $outcome.ReasonCode -Detail $outcome.Detail -FailureClass $outcome.FailureClass `
+            -Provider $outcome.Provider -Operations $outcome.Operations -Gaps $outcome.Gaps `
+            -ApiVersion $outcome.ApiVersion
         return
     }
 
-    $items = @($Data)
+    $items = @($outcome.Rows)
     # NOT wrapped in @(...): Remove-PulseGraphRowProvenance already returns a proper
-    # array via the unary comma operator (`return , $Data`) so PowerShell's pipeline
-    # never unrolls it to individual rows. Wrapping that call in @(...) here would
-    # capture the whole returned array as pipeline output and re-wrap IT in a second
-    # one-element array - silently truncating every dataset with more than one row down
-    # to itemCount 1 (caught by this file's own test suite; verified empirically that a
-    # direct assignment does not have this problem, only @(functionCall) around a
-    # comma-protected return does).
+    # array via the unary comma operator, so the direct assignment preserves every row.
     $items = Remove-PulseGraphRowProvenance -Data $items
     if (-not [string]::IsNullOrEmpty($TenantId) -and -not [string]::IsNullOrEmpty($Pseudonym)) {
         $items = Protect-PulseGraphRowTenantId -Data $items -TenantId $TenantId -Pseudonym $Pseudonym
@@ -97,13 +136,7 @@ function Write-PulseDataset {
     $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $items -Depth $Depth
     $datasetPath = Join-Path $Store.DatasetsPath "$Name.json"
 
-    # Hash-what-you-write (post-review fix, omp finding #2): compute the byte array ONCE
-    # and both write it (via -Bytes, bypassing Set-Content's own text encoder entirely) and
-    # hash it - so the recorded sha256 is provably the hash of the bytes actually persisted,
-    # not a separately re-encoded copy of the same string that merely SHOULD match. Atomic
-    # write via the shared helper (post-review fix - see its own docstring): a crash or
-    # interruption mid-write must never leave a truncated dataset file on disk with a
-    # manifest entry that claims it was Collected.
+    # Hash-what-you-write: the exact UTF-8 byte array is both persisted and hashed.
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($canonicalJson)
     Set-PulseAtomicFileContent -Path $datasetPath -Bytes $bytes
 
@@ -112,6 +145,8 @@ function Write-PulseDataset {
 
     $collectedUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [System.Globalization.CultureInfo]::InvariantCulture)
 
-    Set-PulseManifestEntry -Store $Store -Name $Name -Status $Status -Reason $Reason -ApiVersion $ApiVersion `
-        -Sha256 $sha256 -ItemCount $items.Count -CollectedUtc $collectedUtc
+    Set-PulseManifestEntry -Store $Store -Name $Name -Status $Status -Reason $Reason `
+        -ReasonCode $outcome.ReasonCode -Detail $outcome.Detail -FailureClass $outcome.FailureClass `
+        -Provider $outcome.Provider -Operations $outcome.Operations -Gaps $outcome.Gaps `
+        -ApiVersion $outcome.ApiVersion -Sha256 $sha256 -ItemCount $items.Count -CollectedUtc $collectedUtc
 }

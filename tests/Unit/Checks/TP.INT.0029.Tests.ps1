@@ -12,15 +12,16 @@ BeforeAll {
     function script:Invoke-PulseCheckFixture {
         param(
             [Parameter(Mandatory)] [string] $CheckId,
-            [Parameter(Mandatory)] [hashtable[]] $Datasets
+            [Parameter(Mandatory)] [hashtable[]] $Datasets,
+            [Parameter()] $GateProvider = @{ Intune = @{ Status = 'Available'; Detail = 'fixture gate' } }
         )
 
         $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $keyPath = Join-Path $storeRoot '.opkey/operator.key'
 
         try {
-            $evaluation = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $CheckId, $Datasets {
-                param($storeRoot, $keyPath, $checkId, $datasets)
+            $evaluation = InModuleScope TenantPulse -ArgumentList $storeRoot, $keyPath, $CheckId, $Datasets, $GateProvider {
+                param($storeRoot, $keyPath, $checkId, $datasets, $gateProvider)
 
                 $catalog = @(Import-PulseCheckCatalog)
                 $check = $catalog | Where-Object { $_.Id -eq $checkId }
@@ -35,11 +36,33 @@ BeforeAll {
                         Status     = $d.Status
                     }
                     if ($d.ContainsKey('Data')) { $params.Data = $d.Data }
+                    if ($d.ContainsKey('Gaps')) { $params.Gaps = $d.Gaps }
                     if ($d.ContainsKey('Reason')) { $params.Reason = $d.Reason }
                     Write-PulseDataset @params
                 }
 
-                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath
+                $manifest = Get-PulseSnapshotManifest -Store $store
+                $gates = if ($null -eq $check.Data -or $null -eq $check.Data.Gates) { @() } else { @($check.Data.Gates) }
+                if ($gates.Count -gt 0) {
+                    if (-not $manifest.Contains('licenseEvidence') -or $manifest.licenseEvidence -isnot [System.Collections.IDictionary]) {
+                        $manifest.licenseEvidence = [ordered]@{}
+                    }
+                    foreach ($gate in $gates) {
+                        if ($null -ne $gate -and -not [string]::IsNullOrWhiteSpace([string] $gate)) {
+                            $manifest.licenseEvidence[[string] $gate] = [ordered]@{
+                                Status = 'Available'
+                                Detail = 'fixture gate'
+                            }
+                        }
+                    }
+                    if ($manifest.licenseEvidence.Count -gt 0) {
+                        $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $manifest
+                        Set-PulseAtomicFileContent -Path $store.ManifestPath -Value $canonicalJson
+                    }
+                }
+
+
+                Invoke-PulseEvaluation -Store $store -Checks @($check) -OperatorKeyPath $keyPath -GateProvider $gateProvider
             }
             return $evaluation.Document.findings[0]
         } finally {

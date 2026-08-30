@@ -3,19 +3,19 @@
     loaded from .build/ per build.ps1's own convention (see its "Loading Build Tasks
     defined in the .build/ folder" step).
 
-    Record_Tested_Module_Digest: records a manifest of SHA-256 hashes for every file the
-    built module ships (psm1, psd1, Data/**, en-US/**) IMMEDIATELY after the Pester suite
-    passes, to output/testResults/tested-module-digest.txt. Publish-TenantPulsePackage.ps1
-    compares the packaged .nupkg's own files against THIS recorded manifest, not against
-    whatever happens to be sitting in output/module/ at publish time - closing the gap
-    where a built-module file could be silently edited (not rebuilt, just edited) between
-    a passing test run and a later publish, with nothing catching the drift because the
-    old check only ever re-hashed "whatever is on disk right now" and compared that
-    against itself.
+    Capture_Candidate_Proof_Input invalidates prior authorization material and records the
+    exact module file set/digests plus package name/hash before Pester starts.
+
+    Record_Tested_Module_Digest runs only after the whole-result gate, rejects any change
+    to that captured candidate or to the gated NUnit/Pester-object pair, then writes the
+    compatibility text digests and the authoritative tested-release-proof.json manifest.
+    Publish-TenantPulsePackage.ps1 requires all three and will not combine independently
+    supplied same-version results with stale artifact digests.
 
     Assert_Gate_Result: runs tests/QA/Assert-GateResult.ps1's whole-result gate (the same
     -MinimumTests/-AllowedSkips/-AllowNotRun ratchet ci.yml already enforces) against the
-    NUnit result this same local `./build.ps1 -Tasks test` run just produced, so a
+    one matching NUnit/Pester-object pair this same local `./build.ps1 -Tasks test` run
+    produced, so a
     developer running tests locally gets the same "did discovery silently drop tests"
     protection CI has always had - previously this gate only ever ran in CI, so a local
     green `test` run could still hide a discovery regression until CI caught it.
@@ -499,50 +499,291 @@
 # `./build.ps1 -Tasks test` total on this tree.
 # 2009 -> 2016 (R0 source/release truth): +6 package-identity and exact GraphKit
 # dependency assertions across source, restore pin, built manifest, nupkg, and publisher file-set proof; +1 case-sensitivity regression.
-$script:tenantPulseGateMinimumTests = 2016
+# 2016 -> 2123 (R1 outcome/composite implementation and handoff coverage): +107.
+# 2123 -> 2135 (default-plan and current/legacy baseline coverage): +12.
+# 2135 -> 2142 (security-baseline provider-shape closeout): +7 focused regressions.
+# 2142 is the real, measured `./build.ps1 -Tasks test` total on this tree.
+# 2142 -> 2162 (integrated 0.2.0 closeout): +20 typed-assignment hardening,
+# transitive package-chain QA/discovery coverage, NuGet-wrapper integrity, and a
+# clean-process dependency restore/import proof. 2162 -> 2175 at the final independent-
+# review closeout: +11 fail-closed Settings Catalog/RBAC/baseline regressions and +2
+# default-workflow/publisher safety regressions. 2175 -> 2187 at the post-review
+# fail-closed closeout: +12 source-gap propagation, typed-identifier, unknown-principal,
+# malformed-baseline, and exact-archive publisher regressions. 2187 -> 2199 after the
+# live-gate gate-evidence, nullable-RBAC-shape, and dataset-map contract regressions.
+# 2199 -> 2220 after the first fail-closed license-evidence, assignment-filter typing,
+# and publisher archive/authorization boundary regressions. 2220 -> 2247 after the final
+# independent-review closeout: grace-state/coherence, filter-enum/gap-structure, byte-bound
+# dependency provenance, proof-ordering, module-qualified publisher, and archive-TOCTOU
+# regressions. 2247 -> 2255 after the release-proof binding closeout: +7 pre-test
+# artifact/result-pair authorization regressions and +1 multiline-ratchet parser regression.
+# 2255 is the real, measured `./build.ps1 -Tasks test` total.
+$script:tenantPulseGateMinimumTests = 2255
 
-task Record_Tested_Module_Digest {
-    $moduleRoot = Join-Path $BuildRoot 'output/module/TenantPulse'
-    $builtVersionDir = Get-ChildItem -LiteralPath $moduleRoot -Directory -ErrorAction SilentlyContinue |
-        Sort-Object Name -Descending | Select-Object -First 1
+function Get-TenantPulseCandidateProofState {
+    param([Parameter(Mandatory)] [string] $Root)
 
-    if (-not $builtVersionDir) {
-        throw "Record_Tested_Module_Digest: no built module found under '$moduleRoot' - run the 'build' workflow before 'test'."
+    $moduleRoot = Join-Path $Root 'output/module/TenantPulse'
+    $builtVersionDirs = @(Get-ChildItem -LiteralPath $moduleRoot -Directory -Force -ErrorAction SilentlyContinue)
+    if ($builtVersionDirs.Count -ne 1) {
+        throw "Candidate proof requires exactly one built TenantPulse version under '$moduleRoot'; found $($builtVersionDirs.Count). Run the 'pack' workflow before 'test'."
+    }
+    $builtVersionDir = $builtVersionDirs[0]
+
+    $relativeToFile = [System.Collections.Generic.Dictionary[string, System.IO.FileInfo]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    # ModuleBuilder leaves .gitkeep placeholders in empty source directories, while NuGet
+    # deliberately omits them. They are repository scaffolding, not shipped payload, so the
+    # cross-platform proof set must exclude them explicitly rather than relying on a host's
+    # hidden-file enumeration behavior.
+    foreach ($file in @(
+        Get-ChildItem -LiteralPath $builtVersionDir.FullName -Recurse -File -Force |
+            Where-Object { $_.Name -cne '.gitkeep' }
+    )) {
+        $relativePath = $file.FullName.Substring($builtVersionDir.FullName.Length + 1) -replace '\\', '/'
+        $relativeToFile.Add($relativePath, $file)
     }
 
-    $shippedFiles = @(Get-ChildItem -LiteralPath $builtVersionDir.FullName -Recurse -File | Sort-Object { $_.FullName })
+    [string[]] $relativePaths = @($relativeToFile.Keys)
+    [System.Array]::Sort($relativePaths, [System.StringComparer]::Ordinal)
+    $fileRecords = @($relativePaths | ForEach-Object {
+        [pscustomobject] [ordered] @{
+            path = $_
+            sha256 = (Get-FileHash -LiteralPath $relativeToFile[$_].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    })
 
+    $packagePath = Join-Path $Root "output/TenantPulse.$($builtVersionDir.Name).nupkg"
+    if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
+        throw "Candidate proof package '$packagePath' is missing - run the 'pack' workflow before 'test'."
+    }
+
+    [pscustomobject] [ordered] @{
+        module = [pscustomobject] [ordered] @{
+            name = 'TenantPulse'
+            version = $builtVersionDir.Name
+            files = @($fileRecords)
+        }
+        package = [pscustomobject] [ordered] @{
+            name = Split-Path -Leaf $packagePath
+            sha256 = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+}
+
+function Get-TenantPulseBoundResultPair {
+    param([Parameter(Mandatory)] [string] $ResultsDirectory)
+
+    $nunitFiles = @(Get-ChildItem -LiteralPath $ResultsDirectory -Filter 'NUnitXml_*.xml' -File -ErrorAction SilentlyContinue)
+    if ($nunitFiles.Count -ne 1) {
+        throw "Result binding requires exactly one NUnit result under '$ResultsDirectory'; found $($nunitFiles.Count)."
+    }
+
+    $pesterObjectFiles = @(Get-ChildItem -LiteralPath $ResultsDirectory -Filter 'PesterObject_*.xml' -File -ErrorAction SilentlyContinue)
+    if ($pesterObjectFiles.Count -ne 1) {
+        throw "Result binding requires exactly one Pester object under '$ResultsDirectory'; found $($pesterObjectFiles.Count)."
+    }
+
+    $nunitSuffix = $nunitFiles[0].Name.Substring('NUnitXml_'.Length)
+    $pesterObjectSuffix = $pesterObjectFiles[0].Name.Substring('PesterObject_'.Length)
+    if (-not [string]::Equals($nunitSuffix, $pesterObjectSuffix, [System.StringComparison]::Ordinal)) {
+        throw "The NUnit result and Pester object must carry the same result suffix; found '$nunitSuffix' and '$pesterObjectSuffix'."
+    }
+
+    [pscustomobject] [ordered] @{
+        nunit = [pscustomobject] [ordered] @{
+            name = $nunitFiles[0].Name
+            path = $nunitFiles[0].FullName
+            sha256 = (Get-FileHash -LiteralPath $nunitFiles[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        pesterObject = [pscustomobject] [ordered] @{
+            name = $pesterObjectFiles[0].Name
+            path = $pesterObjectFiles[0].FullName
+            sha256 = (Get-FileHash -LiteralPath $pesterObjectFiles[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+}
+
+function Assert-TenantPulseCandidateProofStateUnchanged {
+    param(
+        [Parameter(Mandatory)] [object] $Captured,
+        [Parameter(Mandatory)] [object] $Current
+    )
+
+    $capturedFiles = @($Captured.module.files)
+    $currentFiles = @($Current.module.files)
+    $moduleChanged =
+        -not [string]::Equals([string] $Captured.module.name, [string] $Current.module.name, [System.StringComparison]::Ordinal) -or
+        -not [string]::Equals([string] $Captured.module.version, [string] $Current.module.version, [System.StringComparison]::Ordinal) -or
+        $capturedFiles.Count -ne $currentFiles.Count
+
+    if (-not $moduleChanged) {
+        for ($index = 0; $index -lt $capturedFiles.Count; $index++) {
+            if (-not [string]::Equals([string] $capturedFiles[$index].path, [string] $currentFiles[$index].path, [System.StringComparison]::Ordinal) -or
+                -not [string]::Equals([string] $capturedFiles[$index].sha256, [string] $currentFiles[$index].sha256, [System.StringComparison]::Ordinal)) {
+                $moduleChanged = $true
+                break
+            }
+        }
+    }
+
+    if ($moduleChanged) {
+        throw 'The built module candidate changed after the pre-test capture; no tested proof was emitted.'
+    }
+
+    if (-not [string]::Equals([string] $Captured.package.name, [string] $Current.package.name, [System.StringComparison]::Ordinal) -or
+        -not [string]::Equals([string] $Captured.package.sha256, [string] $Current.package.sha256, [System.StringComparison]::Ordinal)) {
+        throw 'The package candidate changed after the pre-test capture; no tested proof was emitted.'
+    }
+}
+
+function Assert-TenantPulseResultPairUnchanged {
+    param(
+        [Parameter(Mandatory)] [object] $Gated,
+        [Parameter(Mandatory)] [object] $Current
+    )
+
+    foreach ($kind in @('nunit', 'pesterObject')) {
+        if (-not [string]::Equals([string] $Gated.$kind.name, [string] $Current.$kind.name, [System.StringComparison]::Ordinal) -or
+            -not [string]::Equals([string] $Gated.$kind.sha256, [string] $Current.$kind.sha256, [System.StringComparison]::Ordinal)) {
+            throw 'The bound NUnit/Pester result pair changed after the whole-result gate; no tested proof was emitted.'
+        }
+    }
+}
+
+task Capture_Candidate_Proof_Input {
+    $script:tenantPulseGatedResultPair = $null
     $testResultsDir = Join-Path $BuildRoot 'output/testResults'
     if (-not (Test-Path -LiteralPath $testResultsDir -PathType Container)) {
         New-Item -Path $testResultsDir -ItemType Directory -Force | Out-Null
     }
 
-    $digestPath = Join-Path $testResultsDir 'tested-module-digest.txt'
-    $lines = [System.Collections.Generic.List[string]]::new()
-    foreach ($file in $shippedFiles) {
-        $relativePath = $file.FullName.Substring($builtVersionDir.FullName.Length + 1) -replace '\\', '/'
-        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        $lines.Add("$relativePath  $hash")
+    # Invalidate all prior authorization material before validating this new attempt. A
+    # failed capture or failed test run can therefore never leave a publishable old proof.
+    foreach ($path in @(
+        (Join-Path $testResultsDir 'candidate-proof-input.json'),
+        (Join-Path $testResultsDir 'tested-module-digest.txt'),
+        (Join-Path $testResultsDir 'tested-package-digest.txt'),
+        (Join-Path $testResultsDir 'tested-release-proof.json')
+    )) {
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
+    Get-ChildItem -LiteralPath $testResultsDir -File -ErrorAction SilentlyContinue |
+        Where-Object Name -Match '^(NUnitXml_|PesterObject_).*\.xml$' |
+        Remove-Item -Force
+
+    $candidate = Get-TenantPulseCandidateProofState -Root $BuildRoot
+    $capture = [pscustomobject] [ordered] @{
+        schemaVersion = 1
+        runId = [guid]::NewGuid().ToString('D')
+        module = $candidate.module
+        package = $candidate.package
     }
 
-    # Ordinal sort of the recorded lines (relative path first) - deterministic file
-    # content regardless of filesystem enumeration order, matching this codebase's
-    # "deterministic ordering everywhere" rule elsewhere.
-    $sortedLines = [string[]] @($lines)
-    [System.Array]::Sort($sortedLines, [System.StringComparer]::Ordinal)
+    $capturePath = Join-Path $testResultsDir 'candidate-proof-input.json'
+    $stagedCapturePath = "$capturePath.tmp-$PID-$([guid]::NewGuid().ToString('N'))"
+    try {
+        $capture | ConvertTo-Json -Depth 8 |
+            Set-Content -LiteralPath $stagedCapturePath -NoNewline -Encoding utf8NoBOM
+        [System.IO.File]::Move($stagedCapturePath, $capturePath, $true)
+    }
+    finally {
+        Remove-Item -LiteralPath $stagedCapturePath -Force -ErrorAction SilentlyContinue
+    }
 
-    Set-Content -LiteralPath $digestPath -Value ($sortedLines -join [System.Environment]::NewLine) -NoNewline -Encoding utf8NoBOM
-    Write-Build Green "Recorded $($sortedLines.Count) shipped-file digests to '$digestPath' for module version $($builtVersionDir.Name)."
+    Write-Build Green "Captured the pre-test module and package candidate as run $($capture.runId)."
+}
+
+task Record_Tested_Module_Digest Assert_Gate_Result, {
+    $testResultsDir = Join-Path $BuildRoot 'output/testResults'
+    $capturePath = Join-Path $testResultsDir 'candidate-proof-input.json'
+    if (-not (Test-Path -LiteralPath $capturePath -PathType Leaf)) {
+        throw "Record_Tested_Module_Digest: no pre-test candidate capture found at '$capturePath'. Run the 'test' workflow."
+    }
+
+    try {
+        $captured = Get-Content -LiteralPath $capturePath -Raw | ConvertFrom-Json -Depth 8
+    }
+    catch {
+        throw "Record_Tested_Module_Digest: pre-test candidate capture is unreadable: $($_.Exception.Message)"
+    }
+    $parsedRunId = [guid]::Empty
+    if ($captured.schemaVersion -ne 1 -or
+        -not ([guid]::TryParse([string] $captured.runId, [ref] $parsedRunId)) -or
+        $parsedRunId -eq [guid]::Empty) {
+        throw 'Record_Tested_Module_Digest: pre-test candidate capture has an invalid schema version or run id.'
+    }
+
+    $current = Get-TenantPulseCandidateProofState -Root $BuildRoot
+    Assert-TenantPulseCandidateProofStateUnchanged -Captured $captured -Current $current
+
+    if ($null -eq $script:tenantPulseGatedResultPair) {
+        throw 'Record_Tested_Module_Digest: no result pair was accepted by Assert_Gate_Result in this invocation.'
+    }
+    $currentResultPair = Get-TenantPulseBoundResultPair -ResultsDirectory $testResultsDir
+    Assert-TenantPulseResultPairUnchanged -Gated $script:tenantPulseGatedResultPair -Current $currentResultPair
+
+    $releaseProof = [pscustomobject] [ordered] @{
+        schemaVersion = 1
+        runId = [string] $captured.runId
+        module = $captured.module
+        package = $captured.package
+        testRun = [pscustomobject] [ordered] @{
+            nunit = [pscustomobject] [ordered] @{
+                name = $script:tenantPulseGatedResultPair.nunit.name
+                sha256 = $script:tenantPulseGatedResultPair.nunit.sha256
+            }
+            pesterObject = [pscustomobject] [ordered] @{
+                name = $script:tenantPulseGatedResultPair.pesterObject.name
+                sha256 = $script:tenantPulseGatedResultPair.pesterObject.sha256
+            }
+        }
+    }
+
+    $moduleLines = @($captured.module.files | ForEach-Object { "$($_.path)  $($_.sha256)" })
+    $digestPath = Join-Path $testResultsDir 'tested-module-digest.txt'
+    $packageDigestPath = Join-Path $testResultsDir 'tested-package-digest.txt'
+    $releaseProofPath = Join-Path $testResultsDir 'tested-release-proof.json'
+    $stagingSuffix = ".tmp-$PID-$([guid]::NewGuid().ToString('N'))"
+    $stagedDigestPath = "$digestPath$stagingSuffix"
+    $stagedPackageDigestPath = "$packageDigestPath$stagingSuffix"
+    $stagedReleaseProofPath = "$releaseProofPath$stagingSuffix"
+    try {
+        Set-Content -LiteralPath $stagedDigestPath `
+            -Value ($moduleLines -join [System.Environment]::NewLine) `
+            -NoNewline `
+            -Encoding utf8NoBOM
+        Set-Content -LiteralPath $stagedPackageDigestPath `
+            -Value "$($captured.package.name)  $($captured.package.sha256)" `
+            -NoNewline `
+            -Encoding utf8NoBOM
+        $releaseProof | ConvertTo-Json -Depth 8 |
+            Set-Content -LiteralPath $stagedReleaseProofPath -NoNewline -Encoding utf8NoBOM
+
+        [System.IO.File]::Move($stagedDigestPath, $digestPath, $true)
+        [System.IO.File]::Move($stagedPackageDigestPath, $packageDigestPath, $true)
+        Remove-Item -LiteralPath $capturePath -Force
+        # This authoritative manifest moves last. A partial compatibility-file update is
+        # never publication authority without this run-bound proof.
+        [System.IO.File]::Move($stagedReleaseProofPath, $releaseProofPath, $true)
+    }
+    finally {
+        Remove-Item -LiteralPath $stagedDigestPath, $stagedPackageDigestPath, $stagedReleaseProofPath -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Build Green "Recorded $($moduleLines.Count) shipped-file digests to '$digestPath' for module version $($captured.module.version)."
+    Write-Build Green "Recorded exact package and bound result-pair proof to '$releaseProofPath'."
 }
 
 task Assert_Gate_Result {
     $resultsDir = Join-Path $BuildRoot 'output/testResults'
-    $resultFiles = @(Get-ChildItem -LiteralPath $resultsDir -Filter 'NUnitXml_*.xml' -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending)
-
-    if ($resultFiles.Count -eq 0) {
-        throw "Assert_Gate_Result: no NUnit test result file found under '$resultsDir' - the Pester task must run before this one."
+    $script:tenantPulseGatedResultPair = $null
+    $capturePath = Join-Path $resultsDir 'candidate-proof-input.json'
+    if (-not (Test-Path -LiteralPath $capturePath -PathType Leaf)) {
+        throw "Assert_Gate_Result: no pre-test candidate capture found at '$capturePath'."
     }
+    $resultPair = Get-TenantPulseBoundResultPair -ResultsDirectory $resultsDir
 
     # AllowNotRun 1 (GraphKit 0.1.1 migration, Task 1.11): tests/QA/ReadOnly.tests.ps1's
     # "every Pending dataset declares an expected Read/Safe descriptor" block is
@@ -556,8 +797,14 @@ task Assert_Gate_Result {
     # Platform-aware skips: the two $IsWindows-gated POSIX-permission tests (Identity
     # key file 0600 / key dir 0700) skip by design on Windows; zero-skip everywhere else.
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
-    & $gate -ResultPath $resultFiles[0].FullName -MinimumTests $script:tenantPulseGateMinimumTests -AllowedSkips $allowedSkips -AllowNotRun 1
+    & $gate `
+        -ResultPath $resultPair.nunit.path `
+        -PesterObjectPath $resultPair.pesterObject.path `
+        -MinimumTests $script:tenantPulseGateMinimumTests `
+        -AllowedSkips $allowedSkips `
+        -AllowNotRun 1
     if ($LASTEXITCODE -ne 0) {
         throw "Assert_Gate_Result: the local test run did not pass the whole-result gate (MinimumTests $script:tenantPulseGateMinimumTests) - see the Assert-GateResult.ps1 output above for the specific violation."
     }
+    $script:tenantPulseGatedResultPair = $resultPair
 }

@@ -77,6 +77,399 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' }
     }
 
+    It 'normalizes typed-policy include and exclude intent, preserves filters, and sorts assignments deterministically' {
+        $policy = New-TestCompliancePolicy -Id 'p-intent'
+        $assignments = @(
+            [pscustomobject]@{
+                id = 'z-exclude'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'
+                    groupId = 'group-excluded'
+                }
+            }
+            [pscustomobject]@{
+                id = 'z-include-group'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                    groupId = 'group-included'
+                    deviceAndAppManagementAssignmentFilterId = 'filter-1'
+                    deviceAndAppManagementAssignmentFilterType = 'include'
+                }
+            }
+            [pscustomobject]@{
+                id = 'a-all-devices'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'
+                }
+            }
+        )
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'p-intent' } { $assignments }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'Expanded'
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store -Name 'compliance'
+        $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
+        $normalized = @($rows[0].assignments)
+        $normalized.Count | Should -Be 3
+
+        @($normalized.intent) | Should -Be @('exclude', 'include', 'include')
+        @($normalized.targetType) | Should -Be @('exclusionGroup', 'allDevices', 'group')
+        $normalized[0].groupId | Should -Be 'group-excluded'
+        $normalized[2].groupId | Should -Be 'group-included'
+        $normalized[2].filterId | Should -Be 'filter-1'
+        $normalized[2].filterType | Should -Be 'include'
+    }
+
+    It 'derives device-configuration include and exclude solely from target type instead of passing through raw application intent' {
+        $policy = [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.windows10CustomConfiguration'
+            id            = 'device-config-intent'
+            displayName   = 'Device configuration intent'
+            omaSettings   = @([pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.omaSettingBoolean'
+                    omaUri        = './review/intent'
+                    value         = $true
+                })
+        }
+        $assignments = @(
+            [pscustomobject]@{
+                id     = 'raw-remove'
+                intent = 'remove'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                    groupId       = 'group-included'
+                }
+            }
+            [pscustomobject]@{
+                id     = 'raw-apply'
+                intent = 'apply'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'
+                    groupId       = 'group-excluded'
+                }
+            }
+            [pscustomobject]@{
+                id     = 'raw-future'
+                intent = 'futureApplicationIntent'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.allLicensedUsersAssignmentTarget'
+                }
+            }
+        )
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'DeviceConfigurationAssignment' -and $Parameters.id -eq 'device-config-intent'
+        } { $assignments }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.deviceConfiguration {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'deviceConfiguration' `
+                -TypeMap $typeMap -AssignmentType 'DeviceConfigurationAssignment' -Name 'deviceConfiguration'
+        }
+
+        $summary.Status | Should -Be 'Expanded'
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store -Name 'deviceConfiguration'
+        $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
+        $normalized = @($rows[0].assignments)
+
+        @($normalized.intent) | Should -Be @('exclude', 'include', 'include')
+        @($normalized.targetType) | Should -Be @('exclusionGroup', 'allLicensedUsers', 'group')
+        @($normalized.intent) | Should -Not -Contain 'apply'
+        @($normalized.intent) | Should -Not -Contain 'remove'
+        @($normalized.intent) | Should -Not -Contain 'futureApplicationIntent'
+    }
+
+    It 'gaps a typed policy whose assignment target is missing instead of publishing a false unassigned row' {
+        $policy = New-TestCompliancePolicy -Id 'p-invalid-target'
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'p-invalid-target' } {
+            @([pscustomobject]@{ id = 'bad-assignment'; target = $null })
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.RowCount | Should -Be 0
+        $summary.Gaps.Count | Should -Be 1
+        $summary.Gaps[0].reason | Should -Be 'category:InvalidAssignmentTarget'
+    }
+
+    It 'gaps every policy whose assignment target cannot be represented by the supported typed-target schema' {
+        $policies = @(
+            (New-TestCompliancePolicy -Id 'target-empty-object')
+            (New-TestCompliancePolicy -Id 'target-missing-discriminator')
+            (New-TestCompliancePolicy -Id 'target-group-missing-id')
+            (New-TestCompliancePolicy -Id 'target-exclusion-missing-id')
+            (New-TestCompliancePolicy -Id 'target-group-numeric-id')
+            (New-TestCompliancePolicy -Id 'target-exclusion-object-id')
+            (New-TestCompliancePolicy -Id 'target-unsupported')
+        )
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'DeviceCompliancePolicyAssignment'
+        } {
+            $target = switch ($Parameters.id) {
+                'target-empty-object' { [pscustomobject]@{} }
+                'target-missing-discriminator' { [pscustomobject]@{ groupId = 'orphan-group' } }
+                'target-group-missing-id' { [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget' } }
+                'target-exclusion-missing-id' { [pscustomobject]@{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget' } }
+                'target-group-numeric-id' { [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 12345 } }
+                'target-exclusion-object-id' { [pscustomobject]@{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = [ordered]@{ value = 'group-object' } } }
+                'target-unsupported' { [pscustomobject]@{ '@odata.type' = '#microsoft.graph.scopeTagGroupAssignmentTarget' } }
+            }
+            @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policies, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies $policies -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.RowCount | Should -Be 0
+        $summary.Gaps.Count | Should -Be 7
+        @($summary.Gaps.reason | Sort-Object -Unique) | Should -Be @('category:InvalidAssignmentTarget')
+        @($summary.Gaps.policyId | Sort-Object) | Should -Be @(
+            'target-empty-object'
+            'target-exclusion-missing-id'
+            'target-exclusion-object-id'
+            'target-group-missing-id'
+            'target-group-numeric-id'
+            'target-missing-discriminator'
+            'target-unsupported'
+        )
+    }
+
+    It 'gaps allDevices and allLicensedUsers targets that supply any non-null groupId' {
+        $caseIds = @(
+            'target-all-devices-string-id'
+            'target-all-devices-numeric-id'
+            'target-all-licensed-users-string-id'
+            'target-all-licensed-users-object-id'
+        )
+        $policies = @($caseIds | ForEach-Object { New-TestCompliancePolicy -Id $_ })
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'DeviceCompliancePolicyAssignment'
+        } {
+            $target = switch ($Parameters.id) {
+                'target-all-devices-string-id' {
+                    [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'; groupId = 'stray-group' }
+                }
+                'target-all-devices-numeric-id' {
+                    [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'; groupId = 12345 }
+                }
+                'target-all-licensed-users-string-id' {
+                    [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allLicensedUsersAssignmentTarget'; groupId = 'stray-group' }
+                }
+                'target-all-licensed-users-object-id' {
+                    [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allLicensedUsersAssignmentTarget'; groupId = [ordered]@{ value = 'stray-group' } }
+                }
+            }
+            @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policies, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies $policies -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.RowCount | Should -Be 0
+        $summary.Gaps.Count | Should -Be $caseIds.Count
+        @($summary.Gaps.reason | Sort-Object -Unique) | Should -Be @('category:InvalidAssignmentTarget')
+        @($summary.Gaps.policyId | Sort-Object) | Should -Be @($caseIds | Sort-Object)
+    }
+
+    It 'gaps typed policies whose assignment filter id or type is not a string' {
+        $caseIds = @('filter-id-non-string', 'filter-type-non-string')
+        $policies = @($caseIds | ForEach-Object { New-TestCompliancePolicy -Id $_ })
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'DeviceCompliancePolicyAssignment'
+        } {
+            $target = [pscustomobject]@{
+                '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                groupId = "group-$($Parameters.id)"
+                deviceAndAppManagementAssignmentFilterId = 'filter-valid'
+                deviceAndAppManagementAssignmentFilterType = 'include'
+            }
+            if ($Parameters.id -eq 'filter-id-non-string') {
+                $target.deviceAndAppManagementAssignmentFilterId = 12345
+            } else {
+                $target.deviceAndAppManagementAssignmentFilterType = [ordered]@{ value = 'include' }
+            }
+            @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policies, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies $policies -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.RowCount | Should -Be 0
+        $summary.Gaps.Count | Should -Be $caseIds.Count
+        @($summary.Gaps.reason | Sort-Object -Unique) | Should -Be @('category:InvalidAssignmentTarget')
+        @($summary.Gaps.policyId | Sort-Object) | Should -Be @($caseIds | Sort-Object)
+    }
+
+    It 'gaps typed policies whose assignment filter enum or id/type pairing violates the Graph contract' {
+        $caseIds = @(
+            'filter-type-unknown'
+            'filter-type-wrong-case'
+            'filter-include-missing-id'
+            'filter-include-blank-id'
+            'filter-exclude-null-id'
+            'filter-exclude-whitespace-id'
+            'filter-none-with-id'
+            'filter-none-with-blank-id'
+            'filter-null-type-with-id'
+        )
+        $policies = @($caseIds | ForEach-Object { New-TestCompliancePolicy -Id $_ })
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'DeviceCompliancePolicyAssignment'
+        } {
+            $target = [pscustomobject]@{
+                '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                groupId = 'group-valid'
+            }
+            switch ($Parameters.id) {
+                'filter-type-unknown' {
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterId -NotePropertyValue 'filter-valid'
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue 'unknownFutureValue'
+                }
+                'filter-type-wrong-case' {
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterId -NotePropertyValue 'filter-valid'
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue 'Include'
+                }
+                'filter-include-missing-id' {
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue 'include'
+                }
+                'filter-include-blank-id' {
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterId -NotePropertyValue ''
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue 'include'
+                }
+                'filter-exclude-null-id' {
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterId -NotePropertyValue $null
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue 'exclude'
+                }
+                'filter-exclude-whitespace-id' {
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterId -NotePropertyValue '   '
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue 'exclude'
+                }
+                'filter-none-with-id' {
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterId -NotePropertyValue 'filter-contradiction'
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue 'none'
+                }
+                'filter-none-with-blank-id' {
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterId -NotePropertyValue ''
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue 'none'
+                }
+                'filter-null-type-with-id' {
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterId -NotePropertyValue 'filter-orphaned'
+                    $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue $null
+                }
+            }
+            @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policies, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies $policies -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.RowCount | Should -Be 0
+        $summary.Gaps.Count | Should -Be $caseIds.Count
+        @($summary.Gaps.reason | Sort-Object -Unique) | Should -Be @('category:InvalidAssignmentTarget')
+        @($summary.Gaps.policyId | Sort-Object) | Should -Be @($caseIds | Sort-Object)
+    }
+
+    It 'preserves valid typed assignment filter shapes for omitted, explicit-null, none, include, and exclude' {
+        $policy = New-TestCompliancePolicy -Id 'filter-valid-shapes'
+        $assignments = @(
+            [pscustomobject]@{
+                id = 'assignment-omitted'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                    groupId = 'group-omitted'
+                }
+            }
+            [pscustomobject]@{
+                id = 'assignment-explicit-null'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'
+                    groupId = $null
+                    deviceAndAppManagementAssignmentFilterId = $null
+                    deviceAndAppManagementAssignmentFilterType = $null
+                }
+            }
+            [pscustomobject]@{
+                id = 'assignment-none'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.allLicensedUsersAssignmentTarget'
+                    deviceAndAppManagementAssignmentFilterId = $null
+                    deviceAndAppManagementAssignmentFilterType = 'none'
+                }
+            }
+            [pscustomobject]@{
+                id = 'assignment-include'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                    groupId = 'group-include'
+                    deviceAndAppManagementAssignmentFilterId = 'filter-include'
+                    deviceAndAppManagementAssignmentFilterType = 'include'
+                }
+            }
+            [pscustomobject]@{
+                id = 'assignment-exclude'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                    groupId = 'group-exclude'
+                    deviceAndAppManagementAssignmentFilterId = 'filter-exclude'
+                    deviceAndAppManagementAssignmentFilterType = 'exclude'
+                }
+            }
+        )
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'DeviceCompliancePolicyAssignment' -and $Parameters.id -eq 'filter-valid-shapes'
+        } { $assignments }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'Expanded'
+        $summary.Gaps.Count | Should -Be 0
+        $rows = @(Get-Content -LiteralPath (Get-PulseExpandedJsonlPath -Store $script:store -Name 'compliance')) |
+            ForEach-Object { $_ | ConvertFrom-Json }
+        $normalized = @($rows[0].assignments)
+        $normalized.Count | Should -Be 5
+
+        ($normalized | Where-Object groupId -EQ 'group-omitted').filterType | Should -BeNullOrEmpty
+        $explicitNull = $normalized | Where-Object targetType -EQ 'allDevices'
+        $explicitNull.groupId | Should -BeNullOrEmpty
+        $explicitNull.filterType | Should -BeNullOrEmpty
+        $none = $normalized | Where-Object targetType -EQ 'allLicensedUsers'
+        $none.groupId | Should -BeNullOrEmpty
+        $none.filterType | Should -Be 'none'
+        ($normalized | Where-Object groupId -EQ 'group-include').filterId | Should -Be 'filter-include'
+        ($normalized | Where-Object groupId -EQ 'group-include').filterType | Should -Be 'include'
+        ($normalized | Where-Object groupId -EQ 'group-exclude').filterId | Should -Be 'filter-exclude'
+        ($normalized | Where-Object groupId -EQ 'group-exclude').filterType | Should -Be 'exclude'
+    }
+
     It 'T2.7 LIVE-GATE REGRESSION: a raw tenant id appearing as an ordinary (non-sensitive) typed-policy property VALUE is redacted to its pseudonym in the published jsonl' {
         # Same class of live finding as the Settings Catalog fix (Ivy24, T2.7): the raw
         # tenant id can legitimately appear as ADMIN-ENTERED CONFIGURATION DATA in an
