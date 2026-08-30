@@ -20,6 +20,7 @@
 - Snapshot schema remains 2.0 and findings schema remains 1.0. These changes expose no new serialized schema field.
 - A live tenant is not required to prove deterministic error mapping or evaluator branching. Do not manufacture a live timeout, cancellation, permission failure, or ambiguous response merely for evidence.
 - Reasons and findings may state aggregate gap counts, operation names, and bounded failure classes. They must not surface raw gap scopes, raw provider detail, tenant identifiers, tokens, or PII.
+- Function rules are trusted, reviewed code: the evaluator provides the structured `Gaps` projection but cannot prevent an arbitrary rule from copying raw projected values into a finding. The four built-in opt-ins must therefore prove with canaries that they emit only aggregate gap counts and reviewed row evidence.
 
 ---
 
@@ -39,7 +40,7 @@
 - [x] Confirm the manifest still declares TenantPulse 0.3.0 and exact GraphKit 0.3.0.
 - [x] Run `./build.ps1 -Tasks pack`, then `./build.ps1 -Tasks test`.
 - [x] Measured 2,290 tests: the 2,288 merged baseline plus the plan's two discovery-time Secret/PII and control-byte cases; zero failures/errors/skips/NotRun. Keep the synchronized floor at 2,288 until implementation's final measured ratchet.
-- [ ] Commit the plan and baseline record as `docs: plan R1a outcome fidelity`.
+- [x] Commit the plan and baseline record as `docs: plan R1a outcome fidelity` (`5664935`).
 
 ### Task 1: Add the canonical total Graph failure mapper
 
@@ -127,12 +128,13 @@
 - New optional descriptor field: `Data.PartialDatasets = [string[]]`.
 - The field is an evaluator opt-in, never a collection dependency declaration.
 
-- [ ] Write failing catalog tests for a scalar value, null/empty array, blank member, duplicate member, unknown dataset, dataset not listed in `Data.Datasets`, Expression rule use, and Function rule whose command lacks a `DatasetOutcomes` parameter.
+- [ ] Write failing catalog tests for a scalar value, null/empty array, blank member, exact duplicate, case-only duplicate, case-only alias of a canonical dataset, unknown dataset, dataset not listed in `Data.Datasets`, Expression rule use, and Function rule whose command lacks a `DatasetOutcomes` parameter.
 - [ ] Write a passing test for a Function rule with one or more unique `PartialDatasets`, each a member of `Data.Datasets`, whose command declares `DatasetOutcomes`.
-- [ ] Validate `PartialDatasets` only when present. It must be a non-empty string array, contain no ordinal duplicate, be a subset of `Data.Datasets`, and be legal only for `Rule.Type = Function`.
+- [ ] Validate `PartialDatasets` only when present. It must be a non-empty string array, be unique under `OrdinalIgnoreCase`, use the exact canonical casing from `Data.Datasets` and the dataset map, be a subset of `Data.Datasets`, and be legal only for `Rule.Type = Function`.
 - [ ] Resolve `Rule.Function` first, then require its command metadata to declare a `DatasetOutcomes` parameter whenever `PartialDatasets` is present. A descriptor cannot claim partial awareness without an implementation able to receive the outcome projection.
 - [ ] Do not add `PartialDatasets` to `Data.Datasets`, the dataset map, the collection manifest, or dependency ordering. It changes evaluation only.
-- [ ] Document the field and monotonic safety rule in `source/Data/Checks/README.md`: universal checks may fail on a known offender but cannot pass with gaps; existential checks may pass on a known witness but cannot fail with gaps.
+- [ ] Prove `Import-PulseCheckCatalog` retains `Data.PartialDatasets` exactly and `Get-PulseCollectionManifest` remains driven only by `Data.Datasets`.
+- [ ] Document the field and monotonic safety rule in `source/Data/Checks/README.md`: universal checks may fail on a known offender but cannot pass with gaps; existential checks may pass on a known witness but cannot fail with gaps. Correct the stale claim that `Data.Datasets` is always required/non-empty, because expansion-only descriptors are valid.
 - [ ] Run catalog tests green and commit as `feat: validate partial-aware checks`.
 
 ### Task 4: Add fail-closed partial evaluation and an isolated outcome projection
@@ -146,14 +148,15 @@
 **Interfaces:**
 - Function invocation for an opted-in check: `& <Rule.Function> -Datasets <deep clone> -DatasetOutcomes <deep-cloned allowlist> [-Context <clone>]`.
 - `DatasetOutcomes[<name>]` exposes only `Status`, `FailureClass`, `ReasonCode`, `Detail`, `Provider`, `ApiVersion`, `Operations`, and `Gaps`.
+- Append optional `DatasetOutcomes = @{}` after the existing optional `Context` parameter in each opted-in Function to preserve positional compatibility.
 
 - [ ] Add red evaluator tests proving every non-opted-in check still returns `NotApplicable` for `Partial`; Expression rules can never receive partial rows; missing/Failed/Skipped/unknown statuses remain fail-closed.
 - [ ] For non-aware `Partial`, synthesize a bounded reason containing dataset name and gap count only. Do not quote manifest reason, scope, gap detail, or provider detail.
-- [ ] For an opted-in Function check, read the usable rows from a valid Partial dataset, deep-clone them through the existing canonical JSON path, construct an allowlisted outcome projection for all declared datasets, deep-clone that projection independently, and pass it as `DatasetOutcomes`.
-- [ ] Prove both inputs are isolated: a malicious test rule mutating rows, nested gap detail, operations, or the projection itself cannot change the dataset cache, manifest object, or what a later check sees.
-- [ ] Fail closed if an opted-in partial entry has no usable rows, has no structured gaps, or cannot be projected safely. The check returns `NotApplicable` or `Error` as appropriate; it never silently executes as complete.
-- [ ] Keep existing Function rules byte-for-byte compatible: pass `DatasetOutcomes` only when `Data.PartialDatasets` is present and validated. Existing `Context` opt-in remains independent.
-- [ ] Do not serialize `DatasetOutcomes` into findings. Findings schema stays 1.0; snapshot schema stays 2.0.
+- [ ] For an opted-in Function check, read the usable rows from a valid Partial dataset, deep-clone them through the existing canonical JSON path, construct an allowlisted outcome projection for every declared dataset, deep-clone that projection independently, and pass it as `DatasetOutcomes`. Pin the exact projection keys/casing and prove manifest-only `reason`, `sha256`, `itemCount`, and `collectedUtc` are absent.
+- [ ] Prove both inputs are isolated: a malicious test rule mutating dataset rows, `Gaps[].Detail`, `Operations`, projection keys, or the projection root cannot change the dataset cache, manifest object, or what a later check sees.
+- [ ] Fail closed with `Error` if an opted-in Partial entry has zero usable rows, absent/empty/null-containing/structurally invalid `Gaps`, or cannot be projected or cloned safely. Reuse the complete `New-PulseCollectionOutcome` gap structure contract, not merely `Gaps.Count`. Reserve `NotApplicable` for a structurally valid Partial dataset whose usable rows do not prove the monotonic decision.
+- [ ] Exercise all four Function invocation combinations: legacy `Datasets` only; `Datasets + Context`; `Datasets + DatasetOutcomes`; and all three. Pass `DatasetOutcomes` only when `Data.PartialDatasets` is present and validated; existing `Context` opt-in remains independent.
+- [ ] Prove the non-aware Partial reason contains only dataset name and gap count, with canary manifest/gap text absent. Do not serialize `DatasetOutcomes` into findings or scoring documents. Findings schema stays 1.0; snapshot schema stays 2.0.
 - [ ] Run evaluator and collection-outcome tests green and commit as `feat: evaluate approved partial datasets`.
 
 ### Task 5: Opt in the four monotonic Intune checks
@@ -174,14 +177,18 @@
 
 **Interfaces:**
 - Each descriptor opts in only its existing single dataset.
-- Each Function adds a `DatasetOutcomes` parameter and preserves all complete-dataset behavior.
+- Each Function appends a `DatasetOutcomes` parameter after `Context` and preserves all valid complete-dataset behavior. Invalid boolean-like values that currently compare equal to `$true` must become `Error`, not accidental `Pass`.
 
 - [ ] TP.INT.0013 (universal RBAC protection): under Partial, any known unprotected group -> `Fail`; otherwise -> `NotApplicable`. It can never `Pass` while gaps remain.
 - [ ] TP.INT.0014 (existential BitLocker policy): under Partial, any known qualifying full-disk policy -> `Pass`; otherwise -> `NotApplicable`. It can never `Fail` while gaps remain.
 - [ ] TP.INT.0015 (existential LAPS policy): under Partial, any known policy meeting all four criteria -> `Pass`; otherwise -> `NotApplicable`. It can never `Fail` while gaps remain.
 - [ ] TP.INT.0029 (universal baseline posture): under Partial, any known unassigned or deprecated baseline -> `Fail`; otherwise -> `NotApplicable`. It can never `Pass` while gaps remain.
 - [ ] Partial result reasons state only the unresolved gap count and the monotonic decision. Evidence may describe known rows through the existing redaction path; it may not copy gap scope/detail into findings.
-- [ ] Add hostile fixtures: zero usable rows, multiple gaps, mixed good/bad known rows, missing required row fields, malformed outcome projection, and mutation attempts. Preserve every existing complete, pending, gate-degraded, and field-absence assertion.
+- [ ] Require native `[bool]` values before TP.INT.0014 `isFullDiskEncryption` or TP.INT.0015's four criteria can be a qualifying witness. Add Collected and Partial fixtures for string `'true'`, integer `1`, and other non-boolean values; these must not earn a Pass.
+- [ ] Pin monotonic precedence and row-order independence: Partial + valid offender/witness + malformed unrelated row returns the monotonic `Fail`/`Pass`; Partial + no proof + all known rows valid returns `NotApplicable`; Partial + no proof + malformed known row returns `Error`; Complete + any malformed row returns `Error`. Test both row orders.
+- [ ] Update all four check fixture helpers to forward the full real outcome surface: `Status`, `FailureClass`, `ReasonCode`, `Detail`, `Provider`, `ApiVersion`, `Operations`, and structurally valid `Gaps`.
+- [ ] Add hostile fixtures: zero usable rows, multiple gaps, mixed good/bad known rows, missing required row fields, malformed outcome projection, and mutation attempts. Add GUID, UPN, secret-like, raw scope, and provider-detail canaries and prove none reaches reasons, evidence, serialized findings, or score documents. Preserve every existing complete, pending, gate-degraded, and field-absence assertion.
+- [ ] Prove scoring consequences: Partial Pass for TP.INT.0014/.0015 contributes earned, possible, and assessed weight; Partial Fail for TP.INT.0013/.0029 contributes possible and assessed but no earned weight; non-decisive Partial is excluded and increases not-assessed coverage. Findings schema remains 1.0, snapshot schema 2.0, and scoring model 1.0.
 - [ ] Run the four check containers together, then evaluator/catalog containers, then `pack` + full suite.
 - [ ] Commit as `feat: make four Intune checks partial aware`.
 
