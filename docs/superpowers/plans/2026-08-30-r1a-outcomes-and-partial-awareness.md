@@ -238,6 +238,17 @@
 - Authoritative proof run identifier: `76653a5a-994c-495d-bed1-d5eb2e1c1c71`. Tested TenantPulse 0.3.0 package SHA-256: `fb9adc26d43280ef6ca191081e08bf1c4a4a96da680a4d72a3a47673015413ce`; built manifest SHA-256: `4693f670b62e1c84aa83effa967f0692a252681a897c2e730e73586803f38f06`; built module SHA-256: `98712d1a165f79283bf608875bf97bf763c07e8ab7214efdca644e207993ece2`.
 - Implementation commit: `f21469272a4d103d6443ba11f56a51116df92786` (`feat: make four Intune checks partial aware`).
 
+**Task 5 independent-review correction evidence (2026-08-30):**
+
+- Independent review reproduced three actionable gaps: identity was validated only after a row became decisive evidence, unsupported persisted status/reason values could be copied into a finding, and TP.INT.0013's source commentary still claimed Function rules could not observe Partial outcomes.
+- Focused correction red gate against the implementation above: 121 examples discovered; 110 passed and 11 failed, with zero skipped, NotRun, or failed containers. Four failures reproduced Complete and non-decisive Partial rows without usable identities returning Pass/Fail/NotApplicable instead of Error; four reproduced raw or interpolated direct-call outcome errors; one reproduced the persisted-engine status/reason leak; and two reproduced the evaluator leak for scalar and non-scalar unsupported statuses. The four decisive Partial plus malformed-identity row-order cases already passed, pinning the monotonic proof precedence that the fix had to preserve.
+- A shared strict outcome-state helper now rejects null roots, null/non-dictionary entries, missing/unsupported/non-scalar status, and malformed Partial gap arrays with one fixed caller-specific error that contains no raw value. The evaluator emits one fixed bounded reason for truly unsupported persisted statuses while preserving the established Pending/Failed/Skipped reasons. TP.INT.0013's source contract now documents the actual Partial projection and zero-usable-row boundary.
+- Each check validates every row's minimal identity before classification: nonblank `groupId` for TP.INT.0013, nonblank `policyId` for TP.INT.0014/.0015, and a usable `id` or `name` for TP.INT.0029. Complete and non-decisive Partial malformed rows Error; decisive Partial proof still outranks an unrelated malformed row in both orders.
+- The first correction rerun passed 116/121 and exposed five compatibility regressions from treating known Pending/Failed/Skipped states as unknown. Narrowing the fixed unsupported-status reason to genuinely unknown states restored those historical reasons. Final focused correction gate: 121/121 passed with zero failures, skips, NotRun, or failed containers.
+- Package-first authoritative correction gate: `pack` succeeded with 10 tasks, 0 errors, and 0 warnings; subsequent `test` passed 2,508/2,508 with 0 failures, 0 errors, 0 skipped, 0 NotRun, and 11 build tasks with 0 errors/warnings.
+- Authoritative correction proof run identifier: `9a09a160-aa90-4b92-b05f-78c1aa9189e0`. Tested TenantPulse 0.3.0 package SHA-256: `0c5b4520a0bd0d5a9df11f8d1ad7b6f2e4c3a123c2b086200f822c075444d00a`; built manifest SHA-256: `4693f670b62e1c84aa83effa967f0692a252681a897c2e730e73586803f38f06`; built module SHA-256: `382583ecfa3edc99bbf75a30498168e431b86ffb37b018365b48d3b6c868e87e`.
+- Review-fix commit: `71f81b5bb3719505a56e7a8c09974fe46c8b8389` (`fix: fail closed on malformed partial-aware rows`).
+
 ### Task 6: Reconcile compatibility and current-source documentation
 
 **Files:**
