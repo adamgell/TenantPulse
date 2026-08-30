@@ -81,6 +81,36 @@ Describe 'Task 1 snapshot outcome schema' {
         }
     }
 
+    It 'rejects legacy Partial datasets without changing schema 1.0.0 or 1.1.0 manifest bytes' {
+        foreach ($legacyVersion in @('1.0.0', '1.1.0')) {
+            $root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+            New-Item -Path $root -ItemType Directory -Force | Out-Null
+            $manifestPath = Join-Path $root 'manifest.json'
+            $legacyNamespaces = if ($legacyVersion -eq '1.1.0') { ',"references":{},"expansions":{}' } else { '' }
+            $legacyJson = '{"schemaVersion":"' + $legacyVersion + '","createdUtc":"2026-08-19T00:00:00.000Z","tenant":"tp-legacy","producer":{},"collectionFailure":null,"datasets":{"unsupported":{"status":"Partial","apiVersion":"beta","reason":"unsupported historical state","sha256":null,"itemCount":1,"collectedUtc":null}}' + $legacyNamespaces + '}'
+            try {
+                [System.IO.File]::WriteAllText($manifestPath, $legacyJson, [System.Text.UTF8Encoding]::new($false))
+                $beforeBytes = [System.IO.File]::ReadAllBytes($manifestPath)
+                $store = InModuleScope TenantPulse -ArgumentList $root {
+                    param($root)
+                    Get-PulseSnapshotStore -Path $root
+                }
+
+                {
+                    InModuleScope TenantPulse -ArgumentList $store {
+                        param($store)
+                        Get-PulseSnapshotManifest -Store $store
+                    }
+                } | Should -Throw -ExpectedMessage "*legacy dataset*unsupported status 'Partial'*"
+
+                [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($manifestPath)) |
+                    Should -Be ([Convert]::ToBase64String($beforeBytes))
+            } finally {
+                Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     It 'applies deterministic structured defaults for direct legacy dataset writes' {
         $store = InModuleScope TenantPulse -ArgumentList $script:storeRoot {
             param($root)

@@ -5,18 +5,15 @@ BeforeAll {
     $script:sourceManifest = Import-PowerShellDataFile -Path $script:sourceManifestPath
     $script:releaseVersion = [string] $script:sourceManifest.ModuleVersion
     $script:expectedReleaseNotes = @'
-## [0.2.0] - 2026-08-29
+## [0.3.0] - Unreleased
 
-### Added
+### Fixed
 
-- Built-in read-only provider plans for Intune RBAC, Endpoint Security BitLocker and LAPS, and current plus legacy security baselines.
-- Settings Catalog assignment collection with include, exclude, filter, and typed intent preservation.
-- Typed compliance and device-configuration assignment intent with deterministic normalization and malformed-target gaps.
+- Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta` and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count; child gaps name the setting primitive explicitly.
 
 ### Changed
 
-- Migrated TP.INT.0007 to the supported per-platform managed-device cleanup-rule collection.
-- Requires exact GraphKit `0.3.0` for the new live-proven operation primitives and lazy SecretManagement boundary.
+- The approved product-program completion work uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
 '@
     $script:sourceReleaseNotes = [string] $script:sourceManifest.PrivateData.PSData.ReleaseNotes
     $script:builtManifestPath = Join-Path $script:repoRoot "output/module/TenantPulse/$script:releaseVersion/TenantPulse.psd1"
@@ -31,11 +28,25 @@ BeforeAll {
         $requirements[0].ContainsKey('ModuleVersion') | Should -BeFalse
         $requirements[0].ContainsKey('MaximumVersion') | Should -BeFalse
     }
+
+    function Assert-ExactUnreleasedReleaseNotes {
+        param([Parameter(Mandatory)] [string] $ReleaseNotes)
+
+        # Sampler materializes CHANGELOG.md's [Unreleased] section into the built package
+        # with the build date. Normalize only that generated header; the complete source
+        # release-note body must remain byte-for-byte identical.
+        $normalizedReleaseNotes = $ReleaseNotes -replace (
+            '^## \[0\.3\.0\] - \d{4}-\d{2}-\d{2}',
+            '## [0.3.0] - Unreleased'
+        )
+        $normalizedReleaseNotes.TrimEnd("`r", "`n") |
+            Should -Be $script:sourceReleaseNotes.TrimEnd("`r", "`n")
+    }
 }
 
 Describe 'TenantPulse package identity and GraphKit dependency' -Tag 'QA' {
-    It 'uses the 0.2.0 identity for changed runtime and dependency bytes' {
-        $script:releaseVersion | Should -Be '0.2.0'
+    It 'uses the unique unreleased 0.3.0 identity for changed runtime and dependency bytes' {
+        $script:releaseVersion | Should -Be '0.3.0'
     }
 
     It 'requires exact GraphKit 0.3.0 and the intended release notes in the source manifest' {
@@ -52,10 +63,10 @@ Describe 'TenantPulse package identity and GraphKit dependency' -Tag 'QA' {
         Test-Path -LiteralPath $script:builtManifestPath -PathType Leaf | Should -BeTrue
         $builtManifest = Import-PowerShellDataFile -Path $script:builtManifestPath
         Assert-ExactGraphKitRequirement -Manifest $builtManifest
-        [string] $builtManifest.PrivateData.PSData.ReleaseNotes | Should -Be $script:sourceReleaseNotes
+        Assert-ExactUnreleasedReleaseNotes -ReleaseNotes ([string] $builtManifest.PrivateData.PSData.ReleaseNotes)
     }
 
-    It 'preserves exact GraphKit 0.3.0 and source release notes in the 0.2.0 nupkg manifest' {
+    It 'preserves exact GraphKit 0.3.0 and source release notes in the 0.3.0 nupkg manifest' {
         Test-Path -LiteralPath $script:packagePath -PathType Leaf | Should -BeTrue
         $extractRoot = Join-Path $TestDrive 'package'
         if (Test-Path -LiteralPath $extractRoot) {
@@ -64,6 +75,6 @@ Describe 'TenantPulse package identity and GraphKit dependency' -Tag 'QA' {
         [System.IO.Compression.ZipFile]::ExtractToDirectory($script:packagePath, $extractRoot)
         $packagedManifest = Import-PowerShellDataFile -Path (Join-Path $extractRoot 'TenantPulse.psd1')
         Assert-ExactGraphKitRequirement -Manifest $packagedManifest
-        [string] $packagedManifest.PrivateData.PSData.ReleaseNotes | Should -Be $script:sourceReleaseNotes
+        Assert-ExactUnreleasedReleaseNotes -ReleaseNotes ([string] $packagedManifest.PrivateData.PSData.ReleaseNotes)
     }
 }

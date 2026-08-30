@@ -47,8 +47,10 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     } else {
         'beta'
     }
-    $operations = [System.Collections.Generic.List[string]]::new()
-    $operations.Add('ListBeta') | Out-Null
+    $operations = @(
+        'ConfigurationPolicy.ListBeta'
+        'ConfigurationPolicySetting.ListBeta'
+    )
 
     $isBitLocker = $Dataset -eq 'endpointSecurityDiskEncryptionPolicies'
     $isLaps = $Dataset -eq 'endpointSecurityLapsPolicies'
@@ -83,7 +85,7 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass $failureClass -ReasonCode (Get-EndpointFailureReasonCode -FailureClass $failureClass) `
             -Detail @{ operation = 'ConfigurationPolicy.ListBeta' } -Provider 'GraphKit' -ApiVersion $apiVersion `
-            -Operations $operations.ToArray()
+            -Operations $operations
     }
 
     $selectedPolicies = [System.Collections.Generic.List[object]]::new()
@@ -134,7 +136,6 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     foreach ($selectedPolicy in $selected) {
         $policyId = [string] $selectedPolicy.PolicyId
         $settings = @()
-        $operations.Add('ListBeta') | Out-Null
         try {
             $settings = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' `
                     -Parameters @{ id = $policyId } -ErrorAction Stop)
@@ -142,7 +143,8 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             $failureClass = Convert-EndpointFailureClass -ErrorRecord $_
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass $failureClass `
                     -ReasonCode (Get-EndpointFailureReasonCode -FailureClass $failureClass) `
-                    -Detail @{ policyId = $policyId } -Operation 'ListBeta' -ApiVersion 'beta')) | Out-Null
+                    -Detail @{ policyId = $policyId } `
+                    -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta')) | Out-Null
             continue
         }
 
@@ -168,7 +170,7 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
         } catch {
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass 'InvalidProviderData' `
                     -ReasonCode 'missing-setting' -Detail @{ policyId = $policyId; message = $_.Exception.Message } `
-                    -Operation 'ListBeta' -ApiVersion 'beta')) | Out-Null
+                    -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta')) | Out-Null
         }
     }
 
@@ -177,15 +179,15 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     if ($gapArray.Count -eq 0) {
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Collected' -Rows $rowArray -Gaps @() `
             -ReasonCode 'collected' -Detail @{ policyCount = $rowArray.Count } -Provider 'GraphKit' `
-            -ApiVersion $apiVersion -Operations $operations.ToArray()
+            -ApiVersion $apiVersion -Operations $operations
     }
     if ($rowArray.Count -gt 0) {
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Partial' -Rows $rowArray -Gaps $gapArray `
             -ReasonCode 'partial' -Detail @{ policyCount = $rowArray.Count; gapCount = $gapArray.Count } `
-            -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations.ToArray()
+            -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
     }
 
     return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gapArray `
         -FailureClass 'ProviderFailed' -ReasonCode 'provider-failed' -Detail @{ gapCount = $gapArray.Count } `
-        -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations.ToArray()
+        -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
 }

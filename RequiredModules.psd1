@@ -25,9 +25,9 @@
     Sampler                     = '0.120.1'
 
     # GraphKit is a runtime dependency (see source/TenantPulse.psd1 RequiredModules),
-    # pinned to the same exact candidate version. For local candidate validation, stage
-    # the already-tested GraphKit package under output/RequiredModules rather than
-    # resolving an older public release from PSGallery.
+    # and this restore pin matches that exact published runtime dependency. Local or
+    # offline validation may stage the already-tested GraphKit package under
+    # output/RequiredModules.
     GraphKit                    = '0.3.0'
 
     # Resolve-Dependency does not walk transitive requirements. GraphKit 0.3.0 still uses

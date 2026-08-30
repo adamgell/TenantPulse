@@ -48,7 +48,7 @@ BeforeAll {
     function script:Invoke-EndpointPlanFixture {
         param(
             [Parameter(Mandatory)] [string] $Dataset,
-            [Parameter(Mandatory)] [object[]] $Policies,
+            [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Policies,
             [Parameter(Mandatory)] [hashtable] $SettingsByPolicy,
             [Parameter()] [hashtable] $SettingErrors = @{}
         )
@@ -283,6 +283,33 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicySetting' }).Count | Should -Be 0
     }
 
+    It 'records the same qualified primitive provenance for <PolicyCount> selected policies' -ForEach @(
+        @{ PolicyCount = 0 }
+        @{ PolicyCount = 1 }
+        @{ PolicyCount = 2 }
+    ) {
+        $policies = @()
+        $settingsByPolicy = @{}
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        if ($PolicyCount -gt 0) {
+            foreach ($policyIndex in 1..$PolicyCount) {
+                $policyId = "bitlocker-$policyIndex"
+                $policies += New-EndpointPolicy -Id $policyId -Name "Policy $policyIndex" -Family 'endpointSecurityDiskEncryption'
+                $settingsByPolicy[$policyId] = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+            }
+        }
+
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies $policies `
+            -SettingsByPolicy $settingsByPolicy
+
+        $result.Outcome.Operations | Should -Be @(
+            'ConfigurationPolicy.ListBeta'
+            'ConfigurationPolicySetting.ListBeta'
+        )
+    }
+
     It 'retains usable policy rows and a scoped gap when one policy settings read fails' {
         $good = New-EndpointPolicy -Id 'laps-good' -Name 'Good LAPS' -Family 'endpointSecurityAccountProtection' -TemplateId 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796'
         $bad = New-EndpointPolicy -Id 'laps-bad' -Name 'Unreadable LAPS' -Family 'endpointSecurityAccountProtection' -TemplateId 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796'
@@ -308,7 +335,7 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'policy:laps-bad'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'ProviderFailed'
-        $result.Outcome.Gaps[0].Operation | Should -Be 'ListBeta'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicySetting.ListBeta'
     }
 
     It 'fails rather than returning an authoritative empty result when the only selected policy is missing a LAPS criterion' {

@@ -13,6 +13,24 @@ through [GraphKit](https://github.com/AdamGell/GraphKit)'s read-class descriptor
 (`ThrottleClass 'Read'`, `ReplayPolicy 'Safe'`) - TenantPulse never calls `Connect-MgGraph`,
 never uses the Microsoft Graph PowerShell SDK, and never constructs a Graph URI of its own.
 
+## Current release
+
+[GraphKit `0.3.0`](https://www.powershellgallery.com/packages/GraphKit/0.3.0) and
+[TenantPulse `0.2.0`](https://www.powershellgallery.com/packages/TenantPulse/0.2.0) are the
+current immutable PSGallery pair. TenantPulse `0.2.0` is the current immutable release on PSGallery.
+Its 411284-byte archive was published at `2026-08-30T14:07:39.587Z` with SHA-256
+`a0d5ff793b92753ab3efb4db20cf5bcf8b953e3cf81bf1a776c96a3d992417bd`. The merged source is
+`b2eb7a882cc1fcb7994c39a606c7b9ac22f5a114`; exact-main CI run `33295648250` executed 2,277
+tests with zero failures, errors, skips, or NotRun results across all six OS/PowerShell jobs,
+with gitleaks green.
+
+Current source starts the unreleased TenantPulse `0.3.0` product-program line. It has a unique
+successor identity and is not the public TenantPulse `0.2.0` archive. On this line, Endpoint
+Security composite provenance uses the stable qualified primitives `ConfigurationPolicy.ListBeta`
+and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count. Legacy schema
+1.0.0/1.1.0 manifests remain fail-closed when they contain the later `Partial` state; reads reject
+that unsupported state without rewriting the manifest.
+
 ## Quick start
 
 ```powershell
@@ -155,10 +173,11 @@ constitute a claim of CIS Benchmark compliance."*
 ## Operator prerequisites
 
 - PowerShell 7.4 or later
-- [GraphKit](https://github.com/AdamGell/GraphKit) exactly `0.3.0`. TenantPulse `0.2.0`
-  declares this with `RequiredVersion`, so a different GraphKit version does not satisfy the
-  candidate runtime contract. Until both versions are published, install the exact packages
-  produced and verified together from these source revisions.
+- [GraphKit](https://www.powershellgallery.com/packages/GraphKit/0.3.0) exactly `0.3.0`.
+  Published TenantPulse `0.2.0` and the unreleased `0.3.0` source line both declare this with
+  `RequiredVersion`, so a different GraphKit version does not satisfy the runtime contract.
+  Installing TenantPulse `0.2.0` from PSGallery resolves the exact published GraphKit `0.3.0`
+  dependency.
 - A GraphKit profile already registered for the tenant you want to assess (see GraphKit's
   own documentation - profile registration, credential setup, and Graph app-registration
   concerns are entirely GraphKit's responsibility, not TenantPulse's)
@@ -169,16 +188,16 @@ constitute a claim of CIS Benchmark compliance."*
   collect require
 - PSGallery access (or an internal mirror) to install TenantPulse and GraphKit
 
-GraphKit `0.2.2` and TenantPulse `0.1.3` remain the immutable current PSGallery releases.
-The source documented here is the next candidate pair: GraphKit `0.3.0` plus TenantPulse
-`0.2.0`. This is greenfield, pre-adoption work: there is no installed TenantPulse user base,
-customer estate, prior runtime, or migration/cutover task. The candidate adds the cleanup-rule
+GraphKit `0.3.0` and TenantPulse `0.2.0` are the immutable current PSGallery releases.
+The `0.2.0` release was greenfield, pre-adoption work: there was no installed TenantPulse user
+base, customer estate, prior runtime, or migration/cutover task. It added the cleanup-rule
 primitive, Settings Catalog assignments, expanded Intune
 RBAC primitives, and default TenantPulse provider plans for RBAC, BitLocker, LAPS, and current
 plus legacy security baselines. The Windows data-processor path is explicitly classified as
 platform-unavailable because Microsoft has not published the GET/application-permission
 contract needed for a releasable descriptor. See `docs/STATUS.md` for the exact local, live,
-package, and CI evidence boundaries.
+package, CI, and publication evidence boundaries. Current source is the separate unreleased
+TenantPulse `0.3.0` product-program line.
 
 ## Catalog scope - what this is and isn't, honestly
 
@@ -200,9 +219,8 @@ the ScuBA/CISA-cited Conditional Access, privileged-role, and credential-hygiene
 (`TP.ENT.0017`-`0024`). Not a comprehensive tenant-health product - a deliberately scoped,
 verified-against-a-real-tenant catalog.
 
-"Live" below means the exact packaged candidate's dataset and evaluation path completed
-against a live tenant; it is separate from exact-SHA CI and publication. "Candidate" means
-that exact packaged path still needs its recorded live gate. "Live (partial)" means the path
+"Live" below means the exact packaged TenantPulse `0.2.0` dataset and evaluation path completed
+against a live tenant; it is separate from exact-SHA CI and publication. "Live (partial)" means the path
 completed but the service evidence contained explicit gaps, so evaluation failed closed.
 "Platform unavailable" means TenantPulse
 returns an explicit non-collecting disposition because the service contract needed for a
@@ -275,7 +293,7 @@ and composes only GraphKit Read/Safe primitives. The Windows data-processor plac
 intercepted by a no-network plan that emits `PlatformUnavailable`. The cleanup rule is no
 longer Pending: GraphKit `0.3.0` ships its direct Read/Safe collection descriptor.
 
-What the catalog does **not** cover, honestly, as of this candidate: group-**membership** expansion for
+What the catalog does **not** cover, honestly, as of TenantPulse 0.2.0: group-**membership** expansion for
 Conditional Access exclusions (only direct user/group/role references resolve today - a group
 assigned to a CA exclusion is read as a group reference, not expanded to its members, because no
 group-members dataset exists yet; several checks document this as a known limitation, not a
@@ -383,9 +401,9 @@ the normal `ShouldProcess` confirmation boundary.
 
 `source/TenantPulse.psd1` declares GraphKit `0.3.0` with `RequiredVersion`, the exact runtime
 contract. `RequiredModules.psd1` separately pins `GraphKit = '0.3.0'` for build-time staging.
-These two files intentionally use different schemas but must resolve the same version. While
-the candidate is unpublished, validation stages the already-tested GraphKit package locally;
-it must not silently fall back to public GraphKit `0.2.2`.
+These two files intentionally use different schemas but must resolve the same version. For the
+unreleased TenantPulse `0.3.0` source line, validation stages the already-tested published
+GraphKit `0.3.0` package locally; it must not silently fall back to any other GraphKit version.
 
 Unit tests never import real GraphKit: every GraphKit command TenantPulse calls
 (`Get-GraphContext`, `Get-GraphObject`, `Invoke-GraphOperation`, `Get-GraphOperation`) is

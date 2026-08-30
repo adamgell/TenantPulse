@@ -3,13 +3,26 @@
 The format is based on and uses the types of changes according to [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Unreleased / 0.3.0 program line.** Current work stabilizes Endpoint Security composite
+> provenance as a qualified primitive set. Review finding 14 remains rejected on first-party
+> schema evidence: released schema 1.0.0/1.1.0 writers could not emit `Partial`, so migration
+> rejects that later state without rewriting the manifest.
+
 ## [Unreleased]
 
-## [0.2.0] - 2026-08-29
+### Fixed
 
-This commit prepares the greenfield, pre-adoption `0.2.0` candidate. There is no installed
-TenantPulse user base, customer estate, prior runtime, or migration/cutover task. It does not
-publish the package; PSGallery `0.1.3` remains immutable.
+- Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta` and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count; child gaps name the setting primitive explicitly.
+
+### Changed
+
+- The approved product-program completion work uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
+
+## [0.2.0] - 2026-08-30
+
+TenantPulse `0.2.0` was published to PSGallery on 2026-08-30. The release was developed as
+greenfield, pre-adoption work: there was no installed TenantPulse user base, customer estate,
+prior runtime, or migration/cutover task.
 
 ### Added
 
@@ -35,9 +48,13 @@ publish the package; PSGallery `0.1.3` remains immutable.
 
 ### Verification
 
-- The final local suite passed 2255/2255 tests with zero failures, errors, skips, or NotRun
-  tests. The tested `TenantPulse.0.2.0.nupkg` SHA-256 is
-  `041591C3C4CA8402BFCFC77F302246E6FFD315D02D0DB053DF9F5D4771159888`.
+- Reviewed source `24b3d4ebe522d9bf94d9a75c8625be438fa9b768` merged to main as
+  `b2eb7a882cc1fcb7994c39a606c7b9ac22f5a114`. PR-head CI run `33295409637` and
+  exact-main CI run `33295648250` each executed 2,277 tests with zero failures, errors,
+  skips, or NotRun results across the six OS/PowerShell jobs; gitleaks was green.
+- The tested and published `TenantPulse.0.2.0.nupkg` is 411284 bytes with SHA-256
+  `a0d5ff793b92753ab3efb4db20cf5bcf8b953e3cf81bf1a776c96a3d992417bd`. PSGallery
+  published it at `2026-08-30T14:07:39.587Z`; a downloaded archive matched that hash.
 - A read-only live gate installed that exact archive into an isolated root and loaded the
   TenantPulse `0.2.0` -> GraphKit `0.3.0` -> Microsoft.Graph.Authentication `2.38.1` chain
   from that root. All seven selected checks completed: 3 Pass, 3 tenant-posture Fail, and 1
@@ -51,8 +68,8 @@ publish the package; PSGallery `0.1.3` remains immutable.
 - Privacy assertions passed across 1629 generated artifacts: the raw tenant id was absent,
   profile provenance metadata was absent, and the profile label was absent from the manifest
   and redacted report.
-- This records local and live exact-package evidence only. Remote exact-SHA CI and publication
-  remain separate gates; `0.2.0` has not been published.
+- Deterministic, CI, live, and publication evidence remain separate gates; `docs/STATUS.md`
+  records each state independently.
 
 ## [0.1.3] - 2026-08-19
 

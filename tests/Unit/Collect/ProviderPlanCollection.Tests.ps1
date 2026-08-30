@@ -38,11 +38,12 @@ Describe 'Invoke-PulseCollection provider plans' {
                 compositeDataset = {
                     param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
                     $gap = New-PulseCollectionGap -Scope 'policy-2/settings' -FailureClass 'ProviderFailed' `
-                        -ReasonCode 'child-failed' -Detail @{ child = 'policy-2' } -Operation 'ListBeta' -ApiVersion 'beta'
+                        -ReasonCode 'child-failed' -Detail @{ child = 'policy-2' } `
+                        -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta'
                     New-PulseCollectionOutcome -Dataset $Dataset -Status Partial `
                         -Rows @([pscustomobject]@{ policyId = 'policy-1'; enabled = $true }) -Gaps @($gap) `
                         -ReasonCode 'partial' -Detail @{ childCount = 2 } -Provider 'GraphKit' -ApiVersion 'beta' `
-                        -Operations @('ListBeta', 'ListBeta')
+                        -Operations @('ConfigurationPolicy.ListBeta', 'ConfigurationPolicySetting.ListBeta')
                 }
             }
         }
@@ -55,9 +56,12 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $saved.datasets.compositeDataset.status | Should -Be 'Partial'
-        $saved.datasets.compositeDataset.operations | Should -Be @('ListBeta', 'ListBeta')
+        $saved.datasets.compositeDataset.operations | Should -Be @(
+            'ConfigurationPolicy.ListBeta'
+            'ConfigurationPolicySetting.ListBeta'
+        )
         $saved.datasets.compositeDataset.gaps[0].scope | Should -Be 'policy-2/settings'
-        $saved.datasets.compositeDataset.gaps[0].operation | Should -Be 'ListBeta'
+        $saved.datasets.compositeDataset.gaps[0].operation | Should -Be 'ConfigurationPolicySetting.ListBeta'
         $rows = InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)
             Read-PulseDataset -Store $store -Name 'compositeDataset'
