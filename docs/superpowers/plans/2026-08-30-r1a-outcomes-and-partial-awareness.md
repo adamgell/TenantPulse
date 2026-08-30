@@ -302,7 +302,7 @@
 - [x] Ratchet every synchronized minimum to the measured total only after the authoritative result exists. Update the floor history comment with an honest breakdown; set the negative floor fixture to measured minus one.
 - [x] Re-run `pack` then full `test` after the floor change. Confirm zero failures/errors/skips/NotRun and exact GraphKit 0.3.0 dependency in source, built module, package, and clean child-process import.
 - [ ] Run the repo-local Secret/PII/control-byte scan and gitleaks. Inspect the diff for raw tenant IDs, client IDs, secrets, tokens, PII, gap scopes, or provider detail.
-- [ ] Obtain independent task reviews and a final whole-branch review. Resolve every actionable finding; rerun the affected focused tests and authoritative full gate after fixes.
+- [x] Obtain independent task reviews and a final whole-branch review. Resolve every actionable finding; rerun the affected focused tests and authoritative full gate after fixes.
 - [ ] Push `codex/r1a-outcomes-partial`, open one PR, run CodeRabbit, independently validate its findings, and resolve all threads.
 - [ ] Require exact-head CI: PowerShell 7.4 and 7.6 on Windows, Ubuntu, and macOS, plus gitleaks, all green for the reviewed SHA.
 - [ ] Merge only that reviewed SHA. Require the same merged-main matrix plus gitleaks green for the merge commit before starting R1b.
@@ -328,6 +328,16 @@
 - The package-first gate then passed 10 pack tasks and 11 test tasks with zero errors or warnings. The full gate measured 2,510/2,510 with zero failures, errors, skips, NotRun, or failed containers against the unchanged 2,508 minimum. This review-fix task deliberately did not ratchet the synchronized floor; the final Task 7 gate owner will do so after all whole-branch findings are closed.
 - Authoritative review-fix proof run: `3c0403f2-8d55-44d4-849b-446d3b3df10f`. The proof binds all 59 shipped files and the exact NUnit/Pester result pair.
 - Candidate archive SHA-256: `abd35d920b16d6c4685d818b092124ee0f6d9446e823bc22f2696a4418aa377f`. Built manifest SHA-256: `9d644284774346fa7e9e4ce6a725f306288b426ed8cda74d35493b56fc086de8`. Built module SHA-256: `16bb0074f414ec34dcc828d72b9053c52d507970fea4bd6215adf9e40fdc1c08`. Source manifest SHA-256: `90f6987936c5c9791b4ddcbd7e0282c2be8de161ec5269a0046968fdcf954d87`.
+
+**Task 7 final local gate evidence (2026-08-30):**
+
+- After every whole-branch finding was closed, the synchronized floor moved from 2,508 to the measured 2,510 only. The negative fixture is 2,509 and every active build, CI, and publisher `AllowNotRun` value remains zero. The +2 history is the pair of provider-plan regressions proving that thrown structured Graph failures preserve the canonical outcome and that authentication aborts later network-backed plans.
+- Post-ratchet `build` passed 7 tasks with zero errors/warnings. The synchronized-ratchet, publisher, and proof-gate set passed 35/35 with zero failures, skips, NotRun, or failed containers. Exact tested commit: `2eb958a6dd9a883306ece7e035040a8c35c0fd40` (`chore: ratchet reviewed R1a release gate`).
+- One final `pack` passed 10 tasks with zero errors/warnings. The subsequent and final full `test` passed exactly 2,510/2,510 with zero failures, errors, skips, NotRun, or failed containers and 11 build tasks with zero errors/warnings. No rebuild or repack occurred afterward.
+- Authoritative final proof run: `aa6994cb-8901-4103-b39a-2751603ab3de`. The proof binds all 59 shipped files and the exact NUnit/Pester pair. Candidate archive SHA-256: `8d786e1de01ebf08be1931ab610bbffef90a792b1270c2097e5968182e7bcba3`; size: 418,135 bytes. Proof-manifest SHA-256: `1f0b213805178525ec19f7d8e2975b9821d5f8823a3d38402fbae8f8c1fc1fb2`.
+- Built manifest SHA-256: `9d644284774346fa7e9e4ce6a725f306288b426ed8cda74d35493b56fc086de8`; built module SHA-256: `16bb0074f414ec34dcc828d72b9053c52d507970fea4bd6215adf9e40fdc1c08`; source manifest SHA-256: `90f6987936c5c9791b4ddcbd7e0282c2be8de161ec5269a0046968fdcf954d87`.
+- Source, built, packaged, and clean child-process import checks preserve exact GraphKit `0.3.0`; the focused transitive dependency gate passed 13/13. The publisher accepted the proof-named NUnit path and completed a no-key/no-`-Publish` dry run against the same candidate: nothing was published.
+- The full suite's repo-local Secret/PII/control-byte gate passed 807/807. Local `gitleaks` remains unavailable and was neither installed nor claimed; the exact-head CI gitleaks job remains pending with push/PR/CodeRabbit, the six-job matrix, merge, and merged-main CI.
 
 ## Completion evidence for R1a
 
