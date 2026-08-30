@@ -73,20 +73,10 @@ function Invoke-PulseSubscribedSkuLicensePlan {
     try {
         $rows = @(Get-GraphObject -Context $Context -Type 'SubscribedSku' -Operation 'List' -ErrorAction Stop)
     } catch {
-        $classified = Get-PulseFailureClass -ErrorRecord $_
-        $failureClass = switch ($classified) {
-            'PermissionDenied' { 'PermissionDenied'; break }
-            'AuthFailure' { 'AuthenticationFailed'; break }
-            default { 'ProviderFailed' }
-        }
-        $reasonCode = switch ($failureClass) {
-            'PermissionDenied' { 'permission-denied'; break }
-            'AuthenticationFailed' { 'authentication-failed'; break }
-            default { 'provider-failed' }
-        }
+        $failure = Resolve-PulseGraphFailure -ErrorRecord $_
 
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
-            -FailureClass $failureClass -ReasonCode $reasonCode -Detail @{ operation = 'SubscribedSku.List' } `
+            -FailureClass $failure.FailureClass -ReasonCode $failure.ReasonCode -Detail @{ operation = 'SubscribedSku.List' } `
             -Provider 'GraphKit' -ApiVersion $apiVersion -Operations @('List')
     }
 

@@ -286,7 +286,7 @@ Describe 'Assert-PulseReadOnlyDescriptor' {
     }
 }
 
-Describe 'Get-PulseFailureClass' {
+Describe 'Resolve-PulseGraphFailure compatibility cases' {
     BeforeAll {
         # GraphKit 0.1.1: Get-GraphObject's failure ErrorRecord now carries structured
         # CategoryInfo.Category (mapped by GraphKit from the HTTP status) and a
@@ -319,7 +319,7 @@ Describe 'Get-PulseFailureClass' {
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
         $class | Should -Be 'PermissionDenied'
@@ -330,10 +330,10 @@ Describe 'Get-PulseFailureClass' {
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
-        $class | Should -Be 'AuthFailure'
+        $class | Should -Be 'AuthenticationFailed'
     }
 
     It 'classifies a CategoryInfo.Category this function does not map (ResourceUnavailable, 5xx) as Failed' {
@@ -341,10 +341,10 @@ Describe 'Get-PulseFailureClass' {
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
-        $class | Should -Be 'Failed'
+        $class | Should -Be 'ProviderFailed'
     }
 
     It 'falls back to the Telemetry last-attempt StatusCode (signal 2) when CategoryInfo.Category is NotSpecified' {
@@ -355,7 +355,7 @@ Describe 'Get-PulseFailureClass' {
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
         $class | Should -Be 'PermissionDenied'
@@ -368,7 +368,7 @@ Describe 'Get-PulseFailureClass' {
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
         $class | Should -Be 'PermissionDenied'
@@ -384,7 +384,7 @@ Describe 'Get-PulseFailureClass' {
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
         $class | Should -Be 'PermissionDenied'
@@ -400,10 +400,10 @@ Describe 'Get-PulseFailureClass' {
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
-        $class | Should -Be 'AuthFailure'
+        $class | Should -Be 'AuthenticationFailed'
     }
 
     It 'falls back to message text ("token acquisition") as AuthFailure when no AADSTS code is present' {
@@ -416,10 +416,10 @@ Describe 'Get-PulseFailureClass' {
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
-        $class | Should -Be 'AuthFailure'
+        $class | Should -Be 'AuthenticationFailed'
     }
 
     It 'classifies an unrelated message as Failed' {
@@ -432,10 +432,10 @@ Describe 'Get-PulseFailureClass' {
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
-        $class | Should -Be 'Failed'
+        $class | Should -Be 'ProviderFailed'
     }
 
     It 'is total: a string Telemetry StatusCode ("403 Forbidden") never throws and classifies rather than raw-casting' {
@@ -444,13 +444,13 @@ Describe 'Get-PulseFailureClass' {
         {
             InModuleScope TenantPulse -ArgumentList $errorRecord {
                 param($errorRecord)
-                Get-PulseFailureClass -ErrorRecord $errorRecord
+                (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
             }
         } | Should -Not -Throw
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
         # TryParse on the non-numeric Telemetry StatusCode string fails cleanly, so this
@@ -464,41 +464,41 @@ Describe 'Get-PulseFailureClass' {
         {
             InModuleScope TenantPulse -ArgumentList $errorRecord {
                 param($errorRecord)
-                Get-PulseFailureClass -ErrorRecord $errorRecord
+                (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
             }
         } | Should -Not -Throw
 
         $class = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Get-PulseFailureClass -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).FailureClass
         }
 
-        $class | Should -Be 'Failed'
+        $class | Should -Be 'ProviderFailed'
     }
 
     It 'is total: a $null ErrorRecord never throws and classifies Failed' {
         {
             InModuleScope TenantPulse {
-                Get-PulseFailureClass -ErrorRecord $null
+                (Resolve-PulseGraphFailure -ErrorRecord $null).FailureClass
             }
         } | Should -Not -Throw
 
         $class = InModuleScope TenantPulse {
-            Get-PulseFailureClass -ErrorRecord $null
+            (Resolve-PulseGraphFailure -ErrorRecord $null).FailureClass
         }
 
-        $class | Should -Be 'Failed'
+        $class | Should -Be 'ProviderFailed'
     }
 }
 
-Describe 'Test-PulseErrorRecordHasStructuredSignal' {
+Describe 'Resolve-PulseGraphFailure structured-signal compatibility' {
     It 'returns $true when CategoryInfo.Category is a mapped, non-default category' {
         $exception = [System.InvalidOperationException]::new('boom')
         $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'GraphKit.OperationFailed.403', [System.Management.Automation.ErrorCategory]::PermissionDenied, $null)
 
         $result = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).HasStructuredSignal
         }
 
         $result | Should -BeTrue
@@ -511,7 +511,7 @@ Describe 'Test-PulseErrorRecordHasStructuredSignal' {
 
         $result = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).HasStructuredSignal
         }
 
         $result | Should -BeTrue
@@ -527,7 +527,7 @@ Describe 'Test-PulseErrorRecordHasStructuredSignal' {
 
         $result = InModuleScope TenantPulse -ArgumentList $errorRecord {
             param($errorRecord)
-            Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $errorRecord
+            (Resolve-PulseGraphFailure -ErrorRecord $errorRecord).HasStructuredSignal
         }
 
         $result | Should -BeFalse
@@ -536,12 +536,12 @@ Describe 'Test-PulseErrorRecordHasStructuredSignal' {
     It 'is total: a $null ErrorRecord returns $false rather than throwing' {
         {
             InModuleScope TenantPulse {
-                Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $null
+                (Resolve-PulseGraphFailure -ErrorRecord $null).HasStructuredSignal
             }
         } | Should -Not -Throw
 
         $result = InModuleScope TenantPulse {
-            Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $null
+            (Resolve-PulseGraphFailure -ErrorRecord $null).HasStructuredSignal
         }
 
         $result | Should -BeFalse
@@ -606,9 +606,9 @@ Describe 'Invoke-PulseCollection' {
     # Outcome 'Failed', Certainty 'Known'." - no '403 Forbidden' text, unlike every other
     # test in this Describe block, which mocks that text into the thrown message. Without
     # the supplemental Invoke-GraphOperation classification call this dataset landed
-    # Failed, not the Skipped/permission-denied honest-degradation contract the design
-    # promises - this test pins the fix against the real shape, not the assumed one.
-    It 'classifies a real-shaped GraphKit 0.1.1 Get-GraphObject 403 ErrorRecord (CategoryInfo.Category PermissionDenied) as Skipped/permission-denied' {
+    # Provider execution was attempted, so the provider-neutral contract records this as
+    # Failed/PermissionDenied rather than the no-request Skipped state.
+    It 'classifies a real-shaped GraphKit Get-GraphObject 403 ErrorRecord as Failed/PermissionDenied' {
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' -RequiredPermissions @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } {
             $exception = [System.InvalidOperationException]::new("Get-GraphObject failed for 'ConditionalAccessPolicy/List': Outcome 'Failed', Certainty 'Known', HTTP 403.")
@@ -628,7 +628,9 @@ Describe 'Invoke-PulseCollection' {
         }
 
         $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
-        $result.datasets.conditionalAccessPolicies.status | Should -Be 'Skipped'
+        $result.datasets.conditionalAccessPolicies.status | Should -Be 'Failed'
+        $result.datasets.conditionalAccessPolicies.failureClass | Should -Be 'PermissionDenied'
+        $result.datasets.conditionalAccessPolicies.reasonCode | Should -Be 'permission-denied'
         $result.datasets.conditionalAccessPolicies.reason | Should -Match '^permission-denied:'
         $result.datasets.conditionalAccessPolicies.reason | Should -Match 'Policy.Read.All'
 
@@ -669,7 +671,7 @@ Describe 'Invoke-PulseCollection' {
         Test-Path -LiteralPath $datasetFile | Should -Be $false
     }
 
-    It 'writes Collected for a clean read, Skipped with a permission reason for a 403, and Failed for a 500 - each dataset attempted independently' {
+    It 'writes Collected for a clean read and Failed for both 403 and 500 request failures while attempting each dataset independently' {
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' -RequiredPermissions @(@{ Type = 'Application'; Value = 'Policy.Read.All' }, @{ Type = 'Application'; Value = 'Directory.Read.All' }) }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfiguration' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
@@ -693,7 +695,8 @@ Describe 'Invoke-PulseCollection' {
 
         $result.datasets.conditionalAccessPolicies.status | Should -Be 'Collected'
 
-        $result.datasets.deviceCompliancePolicies.status | Should -Be 'Skipped'
+        $result.datasets.deviceCompliancePolicies.status | Should -Be 'Failed'
+        $result.datasets.deviceCompliancePolicies.failureClass | Should -Be 'PermissionDenied'
         $result.datasets.deviceCompliancePolicies.reason | Should -Match '^permission-denied:'
         $result.datasets.deviceCompliancePolicies.reason | Should -Match 'Policy.Read.All'
         $result.datasets.deviceCompliancePolicies.reason | Should -Match 'Directory.Read.All'
@@ -710,10 +713,8 @@ Describe 'Invoke-PulseCollection' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceConfiguration' }
     }
 
-    # GraphKit 0.1.1 migration: '(status unknown)' now means the ErrorRecord itself
-    # carried NO structured signal at all - no CategoryInfo.Category this classifier maps
-    # and no readable Telemetry StatusCode (see Test-PulseErrorRecordHasStructuredSignal) -
-    # not (as under GraphKit 0.1.0) that a separate out-of-band recovery call failed. A
+    # '(status unknown)' means the ErrorRecord itself carried no readable envelope,
+    # known GraphKit category, or last-attempt status. A
     # plain `throw "<message>"` (no ErrorRecord constructed with a mapped category or a
     # TargetObject) is exactly that shape.
     It 'appends "(status unknown)" to a Failed reason when the ErrorRecord carries no structured signal' {
@@ -1041,7 +1042,8 @@ Describe 'Get-PulseTenantSnapshot' {
         $manifestRaw | Should -Not -Match 'contoso-tenant-id'
 
         $manifest.datasets.conditionalAccessPolicies.status | Should -Be 'Collected'
-        $manifest.datasets.deviceCompliancePolicies.status | Should -Be 'Skipped'
+        $manifest.datasets.deviceCompliancePolicies.status | Should -Be 'Failed'
+        $manifest.datasets.deviceCompliancePolicies.failureClass | Should -Be 'PermissionDenied'
         $manifest.datasets.deviceCompliancePolicies.reason | Should -Match '^permission-denied:'
     }
     It 'passes a supplied dataset-keyed plan registry through the public path sequentially with the same resolved Context' {

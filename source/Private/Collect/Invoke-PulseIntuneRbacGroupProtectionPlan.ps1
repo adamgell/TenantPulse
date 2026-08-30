@@ -65,20 +65,10 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
             [Parameter(Mandatory)] [System.Management.Automation.ErrorRecord] $ErrorRecord
         )
 
-        $failureClass = Get-PulseFailureClass -ErrorRecord $ErrorRecord
-        $normalizedFailureClass = switch ($failureClass) {
-            'PermissionDenied' { 'PermissionDenied'; break }
-            'AuthFailure' { 'AuthenticationFailed'; break }
-            default { 'ProviderFailed' }
-        }
-        $reasonCode = switch ($normalizedFailureClass) {
-            'PermissionDenied' { 'permission-denied'; break }
-            'AuthenticationFailed' { 'authentication-failed'; break }
-            default { 'provider-failed' }
-        }
+        $failure = Resolve-PulseGraphFailure -ErrorRecord $ErrorRecord
 
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
-            -FailureClass $normalizedFailureClass -ReasonCode $reasonCode `
+            -FailureClass $failure.FailureClass -ReasonCode $failure.ReasonCode `
             -Detail @{ operation = $Operation } -Provider 'GraphKit' -ApiVersion $apiVersion `
             -Operations $operations
     }
@@ -204,19 +194,9 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         try {
             $groupRows = @(Get-GraphObject -Context $Context -Type 'Group' -Operation 'Get' -Parameters @{ id = $groupId } -ErrorAction Stop)
         } catch {
-            $failureClass = Get-PulseFailureClass -ErrorRecord $_
-            $normalizedFailureClass = switch ($failureClass) {
-                'PermissionDenied' { 'PermissionDenied'; break }
-                'AuthFailure' { 'AuthenticationFailed'; break }
-                default { 'ProviderFailed' }
-            }
-            $reasonCode = switch ($normalizedFailureClass) {
-                'PermissionDenied' { 'permission-denied'; break }
-                'AuthenticationFailed' { 'authentication-failed'; break }
-                default { 'provider-failed' }
-            }
-            $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass $normalizedFailureClass `
-                    -ReasonCode $reasonCode -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
+            $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+            $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass $failure.FailureClass `
+                    -ReasonCode $failure.ReasonCode -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
             continue
         }
 
@@ -286,24 +266,18 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
     $topReasonCode = 'provider-failed'
     if ($gapArray.Count -gt 0) {
         $candidateFailureClass = [string] $gapArray[0].FailureClass
-        $uniformFailureClass = $true
+        $candidateReasonCode = [string] $gapArray[0].ReasonCode
+        $uniformFailureTuple = $true
         foreach ($gap in $gapArray) {
-            if ([string] $gap.FailureClass -ne $candidateFailureClass) {
-                $uniformFailureClass = $false
+            if ([string] $gap.FailureClass -ne $candidateFailureClass -or
+                [string] $gap.ReasonCode -ne $candidateReasonCode) {
+                $uniformFailureTuple = $false
                 break
             }
         }
-        if ($uniformFailureClass) {
-            switch ($candidateFailureClass) {
-                'PermissionDenied' {
-                    $topFailureClass = 'PermissionDenied'
-                    $topReasonCode = 'permission-denied'
-                }
-                'AuthenticationFailed' {
-                    $topFailureClass = 'AuthenticationFailed'
-                    $topReasonCode = 'authentication-failed'
-                }
-            }
+        if ($uniformFailureTuple) {
+            $topFailureClass = $candidateFailureClass
+            $topReasonCode = $candidateReasonCode
         }
     }
 

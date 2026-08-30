@@ -15,12 +15,10 @@
           and downgraded to a per-dataset Failed outcome, then collection continues with
           the next dataset.
         - Otherwise: attempts Get-GraphObject. A clean read writes Collected. A caught
-          error is classified via Get-PulseFailureClass:
-            * PermissionDenied writes Skipped with reason 'permission-denied: <required
-              permissions>' (read from the descriptor's own RequiredPermissions - the
-              uncollected-with-reason outcome the spec requires, without a new GraphKit
-              permission-preflight API).
-            * AuthFailure means no further network-backed read in this run can possibly
+          request error is resolved once through Resolve-PulseGraphFailure and writes
+          Failed with its canonical FailureClass and ReasonCode. A request-time 403 is
+          Failed/PermissionDenied; Skipped is reserved for paths where no request was sent.
+            * AuthenticationFailed means no further network-backed read in this run can possibly
               succeed -
               GraphKit's Get-GraphContext performs zero network calls and never acquires a
               token (see its own docstring), so a real authentication failure is only ever
@@ -157,7 +155,7 @@ function Invoke-PulseCollection {
         if ($authenticationAborted -and -not $isPendingWithoutPlan -and
             ($null -eq $planCommand -or $planRequiresNetwork)) {
             Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
-                -Reason $authenticationAbortReason -ReasonCode 'auth-failure' -Detail @{ status = 'collection aborted' } `
+                -Reason $authenticationAbortReason -ReasonCode 'authentication-failed' -Detail @{ status = 'collection aborted' } `
                 -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations @($entry.Operation)
             continue
         }
@@ -306,14 +304,9 @@ function Invoke-PulseCollection {
             Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Collected' -TenantId $contextTenantId -Pseudonym $TenantPseudonym
             $collectedRows[$entry.Dataset] = $rows
         } catch {
-            # GraphKit 0.1.1: Get-GraphObject's own ErrorRecord now carries the structured
-            # signal directly (CategoryInfo.Category, and the TargetObject.Telemetry
-            # envelope's last-attempt StatusCode) - see Get-PulseFailureClass's docstring.
-            # No supplemental out-of-band Graph call is needed to recover a status code
-            # anymore.
-            $failureClass = Get-PulseFailureClass -ErrorRecord $_
+            $failure = Resolve-PulseGraphFailure -ErrorRecord $_
 
-            if ($failureClass -eq 'PermissionDenied') {
+            if ($failure.FailureClass -eq 'PermissionDenied') {
                 $requiredPermissions = $null
                 try {
                     $descriptor = Get-GraphOperation -Type $entry.Type -Operation $entry.Operation -ErrorAction Stop
@@ -330,35 +323,23 @@ function Invoke-PulseCollection {
 
                 $permissionsText = if ([string]::IsNullOrWhiteSpace($requiredPermissions)) { '(unknown)' } else { $requiredPermissions }
                 $reason = Protect-PulseReason -Message "permission-denied: $permissionsText" -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
-                Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Skipped' `
+                Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
                     -Reason $reason -ReasonCode 'permission-denied' -Detail @{ permissions = $permissionsText } `
                     -FailureClass 'PermissionDenied' -Provider 'GraphKit' -Operations @($entry.Operation)
-            } elseif ($failureClass -eq 'AuthFailure') {
-                $redactedReason = Protect-PulseReason -Message "auth-failure: $($_.Exception.Message)" -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
-
-                Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
-                    -Reason $redactedReason -ReasonCode 'auth-failure' -Detail @{ message = $_.Exception.Message } `
-                    -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations @($entry.Operation)
-                Set-PulseManifestEntry -Store $Store -CollectionFailure $redactedReason
-
-                $authenticationAborted = $true
-                $authenticationAbortReason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
-                    -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
-                continue
             } else {
-                # GraphKit 0.1.1: the ErrorRecord itself is the only signal source now (see
-                # Get-PulseFailureClass's docstring - no supplemental out-of-band recovery
-                # call exists anymore). '(status unknown)' now means the ErrorRecord carried
-                # NO structured signal at all - no CategoryInfo.Category this classifier
-                # maps and no readable Telemetry StatusCode - so this Failed classification
-                # fell all the way through to the message-text fallback (or found nothing
-                # there either). That must be visible in the artifact itself, not only in a
-                # console an operator may never see.
-                $statusSuffix = if (Test-PulseErrorRecordHasStructuredSignal -ErrorRecord $_) { '' } else { ' (status unknown)' }
+                $statusSuffix = if ($failure.HasStructuredSignal) { '' } else { ' (status unknown)' }
                 $reason = Protect-PulseReason -Message "$($_.Exception.Message)$statusSuffix" -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                 Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
-                    -Reason $reason -ReasonCode 'provider-failed' -Detail @{ status = $statusSuffix.Trim() } `
-                    -FailureClass 'ProviderFailed' -Provider 'GraphKit' -Operations @($entry.Operation)
+                    -Reason $reason -ReasonCode $failure.ReasonCode -Detail @{ status = $statusSuffix.Trim() } `
+                    -FailureClass $failure.FailureClass -Provider 'GraphKit' -Operations @($entry.Operation)
+
+                if ($failure.AbortCollection) {
+                    Set-PulseManifestEntry -Store $Store -CollectionFailure $reason
+                    $authenticationAborted = $true
+                    $authenticationAbortReason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
+                        -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                    continue
+                }
             }
         }
     }

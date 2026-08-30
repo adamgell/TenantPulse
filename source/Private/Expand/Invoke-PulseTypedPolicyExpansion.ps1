@@ -198,10 +198,13 @@ function Invoke-PulseTypedPolicyExpansion {
                     -TenantId $TenantId -Pseudonym $Pseudonym
             } catch {
                 Write-Verbose "Invoke-PulseTypedPolicyExpansion: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
-                $failureClass = Get-PulseFailureClass -ErrorRecord $_
-                $category = switch ($failureClass) {
+                $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+                $category = switch ($failure.FailureClass) {
                     'PermissionDenied' { 'AssignmentPermissionDenied' }
-                    'AuthFailure' { 'AssignmentAuthFailure' }
+                    'AuthenticationFailed' { 'AssignmentAuthFailure' }
+                    'DeadlineExpired' { 'AssignmentDeadlineExpired' }
+                    'Cancelled' { 'AssignmentCancelled' }
+                    'Indeterminate' { 'AssignmentIndeterminate' }
                     default { 'AssignmentFetchFailed' }
                 }
                 $assignmentGap = New-PulseTypedGapReason -Category $category

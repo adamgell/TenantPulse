@@ -331,8 +331,20 @@ Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
     }
 
     It 'maps a denied subscribedSkus read to an explicit failed provider outcome' {
-        Mock Get-GraphObject -ModuleName TenantPulse { throw 'synthetic denied read' }
-        Mock Get-PulseFailureClass -ModuleName TenantPulse { 'PermissionDenied' }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            $target = [pscustomobject]@{
+                PSTypeName = 'GraphKit.OperationResult'
+                Outcome = 'Failed'
+                Certainty = 'Known'
+                Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = 403 })
+            }
+            $record = [System.Management.Automation.ErrorRecord]::new(
+                [System.InvalidOperationException]::new('synthetic denied read'),
+                'GraphKit.OperationFailed.403',
+                [System.Management.Automation.ErrorCategory]::PermissionDenied,
+                $target)
+            throw $record
+        }
 
         $outcome = InModuleScope TenantPulse {
             Invoke-PulseSubscribedSkuLicensePlan `

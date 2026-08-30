@@ -116,12 +116,7 @@ function Invoke-PulseSecurityBaselinePlan {
 
     function Get-BaselineFailureMetadata {
         param([System.Management.Automation.ErrorRecord] $ErrorRecord)
-        $classified = Get-PulseFailureClass -ErrorRecord $ErrorRecord
-        switch ($classified) {
-            'PermissionDenied' { return @{ FailureClass = 'PermissionDenied'; ReasonCode = 'permission-denied' } }
-            'AuthFailure' { return @{ FailureClass = 'AuthenticationFailed'; ReasonCode = 'authentication-failed' } }
-            default { return @{ FailureClass = 'ProviderFailed'; ReasonCode = 'provider-failed' } }
-        }
+        return Resolve-PulseGraphFailure -ErrorRecord $ErrorRecord
     }
 
     function New-BaselineReadFailure {

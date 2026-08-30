@@ -187,7 +187,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'platform-unavailable'
         $saved.datasets.subscribedSkus.status | Should -Be 'Failed'
         $saved.datasets.subscribedSkus.failureClass | Should -Be 'AuthenticationFailed'
-        $saved.datasets.subscribedSkus.reasonCode | Should -Be 'auth-failure'
+        $saved.datasets.subscribedSkus.reasonCode | Should -Be 'authentication-failed'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 
@@ -220,7 +220,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Failed'
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'AuthenticationFailed'
-        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'auth-failure'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'authentication-failed'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 
@@ -256,7 +256,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Failed'
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'AuthenticationFailed'
-        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'auth-failure'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'authentication-failed'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 
