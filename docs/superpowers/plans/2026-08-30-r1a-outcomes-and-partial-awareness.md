@@ -264,12 +264,20 @@
 - Current source remains unreleased TenantPulse 0.3.0 with exact GraphKit 0.3.0.
 - Public TenantPulse 0.2.0 evidence remains historical and immutable.
 
-- [ ] Add release notes for canonical Graph outcome mapping and reviewed partial-aware evaluation; do not claim the unreleased source is published.
-- [ ] Document that request-time 403 is `Failed/PermissionDenied`, only authentication aborts subsequent network collection, and deadlines/cancellations/indeterminate certainty remain explicit.
-- [ ] Document the exact four opted-in checks and their asymmetric monotonic semantics. State that all other checks remain `NotApplicable` on Partial.
-- [ ] State explicitly that schemas did not change and no new live-service claim was made in this deterministic tranche.
-- [ ] Preserve all current release hashes, merged SHAs, CI run IDs, test evidence, no-user/no-legacy premise, and exact dependency pins.
-- [ ] Run focused manifest/release-truth QA green and commit as `docs: record R1a outcome contracts`.
+- [x] Add release notes for canonical Graph outcome mapping and reviewed partial-aware evaluation; do not claim the unreleased source is published.
+- [x] Document that request-time 403 is `Failed/PermissionDenied`, only authentication aborts subsequent network collection, and deadlines/cancellations/indeterminate certainty remain explicit.
+- [x] Document the exact four opted-in checks and their asymmetric monotonic semantics. State that all other checks remain `NotApplicable` on Partial.
+- [x] State explicitly that schemas did not change and no new live-service claim was made in this deterministic tranche.
+- [x] Preserve all current release hashes, merged SHAs, CI run IDs, test evidence, no-user/no-legacy premise, and exact dependency pins.
+- [x] Run focused manifest/release-truth QA green and commit as `docs: record R1a outcome contracts`.
+
+**Task 6 evidence (2026-08-30):**
+
+- The `CHANGELOG.md` Unreleased body, source-manifest `ReleaseNotes`, and exact QA fixture are synchronized. They preserve review finding 6 as implemented and review finding 14 as rejected/obsolete, while keeping TenantPulse source at unreleased `0.3.0` with exact GraphKit `0.3.0` runtime and restore pins.
+- README, status, descriptor guidance, and findings-schema guidance now record the canonical direct/composite/expansion failure mapping, request-time `403` as `Failed` / `PermissionDenied`, authentication as the sole run-wide network abort, the exact four asymmetric partial-aware checks, native-Boolean witness requirements, and malformed-input `Error` boundary. Findings schema `1.0`, snapshot schema `2.0.0`, and scoring model `1.0` remain unchanged.
+- The immutable TenantPulse `0.2.0` archive hash, reviewed and merged SHAs, CI run IDs, test/live/publication evidence boundaries, and no-user/no-legacy premise were left unchanged. The PIM guidance now requires collected `subscribedSkus`/gate evidence before claiming Entra ID P2 is absent; a PIM `400`/`403` is not license proof.
+- Documentation-first package gate: `pack` succeeded with 10 tasks, 0 errors, and 0 warnings. Pinned Pester `6.1.0` then ran `tests/QA/ModuleManifest.tests.ps1` plus `tests/QA/ReleaseTruth.tests.ps1`: 10/10 passed, 0 failed, 0 skipped, 0 NotRun, and 0 failed containers.
+- Post-documentation candidate hashes: `TenantPulse.0.3.0.nupkg` SHA-256 `3eac93491504e78a4d96aefd22b300ad7ec736953f1e4a1fa8090e897d68894c`; built manifest SHA-256 `9d644284774346fa7e9e4ce6a725f306288b426ed8cda74d35493b56fc086de8`; built module SHA-256 `382583ecfa3edc99bbf75a30498168e431b86ffb37b018365b48d3b6c868e87e`. These identify this Task 6 pack candidate only; they are not Task 7 full-suite, exact-head CI, live-service, merged-release, or publication proof. Earlier Task 5 hashes remain pre-documentation evidence rather than final Task 6 evidence.
 
 ### Task 7: Measure, ratchet, review, and merge the exact train
 

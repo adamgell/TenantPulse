@@ -20,6 +20,27 @@ in released schema 1.0.0/1.1.0 manifests remains rejected: those writers emitted
 `Failed`, and `Skipped`; migration fails closed without modifying the manifest. Schema 2.0.0 is
 the first writer contract that introduced `Partial`.
 
+The current unreleased source also implements the R1a outcome-fidelity tranche. One canonical
+mapper preserves Graph failure outcomes across direct, composite, and expansion collection. A
+request-time `403` is persisted as `Failed` / `PermissionDenied`; only `AuthenticationFailed`
+aborts later network-backed collection. Deadline expiration, cancellation, indeterminate
+certainty, permission denial, and provider failure remain explicit and isolated, and a `Partial`
+provider outcome never satisfies a later collection dependency.
+
+`Data.PartialDatasets` is a strict Function-only opt-in requiring a `DatasetOutcomes` parameter.
+Exactly four checks opt in. Universal checks `TP.INT.0013` and `TP.INT.0029` may Fail when a known
+row proves an offender but cannot Pass while gaps remain. Existential checks `TP.INT.0014` and
+`TP.INT.0015` may Pass on a known witness but cannot Fail while gaps remain; their BitLocker/LAPS
+criteria require native Boolean values. The other 49 checks remain `NotApplicable` on Partial. For
+the four opt-ins, structurally valid non-decisive Partial evidence is also `NotApplicable`; without
+decisive proof, zero rows or malformed outcome, gap, or row data is `Error`. Findings schema `1.0`,
+snapshot schema `2.0.0`, and scoring model `1.0` remain unchanged.
+
+This tranche's evidence is deterministic source/package testing only. It adds no new live-service
+or publication proof, and the final exact-head/full-suite/CI gate remains Task 7 work. The immutable
+TenantPulse `0.2.0` evidence table and exact-package live record below are historical release proof,
+not proof for the unreleased `0.3.0` source.
+
 | Evidence state | Proof |
 |---|---|
 | Deterministic | Reviewed tree `24b3d4ebe522d9bf94d9a75c8625be438fa9b768`; 2,277 tests; zero failures/errors/skips/NotRun; bound archive hash `a0d5ff793b92753ab3efb4db20cf5bcf8b953e3cf81bf1a776c96a3d992417bd`. |

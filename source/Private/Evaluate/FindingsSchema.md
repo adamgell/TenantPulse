@@ -38,7 +38,7 @@ a `Document` (no fresh `RedactionMap`) cannot redact.
                                                   // snapshot-write time (New-PulseSnapshotStore
                                                   // -Tenant), never the raw tenant id
   "producer": {
-    "tenantPulse": "0.1.0",                      // this module's own version
+    "tenantPulse": "0.3.0",                      // this module's own version
     "graphKit": null,                             // pass-through of manifest.producer.graphKit
     "scoringModelVersion": "1.0"                  // fixed for Phase 1 - T1.7 owns the model
   },
@@ -95,7 +95,7 @@ document as-is.
 | `Pass`         | rule            | The check's condition holds. |
 | `Warn`         | rule (Function only) | The check needs attention but isn't a hard failure. Only a Function rule can produce this - an Expression rule can only resolve to Pass/Fail. |
 | `Fail`         | rule            | The check's condition does not hold. |
-| `NotApplicable`| engine, OR rule (Function only, with mandatory `Reason`) | Engine-assigned: a declared dataset is missing, `Failed`, `Skipped`, unknown, or `Partial` without an explicit reviewed Function opt-in; or a declared gate is unsatisfied - the rule is never invoked. A non-aware `Partial` reason contains only the canonical dataset name and aggregate gap count. Rule-assigned (post-review, adjudicated): a Function rule may itself return `NotApplicable` when its own condition genuinely does not apply given what it observed in `$Datasets` (including a structurally valid opted-in `Partial` dataset whose usable rows do not prove a monotonic decision) - `New-PulseFinding -Status NotApplicable` REQUIRES `-Reason` (throws without it). Both paths land in the identical `status: "NotApplicable"` string, so `Add-PulseScores` excludes both from its scoring denominator identically. |
+| `NotApplicable`| engine, OR rule (Function only, with mandatory `Reason`) | Engine-assigned: a declared dataset is missing, `Failed`, `Skipped`, unknown, or `Partial` without an explicit reviewed Function opt-in; or a declared gate is unsatisfied - the rule is never invoked. A non-aware `Partial` reason contains only the canonical dataset name and aggregate gap count. Rule-assigned (post-review, adjudicated): a Function rule may itself return `NotApplicable` when its own condition genuinely does not apply given what it observed in `$Datasets`, including a structurally valid opted-in `Partial` dataset whose usable rows do not prove a monotonic decision. Malformed opted-in Partial input is `Error`, not `NotApplicable`. `New-PulseFinding -Status NotApplicable` REQUIRES `-Reason` (throws without it). Both NotApplicable paths land in the identical `status: "NotApplicable"` string, so `Add-PulseScores` excludes both from its scoring denominator identically. |
 | `Error`        | engine          | The rule threw, returned a shape the engine could not interpret, declared an unrecognized `Rule.Type`, or an opted-in `Partial` entry had zero usable rows, invalid structured gaps, or an input that could not be safely projected/deep-cloned. Evaluation of every OTHER check still continues - one bad rule never hides the rest of the run ("no silent gaps"). |
 
 `Error` is **engine-assigned only** - no rule function or expression can ever produce it
@@ -152,7 +152,25 @@ For each check, in order:
    `ApiVersion`, `Operations`, and `Gaps`; manifest-only `reason`, `sha256`, `itemCount`, and
    `collectedUtc` are absent. `DatasetOutcomes` is an in-memory evaluation input only. It is
    never copied into a finding, scoring document, snapshot, or report, so findings schema
-   remains 1.0 and snapshot schema remains 2.0.
+   remains `1.0`, snapshot schema remains `2.0.0`, and scoring model remains `1.0`.
+
+### Built-in partial-aware checks
+
+Only four catalog descriptors opt in, each for one dataset:
+
+- Universal `TP.INT.0013` (`intuneRbacGroupProtection`) and `TP.INT.0029`
+  (`securityBaselinesAssignedAndCurrent`) may Fail when a known row proves an offender; neither
+  may Pass with gaps.
+- Existential `TP.INT.0014` (`endpointSecurityDiskEncryptionPolicies`) and `TP.INT.0015`
+  (`endpointSecurityLapsPolicies`) may Pass when a known row proves a witness; neither may Fail
+  with gaps. The qualifying BitLocker value and all four qualifying LAPS criteria must be native
+  Boolean values, not string or numeric lookalikes.
+
+The other 49 checks remain engine-assigned `NotApplicable` when a required dataset is `Partial`.
+For the four opt-ins, a structurally valid Partial dataset whose known rows do not prove the safe
+direction is rule-assigned `NotApplicable`. Without decisive proof, zero usable rows, malformed
+outcome/gap structure, unsupported state, or malformed known rows is `Error`. A decisive monotonic
+witness or offender outranks an unrelated malformed row in either row order.
 
 `$Context` (optional, threaded from `Invoke-PulseEvaluation -Context`) always carries two
 engine-populated keys, unconditionally, regardless of whether the caller supplied its own

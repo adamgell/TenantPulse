@@ -31,6 +31,18 @@ and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count. L
 1.0.0/1.1.0 manifests remain fail-closed when they contain the later `Partial` state; reads reject
 that unsupported state without rewriting the manifest.
 
+The unreleased line also carries one canonical Graph failure mapping across direct, composite,
+and expansion collectors. A request-time `403` is `Failed` / `PermissionDenied`, and only
+`AuthenticationFailed` stops later network work; deadline expiration, cancellation, indeterminate
+certainty, permission denial, and provider failure remain explicit and isolated. Partial evaluation
+is an exact, reviewed opt-in for only `TP.INT.0013`, `TP.INT.0014`, `TP.INT.0015`, and
+`TP.INT.0029`: the two universal checks may Fail on a known offender but cannot Pass with gaps,
+while the two existential checks may Pass on a known native-Boolean witness but cannot Fail with
+gaps. The other 49 checks remain `NotApplicable` on Partial. For the four opt-ins, malformed input
+without decisive monotonic proof is `Error`, not `NotApplicable`. Findings schema `1.0`, snapshot
+schema `2.0.0`, and scoring model `1.0` are unchanged. These are deterministic current-source and
+package-test claims only; they are not new live-service, merged-release, or publication claims.
+
 ## Quick start
 
 ```powershell
@@ -80,12 +92,13 @@ example `Policy.Read.All` for Conditional Access and authentication methods poli
 `DeviceManagementApps.Read.All` for the Intune datasets, `Directory.Read.All` /
 `RoleManagement.Read.Directory` for directory role data, `Domain.Read.All` for domains).
 
-A missing permission is never a hard failure: the collector attempts every dataset
-independently and classifies a `403` as `Skipped` with reason
-`permission-denied: <the exact permissions that operation needs>` - read straight out of
-GraphKit's own descriptor, so you always get the precise, current scope name to grant next,
-rather than a guess baked into this README going stale. Every check that needed a Skipped
-dataset degrades honestly to `NotApplicable`, never a silently-wrong Pass or Fail.
+A missing permission is never a process-wide abort: the collector attempts every dataset
+independently and records a request-time `403` as dataset status `Failed`, failure class
+`PermissionDenied`, and reason code `permission-denied`. The bounded reason names the exact
+permissions from GraphKit's own descriptor when available, so the scope guidance does not become a
+second stale permission list in this README. Only `AuthenticationFailed` stops later network
+collection. A check whose required dataset Failed degrades honestly to `NotApplicable`, never a
+silently wrong Pass or Fail.
 
 ## Snapshot data is sensitive at rest
 
@@ -226,10 +239,10 @@ completed but the service evidence contained explicit gaps, so evaluation failed
 returns an explicit non-collecting disposition because the service contract needed for a
 supported read does not exist. A raw `Pending = $true` map placeholder is still never sent to
 Graph directly; a built-in provider plan must resolve it first or it degrades honestly to
-`NotApplicable`. `TP.ENT.0022` additionally requires Entra ID P2 licensing
-once collected; a 400/403 on a non-P2 tenant is itself a rendered finding ("PIM
-posture unassessable - Entra ID P2 required"), per its own research entry - not a collection
-failure hidden from the report.
+`NotApplicable`. `TP.ENT.0022` additionally requires Entra ID P2 licensing, but TenantPulse calls
+that gate unavailable only when successfully collected `subscribedSkus` evidence proves P2 is
+absent. A `400`/`403` from a PIM read is not proof that the tenant lacks P2; it remains an explicit
+provider/permission outcome and the check fails closed rather than inventing a license finding.
 
 | Id | Category | Severity | Evidence | Title |
 |---|---|---|---|---|

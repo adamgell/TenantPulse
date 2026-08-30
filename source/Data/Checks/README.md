@@ -1,9 +1,10 @@
 # Check descriptors
 
 This directory holds the check descriptor `.psd1` files that `Import-PulseCheckCatalog`
-loads and validates at the start of every assessment run. It is empty except for
-`.gitkeep` until Task 1.9 adds the ten seed checks - `Import-PulseCheckCatalog` treats an
-empty (or missing) directory as a valid, empty catalog rather than an error.
+loads and validates at the start of every assessment run. The shipped catalog contains 53
+descriptors: 30 `TP.INT` checks and 23 `TP.ENT` checks, one file per check. A caller-supplied
+empty (or missing) catalog directory remains valid and returns an empty catalog rather than an
+error.
 
 ## Schema
 
@@ -12,22 +13,22 @@ matching this schema exactly:
 
 ```powershell
 @{
-  Id           = 'TP.ENT.0001'         # ^TP\.(INT|ENT)\.\d{4}$
-  Title        = '...'
-  Category     = 'Entra.ConditionalAccess'   # dotted area path
-  Severity     = 'High'                # Critical|High|Medium|Low|Info
-  Effort       = 'Low'                 # Low|Medium|High  (consulting axis, not scored)
+  Id           = 'TP.INT.0014'         # ^TP\.(INT|ENT)\.\d{4}$
+  Title        = 'BitLocker full-disk encryption enforced via Endpoint Security policy'
+  Category     = 'Intune.EndpointSecurity'   # dotted area path
+  Severity     = 'Critical'            # Critical|High|Medium|Low|Info
+  Effort       = 'Medium'               # Low|Medium|High  (consulting axis, not scored)
   Impact       = 'High'                # Low|Medium|High  (consulting axis, not scored)
   Data         = @{
-                   Datasets        = @('conditionalAccessPolicies')
+                   Datasets        = @('endpointSecurityDiskEncryptionPolicies')
                    Expansions      = @() # optional; may replace Datasets for artifact-only checks
-                   PartialDatasets = @('conditionalAccessPolicies') # optional Function opt-in
-                   Gates           = @('EntraP1')
+                   PartialDatasets = @('endpointSecurityDiskEncryptionPolicies') # optional Function opt-in
+                   Gates           = @('Intune')
                  }
-  Rule         = @{ Type = 'Function'; Function = 'Test-PulseLegacyAuthBlocked' }
+  Rule         = @{ Type = 'Function'; Function = 'Test-PulseBitLockerFullDiskEncryption' }
                  # or Type='Expression'; Expression='<scriptblock text over $Datasets>'
   Consulting   = @{ WhatItMeans='...'; WhyItMatters='...'; Remediation=@('step...');
-                    PortalLinks=@('https://entra.microsoft.com/...') }
+                    PortalLinks=@('https://intune.microsoft.com/...') }
   References   = @{ Research='docs/research/iha-v2/<file>#<anchor>'
                     Authorities=@('https://learn.microsoft.com/...','MS.AAD.1.1v1')
                     Cis=@('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)') }
@@ -135,3 +136,21 @@ sound despite unresolved gaps:
 If the usable rows do not prove that one safe direction, the check remains fail-closed;
 the presence of `PartialDatasets` is never permission to treat incomplete scope as a
 complete assessment.
+
+The built-in catalog has exactly four partial-aware descriptors:
+
+- `TP.INT.0013` / `intuneRbacGroupProtection` is universal: a known unprotected group may
+  prove Fail; it cannot prove Pass with gaps.
+- `TP.INT.0014` / `endpointSecurityDiskEncryptionPolicies` is existential: a known policy
+  whose `isFullDiskEncryption` value is a native `[bool]` `$true` may prove Pass; it cannot
+  prove Fail with gaps.
+- `TP.INT.0015` / `endpointSecurityLapsPolicies` is existential: one known policy whose four
+  criteria are native `[bool]` `$true` values may prove Pass; it cannot prove Fail with gaps.
+- `TP.INT.0029` / `securityBaselinesAssignedAndCurrent` is universal: a known unassigned or
+  obsolete baseline may prove Fail; it cannot prove Pass with gaps.
+
+The other 49 checks remain `NotApplicable` when a required dataset is `Partial`. For these four
+opt-ins, a structurally valid Partial dataset with no decisive proof is also `NotApplicable`.
+Zero usable rows, invalid gaps/outcomes, or a malformed known row without decisive monotonic proof
+is `Error`; a decisive witness/offender remains authoritative even when an unrelated row is
+malformed, regardless of row order.
