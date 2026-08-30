@@ -78,6 +78,39 @@ Describe 'Graph failure adapter contract' {
         }
     }
 
+    It 'never persists arbitrary provider response text from a direct Graph failure' {
+        $privateMarker = 'PRIVATE' + '-PROVIDER-BODY'
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("provider response contained $privateMarker"),
+            'GraphKit.OperationFailed',
+            [System.Management.Automation.ErrorCategory]::ResourceUnavailable,
+            $null)
+        $fixture = New-AdapterStore
+        try {
+            $manifest = @([pscustomobject]@{
+                Dataset = 'privateFailure'; Type = 'Synthetic'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null
+            })
+            $context = [pscustomobject]@{ ProfileId = 'fixture' }
+            InModuleScope TenantPulse -ArgumentList $fixture.Store, $manifest, $context, $record {
+                param($store, $manifest, $context, $record)
+                $script:AdapterRecord = $record
+                Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
+                Mock Get-GraphObject -ModuleName TenantPulse { throw $script:AdapterRecord }
+                Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                    -ProfileId 'fixture' -TenantPseudonym 'tp-fixture'
+            }
+
+            $manifestText = Get-Content -LiteralPath $fixture.Store.ManifestPath -Raw
+            $saved = $manifestText | ConvertFrom-Json
+            $saved.datasets.privateFailure.failureClass | Should -Be 'ProviderFailed'
+            $saved.datasets.privateFailure.reasonCode | Should -Be 'provider-failed'
+            $saved.datasets.privateFailure.reason | Should -Be 'graph-request-failed: failureClass=ProviderFailed; reasonCode=provider-failed; statusCode=unknown'
+            $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))
+        } finally {
+            Remove-Item -LiteralPath $fixture.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'maps <Name> through the RBAC composite top-level read' -ForEach $failureCases {
         $record = New-AdapterGraphErrorRecord -Outcome $Outcome -Certainty $Certainty -StatusCode $StatusCode -Category $Category
         $outcome = InModuleScope TenantPulse -ArgumentList $record {
@@ -335,13 +368,60 @@ Describe 'Graph failure adapter contract' {
 }
 
 Describe 'Canonical Graph failure interpreter source contract' {
-    It 'has no production status or message classifier outside Resolve-PulseGraphFailure' {
-        $violations = Get-ChildItem (Join-Path $script:repoRoot 'source/Private') -Recurse -Filter '*.ps1' |
-            Where-Object Name -ne 'Resolve-PulseGraphFailure.ps1' |
-            Where-Object {
-                (Get-Content -LiteralPath $_.FullName -Raw) -match 'Get-PulseFailureClass|Test-PulseErrorRecordHasStructuredSignal|Get-PulseGraphErrorStatusCode'
+    It 'rejects renamed signal interpreters and has none outside Resolve-PulseGraphFailure' {
+        function Get-InterpreterViolations {
+            param([string] $Text, [string] $Path)
+
+            $tokens = $null
+            $parseErrors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($Text, $Path, [ref] $tokens, [ref] $parseErrors)
+            $result = [System.Collections.Generic.List[string]]::new()
+            foreach ($parseError in @($parseErrors)) {
+                $result.Add("${Path}: parse error: $($parseError.Message)") | Out-Null
             }
 
-        @($violations.FullName) | Should -BeNullOrEmpty
+            $signalMembers = @('TargetObject', 'CategoryInfo', 'FullyQualifiedErrorId', 'Telemetry', 'Outcome', 'Certainty')
+            foreach ($memberAst in $ast.FindAll({
+                        param($node)
+                        $node -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                        $node.Member.Value -in $signalMembers
+                    }, $true)) {
+                $result.Add("${Path}:$($memberAst.Extent.StartLineNumber): reads Graph error signal '$($memberAst.Member.Value)'") | Out-Null
+            }
+
+            foreach ($stringAst in $ast.FindAll({
+                        param($node)
+                        $node -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                        $node.Value -match '(?i)AADSTS\d+|token acquisition|\bunauthorized\b|\bforbidden\b|accessdenied'
+                    }, $true)) {
+                $result.Add("${Path}:$($stringAst.Extent.StartLineNumber): contains an inline auth/permission classifier token") | Out-Null
+            }
+
+            if ($Text -match 'Get-PulseFailureClass|Test-PulseErrorRecordHasStructuredSignal|Get-PulseGraphErrorStatusCode') {
+                $result.Add("${Path}: contains a legacy classifier symbol") | Out-Null
+            }
+            return $result.ToArray()
+        }
+
+        $renamedInterpreter = @'
+function Resolve-RenamedGraphProblem {
+    param($Caught)
+    if ($Caught.TargetObject.Outcome -eq 'Cancelled') { return 'Cancelled' }
+    if ($Caught.Exception.Message -match 'AADSTS700016') { return 'AuthenticationFailed' }
+}
+'@
+        @(Get-InterpreterViolations -Text $renamedInterpreter -Path 'synthetic-renamed-classifier.ps1').Count | Should -BeGreaterThan 0
+
+        $violations = [System.Collections.Generic.List[string]]::new()
+        foreach ($directory in @('source/Private/Collect', 'source/Private/Expand')) {
+            foreach ($file in Get-ChildItem (Join-Path $script:repoRoot $directory) -Recurse -Filter '*.ps1') {
+                if ($file.Name -eq 'Resolve-PulseGraphFailure.ps1') { continue }
+                foreach ($violation in @(Get-InterpreterViolations -Text (Get-Content -LiteralPath $file.FullName -Raw) -Path $file.FullName)) {
+                    $violations.Add($violation) | Out-Null
+                }
+            }
+        }
+
+        $violations.ToArray() | Should -BeNullOrEmpty
     }
 }

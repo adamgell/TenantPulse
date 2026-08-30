@@ -1,3 +1,14 @@
+BeforeDiscovery {
+    $rootFailureCases = @(
+        @{ Name = 'deadline'; Outcome = 'DeadlineExpired'; Certainty = 'Indeterminate'; StatusCode = 408; Category = [System.Management.Automation.ErrorCategory]::OperationTimeout; FailureClass = 'DeadlineExpired'; ReasonCode = 'deadline-expired'; Aborts = $false }
+        @{ Name = 'cancellation'; Outcome = 'Cancelled'; Certainty = 'Known'; StatusCode = 0; Category = [System.Management.Automation.ErrorCategory]::OperationStopped; FailureClass = 'Cancelled'; ReasonCode = 'cancelled'; Aborts = $false }
+        @{ Name = 'indeterminate certainty'; Outcome = 'Failed'; Certainty = 'Indeterminate'; StatusCode = 500; Category = [System.Management.Automation.ErrorCategory]::ResourceUnavailable; FailureClass = 'Indeterminate'; ReasonCode = 'indeterminate'; Aborts = $false }
+        @{ Name = 'permission denial'; Outcome = 'Failed'; Certainty = 'Known'; StatusCode = 403; Category = [System.Management.Automation.ErrorCategory]::PermissionDenied; FailureClass = 'PermissionDenied'; ReasonCode = 'permission-denied'; Aborts = $false }
+        @{ Name = 'authentication failure'; Outcome = 'Failed'; Certainty = 'Known'; StatusCode = 401; Category = [System.Management.Automation.ErrorCategory]::AuthenticationError; FailureClass = 'AuthenticationFailed'; ReasonCode = 'authentication-failed'; Aborts = $true }
+        @{ Name = 'provider failure'; Outcome = 'Failed'; Certainty = 'Known'; StatusCode = 503; Category = [System.Management.Automation.ErrorCategory]::ResourceUnavailable; FailureClass = 'ProviderFailed'; ReasonCode = 'provider-failed'; Aborts = $false }
+    )
+}
+
 BeforeAll {
     $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).ProviderPath
 
@@ -12,6 +23,21 @@ BeforeAll {
         function Get-GraphObject { param() }
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
+
+    function New-ExpansionPipelineGraphErrorRecord {
+        param($Outcome, $Certainty, $StatusCode, $Category, [string] $PrivateMarker)
+        $target = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'
+            Outcome = $Outcome
+            Certainty = $Certainty
+            Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = $StatusCode })
+        }
+        [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Graph failure contained $PrivateMarker"),
+            "GraphKit.OperationFailed.$StatusCode",
+            $Category,
+            $target)
+    }
 }
 
 Describe 'Invoke-PulseSettingsCatalogExpansionPipeline' {
@@ -61,18 +87,32 @@ Describe 'Invoke-PulseSettingsCatalogExpansionPipeline' {
         }
     }
 
-    It 'a configurationPolicies fetch failure writes Failed + NotExpanded and never calls the fan-out (no policy list to walk)' {
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { throw 'simulated Graph failure' }
+    It 'maps a root <Name> through the canonical DTO, persists no provider text, and stops the expansion network path' -ForEach $rootFailureCases {
+        $privateMarker = 'PRIVATE' + '-ROOT-BODY'
+        $record = New-ExpansionPipelineGraphErrorRecord -Outcome $Outcome -Certainty $Certainty `
+            -StatusCode $StatusCode -Category $Category -PrivateMarker $privateMarker
+        $script:rootFailureRecord = $record
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { throw $script:rootFailureRecord }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)
             Invoke-PulseSettingsCatalogExpansionPipeline -Store $store -Context $context -ProfileId 'contoso-lab' -TenantPseudonym 'tp-abc123'
         }
 
-        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifestText = Get-Content -LiteralPath $script:store.ManifestPath -Raw
+        $manifest = $manifestText | ConvertFrom-Json
         $manifest.datasets.configurationPolicies.status | Should -Be 'Failed'
+        $manifest.datasets.configurationPolicies.failureClass | Should -Be $FailureClass
+        $manifest.datasets.configurationPolicies.reasonCode | Should -Be $ReasonCode
+        $manifest.datasets.configurationPolicies.reason | Should -Be "graph-request-failed: failureClass=$FailureClass; reasonCode=$ReasonCode; statusCode=$StatusCode"
         $manifest.expansions.settingsCatalog.status | Should -Be 'NotExpanded'
         $manifest.expansions.settingsCatalog.reason | Should -Match 'configurationPolicies unavailable'
+        $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))
+        if ($Aborts) {
+            $manifest.collectionFailure | Should -Not -BeNullOrEmpty
+        } else {
+            $manifest.collectionFailure | Should -BeNullOrEmpty
+        }
 
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' }
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' }
@@ -125,6 +165,43 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings' {
         ($manifest.expansions.PSObject.Properties.Name -contains 'settingsCatalog') | Should -BeFalse
 
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Type -eq 'ConfigurationPolicy' }
+    }
+
+    It 'suppresses every later network expansion after ordinary collection records AuthenticationFailed' {
+        InModuleScope TenantPulse {
+            function Get-GraphContext { param() }
+            function Get-GraphObject { param() }
+        }
+        $privateMarker = 'PRIVATE' + '-COLLECTION-AUTH-BODY'
+        $record = New-ExpansionPipelineGraphErrorRecord -Outcome 'Failed' -Certainty 'Known' `
+            -StatusCode 401 -Category ([System.Management.Automation.ErrorCategory]::AuthenticationError) `
+            -PrivateMarker $privateMarker
+        $script:rootFailureRecord = $record
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ TenantId = 'tenant-guid-auth-suppression'; ProfileId = 'contoso-auth-suppression' }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } {
+            throw $script:rootFailureRecord
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse { @() }
+
+        $store = InModuleScope TenantPulse -ArgumentList $script:outputRoot {
+            param($outputRoot)
+            Get-PulseTenantSnapshot -ProfileId 'contoso-auth-suppression' -OutputPath $outputRoot `
+                -IncludeCheck 'TP.ENT.0001' -ExpandSettings
+        }
+
+        $manifestText = Get-Content -LiteralPath $store.ManifestPath -Raw
+        $manifest = $manifestText | ConvertFrom-Json
+        $manifest.collectionFailure | Should -Not -BeNullOrEmpty
+        $manifest.expansions.settingsCatalog.status | Should -Be 'NotExpanded'
+        $manifest.expansions.compliance.status | Should -Be 'NotExpanded'
+        $manifest.expansions.deviceConfiguration.status | Should -Be 'NotExpanded'
+        $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))
+
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Type -eq 'ConfigurationPolicy' }
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Type -like '*Assignment' }
     }
 
     # P0-1 review fix (reproduced defect): Get-PulseTenantSnapshot -ExpandSettings used to

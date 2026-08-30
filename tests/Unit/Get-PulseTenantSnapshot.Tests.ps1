@@ -665,7 +665,8 @@ Describe 'Invoke-PulseCollection' {
 
         $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $result.datasets.conditionalAccessPolicies.status | Should -Be 'Failed'
-        $result.datasets.conditionalAccessPolicies.reason | Should -Match 'maximum redaction depth'
+        $result.datasets.conditionalAccessPolicies.failureClass | Should -Be 'ProviderFailed'
+        $result.datasets.conditionalAccessPolicies.reason | Should -Be 'graph-request-failed: failureClass=ProviderFailed; reasonCode=provider-failed; statusCode=unknown'
 
         $datasetFile = Join-Path $script:store.DatasetsPath 'conditionalAccessPolicies.json'
         Test-Path -LiteralPath $datasetFile | Should -Be $false
@@ -702,7 +703,7 @@ Describe 'Invoke-PulseCollection' {
         $result.datasets.deviceCompliancePolicies.reason | Should -Match 'Directory.Read.All'
 
         $result.datasets.deviceConfigurations.status | Should -Be 'Failed'
-        $result.datasets.deviceConfigurations.reason | Should -Match '500 Internal Server Error'
+        $result.datasets.deviceConfigurations.reason | Should -Be 'graph-request-failed: failureClass=ProviderFailed; reasonCode=provider-failed; statusCode=unknown'
 
         # Mock-seam proof (Task 1.11 review round 2): three independently-filtered
         # Get-GraphObject mocks are staged above (one per Type) - prove each one actually
@@ -713,11 +714,9 @@ Describe 'Invoke-PulseCollection' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter { $Type -eq 'DeviceConfiguration' }
     }
 
-    # '(status unknown)' means the ErrorRecord itself carried no readable envelope,
-    # known GraphKit category, or last-attempt status. A
-    # plain `throw "<message>"` (no ErrorRecord constructed with a mapped category or a
-    # TargetObject) is exactly that shape.
-    It 'appends "(status unknown)" to a Failed reason when the ErrorRecord carries no structured signal' {
+    # A plain `throw "<message>"` carries no readable envelope, known GraphKit category,
+    # or last-attempt status. Persist only the bounded DTO projection, never that message.
+    It 'persists statusCode=unknown without provider text when the ErrorRecord carries no structured signal' {
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse { throw "Get-GraphObject failed for 'DeviceConfiguration/List': 500 Internal Server Error." }
 
@@ -733,7 +732,8 @@ Describe 'Invoke-PulseCollection' {
 
         $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $result.datasets.deviceConfigurations.status | Should -Be 'Failed'
-        $result.datasets.deviceConfigurations.reason | Should -Match '\(status unknown\)$'
+        $result.datasets.deviceConfigurations.reason | Should -Be 'graph-request-failed: failureClass=ProviderFailed; reasonCode=provider-failed; statusCode=unknown'
+        $result.datasets.deviceConfigurations.detail.hasStructuredSignal | Should -BeFalse
     }
 
     It 'writes Skipped with a descriptor-pending reason and never calls Get-GraphObject for a Pending dataset' {
@@ -811,10 +811,10 @@ Describe 'Invoke-PulseCollection' {
         $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
 
         $result.collectionFailure | Should -Not -BeNullOrEmpty
-        $result.collectionFailure | Should -Match 'AADSTS700016'
+        $result.collectionFailure | Should -Be 'graph-request-failed: failureClass=AuthenticationFailed; reasonCode=authentication-failed; statusCode=unknown'
 
         $result.datasets.conditionalAccessPolicies.status | Should -Be 'Failed'
-        $result.datasets.conditionalAccessPolicies.reason | Should -Match 'AADSTS700016'
+        $result.datasets.conditionalAccessPolicies.reason | Should -Be $result.collectionFailure
 
         $result.datasets.deviceCompliancePolicies.status | Should -Be 'Failed'
         $result.datasets.deviceCompliancePolicies.reason | Should -Be 'auth-failure: collection aborted'
@@ -855,7 +855,7 @@ Describe 'Invoke-PulseCollection' {
         $result.datasets.deviceConfigurations.reason | Should -Be 'auth-failure: collection aborted'
     }
 
-    It 'redacts the raw ProfileId out of a Failed reason' {
+    It 'replaces arbitrary provider text instead of persisting a redacted variant' {
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphObject -ModuleName TenantPulse { throw "Resource lookup failed for profile 'contoso-secret-tenant'." }
 
@@ -873,7 +873,7 @@ Describe 'Invoke-PulseCollection' {
         $raw | Should -Not -Match 'contoso-secret-tenant'
 
         $result = $raw | ConvertFrom-Json
-        $result.datasets.conditionalAccessPolicies.reason | Should -Match 'tp-abc123'
+        $result.datasets.conditionalAccessPolicies.reason | Should -Be 'graph-request-failed: failureClass=ProviderFailed; reasonCode=provider-failed; statusCode=unknown'
 
         # Mock-seam proof (Task 1.11 review round 2): unfiltered mocks can't have a
         # ParameterFilter mismatch, but confirming the call count still proves this test
@@ -1292,7 +1292,7 @@ Describe 'Get-PulseTenantSnapshot' {
 
         $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
         $manifest.collectionFailure | Should -Not -BeNullOrEmpty
-        $manifest.collectionFailure | Should -Match 'AADSTS700016'
+        $manifest.collectionFailure | Should -Be 'graph-request-failed: failureClass=AuthenticationFailed; reasonCode=authentication-failed; statusCode=unknown'
 
         $failedCount = @($manifest.datasets.PSObject.Properties | Where-Object { $_.Value.status -eq 'Failed' }).Count
         $failedCount | Should -Be 2

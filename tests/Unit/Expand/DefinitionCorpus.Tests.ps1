@@ -354,17 +354,13 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
 
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $manifest.references.settingDefinitions.status | Should -Be 'Failed'
-        $manifest.references.settingDefinitions.reason | Should -Match 'capture-failed'
-        $manifest.references.settingDefinitions.reason | Should -Match '503'
+        $manifest.references.settingDefinitions.reason | Should -Be 'graph-request-failed: failureClass=ProviderFailed; reasonCode=provider-failed; statusCode=unknown'
     }
 
-    # omp finding #6: a caught GraphKit exception's message can carry -Context's raw
-    # ProfileId or raw TenantId verbatim (an AADSTS error embeds a profile id, others embed
-    # the tenant GUID once resolved) - both must be redacted to the store's own pseudonym
-    # before the reason ever reaches the manifest, exactly like every dataset-collection
-    # failure reason already is (Invoke-PulseCollection). Planted here as raw, real-shaped
-    # values so the assertion fails loudly if redaction is ever silently dropped.
-    It 'routes a capture-failure reason through Protect-PulseReason - raw ProfileId/TenantId never reach the manifest (omp finding #6)' {
+    # Provider messages may carry profile/tenant identifiers or response fragments. The
+    # persisted reference reason is therefore assembled only from the canonical DTO; it is
+    # not a redacted copy of provider text.
+    It 'replaces a definition-capture provider message with a bounded canonical reason' {
         # Store creation deliberately kept apart from the planted GUID below (the repo's own
         # SecretScan QA gate flags a GUID literal within 200 characters of a
         # "System.IO.Path"-shaped token as looking like a real tenant id/domain pair - this
@@ -395,7 +391,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
 
             $reason | Should -Not -Match ([regex]::Escape($plantedProfileId))
             $reason | Should -Not -Match ([regex]::Escape($plantedTenantId))
-            $reason | Should -Match 'tp-abc123'
+            $reason | Should -Be 'graph-request-failed: failureClass=AuthenticationFailed; reasonCode=authentication-failed; statusCode=unknown'
         } finally {
             Remove-Item -LiteralPath $taintedStoreRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
