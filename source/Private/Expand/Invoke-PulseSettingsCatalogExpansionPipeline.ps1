@@ -158,7 +158,13 @@ function Invoke-PulseSettingsCatalogExpansionPipeline {
         # force here, and this call site is unchanged in behavior, only in that the choice
         # is no longer expressible any other way.
         $null = Invoke-PulseSettingsCatalogExpansion -Store $Store -Context $Context -Policies $policies -DefinitionIndex $definitionIndex `
-            -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+            -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId `
+            -NetworkAbortState $NetworkAbortState
+        if ($NetworkAbortState.AuthenticationAborted) {
+            $collectionFailure = Protect-PulseReason -Message 'authentication-failed' -ProfileId $ProfileId `
+                -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+            Set-PulseManifestEntry -Store $Store -CollectionFailure $collectionFailure
+        }
     } catch {
         # OUTER FAILURE BOUNDARY - see this file's own docstring: never let an unexpected
         # exception here escape and abort a snapshot that is otherwise already complete.

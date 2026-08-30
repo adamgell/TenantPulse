@@ -334,8 +334,16 @@ function Invoke-PulseSettingsCatalogExpansion {
 
         [Parameter()]
         [AllowNull()]
-        [string] $TenantId
+        [string] $TenantId,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     if ($null -eq $DefinitionIndex -or $DefinitionIndex.Count -eq 0) {
         $reason = Protect-PulseReason -Message 'definitions corpus unavailable' -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
@@ -456,7 +464,7 @@ function Invoke-PulseSettingsCatalogExpansion {
             $result = Invoke-PulseSettingsCatalogPolicy -Store $Store -Policy $policy -Context $Context -DefinitionIndex $DefinitionIndex `
                 -FromCapturedPayloads $FromCapturedPayloads.IsPresent -RawDatasetName $rawDatasetName `
                 -RawAssignmentDatasetName $rawAssignmentDatasetName `
-                -TenantId $TenantId -Pseudonym $Pseudonym
+                -TenantId $TenantId -Pseudonym $Pseudonym -NetworkAbortState $NetworkAbortState
         } catch {
             # WORKER DRAIN applies here too (P0-5's own spirit, preserved from the deleted
             # parallel path): an unexpected exception from one policy must not skip
@@ -470,6 +478,7 @@ function Invoke-PulseSettingsCatalogExpansion {
             $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
             $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
         }
+        if ($NetworkAbortState.AuthenticationAborted) { break }
     }
 
     # DETERMINISTIC MERGE: sort strictly on (policyId, settingPath, instanceId), ordinal -

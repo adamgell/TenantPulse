@@ -236,13 +236,16 @@ function Get-PulseTenantSnapshot {
         $tenantPseudonym = Get-PulsePseudonym -Value $ProfileId -Key $operatorKey
         $store = New-PulseSnapshotStore -Path $OutputPath -Tenant $tenantPseudonym -GraphKitVersion $graphKitVersion
 
-        # The tenant id is never resolved on this path, so Protect-PulseReason has only
-        # -ProfileId to redact out of the caught exception message before it is written to
-        # the snapshot.
-        $failureReason = Protect-PulseReason -Message "auth-failure: $($_.Exception.Message)" -ProfileId $ProfileId -Pseudonym $tenantPseudonym
+        # Context resolution happens before any request. Persist only a closed canonical
+        # reason: exception text can contain provider response bodies, UPNs, or client ids.
+        $failureReason = Protect-PulseReason -Message 'authentication-failed: context unavailable before request' `
+            -ProfileId $ProfileId -Pseudonym $tenantPseudonym
 
         foreach ($entry in $manifest) {
-            Write-PulseDataset -Store $store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' -Reason $failureReason
+            Write-PulseDataset -Store $store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
+                -Reason $failureReason -ReasonCode 'authentication-failed' `
+                -Detail @{ status = 'context unavailable before request' } -FailureClass 'AuthenticationFailed' `
+                -Provider 'GraphKit' -Operations @($entry.Operation)
         }
 
         Set-PulseManifestEntry -Store $store -CollectionFailure $failureReason
@@ -309,7 +312,8 @@ function Get-PulseTenantSnapshot {
                 Set-PulseExpansionEntry -Store $store -Name $expansionName -Status 'NotExpanded' -Reason $expansionSuppressedReason
             }
         } else {
-            $null = Invoke-PulseTypedPolicyExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
+            $null = Invoke-PulseTypedPolicyExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId `
+                -TenantPseudonym $tenantPseudonym -NetworkAbortState $networkAbortState
         }
 
         # Task 2.6: conflict detection - purely derived from the family expansion jsonl

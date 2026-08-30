@@ -21,39 +21,40 @@ function Resolve-PulseProviderPlanRegistry {
     # module build order, this lets tests and embedding hosts replace a plan through the
     # normal command-resolution seam instead of retaining a stale CommandInfo reference.
     $windowsDataProcessorPlan = {
-        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym, $NetworkAbortState)
         Invoke-PulseWindowsDataProcessorPlan @PSBoundParameters
     }
     $intuneRbacPlan = {
-        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym, $NetworkAbortState)
         Invoke-PulseIntuneRbacGroupProtectionPlan @PSBoundParameters
     }
     $endpointSecurityPlan = {
-        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym, $NetworkAbortState)
         Invoke-PulseEndpointSecurityPolicyPlan @PSBoundParameters
     }
     $securityBaselinePlan = {
-        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym, $NetworkAbortState)
         Invoke-PulseSecurityBaselinePlan @PSBoundParameters
     }
     $subscribedSkuLicensePlan = {
-        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym, $NetworkAbortState)
         Invoke-PulseSubscribedSkuLicensePlan @PSBoundParameters
     }
 
     $registry = @{
-        subscribedSkus                                    = $subscribedSkuLicensePlan
+        subscribedSkus                                    = @{ Command = $subscribedSkuLicensePlan; RequiresNetwork = $true; SupportsNetworkAbortState = $true }
         # This disposition is the one built-in plan that is safe to run after an
         # authentication abort: it records a fixed platform outcome and performs no Graph
         # call. Unmarked plans, including caller overrides below, remain network-backed.
         dataProcessorServiceForWindowsFeaturesOnboarding = @{
             Command         = $windowsDataProcessorPlan
             RequiresNetwork = $false
+            SupportsNetworkAbortState = $true
         }
-        intuneRbacGroupProtection                         = $intuneRbacPlan
-        endpointSecurityDiskEncryptionPolicies           = $endpointSecurityPlan
-        endpointSecurityLapsPolicies                     = $endpointSecurityPlan
-        securityBaselinesAssignedAndCurrent              = $securityBaselinePlan
+        intuneRbacGroupProtection                         = @{ Command = $intuneRbacPlan; RequiresNetwork = $true; SupportsNetworkAbortState = $true }
+        endpointSecurityDiskEncryptionPolicies           = @{ Command = $endpointSecurityPlan; RequiresNetwork = $true; SupportsNetworkAbortState = $true }
+        endpointSecurityLapsPolicies                     = @{ Command = $endpointSecurityPlan; RequiresNetwork = $true; SupportsNetworkAbortState = $true }
+        securityBaselinesAssignedAndCurrent              = @{ Command = $securityBaselinePlan; RequiresNetwork = $true; SupportsNetworkAbortState = $true }
     }
 
     if ($null -ne $Overrides) {

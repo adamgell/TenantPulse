@@ -144,12 +144,17 @@ function Invoke-PulseCollection {
         # catalog state, not a runtime implementation for a capability with a plan.
         $planCommand = $null
         $planRequiresNetwork = $true
+        $planSupportsNetworkAbortState = $false
         if ($null -ne $ProviderPlanRegistry -and $ProviderPlanRegistry.ContainsKey($entry.Dataset)) {
             $planRegistration = $ProviderPlanRegistry[$entry.Dataset]
             if ($planRegistration -is [System.Collections.IDictionary] -and $planRegistration.Contains('Command')) {
                 $planCommand = $planRegistration.Command
                 if ($planRegistration.Contains('RequiresNetwork') -and $planRegistration.RequiresNetwork -is [bool]) {
                     $planRequiresNetwork = [bool] $planRegistration.RequiresNetwork
+                }
+                if ($planRegistration.Contains('SupportsNetworkAbortState') -and
+                    $planRegistration.SupportsNetworkAbortState -is [bool]) {
+                    $planSupportsNetworkAbortState = [bool] $planRegistration.SupportsNetworkAbortState
                 }
             } else {
                 $planCommand = $planRegistration
@@ -173,8 +178,12 @@ function Invoke-PulseCollection {
                     throw "provider plan registry entry for '$($entry.Dataset)' must be a scriptblock or command."
                 }
 
-                $planResults = @(& $planCommand -Context $Context -Dataset $entry.Dataset `
-                    -ManifestEntry $entry -ProfileId $ProfileId -TenantPseudonym $TenantPseudonym)
+                $planParameters = @{
+                    Context = $Context; Dataset = $entry.Dataset; ManifestEntry = $entry
+                    ProfileId = $ProfileId; TenantPseudonym = $TenantPseudonym
+                }
+                if ($planSupportsNetworkAbortState) { $planParameters.NetworkAbortState = $NetworkAbortState }
+                $planResults = @(& $planCommand @planParameters)
                 if ($planResults.Count -ne 1 -or $null -eq $planResults[0]) {
                     throw "provider plan for '$($entry.Dataset)' must return exactly one collection outcome."
                 }

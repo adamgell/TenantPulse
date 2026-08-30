@@ -33,8 +33,16 @@ function Invoke-PulseSecurityBaselinePlan {
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
-        [string] $TenantPseudonym
+        [string] $TenantPseudonym,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     $null = $ProfileId
     $null = $TenantPseudonym
@@ -125,6 +133,10 @@ function Invoke-PulseSecurityBaselinePlan {
             [Parameter(Mandatory)] [System.Management.Automation.ErrorRecord] $ErrorRecord
         )
         $metadata = Get-BaselineFailureMetadata -ErrorRecord $ErrorRecord
+        if ($metadata.AbortCollection) {
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+        }
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass $metadata.FailureClass -ReasonCode $metadata.ReasonCode `
             -Detail @{ operation = $Operation } -Provider 'GraphKit' -ApiVersion $apiVersion `
@@ -138,6 +150,10 @@ function Invoke-PulseSecurityBaselinePlan {
             [Parameter(Mandatory)] [System.Management.Automation.ErrorRecord] $ErrorRecord
         )
         $metadata = Get-BaselineFailureMetadata -ErrorRecord $ErrorRecord
+        if ($metadata.AbortCollection) {
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+        }
         return New-PulseCollectionGap -Scope $Scope -FailureClass $metadata.FailureClass `
             -ReasonCode $metadata.ReasonCode -Detail @{ operation = $Operation } `
             -Operation $Operation -ApiVersion 'beta'
@@ -167,6 +183,12 @@ function Invoke-PulseSecurityBaselinePlan {
         $currentTemplates = @()
         $gaps.Add((New-BaselineReadGap -Scope 'surface:configurationPolicyTemplates' `
                 -Operation 'DeviceManagementConfigurationPolicyTemplate.ListBeta' -ErrorRecord $_))
+        if ($NetworkAbortState.AuthenticationAborted) {
+            return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gaps.ToArray() `
+                -FailureClass 'AuthenticationFailed' -ReasonCode 'authentication-failed' `
+                -Detail @{ operation = 'DeviceManagementConfigurationPolicyTemplate.ListBeta' } `
+                -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
+        }
     }
     try {
         $policies = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta' -ErrorAction Stop)
@@ -174,6 +196,12 @@ function Invoke-PulseSecurityBaselinePlan {
         $policies = @()
         $gaps.Add((New-BaselineReadGap -Scope 'surface:configurationPolicies' `
                 -Operation 'ConfigurationPolicy.ListBeta' -ErrorRecord $_))
+        if ($NetworkAbortState.AuthenticationAborted) {
+            return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gaps.ToArray() `
+                -FailureClass 'AuthenticationFailed' -ReasonCode 'authentication-failed' `
+                -Detail @{ operation = 'ConfigurationPolicy.ListBeta' } -Provider 'GraphKit' `
+                -ApiVersion $apiVersion -Operations $operations
+        }
     }
     try {
         $intents = @(Get-GraphObject -Context $Context -Type 'DeviceManagementIntent' -Operation 'ListBeta' -ErrorAction Stop)
@@ -181,6 +209,12 @@ function Invoke-PulseSecurityBaselinePlan {
         $intents = @()
         $gaps.Add((New-BaselineReadGap -Scope 'surface:deviceManagementIntents' `
                 -Operation 'DeviceManagementIntent.ListBeta' -ErrorRecord $_))
+        if ($NetworkAbortState.AuthenticationAborted) {
+            return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gaps.ToArray() `
+                -FailureClass 'AuthenticationFailed' -ReasonCode 'authentication-failed' `
+                -Detail @{ operation = 'DeviceManagementIntent.ListBeta' } -Provider 'GraphKit' `
+                -ApiVersion $apiVersion -Operations $operations
+        }
     }
 
     $templatesById = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -317,6 +351,7 @@ function Invoke-PulseSecurityBaselinePlan {
         } catch {
             $gaps.Add((New-BaselineReadGap -Scope $scope `
                     -Operation 'ConfigurationPolicyAssignment.ListBeta' -ErrorRecord $_))
+            if ($NetworkAbortState.AuthenticationAborted) { break }
             continue
         }
 

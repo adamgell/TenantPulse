@@ -1251,11 +1251,16 @@ Describe 'Get-PulseTenantSnapshot' {
         $rawOutputTree -join "`n" | Should -Not -Match 'contoso-tenant-id'
     }
 
-    It 'still writes the snapshot with every dataset Failed and collectionFailure set when acquiring a GraphKit context fails outright' {
+    It 'persists only a canonical bounded pre-request authentication failure when GraphKit context resolution throws private text' {
         $checkOne = New-TestCheck -Id 'TP.ENT.0001' -Datasets @('conditionalAccessPolicies')
+        $privateMarker = 'PRIVATE' + '-CONTEXT-MARKER'
+        $privateUpn = 'planted' + '@example.invalid'
+        $privateClientId = '11111111' + '-2222-3333-4444-555555555555'
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne) }
-        Mock Get-GraphContext -ModuleName TenantPulse { throw 'token acquisition failed: invalid_client' }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            throw "context failed with $privateMarker for $privateUpn client $privateClientId"
+        }
 
         $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot {
             param($snapshotRoot)
@@ -1264,11 +1269,17 @@ Describe 'Get-PulseTenantSnapshot' {
 
         Test-Path -LiteralPath $store.ManifestPath -PathType Leaf | Should -BeTrue
 
-        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $manifestText = Get-Content -LiteralPath $store.ManifestPath -Raw
+        $manifest = $manifestText | ConvertFrom-Json
         $manifest.collectionFailure | Should -Not -BeNullOrEmpty
-        $manifest.collectionFailure | Should -Match 'invalid_client'
+        $manifest.collectionFailure | Should -Be 'authentication-failed: context unavailable before request'
         $manifest.datasets.conditionalAccessPolicies.status | Should -Be 'Failed'
-        $manifest.datasets.conditionalAccessPolicies.reason | Should -Match 'invalid_client'
+        $manifest.datasets.conditionalAccessPolicies.reason | Should -Be 'authentication-failed: context unavailable before request'
+        $manifest.datasets.conditionalAccessPolicies.reasonCode | Should -Be 'authentication-failed'
+        $manifest.datasets.conditionalAccessPolicies.failureClass | Should -Be 'AuthenticationFailed'
+        $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))
+        $manifestText | Should -Not -Match ([regex]::Escape($privateUpn))
+        $manifestText | Should -Not -Match ([regex]::Escape($privateClientId))
 
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }

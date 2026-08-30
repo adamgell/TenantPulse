@@ -26,8 +26,16 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
-        [string] $TenantPseudonym
+        [string] $TenantPseudonym,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     # These parameters are part of the common provider-plan contract. The plan deliberately
     # passes the same immutable Context instance to every GraphKit call.
@@ -63,6 +71,10 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
         $policies = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta' -ErrorAction Stop)
     } catch {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+        if ($failure.AbortCollection) {
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+        }
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass $failure.FailureClass -ReasonCode $failure.ReasonCode `
             -Detail @{ operation = 'ConfigurationPolicy.ListBeta' } -Provider 'GraphKit' -ApiVersion $apiVersion `
@@ -126,6 +138,11 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
                     -ReasonCode $failure.ReasonCode `
                     -Detail @{ policyId = $policyId } `
                     -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta')) | Out-Null
+            if ($failure.AbortCollection) {
+                $NetworkAbortState.AuthenticationAborted = $true
+                $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                break
+            }
             continue
         }
 

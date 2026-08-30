@@ -33,8 +33,16 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
-        [string] $TenantPseudonym
+        [string] $TenantPseudonym,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     # Required by the common provider-plan contract; this plan does not use either value.
     $null = $ProfileId
@@ -66,6 +74,10 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         )
 
         $failure = Resolve-PulseGraphFailure -ErrorRecord $ErrorRecord
+        if ($failure.AbortCollection) {
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+        }
 
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass $failure.FailureClass -ReasonCode $failure.ReasonCode `
@@ -197,6 +209,11 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
             $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass $failure.FailureClass `
                     -ReasonCode $failure.ReasonCode -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
+            if ($failure.AbortCollection) {
+                $NetworkAbortState.AuthenticationAborted = $true
+                $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                break
+            }
             continue
         }
 

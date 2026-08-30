@@ -106,8 +106,16 @@ function Invoke-PulseTypedPolicyExpansion {
 
         [Parameter()]
         [AllowNull()]
-        [string] $TenantId
+        [string] $TenantId,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     if ([string]::IsNullOrEmpty($Name)) { $Name = $PolicyType }
     if ([string]::IsNullOrEmpty($RawDatasetPrefix)) { $RawDatasetPrefix = "${PolicyType}Assignments-" }
@@ -199,6 +207,10 @@ function Invoke-PulseTypedPolicyExpansion {
             } catch {
                 Write-Verbose "Invoke-PulseTypedPolicyExpansion: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
                 $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+                if ($failure.AbortCollection) {
+                    $NetworkAbortState.AuthenticationAborted = $true
+                    $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                }
                 $category = switch ($failure.FailureClass) {
                     'PermissionDenied' { 'AssignmentPermissionDenied' }
                     'AuthenticationFailed' { 'AssignmentAuthFailure' }
@@ -213,6 +225,7 @@ function Invoke-PulseTypedPolicyExpansion {
 
         if ($assignmentGap) {
             $gapEntries.Add([pscustomobject]@{ policyId = $policyId; reason = $assignmentGap }) | Out-Null
+            if ($NetworkAbortState.AuthenticationAborted) { break }
             continue
         }
 

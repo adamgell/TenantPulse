@@ -706,6 +706,55 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         (Get-Content -LiteralPath $script:store.ManifestPath -Raw) | Should -Not -Match ([regex]::Escape($plantedSecretInException))
     }
 
+    It 'stops Settings Catalog fan-out immediately after first or middle authentication failure, but isolates a non-auth child failure' -ForEach @(
+        @{ Name = 'first settings auth'; FailId = 'policy-1'; FailType = 'ConfigurationPolicySetting'; Status = 401; ExpectedSettings = 1; ExpectedAssignments = 0 }
+        @{ Name = 'middle assignment auth'; FailId = 'policy-2'; FailType = 'ConfigurationPolicyAssignment'; Status = 401; ExpectedSettings = 2; ExpectedAssignments = 2 }
+        @{ Name = 'first settings provider'; FailId = 'policy-1'; FailType = 'ConfigurationPolicySetting'; Status = 503; ExpectedSettings = 3; ExpectedAssignments = 2 }
+    ) {
+        $policies = 1..3 | ForEach-Object { New-TestPolicy -Id "policy-$_" }
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse
+        $target = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Failed'; Certainty = 'Known'
+            Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = $Status })
+        }
+        $category = if ($Status -eq 401) {
+            [System.Management.Automation.ErrorCategory]::AuthenticationError
+        } else {
+            [System.Management.Automation.ErrorCategory]::ResourceUnavailable
+        }
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('planted provider response'),
+            "GraphKit.OperationFailed.$Status", $category, $target)
+
+        $script:settingsCalls = 0
+        $script:assignmentCalls = 0
+        $script:fanoutRecord = $record
+        $script:fanoutFailId = $FailId
+        $script:fanoutFailType = $FailType
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            $script:settingsCalls++
+            if ($script:fanoutFailType -eq $Type -and $Parameters.id -eq $script:fanoutFailId) { throw $script:fanoutRecord }
+            $settingsResponse
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } {
+            $script:assignmentCalls++
+            if ($script:fanoutFailType -eq $Type -and $Parameters.id -eq $script:fanoutFailId) { throw $script:fanoutRecord }
+            @()
+        }
+
+        $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+        $null = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $index, $state {
+            param($store, $context, $policies, $index, $state)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies $policies `
+                -DefinitionIndex $index -NetworkAbortState $state
+        }
+
+        $script:settingsCalls | Should -Be $ExpectedSettings
+        $script:assignmentCalls | Should -Be $ExpectedAssignments
+        $state.AuthenticationAborted | Should -Be ($Status -eq 401)
+    }
+
     It 'planted secret value never appears in the raw persisted dataset, the final jsonl, or the manifest' {
         $policy = New-TestPolicy -Id 'policy-secret'
         $index = New-TestDefinitionIndex

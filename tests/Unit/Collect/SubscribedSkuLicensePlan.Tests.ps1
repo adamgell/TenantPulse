@@ -365,7 +365,9 @@ Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
         $registry = InModuleScope TenantPulse { Resolve-PulseProviderPlanRegistry }
 
         $registry.ContainsKey('subscribedSkus') | Should -BeTrue
-        $registry.subscribedSkus | Should -BeOfType ([scriptblock])
+        $registry.subscribedSkus.Command | Should -BeOfType ([scriptblock])
+        $registry.subscribedSkus.RequiresNetwork | Should -BeTrue
+        $registry.subscribedSkus.SupportsNetworkAbortState | Should -BeTrue
     }
 
     It 'sorts persisted category names ordinally regardless of the current culture' {

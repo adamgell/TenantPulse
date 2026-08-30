@@ -365,6 +365,105 @@ Describe 'Graph failure adapter contract' {
             Remove-Item -LiteralPath $fixture.Root -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+
+    It 'stops RBAC child calls on first or middle authentication failure and isolates a non-auth failure' -ForEach @(
+        @{ Name = 'first auth'; FailId = 'group-a'; Status = 401; ExpectedCalls = 1 }
+        @{ Name = 'middle auth'; FailId = 'group-b'; Status = 401; ExpectedCalls = 2 }
+        @{ Name = 'first provider'; FailId = 'group-a'; Status = 503; ExpectedCalls = 3 }
+    ) {
+        $record = New-AdapterGraphErrorRecord -Outcome Failed -Certainty Known -StatusCode $Status -Category $(
+            if ($Status -eq 401) { [System.Management.Automation.ErrorCategory]::AuthenticationError }
+            else { [System.Management.Automation.ErrorCategory]::ResourceUnavailable })
+        $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+        InModuleScope TenantPulse -ArgumentList $record, $FailId, $state, $ExpectedCalls {
+            param($record, $failId, $state, $expectedCalls)
+            $script:RbacFanoutRecord = $record
+            $script:RbacFanoutFailId = $failId
+            Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementUnifiedRoleAssignment' } {
+                @([pscustomobject]@{
+                    id = 'assignment'; roleDefinition = [pscustomobject]@{ displayName = 'Role' }
+                    principals = @('group-a', 'group-b', 'group-c' | ForEach-Object {
+                        [pscustomobject]@{ id = $_; '@odata.type' = '#microsoft.graph.group' }
+                    })
+                })
+            }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'Group' } {
+                if ($Parameters.id -eq $script:RbacFanoutFailId) { throw $script:RbacFanoutRecord }
+                [pscustomobject]@{ id = $Parameters.id; displayName = $Parameters.id; isManagementRestricted = $false; isAssignableToRole = $false }
+            }
+            $null = Invoke-PulseIntuneRbacGroupProtectionPlan -Context ([pscustomobject]@{}) `
+                -Dataset 'intuneRbacGroupProtection' -ManifestEntry ([pscustomobject]@{ ApiVersion = 'beta' }) `
+                -ProfileId fixture -TenantPseudonym tp-fixture -NetworkAbortState $state
+            Should-Invoke Get-GraphObject -ModuleName TenantPulse -Exactly $expectedCalls -ParameterFilter { $Type -eq 'Group' }
+        }
+        $state.AuthenticationAborted | Should -Be ($Status -eq 401)
+    }
+
+    It 'stops Endpoint Security child calls on first or middle authentication failure and isolates a non-auth failure' -ForEach @(
+        @{ Name = 'first auth'; FailId = 'policy-a'; Status = 401; ExpectedCalls = 1 }
+        @{ Name = 'middle auth'; FailId = 'policy-b'; Status = 401; ExpectedCalls = 2 }
+        @{ Name = 'first provider'; FailId = 'policy-a'; Status = 503; ExpectedCalls = 3 }
+    ) {
+        $record = New-AdapterGraphErrorRecord -Outcome Failed -Certainty Known -StatusCode $Status -Category $(
+            if ($Status -eq 401) { [System.Management.Automation.ErrorCategory]::AuthenticationError }
+            else { [System.Management.Automation.ErrorCategory]::ResourceUnavailable })
+        $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+        InModuleScope TenantPulse -ArgumentList $record, $FailId, $state, $ExpectedCalls {
+            param($record, $failId, $state, $expectedCalls)
+            $script:EndpointFanoutRecord = $record
+            $script:EndpointFanoutFailId = $failId
+            Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } {
+                @('policy-a', 'policy-b', 'policy-c' | ForEach-Object {
+                    [pscustomobject]@{ id = $_; name = $_; templateReference = [pscustomobject]@{ templateFamily = 'endpointSecurityDiskEncryption'; templateId = 'fixture' } }
+                })
+            }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+                if ($Parameters.id -eq $script:EndpointFanoutFailId) { throw $script:EndpointFanoutRecord }
+                @()
+            }
+            $null = Invoke-PulseEndpointSecurityPolicyPlan -Context ([pscustomobject]@{}) `
+                -Dataset 'endpointSecurityDiskEncryptionPolicies' -ManifestEntry ([pscustomobject]@{ ApiVersion = 'beta' }) `
+                -ProfileId fixture -TenantPseudonym tp-fixture -NetworkAbortState $state
+            Should-Invoke Get-GraphObject -ModuleName TenantPulse -Exactly $expectedCalls -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' }
+        }
+        $state.AuthenticationAborted | Should -Be ($Status -eq 401)
+    }
+
+    It 'stops security-baseline assignment calls on first or middle authentication failure and isolates a non-auth failure' -ForEach @(
+        @{ Name = 'first auth'; FailId = 'policy-a'; Status = 401; ExpectedCalls = 1 }
+        @{ Name = 'middle auth'; FailId = 'policy-b'; Status = 401; ExpectedCalls = 2 }
+        @{ Name = 'first provider'; FailId = 'policy-a'; Status = 503; ExpectedCalls = 3 }
+    ) {
+        $record = New-AdapterGraphErrorRecord -Outcome Failed -Certainty Known -StatusCode $Status -Category $(
+            if ($Status -eq 401) { [System.Management.Automation.ErrorCategory]::AuthenticationError }
+            else { [System.Management.Automation.ErrorCategory]::ResourceUnavailable })
+        $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+        InModuleScope TenantPulse -ArgumentList $record, $FailId, $state, $ExpectedCalls {
+            param($record, $failId, $state, $expectedCalls)
+            $script:BaselineFanoutRecord = $record
+            $script:BaselineFanoutFailId = $failId
+            Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementTemplate' } { @() }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementConfigurationPolicyTemplate' } {
+                @('a', 'b', 'c' | ForEach-Object { [pscustomobject]@{ id = "template-$_"; lifecycleState = 'active'; templateFamily = 'baseline' } })
+            }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } {
+                @('a', 'b', 'c' | ForEach-Object { [pscustomobject]@{ id = "policy-$_"; name = $_; templateReference = [pscustomobject]@{ templateId = "template-$_"; templateFamily = 'baseline' } } })
+            }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementIntent' } { @() }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } {
+                if ($Parameters.id -eq $script:BaselineFanoutFailId) { throw $script:BaselineFanoutRecord }
+                @()
+            }
+            $null = Invoke-PulseSecurityBaselinePlan -Context ([pscustomobject]@{}) `
+                -Dataset 'securityBaselinesAssignedAndCurrent' -ManifestEntry ([pscustomobject]@{ ApiVersion = 'beta' }) `
+                -ProfileId fixture -TenantPseudonym tp-fixture -NetworkAbortState $state
+            Should-Invoke Get-GraphObject -ModuleName TenantPulse -Exactly $expectedCalls -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' }
+        }
+        $state.AuthenticationAborted | Should -Be ($Status -eq 401)
+    }
 }
 
 Describe 'Canonical Graph failure interpreter source contract' {
@@ -384,9 +483,37 @@ Describe 'Canonical Graph failure interpreter source contract' {
             foreach ($memberAst in $ast.FindAll({
                         param($node)
                         $node -is [System.Management.Automation.Language.MemberExpressionAst] -and
-                        $node.Member.Value -in $signalMembers
+                        $node.Member.Value -in $signalMembers -and
+                        -not ($node.Member.Value -eq 'Outcome' -and
+                            $node.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                            $node.Expression.VariablePath.UserPath -eq 'gateStatus')
                     }, $true)) {
                 $result.Add("${Path}:$($memberAst.Extent.StartLineNumber): reads Graph error signal '$($memberAst.Member.Value)'") | Out-Null
+            }
+
+            foreach ($memberAst in $ast.FindAll({
+                        param($node)
+                        if ($node -isnot [System.Management.Automation.Language.MemberExpressionAst] -or
+                            $node.Member.Value -ne 'StatusCode') { return $false }
+                        return $node.Expression -isnot [System.Management.Automation.Language.VariableExpressionAst] -or
+                            $node.Expression.VariablePath.UserPath -ne 'failure'
+                    }, $true)) {
+                $result.Add("${Path}:$($memberAst.Extent.StartLineNumber): reads raw Graph status code") | Out-Null
+            }
+
+            foreach ($binaryAst in $ast.FindAll({
+                        param($node)
+                        $node -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                        $node.Operator -in @(
+                            [System.Management.Automation.Language.TokenKind]::Ieq,
+                            [System.Management.Automation.Language.TokenKind]::Ceq,
+                            [System.Management.Automation.Language.TokenKind]::Eq,
+                            [System.Management.Automation.Language.TokenKind]::Imatch,
+                            [System.Management.Automation.Language.TokenKind]::Cmatch,
+                            [System.Management.Automation.Language.TokenKind]::Match
+                        ) -and $node.Extent.Text -match '(?<!\d)(401|403)(?!\d)'
+                    }, $true)) {
+                $result.Add("${Path}:$($binaryAst.Extent.StartLineNumber): classifies numeric Graph status") | Out-Null
             }
 
             foreach ($stringAst in $ast.FindAll({
@@ -408,17 +535,19 @@ function Resolve-RenamedGraphProblem {
     param($Caught)
     if ($Caught.TargetObject.Outcome -eq 'Cancelled') { return 'Cancelled' }
     if ($Caught.Exception.Message -match 'AADSTS700016') { return 'AuthenticationFailed' }
+    if ([int] $Caught.Exception.Response.StatusCode -eq 401) { return 'AuthenticationFailed' }
+    if ($Caught.Exception.Response.StatusCode -eq 403) { return 'PermissionDenied' }
 }
 '@
-        @(Get-InterpreterViolations -Text $renamedInterpreter -Path 'synthetic-renamed-classifier.ps1').Count | Should -BeGreaterThan 0
+        $mutationViolations = @(Get-InterpreterViolations -Text $renamedInterpreter -Path 'synthetic-renamed-classifier.ps1')
+        @($mutationViolations | Where-Object { $_ -match 'raw Graph status code' }).Count | Should -BeGreaterThan 0
+        @($mutationViolations | Where-Object { $_ -match 'numeric Graph status' }).Count | Should -BeGreaterThan 0
 
         $violations = [System.Collections.Generic.List[string]]::new()
-        foreach ($directory in @('source/Private/Collect', 'source/Private/Expand')) {
-            foreach ($file in Get-ChildItem (Join-Path $script:repoRoot $directory) -Recurse -Filter '*.ps1') {
-                if ($file.Name -eq 'Resolve-PulseGraphFailure.ps1') { continue }
-                foreach ($violation in @(Get-InterpreterViolations -Text (Get-Content -LiteralPath $file.FullName -Raw) -Path $file.FullName)) {
-                    $violations.Add($violation) | Out-Null
-                }
+        foreach ($file in Get-ChildItem (Join-Path $script:repoRoot 'source') -Recurse -Filter '*.ps1') {
+            if ($file.Name -eq 'Resolve-PulseGraphFailure.ps1') { continue }
+            foreach ($violation in @(Get-InterpreterViolations -Text (Get-Content -LiteralPath $file.FullName -Raw) -Path $file.FullName)) {
+                $violations.Add($violation) | Out-Null
             }
         }
 

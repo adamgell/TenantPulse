@@ -85,7 +85,11 @@ function Invoke-PulseSettingsCatalogPolicy {
         [string] $TenantId,
 
         [Parameter()]
-        [string] $Pseudonym = 'tp-unknown'
+        [string] $Pseudonym = 'tp-unknown',
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
 
     function New-PulseStructuredGapReason {
@@ -198,6 +202,10 @@ function Invoke-PulseSettingsCatalogPolicy {
         } catch {
             Write-Verbose "Invoke-PulseSettingsCatalogPolicy: fetch failed for policy '$policyId': $($_.Exception.Message)"
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+            if ($failure.AbortCollection -and $null -ne $NetworkAbortState) {
+                $NetworkAbortState.AuthenticationAborted = $true
+                $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            }
             $category = switch ($failure.FailureClass) {
                 'PermissionDenied' { 'PermissionDenied' }
                 'AuthenticationFailed' { 'AuthFailure' }
@@ -217,6 +225,10 @@ function Invoke-PulseSettingsCatalogPolicy {
             } catch {
                 Write-Verbose "Invoke-PulseSettingsCatalogPolicy: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
                 $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+                if ($failure.AbortCollection -and $null -ne $NetworkAbortState) {
+                    $NetworkAbortState.AuthenticationAborted = $true
+                    $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                }
                 $category = switch ($failure.FailureClass) {
                     'PermissionDenied' { 'AssignmentPermissionDenied' }
                     'AuthenticationFailed' { 'AssignmentAuthFailure' }

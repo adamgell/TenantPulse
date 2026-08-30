@@ -55,8 +55,16 @@ function Invoke-PulseSubscribedSkuLicensePlan {
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
-        [string] $TenantPseudonym
+        [string] $TenantPseudonym,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     $null = $ProfileId
     $null = $TenantPseudonym
@@ -74,6 +82,10 @@ function Invoke-PulseSubscribedSkuLicensePlan {
         $rows = @(Get-GraphObject -Context $Context -Type 'SubscribedSku' -Operation 'List' -ErrorAction Stop)
     } catch {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+        if ($failure.AbortCollection) {
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+        }
 
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass $failure.FailureClass -ReasonCode $failure.ReasonCode -Detail @{ operation = 'SubscribedSku.List' } `
