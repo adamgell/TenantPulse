@@ -9,6 +9,11 @@ trusting the transcription alone.
 The Task 4.5 full-catalog live gate: `Invoke-PulseAssessment -ProfileId ivy24 -Redact` run
 against the Ivy24 lab tenant from `phase4/t4.1-normalization`.
 
+This is historical evidence from 2026-08-17: it contains 28 findings under findings schema
+`1.0`, while current source carries 53 check descriptors. It proves the scrub and live behavior
+recorded for that exact run only. It is not a current-catalog artifact, a fresh live assessment,
+or proof of the later R5 enforced field-classification contract.
+
 **Incident note (fix round, honest disclosure - deliberately NOT reproducing any of the actual
 leaked values here, including in this note, since the entire point is that they must not
 persist anywhere in this repository):** the first committed cut of this file leaked real

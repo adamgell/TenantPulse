@@ -1,9 +1,11 @@
 # TenantPulse findings document schema
 
-Produced by `Invoke-PulseEvaluation -Store <store> -Checks <descriptors>` (Task 1.6). This
-is the canonical shape every renderer (T1.8's `Export-PulseReport`) and the scoring layer
-(T1.7) consume - it does not change shape after this task except for `coverage`/`scores`
-being filled in by T1.7 (they are already keyed here as `null` placeholders).
+Produced by `Invoke-PulseEvaluation -Store <store> -Checks <descriptors>` (Task 1.6). For
+findings schema `1.0`, this is the canonical shape every renderer (T1.8's
+`Export-PulseReport`) and the scoring layer (T1.7) consume; within that schema version only
+`coverage`/`scores` are filled in by T1.7 (they are already keyed here as `null`
+placeholders). A later product train may introduce an explicit versioned migration rather
+than silently changing schema `1.0`.
 
 `Invoke-PulseEvaluation` itself returns a `[pscustomobject]` with two top-level properties,
 only one of which is ever serialized:
@@ -22,6 +24,13 @@ built under the local operator key (`Get-PulseOperatorKey` / `Get-PulsePseudonym
 so a later render step (`-Redact` on `Invoke-PulseAssessment`, T1.8) can substitute
 pseudonyms for raw identities without re-running evaluation. A render-only path that only has
 a `Document` (no fresh `RedactionMap`) cannot redact.
+
+> **Current privacy boundary:** schema `1.0` predates the product-program R5 contract. It
+> does not require one of the five privacy classes for every tenant-derived field, and its
+> free-form `reason`/error and optional `RedactDetailKeys` behavior must not be represented as
+> complete de-identification. R5 must version and migrate the schema, loader, checks, snapshot
+> projections, and all renderers together before a findings file is considered protected by
+> classification rather than by the narrower mechanisms documented here.
 
 ## Document shape
 

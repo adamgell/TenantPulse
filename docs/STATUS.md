@@ -331,7 +331,7 @@ expected)**:
    immediately before publication. +2 regression tests (one per pipeline). Re-run against
    Ivy24 after the fix: clean (848 files scanned, zero raw-tenant-id or literal-ProfileId
    hits).
-2. **`-MaxParallel 4` (the default) is pathologically slow against a REAL tenant**: did
+2. **The former `-MaxParallel 4` path was pathologically slow against a REAL tenant**: it did
    not complete even a 20-policy real slice within 9m35s (killed); the identical slice
    completed `-Sequential` in 2.30s (0.12s/policy - even better than the T2.0 spike's own
    300ms mean). Root cause not fully established (see
@@ -339,12 +339,11 @@ expected)**:
    RunspacePool's per-worker GraphKit re-import means each worker's token cache and
    `GraphThrottleCoordinator` state are NOT shared, so four workers independently unaware
    of each other's throttle state hammer the tenant with no shared backoff. Fixed
-   pragmatically: `Invoke-PulseSettingsCatalogExpansionPipeline.ps1` (the one caller that
-   ever runs against a real, live tenant) now forces `-Sequential` unconditionally,
-   documented as a deliberate safe default pending the real root-cause fix.
-   `Invoke-PulseSettingsCatalogExpansion`'s own `-MaxParallel 4` default is UNCHANGED and
-   still fast/byte-identical against `-FromCapturedPayloads` data (no live Graph calls to
-   starve of shared state).
+   first by forcing the production caller to `-Sequential`. The later R1a implementation
+   deleted both `-MaxParallel` and `-Sequential`; current production is sequential-only.
+   That is the safe current posture, not proof that the RunspacePool identity/throttle
+   problem was root-caused. Parallel live fan-out remains unavailable until the producer
+   and consumer share and prove one identity/throttle coordination model.
 
 **`-ExpandSettings` default-on flip, evaluated and deliberately deferred**: the parameter's
 own pre-T2.7 docstring said this would flip on by default in T2.7 once the live gate
@@ -664,10 +663,25 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
 
 ## Not yet done
 
-1. **Evidence-Detail residual**: Reason text is still only capped; unmarked
-   person-identifying Detail keys on checks other than the marked Apple-ID /
-   TP.INT.0005 device-name keys stay unredacted under `-Redact`. Judgment boundary
-   (policy display names, role names) is deliberate, not unfinished code.
-2. **`TP.INT.0010`**, DESCOPED until GraphKit ARM exists. Id reserved.
-3. Phase 2b / scale (not this catalog): admin templates,
-   `-ExpandSettings` default-on, dataset streaming.
+1. **R5 privacy contract — open (0 of 53 checks migrated to an enforced field-classification
+   schema).** Current protections are useful precursors, not the R5 contract:
+   `RedactDetailKeys` is optional, tenant-derived reason/error text can remain free-form,
+   render-only cannot reconstruct the in-memory redaction map, and the external gate-artifact
+   scrub intentionally destroys safe values. Manifest-recorded expansion paths are hash-checked
+   after joining but are not yet constrained to the snapshot root. R5 still requires one
+   versioned classification contract across all checks, engine/snapshot projections, and every
+   renderer; path-containment plus mutation tests; and a fresh protected-live artifact review.
+2. **R6 scale/default contract — open (0 of 9 end-to-end criteria closed).** Current perf
+   fixtures are useful baselines but are excluded from normal CI, measure endpoint heap deltas
+   rather than observed process peaks, and do not span collection through rendering. GraphKit
+   currently materializes all paged rows before TenantPulse receives them; TenantPulse then
+   materializes dataset writes/reads, evaluator clones, renderer input, manifest rewrites, and
+   expansion families. R6 requires a cross-repository bounded producer/consumer train before
+   expansion can become the default. Sequential-only remains the safe live posture until shared
+   identity and throttle coordination is root-caused and proven.
+3. **`TP.INT.0010`**, reserved until a separate GraphKit ARM provider exists and a protected
+   diagnostic-settings read proves its service contract. ARM must not enter the Microsoft Graph
+   descriptor catalog.
+4. **R1b/R4 coverage:** Administrative Template expansion, the deferred expansion-summary
+   dataset, broader assignment/group/role/application-registration coverage, and a supported
+   non-JSON renderer remain open.

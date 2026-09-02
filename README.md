@@ -4,11 +4,11 @@
 [![PSGallery Downloads](https://img.shields.io/powershellgallery/dt/TenantPulse)](https://www.powershellgallery.com/packages/TenantPulse)
 [![PowerShell 7.4+](https://img.shields.io/badge/PowerShell-7.4%2B-blue)](https://github.com/PowerShell/PowerShell)
 
-> Read-only tenant health assessment for Microsoft Intune and Entra — a versioned check catalog, deterministic scoring, and pseudonymized findings reports, built on [GraphKit](https://github.com/AdamGell/GraphKit).
+> Read-only tenant health assessment for Microsoft Intune and Entra — a versioned check catalog, deterministic scoring, and findings reports with opt-in identity pseudonymization, built on [GraphKit](https://github.com/AdamGell/GraphKit).
 
 TenantPulse is a read-only PowerShell module that assesses a Microsoft Intune/Entra
-tenant's health against a versioned set of checks, and produces a deterministic,
-pseudonymized, scored findings report. It never writes to a tenant: every Graph read goes
+tenant's health against a versioned set of checks, and produces a deterministic, scored
+findings report with opt-in identity pseudonymization. It never writes to a tenant: every Graph read goes
 through [GraphKit](https://github.com/AdamGell/GraphKit)'s read-class descriptors
 (`ThrottleClass 'Read'`, `ReplayPolicy 'Safe'`) - TenantPulse never calls `Connect-MgGraph`,
 never uses the Microsoft Graph PowerShell SDK, and never constructs a Graph URI of its own.
@@ -68,7 +68,7 @@ you decide where `-OutputPath` should point).
 
 | Command | What it does |
 |---|---|
-| `Get-PulseTenantSnapshot` | Collects a read-only, pseudonymized snapshot of tenant data through GraphKit and writes it to a snapshot store on disk. The only command that ever talks to Graph. |
+| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
 | `Get-PulseCheckCatalog` | Lists every check descriptor in the catalog (id, title, category, severity, authorities) as a lightweight, read-only view - useful for discovering what `-IncludeCategory`/`-IncludeCheck` values exist before running an assessment. |
 | `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render a findings report. Supports `-Redact` to pseudonymize evidence identities in the rendered report. |
 | `Invoke-PulseCheck` | Runs a scoped subset of checks (by id or category) against a fresh or existing snapshot - the same pipeline as `Invoke-PulseAssessment`, narrowed to exactly the checks you name. |
@@ -103,14 +103,17 @@ silently wrong Pass or Fail.
 ## Snapshot data is sensitive at rest
 
 A snapshot store (`Get-PulseTenantSnapshot`'s output, or the `snapshot/` subdirectory
-`Invoke-PulseAssessment` writes alongside its findings report) contains **raw, unredacted
-tenant data** - device names, policy definitions, configuration values, and more, exactly as
-Graph returned them. The manifest's `tenant` field and every collection-failure reason are
-pseudonymized (an HMAC of the tenant id under a local operator key - see
-`about_TenantPulse` for the full pseudonymization contract), but the *dataset contents
-themselves are not*. Treat a snapshot directory the same way you would treat a Graph API
-export: store it somewhere access-controlled, do not commit it to source control, and clean
-it up when you are done with it.
+`Invoke-PulseAssessment` writes alongside its findings report) contains **sensitive
+tenant-derived data** - device names, policy definitions, configuration values, and more.
+It is not a byte-for-byte Graph response: GraphKit provenance is removed, the manifest's
+`tenant` field and collection-failure reasons are pseudonymized, exact tenant-id matches are
+redacted, and typed-policy fields explicitly marked `Sensitive` are replaced before
+persistence. Those narrow protections do **not** make a snapshot de-identified or safe to
+share. Most other collected values remain available to evaluation, while the typed-policy
+and Settings Catalog classifiers also redact some unknown or complex value shapes
+conservatively when they cannot prove the content safe. Treat a snapshot directory the same
+way you would treat a raw Graph API export: store it somewhere access-controlled, do not
+commit it to source control, and clean it up when you are done with it.
 
 **Where files are written:** every command that writes output takes an explicit
 `-OutputPath` (or, for `Get-PulseTenantSnapshot`, a required output directory) - TenantPulse
@@ -129,27 +132,29 @@ a pseudonym is required to reproduce it.
 
 ## Sharing a findings artifact
 
-`-Redact` pseudonymizes evidence *identities* only (the `evidence[].identity`/`sortKey`
-values a finding is keyed on) - it does **not** touch `evidence[].detail`, where most of a
-finding's real, free-text tenant data actually lives (device/policy display names, role
-names, setting values, and similar). A `-Redact` render is safe to share with someone who
-needs to see *which* checks passed or failed and roughly why, but is **not** on its own
-safe to post somewhere public or hand to someone outside the tenant's own trust boundary -
-`detail` can still carry real names.
+`-Redact` always pseudonymizes evidence identities. It replaces a sort key only when that
+key is itself an exact entry in the redaction map (including the usual default where sort key
+equals identity); a custom composite sort key can still retain an identity fragment. It also
+pseudonymizes the small set of `evidence[].detail` keys that their producing rules explicitly
+mark through `RedactDetailKeys`. It does **not** enforce a complete classification over every
+Detail value, reason, error, label, sort key, or future renderer field. A `-Redact` render can
+therefore still contain tenant-derived names or free text and is **not** on its own safe to post
+publicly or hand outside the tenant's trust boundary.
 
 For a findings JSON you actually intend to publish or share outside that boundary (e.g. a
 committed `docs/gates/*.json` reference artifact), run it through
-`scripts/Protect-PulseGateArtifact.ps1` first - an exhaustive scrub that replaces every
+`scripts/Protect-PulseGateArtifact.ps1` first - a required gate-artifact scrub that replaces every
 string leaf inside every finding's `evidence[].detail` with a stable pseudonym, no
 per-field-name allowlist (see that script's own docstring for why a field-name allowlist is
-exactly the failure mode it exists to avoid). That is the actual "safe to share" bar; a
-`-Redact` render alone is not.
+exactly the failure mode it exists to avoid). Then review the resulting artifact under the
+intended sharing boundary. The script is not a general PII classifier and does not prove the
+later R5 privacy contract; a `-Redact` render alone is even narrower.
 
-The raw **snapshot store** (`./out/snapshot/` - see **Snapshot data is sensitive at rest**
-above) is local-only and never safe to share in any form - it is the raw, unredacted Graph
-data itself, not a findings report. Neither `-Redact` nor `Protect-PulseGateArtifact.ps1`
-touch it; there is no supported way to scrub a snapshot store for sharing, only to delete
-it when you are done.
+The **snapshot store** (`./out/snapshot/` - see **Snapshot data is sensitive at rest** above)
+is local-only and never safe to share in any form. It is the sensitive collection/evaluation
+source, not a findings report. Neither report-time `-Redact` nor
+`Protect-PulseGateArtifact.ps1` transforms it into a shareable artifact; there is no
+supported snapshot-sharing scrub, only controlled storage and cleanup when you are done.
 
 ## CIS compliance disclaimer
 
@@ -372,11 +377,11 @@ phase surfaced rather than hid:
    Expansion`/`Invoke-PulseTypedPolicyExpansion`) accumulate every row for every policy in
    an in-memory list before merging, sorting, and publishing the family's `.jsonl` file -
    a fragment-then-merge streaming path (writing and merging row fragments incrementally
-   instead of holding the whole family in memory at once) has not been built yet. At the
-   ~27 rows/policy the T2.7 perf container's own 5,000-policy synthetic corpus produces per
-   `settingDefinitionId` cycling, a realistic 5,000-policy tenant's Settings Catalog family
-   alone would hold on the order of 135,000 rows in memory at once during expansion -
-   budget accordingly for very large tenants until this streams.
+   instead of holding the whole family in memory at once) has not been built yet. The T2.7
+   5,000-policy synthetic fixture creates one setting per policy and therefore measures
+   5,000 rows, not 135,000. Real tenants may carry many settings per policy, so that fixture
+   is a regression/capacity baseline rather than an end-to-end peak-memory proof; budget
+   accordingly for large tenants until collection and expansion stream.
 
 Separately, capturing the Settings Catalog definitions corpus (`Save-PulseSettingDefinition
 Corpus`, the per-tenant reference index every Settings Catalog row's `settingName`/
