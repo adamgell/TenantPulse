@@ -43,6 +43,33 @@ without decisive monotonic proof is `Error`, not `NotApplicable`. Findings schem
 schema `2.0.0`, and scoring model `1.0` are unchanged. These are deterministic current-source and
 package-test claims only; they are not new live-service, merged-release, or publication claims.
 
+The current product-program boundary is narrower than a finished successor release:
+
+- **The implemented R1a foundation is locally package-first proven; R1a acceptance and remote
+  integration remain open.** Structured dataset outcomes are available to the evaluator but do not
+  yet migrate into a versioned findings/renderer contract as the governing R1a text requires. That
+  product contract still needs an explicit decision. No current verified evidence establishes a
+  remote refresh/push, exact remote-head review, merge, or merged-main CI for the runtime tree.
+  Nothing in this paragraph promotes it over the immutable public `0.2.0` package.
+- **R1b is partial.** Settings Catalog assignments and typed include/exclude intent exist, but
+  Administrative Template expansion, the governing program's expansion-summary dataset, protected
+  live proof with populated assignment targets, and stale pre-implementation map/reason text remain
+  open. A local Phase 2 task once descoped that summary; the later governing R1b contract supersedes
+  that task-local decision.
+- **R2 is partial.** Four real Read/Safe provider plans exist, but the static dataset map still
+  publishes synthetic `Pending` / `Walk` tuples and the current composite outcomes do not preserve
+  complete operation provenance. Known certainty defects remain in Endpoint Security template
+  handling, unknown BitLocker/LAPS values, and the independent current-versus-legacy baseline paths.
+  Protected-live proof of the BitLocker raw-value mapping and LAPS template identity is also still
+  required before those Pending representations can close.
+- **R3 is partial.** Runtime correctly performs no network request and returns
+  `PlatformUnavailable`, but the static map and outcome provenance still describe a GraphKit `Get`
+  operation that never occurs.
+- **R4 is open.** Bounded group closure, application-registration credential coverage, complete
+  Intune assignment awareness, exclusion-only assignment semantics, deterministic evidence caps,
+  and a supported renderer beyond JSON remain to be implemented and proven. R5 privacy and R6 scale
+  are separately open in `docs/STATUS.md`.
+
 ## Quick start
 
 ```powershell
@@ -237,9 +264,11 @@ the ScuBA/CISA-cited Conditional Access, privileged-role, and credential-hygiene
 (`TP.ENT.0017`-`0024`). Not a comprehensive tenant-health product - a deliberately scoped,
 verified-against-a-real-tenant catalog.
 
-"Live" below means the exact packaged TenantPulse `0.2.0` dataset and evaluation path completed
-against a live tenant; it is separate from exact-SHA CI and publication. "Live (partial)" means the path
-completed but the service evidence contained explicit gaps, so evaluation failed closed.
+"Live" below is historical evidence for the exact immutable TenantPulse `0.2.0` package only: its
+dataset and evaluation path completed against a live tenant. It is separate from exact-SHA CI and
+publication, and it does **not** prove current unreleased-source acceptance or closure of R1b-R6.
+"Live (partial)" means the path completed but the service evidence contained explicit gaps, so
+evaluation failed closed.
 "Platform unavailable" means TenantPulse
 returns an explicit non-collecting disposition because the service contract needed for a
 supported read does not exist. A raw `Pending = $true` map placeholder is still never sent to
@@ -305,24 +334,38 @@ provider/permission outcome and the check fails closed rather than inventing a l
 | TP.INT.0030 | Intune.Compliance | Medium | Live | Fleet compliance rate below acceptable threshold |
 | TP.INT.0031 | Intune.SettingsCatalog | Critical | Live | BitLocker CSP settings present and correct across all Settings Catalog policies |
 
-The four composite rows retain synthetic `Pending` map placeholders because they do not map
-to a single Graph operation. TenantPulse's default provider registry intercepts those names
-and composes only GraphKit Read/Safe primitives. The Windows data-processor placeholder is
-intercepted by a no-network plan that emits `PlatformUnavailable`. The cleanup rule is no
-longer Pending: GraphKit `0.3.0` ships its direct Read/Safe collection descriptor.
+The four composite rows still retain synthetic `Pending` / `Walk` map tuples because they do not
+map to a single Graph operation. Current runtime dispatch is safe: TenantPulse's default provider
+registry intercepts them and composes only GraphKit Read/Safe primitives. That safety does not make
+the placeholder schema final; removing the invented production tuples and recording every actual
+primitive in structured outcomes is open R2 work. The Windows data-processor runtime similarly
+performs no network request and emits `PlatformUnavailable`, but its static map and outcome
+provenance still claim a GraphKit `Get`; correcting that representation is open R3 work. The cleanup
+rule is no longer Pending: GraphKit `0.3.0` ships its direct Read/Safe collection descriptor.
 
-What the catalog does **not** cover, honestly, as of TenantPulse 0.2.0: group-**membership** expansion for
-Conditional Access exclusions (only direct user/group/role references resolve today - a group
-assigned to a CA exclusion is read as a group reference, not expanded to its members, because no
-group-members dataset exists yet; several checks document this as a known limitation, not a
-silent gap), assignment verification for every Intune policy family (Settings Catalog and the
-security-baseline provider do preserve assignment disposition; other existence checks may not),
-transitive/group-assigned role-assignment expansion
-for `TP.ENT.0021`'s privileged-role count (direct assignments only - documented in that check's
-own evidence text), `TP.ENT.0019`'s scope (only `servicePrincipal` credentials are read - the
-GraphKit `0.3.0` catalog has no `Application` type, so app-**registration** client secrets/certificates are not
-visible to this check at all until a future GraphKit release adds one; evidence is also capped to
-the top 50 worst offenders by design, not exhaustive), and a rendering format other than JSON.
+What the current catalog does **not** cover, honestly:
+
+- **Entra relationship closure.** Conditional Access group references are not expanded with
+  policy/root attribution, bounds, cycle handling, or partial certainty. This can affect
+  `TP.ENT.0003` status and the evidence/certainty of `TP.ENT.0004`, `0005`, `0017`, and `0018`.
+  `TP.ENT.0002`, `0020`, and `0021` count direct principals or a group object rather than unique
+  effective members. `TP.ENT.0022` must continue to count one permanent group assignment as one
+  violation; future expansion is bounded blast-radius evidence, not multiplication of that finding.
+- **Application registrations.** `TP.ENT.0019` reads only `servicePrincipal` credentials because
+  GraphKit `0.3.0` and the current successor tree have no `Application.List` operation. Ordinary app
+  registration secrets/certificates are invisible. An all-unparseable credential population can
+  also currently reach Pass; R4 must make that result `NotApplicable` unless a proven offender
+  already establishes Fail.
+- **Intune assignment awareness.** `TP.INT.0002`, `0004`, `0011`, `0012`, `0014`, `0015`, `0017`,
+  and `0018` can still evaluate policy existence/configuration without authoritative positive
+  assignment proof. `TP.INT.0028` has assignment-aware evaluator logic, but its producer does not
+  yet collect the required authoritative full-object/assignment shape. The shared presence and
+  conflict indexes also treat exclusion-only scope as assigned or possibly overlapping instead of
+  effectively targeting nobody.
+- **Bounded output and presentation.** Many affected findings still lack a deterministic evidence
+  cap with emitted/omitted counts. The governing R4 design requires a supported renderer beyond
+  JSON, but no specific non-JSON format/output contract has been selected and none has been
+  implemented or proven.
 
 ## Settings expansion (Phase 2)
 

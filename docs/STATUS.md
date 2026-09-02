@@ -370,13 +370,14 @@ total as a snapshot's own manifest grows - a real cost a live 781-policy run pay
 policy). See `docs/spike/2026-08-16-t27-perf-container.md` for the full recorded numbers,
 hardware, and method.
 
-**Ledger: resolved or explicitly descoped Phase 2 data**:
+**Phase 2 task ledger, reconciled with the later governing product program**:
 
-- The orphaned **expansion-summary dataset** is explicitly **descoped**. No report or check
-  consumes it, and the authoritative per-family counts and statuses already live in the
-  snapshot manifest's `expansions` entries. A second derived persisted aggregate would add
-  synchronization risk without adding information. If a future consumer needs a summary,
-  derive it from those manifest entries under that consumer's own contract.
+- The Phase 2 task explicitly **descoped** the orphaned expansion-summary dataset because no report
+  or check consumed it and per-family counts/statuses already existed in the manifest. That was the
+  accurate local-task disposition at the time. The later 2026-08-19 governing product-program R1b
+  contract explicitly requires the deferred expansion-summary dataset, so the current program
+  disposition is **open**; the later requirement supersedes the earlier task-local decision without
+  rewriting its historical rationale.
 - Typed compliance and device-configuration assignment records now populate include/exclude
   `intent` from the assignment target, preserve filter metadata, sort deterministically, and
   gap a policy rather than publishing a false unassigned row when a target is malformed.
@@ -663,7 +664,40 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
 
 ## Not yet done
 
-1. **R5 privacy contract — open (0 of 53 checks migrated to an enforced field-classification
+1. **R1a outcome contract and remote integration — partial.** The implemented foundation is
+   package-first proven only in the isolated local worktree. Structured dataset outcomes reach
+   partial-aware evaluation, but they are not serialized through a versioned findings/renderer
+   contract as the governing R1a criterion requires; that product decision remains open. No current
+   verified evidence establishes the candidate's reviewed exact remote head, remote matrix/gitleaks
+   result, merge, or merged-main CI. The docs-only reconciliation after that runtime tree does not
+   alter the frozen candidate's package-producing bytes.
+2. **R1b assignment and expansion completion — partial.** Settings Catalog assignments and typed
+   include/exclude intent exist. Administrative Template expansion, the now-governing
+   expansion-summary dataset, a protected live shape/count proof with populated assignment targets,
+   and stale pre-implementation map/reason text remain open. Existing end-to-end fixtures use
+   authoritative empty assignments and therefore do not prove overlap behavior with populated targets.
+3. **R2 composite-provider representation and certainty — partial.** Four production provider plans
+   already compose official GraphKit Read/Safe primitives, so no generic GraphKit `Walk` operation is
+   required. The dataset map nevertheless publishes invented `Pending` / `Walk` tuples, QA currently
+   blesses them, and outcome provenance is incomplete. Endpoint Security can skip malformed template
+   metadata and publish authoritative empty; unknown BitLocker/LAPS values can become false decisions;
+   and a legacy-baseline read failure suppresses the independent current baseline surface. The
+   protected-live proof of the raw BitLocker value mapping and LAPS template identity remains
+   mandatory before those Pending representations can close; the historical `0.2.0` table does not
+   prove that mapping.
+4. **R3 platform-unavailable representation — partial.** The Windows data-processor runtime correctly
+   performs no network work and evaluates as `Skipped` / `PlatformUnavailable` / `NotApplicable`.
+   Its static map and structured outcome still falsely name GraphKit and `Get`; closure requires a
+   strict disposition, `Provider = TenantPulse`, empty operations, and no descriptor fallback.
+5. **R4 coverage, relationships, and presentation — open.** Required work includes bounded,
+   policy/root-scoped Conditional Access and role group closure; unique effective role counting;
+   GraphKit `Application.List` plus combined app/service-principal credential hygiene; authoritative
+   assignment handling for `TP.INT.0002`, `0004`, `0011`, `0012`, `0014`, `0015`, `0017`, `0018`,
+   and producer-complete `0028`; exclusion-only semantics; deterministic evidence caps with omitted
+   counts; and one supported non-JSON renderer. The all-unparseable `TP.ENT.0019` population must
+   become `NotApplicable`, not Pass. `TP.ENT.0022` keeps one group assignment as one violation;
+   expansion there is blast-radius evidence only.
+6. **R5 privacy contract — open (0 of 53 checks migrated to an enforced field-classification
    schema).** Current protections are useful precursors, not the R5 contract:
    `RedactDetailKeys` is optional, tenant-derived reason/error text can remain free-form,
    render-only cannot reconstruct the in-memory redaction map, and the external gate-artifact
@@ -671,7 +705,7 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    after joining but are not yet constrained to the snapshot root. R5 still requires one
    versioned classification contract across all checks, engine/snapshot projections, and every
    renderer; path-containment plus mutation tests; and a fresh protected-live artifact review.
-2. **R6 scale/default contract — open (0 of 9 end-to-end criteria closed).** Current perf
+7. **R6 scale/default contract — open (0 of 9 end-to-end criteria closed).** Current perf
    fixtures are useful baselines but are excluded from normal CI, measure endpoint heap deltas
    rather than observed process peaks, and do not span collection through rendering. GraphKit
    currently materializes all paged rows before TenantPulse receives them; TenantPulse then
@@ -679,9 +713,6 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    expansion families. R6 requires a cross-repository bounded producer/consumer train before
    expansion can become the default. Sequential-only remains the safe live posture until shared
    identity and throttle coordination is root-caused and proven.
-3. **`TP.INT.0010`**, reserved until a separate GraphKit ARM provider exists and a protected
+8. **`TP.INT.0010`**, reserved until a separate GraphKit ARM provider exists and a protected
    diagnostic-settings read proves its service contract. ARM must not enter the Microsoft Graph
    descriptor catalog.
-4. **R1b/R4 coverage:** Administrative Template expansion, the deferred expansion-summary
-   dataset, broader assignment/group/role/application-registration coverage, and a supported
-   non-JSON renderer remain open.
