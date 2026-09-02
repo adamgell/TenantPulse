@@ -220,65 +220,67 @@ function Get-PulseCaExclusionContext {
     $malformedDeclaredAccounts = [string[]] @($malformed)
     [System.Array]::Sort($malformedDeclaredAccounts, [System.StringComparer]::Ordinal)
 
-    # RESOLVED GROUP EXCLUSIONS (point 4 above): forward-compatible shape only - no
-    # DatasetMap.psd1 entry backs -Datasets.groupMembers yet (descriptor-pending), so this
-    # branch is dead in every real collection today and GroupExclusionsResolved is always
-    # $false. It stays real, exercised code (not a stub the whole way down) so the moment a
-    # group-membership dataset ships, wiring it into -Datasets.groupMembers is the only
-    # change needed here.
-    # Resolves the flat, de-duplicated, ordinally-sorted union of group-member ids reachable
-    # through every policy's excludeGroups list whose own `state` equals -PolicyState -
-    # shared by both the enforced ($resolvedGroupExclusions, -PolicyState 'enabled') and
-    # report-only ($reportOnlyExclusions, -PolicyState 'enabledForReportingButNotEnforced')
-    # resolutions below so the two can never independently drift on how a group is matched
-    # to its members. Kept as two SEPARATE call sites/output fields rather than one merged
-    # set - see this file's own ENFORCED VS. REPORT-ONLY GROUP EXCLUSIONS ARE KEPT SEPARATE
-    # docstring section for why merging would overstate protection.
+    # RESOLVED GROUP EXCLUSIONS: -Datasets.groupMembers is either the dictionary fixture
+    # shape or Invoke-PulseGroupClosurePlan rows. ConvertTo-PulseGroupMemberMap is the one
+    # normalizer. Report-only excludeGroups never fold into ExcludedIdentifiers.
     function Resolve-GroupExclusionUnion {
         param(
             [hashtable] $Datasets,
-            [string] $PolicyState
+            [string] $PolicyState,
+            $MemberMap
         )
 
         $excludedGroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         if ($Datasets.ContainsKey('conditionalAccessPolicies') -and $null -ne $Datasets.conditionalAccessPolicies) {
             foreach ($policy in @($Datasets.conditionalAccessPolicies)) {
-                if ($policy.state -ne $PolicyState) { continue }
-                foreach ($groupId in @($policy.conditions.users.excludeGroups)) {
+                $state = [string] (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'state')
+                if ($state -ne $PolicyState) { continue }
+                $conditions = Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'conditions'
+                $users = Get-PulseSettingsCatalogValueProperty -Node $conditions -PropertyName 'users'
+                foreach ($groupId in @(Get-PulseSettingsCatalogValueProperty -Node $users -PropertyName 'excludeGroups')) {
                     if ($groupId) { $excludedGroupIds.Add([string] $groupId) | Out-Null }
                 }
             }
         }
 
         $memberUnion = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        $groupMembers = $Datasets.groupMembers
         foreach ($groupId in $excludedGroupIds) {
-            if ($groupMembers -is [System.Collections.IDictionary] -and $groupMembers.Contains($groupId)) {
-                foreach ($memberId in @($groupMembers[$groupId])) {
+            if ($MemberMap -and $MemberMap.Contains($groupId)) {
+                foreach ($memberId in @($MemberMap[$groupId])) {
                     if ($memberId) { $memberUnion.Add([string] $memberId) | Out-Null }
                 }
             }
         }
 
-        $result = [string[]] @($memberUnion)
-        [System.Array]::Sort($result, [System.StringComparer]::Ordinal)
-        # Comma-protects the array return - see ConvertTo-PulseCaPolicyView's own
-        # ARRAY-RETURN UNROLLING TRAP docstring for why an unprotected `return $arr` would
-        # silently collapse a zero- or one-element result.
-        return , $result
+        return , (ConvertTo-PulseOrdinalStringArray -Values $memberUnion)
     }
 
     $groupExclusionsResolved = $false
+    $groupExclusionsComplete = $false
     $resolvedGroupExclusions = @()
     $reportOnlyExclusions = @()
-    $groupExclusionNote = 'Group-based exclusion (excludeGroups membership) cannot be resolved: no group-membership dataset is collected yet (descriptor-pending). Only excludeUsers-based exclusion is verifiable today.'
+    $groupExclusionNote = 'Group-based exclusion (excludeGroups membership) cannot be resolved: no group-membership dataset is collected yet. Only excludeUsers-based exclusion is verifiable today.'
+    $groupExclusionCaps = $null
+    $groupExclusionSampled = $false
 
+    $groupMemberSource = $null
     if ($Datasets -and $Datasets.ContainsKey('groupMembers') -and $null -ne $Datasets.groupMembers) {
+        $groupMemberSource = $Datasets.groupMembers
+    }
+    $groupMemberMap = ConvertTo-PulseGroupMemberMap -GroupMembers $groupMemberSource
+    if ($groupMemberMap.Present) {
         $groupExclusionsResolved = $true
-        $groupExclusionNote = $null
+        $groupExclusionsComplete = [bool] $groupMemberMap.Complete
+        $groupExclusionSampled = [bool] $groupMemberMap.Sampled
+        $groupExclusionCaps = $groupMemberMap.Caps
+        if ($groupExclusionsComplete) {
+            $groupExclusionNote = $null
+        } else {
+            $groupExclusionNote = 'Group-based exclusion membership is sampled or truncated; caps are visible and this context cannot prove complete excludeGroups reachability.'
+        }
 
-        $resolvedGroupExclusions = Resolve-GroupExclusionUnion -Datasets $Datasets -PolicyState 'enabled'
-        $reportOnlyExclusions = Resolve-GroupExclusionUnion -Datasets $Datasets -PolicyState 'enabledForReportingButNotEnforced'
+        $resolvedGroupExclusions = Resolve-GroupExclusionUnion -Datasets $Datasets -PolicyState 'enabled' -MemberMap $groupMemberMap.Map
+        $reportOnlyExclusions = Resolve-GroupExclusionUnion -Datasets $Datasets -PolicyState 'enabledForReportingButNotEnforced' -MemberMap $groupMemberMap.Map
     }
 
     $union = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -287,8 +289,7 @@ function Get-PulseCaExclusionContext {
     foreach ($id in $activeGlobalAdmins) { if ($id) { $union.Add([string] $id) | Out-Null } }
     foreach ($id in $resolvedGroupExclusions) { if ($id) { $union.Add([string] $id) | Out-Null } }
 
-    $excludedIdentifiers = [string[]] @($union)
-    [System.Array]::Sort($excludedIdentifiers, [System.StringComparer]::Ordinal)
+    $excludedIdentifiers = ConvertTo-PulseOrdinalStringArray -Values $union
 
     return [pscustomobject]@{
         BreakGlassAccounts        = $breakGlass
@@ -296,9 +297,13 @@ function Get-PulseCaExclusionContext {
         ActiveGlobalAdmins        = $activeGlobalAdmins
         MalformedDeclaredAccounts = $malformedDeclaredAccounts
         GroupExclusionsResolved   = $groupExclusionsResolved
+        GroupExclusionsComplete   = $groupExclusionsComplete
+        GroupExclusionSampled     = $groupExclusionSampled
+        GroupExclusionCaps        = $groupExclusionCaps
         ResolvedGroupExclusions   = $resolvedGroupExclusions
         ReportOnlyExclusions      = $reportOnlyExclusions
         GroupExclusionNote        = $groupExclusionNote
         ExcludedIdentifiers       = $excludedIdentifiers
+        GroupMemberMap            = $groupMemberMap.Map
     }
 }

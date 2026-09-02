@@ -36,10 +36,11 @@
     non-empty includeGroups/includeRoles now fails closed (treated as reachable, not
     exempted) instead. This function's Reason notes when an exemption applied.
 
-    HONEST LIMITATION: exclusion matching is against conditions.users.excludeUsers only -
-    a break-glass account excluded only via GROUP membership (excludeGroups) is not detected
-    here and will show as a gap even if it is genuinely protected. This mirrors the read-only,
-    no-group-expansion scope of Task 1.9; group-based exclusion resolution is future work.
+    GROUP EXCLUSIONS: when -Datasets.groupMembers is present, an account listed in a
+    policy's excludeGroups (transitively) is treated as excluded. Report-only policies
+    never satisfy enforcement. A truncated group still keeps a member that was observed
+    (group-excluded break-glass stays excluded) and never invents a Pass for unobserved
+    members.
 #>
 
 function Test-PulseBreakGlassExcluded {
@@ -109,7 +110,20 @@ function Test-PulseBreakGlassExcluded {
             }
 
             $excludeUsers = @($policy.conditions.users.excludeUsers)
-            if ($excludeUsers -notcontains $account) {
+            $excluded = $excludeUsers -contains $account
+            if (-not $excluded) {
+                $excludeGroupsRaw = $policy.conditions.users.excludeGroups
+                $excludeGroups = if ($null -eq $excludeGroupsRaw) { @() } else { @($excludeGroupsRaw) }
+                $memberMap = $exclusionContext.GroupMemberMap
+                foreach ($groupId in $excludeGroups) {
+                    if ([string]::IsNullOrWhiteSpace([string] $groupId)) { continue }
+                    if ($memberMap -and $memberMap.Contains([string] $groupId) -and (@($memberMap[[string] $groupId]) -contains $account)) {
+                        $excluded = $true
+                        break
+                    }
+                }
+            }
+            if (-not $excluded) {
                 $unexcludedPolicyNames += [string] $policy.displayName
             }
         }

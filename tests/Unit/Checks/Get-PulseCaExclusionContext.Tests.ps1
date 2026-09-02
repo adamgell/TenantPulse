@@ -185,6 +185,7 @@ Describe 'Get-PulseCaExclusionContext' {
         }
 
         $result.GroupExclusionsResolved | Should -BeTrue
+        $result.GroupExclusionsComplete | Should -BeTrue
         $result.GroupExclusionNote | Should -BeNullOrEmpty
         $result.ResolvedGroupExclusions | Should -Contain 'member-guid-1'
         $result.ResolvedGroupExclusions | Should -Contain 'member-guid-2'

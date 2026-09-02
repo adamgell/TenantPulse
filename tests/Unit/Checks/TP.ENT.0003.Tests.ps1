@@ -75,7 +75,8 @@ BeforeAll {
             [string[]] $ExcludeUsers = @(),
             [string[]] $IncludeUsers = @(),
             [string[]] $IncludeGroups = @(),
-            [string[]] $IncludeRoles = @()
+            [string[]] $IncludeRoles = @(),
+            [string[]] $ExcludeGroups = @()
         )
         [pscustomobject]@{
             id          = "ca-$DisplayName"
@@ -87,6 +88,7 @@ BeforeAll {
                     includeUsers  = $IncludeUsers
                     includeGroups = $IncludeGroups
                     includeRoles  = $IncludeRoles
+                    excludeGroups = $ExcludeGroups
                 }
             }
         }
@@ -247,4 +249,69 @@ Describe 'TP.ENT.0003 - Break-glass accounts exist and are excluded from Conditi
 
         $finding.status | Should -Be 'Fail'
     }
-}
+
+    It 'Pass: a break-glass account excluded only via excludeGroups membership stays excluded' {
+        $bg = $script:bg1Guid
+        $finding = InModuleScope TenantPulse -ArgumentList $bg {
+            param($bg)
+            Test-PulseBreakGlassExcluded -Datasets @{
+                conditionalAccessPolicies = @(
+                    [pscustomobject]@{
+                        displayName = 'Block Legacy Auth'
+                        state       = 'enabled'
+                        conditions  = [pscustomobject]@{
+                            users = [pscustomobject]@{
+                                includeUsers  = @('All')
+                                excludeUsers  = @()
+                                includeGroups = @()
+                                includeRoles  = @()
+                                excludeGroups = @('grp-breakglass')
+                            }
+                        }
+                    }
+                )
+                groupMembers = @{ 'grp-breakglass' = @($bg) }
+            } -Context @{ BreakGlassAccounts = @($bg) }
+        }
+        $finding.status | Should -Be 'Pass'
+    }
+
+    It 'does not treat report-only excludeGroups as enforcement' {
+        $bg = $script:bg1Guid
+        $finding = InModuleScope TenantPulse -ArgumentList $bg {
+            param($bg)
+            Test-PulseBreakGlassExcluded -Datasets @{
+                conditionalAccessPolicies = @(
+                    [pscustomobject]@{
+                        displayName = 'Report Only'
+                        state       = 'enabledForReportingButNotEnforced'
+                        conditions  = [pscustomobject]@{
+                            users = [pscustomobject]@{
+                                includeUsers  = @('All')
+                                excludeUsers  = @()
+                                includeGroups = @()
+                                includeRoles  = @()
+                                excludeGroups = @('grp-breakglass')
+                            }
+                        }
+                    }
+                    [pscustomobject]@{
+                        displayName = 'Enforced'
+                        state       = 'enabled'
+                        conditions  = [pscustomobject]@{
+                            users = [pscustomobject]@{
+                                includeUsers  = @('All')
+                                excludeUsers  = @()
+                                includeGroups = @()
+                                includeRoles  = @()
+                                excludeGroups = @()
+                            }
+                        }
+                    }
+                )
+                groupMembers = @{ 'grp-breakglass' = @($bg) }
+            } -Context @{ BreakGlassAccounts = @($bg) }
+        }
+        $finding.status | Should -Be 'Fail'
+    }
+ }
