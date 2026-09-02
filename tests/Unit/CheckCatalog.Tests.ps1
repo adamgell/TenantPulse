@@ -999,6 +999,210 @@ Describe 'Test-PulseCheckDescriptor' {
             (@($errors) -join "`n") | Should -Match 'Data\.PartialDatasets: canonical dataset identity cannot be verified because the shared dataset map is unavailable\.'
         }
     }
+
+    Context 'References.Research path and heading anchors (DOC1)' {
+        BeforeAll {
+            $script:researchBaseDescriptor = @{
+                Id         = 'TP.ENT.0099'
+                Title      = 'Valid'
+                Category   = 'Entra.ConditionalAccess'
+                Severity   = 'High'
+                Effort     = 'Low'
+                Impact     = 'High'
+                Data       = @{ Datasets = @('conditionalAccessPolicies'); Gates = @() }
+                Rule       = @{ Type = 'Function'; Function = 'Test-PulseFixtureRule' }
+                Consulting = @{
+                    WhatItMeans  = 'x'
+                    WhyItMatters = 'x'
+                    Remediation  = @('x')
+                    PortalLinks  = @('https://entra.microsoft.com/')
+                }
+                Origin     = $null
+            }
+        }
+
+        It 'accepts a relative research path whose unique heading anchor exists under RepoRoot' {
+            $repoRoot = Join-Path $TestDrive 'research-ok'
+            $docDir = Join-Path $repoRoot 'docs/research/iha-v2'
+            New-Item -ItemType Directory -Path $docDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $docDir 'sample.md') -Value @"
+# Sample
+## Unique Heading
+"@ -Encoding utf8NoBOM
+
+            $errors = InModuleScope TenantPulse -ArgumentList $script:researchBaseDescriptor, $repoRoot {
+                param($base, $root)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.References = @{
+                    Research    = 'docs/research/iha-v2/sample.md#unique-heading'
+                    Authorities = @('https://learn.microsoft.com/')
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -RepoRoot $root
+            }
+
+            @($errors).Count | Should -Be 0
+        }
+
+        It 'reports a missing research file' {
+            $repoRoot = Join-Path $TestDrive 'research-missing-file'
+            New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
+
+            $errors = InModuleScope TenantPulse -ArgumentList $script:researchBaseDescriptor, $repoRoot {
+                param($base, $root)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.References = @{
+                    Research    = 'docs/research/iha-v2/absent.md#heading'
+                    Authorities = @('https://learn.microsoft.com/')
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -RepoRoot $root
+            }
+
+            (@($errors) -join "`n") | Should -Match ([regex]::Escape("References.Research: file 'docs/research/iha-v2/absent.md' is not present."))
+        }
+
+        It 'reports a missing heading anchor' {
+            $repoRoot = Join-Path $TestDrive 'research-missing-anchor'
+            $docDir = Join-Path $repoRoot 'docs/research/iha-v2'
+            New-Item -ItemType Directory -Path $docDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $docDir 'sample.md') -Value @"
+# Sample
+## Unique Heading
+"@ -Encoding utf8NoBOM
+
+            $errors = InModuleScope TenantPulse -ArgumentList $script:researchBaseDescriptor, $repoRoot {
+                param($base, $root)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.References = @{
+                    Research    = 'docs/research/iha-v2/sample.md#no-such-heading'
+                    Authorities = @('https://learn.microsoft.com/')
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -RepoRoot $root
+            }
+
+            (@($errors) -join "`n") | Should -Match ([regex]::Escape("References.Research: heading anchor 'no-such-heading' is not present."))
+        }
+
+        It 'reports a duplicate normalized heading anchor' {
+            $repoRoot = Join-Path $TestDrive 'research-duplicate-anchor'
+            $docDir = Join-Path $repoRoot 'docs/research/iha-v2'
+            New-Item -ItemType Directory -Path $docDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $docDir 'sample.md') -Value @"
+# Sample
+## Hello World
+## hello world
+"@ -Encoding utf8NoBOM
+
+            $errors = InModuleScope TenantPulse -ArgumentList $script:researchBaseDescriptor, $repoRoot {
+                param($base, $root)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.References = @{
+                    Research    = 'docs/research/iha-v2/sample.md#hello-world'
+                    Authorities = @('https://learn.microsoft.com/')
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -RepoRoot $root
+            }
+
+            (@($errors) -join "`n") | Should -Match ([regex]::Escape("References.Research: heading anchor 'hello-world' is not unique."))
+        }
+
+        It 'rejects an absolute research path' {
+            $absolutePath = Join-Path $TestDrive 'absolute.md'
+            Set-Content -LiteralPath $absolutePath -Value "# Heading`n" -Encoding utf8NoBOM
+            $research = $absolutePath + '#heading'
+
+            $errors = InModuleScope TenantPulse -ArgumentList $script:researchBaseDescriptor, $research {
+                param($base, $researchValue)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.References = @{
+                    Research    = $researchValue
+                    Authorities = @('https://learn.microsoft.com/')
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+            }
+
+            (@($errors) -join "`n") | Should -Match ([regex]::Escape('References.Research: path must be repository-relative, not absolute.'))
+        }
+
+        It 'rejects a traversing research path' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:researchBaseDescriptor {
+                param($base)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.References = @{
+                    Research    = 'docs/research/iha-v2/../../../etc/passwd.md#heading'
+                    Authorities = @('https://learn.microsoft.com/')
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+            }
+
+            (@($errors) -join "`n") | Should -Match ([regex]::Escape("References.Research: path must not contain '..'."))
+        }
+
+        It 'rejects a research path whose casing does not match the on-disk file' {
+            $repoRoot = Join-Path $TestDrive 'research-case'
+            $docDir = Join-Path $repoRoot 'docs/research/iha-v2'
+            New-Item -ItemType Directory -Path $docDir -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $docDir 'sample.md') -Value @"
+# Sample
+## Unique Heading
+"@ -Encoding utf8NoBOM
+
+            $errors = InModuleScope TenantPulse -ArgumentList $script:researchBaseDescriptor, $repoRoot {
+                param($base, $root)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.References = @{
+                    Research    = 'docs/research/iha-v2/Sample.md#unique-heading'
+                    Authorities = @('https://learn.microsoft.com/')
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -RepoRoot $root
+            }
+
+            (@($errors) -join "`n") | Should -Match ([regex]::Escape("References.Research: file 'docs/research/iha-v2/Sample.md' does not match on-disk path casing."))
+        }
+    }
+}
+
+Describe 'Shipping check research path and heading anchors' {
+    It 'resolves every shipping descriptor to a tracked file and one unique heading anchor' {
+        $checkFiles = @(Get-ChildItem -LiteralPath (Join-Path $script:repoRoot 'source/Data/Checks') -Filter '*.psd1' -File)
+        $checkFiles.Count | Should -BeGreaterOrEqual 53
+
+        $datasetMap = Import-PowerShellDataFile -LiteralPath (Join-Path $script:repoRoot 'source/Data/DatasetMap.psd1')
+        $tracked = [string[]] @(& git -C $script:repoRoot ls-files -- 'docs/research')
+
+        $failures = InModuleScope TenantPulse -ArgumentList $checkFiles, $datasetMap, $script:repoRoot, $tracked {
+            param($files, $map, $repoRoot, $trackedFiles)
+            $rows = [System.Collections.Generic.List[string]]::new()
+            foreach ($file in $files) {
+                $descriptor = Import-PowerShellDataFile -LiteralPath $file.FullName
+                $research = [string] $descriptor.References.Research
+                $hashIndex = $research.IndexOf('#')
+                $pathPart = if ($hashIndex -ge 0) { $research.Substring(0, $hashIndex) } else { $research }
+                $trackedExact = @($trackedFiles | Where-Object {
+                        [string]::Equals($_, $pathPart, [System.StringComparison]::Ordinal)
+                    })
+                if ($trackedExact.Count -eq 0) {
+                    $rows.Add("$($descriptor.Id): research file '$pathPart' is not git-tracked.")
+                }
+
+                $fieldErrors = @(Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map -RepoRoot $repoRoot)
+                foreach ($fieldError in $fieldErrors) {
+                    if ($fieldError -match 'References\.Research') {
+                        $rows.Add($fieldError)
+                    }
+                }
+            }
+            return @($rows)
+        }
+
+        @($failures) | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'Data.PartialDatasets catalog projection and collection isolation (R1a)' {

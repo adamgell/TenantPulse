@@ -51,6 +51,97 @@ BeforeAll {
             }
         })
     }
+
+    function Get-PulseMarkdownHeadingAnchor {
+        param([Parameter(Mandatory)] [string] $HeadingText)
+        $text = $HeadingText.ToLowerInvariant()
+        $text = [regex]::Replace($text, '[^a-z0-9 _-]', '')
+        return $text.Replace(' ', '-')
+    }
+
+    function Resolve-PulseResearchLeaf {
+        param(
+            [Parameter(Mandatory)] [string] $Root,
+            [Parameter(Mandatory)] [string] $RelativePath
+        )
+
+        $segments = @($RelativePath -split '[\\/]+' | Where-Object { $_ -ne '' -and $_ -ne '.' })
+        if ($segments -contains '..') {
+            return @{ Error = "path '$RelativePath' contains '..'." }
+        }
+
+        $current = [System.IO.Path]::GetFullPath($Root)
+        foreach ($segment in $segments) {
+            $children = @(Get-ChildItem -LiteralPath $current -Force -ErrorAction SilentlyContinue)
+            $ordinal = @($children | Where-Object {
+                    [string]::Equals($_.Name, $segment, [System.StringComparison]::Ordinal)
+                })
+            if ($ordinal.Count -eq 1) {
+                $current = $ordinal[0].FullName
+                continue
+            }
+
+            $ignoreCase = @($children | Where-Object {
+                    [string]::Equals($_.Name, $segment, [System.StringComparison]::OrdinalIgnoreCase)
+                })
+            if ($ignoreCase.Count -ge 1) {
+                return @{ Error = "file '$RelativePath' does not match on-disk path casing." }
+            }
+
+            return @{ Error = "file '$RelativePath' is not present." }
+        }
+
+        if (-not (Test-Path -LiteralPath $current -PathType Leaf)) {
+            return @{ Error = "file '$RelativePath' is not present." }
+        }
+
+        return @{ Path = $current }
+    }
+
+    function Get-PulseShippingResearchFailures {
+        param([Parameter(Mandatory)] [string] $Root)
+
+        $files = @(Get-ChildItem -LiteralPath (Join-Path $script:repoRoot 'source/Data/Checks') -Filter '*.psd1' -File)
+        $failures = [System.Collections.Generic.List[string]]::new()
+        foreach ($file in $files) {
+            $descriptor = Import-PowerShellDataFile -LiteralPath $file.FullName
+            $research = [string] $descriptor.References.Research
+            $hashIndex = $research.IndexOf('#')
+            if ($hashIndex -lt 0) {
+                $failures.Add("$($descriptor.Id): References.Research must include a heading fragment.")
+                continue
+            }
+
+            $relativePath = $research.Substring(0, $hashIndex)
+            $fragment = $research.Substring($hashIndex + 1)
+            $resolved = Resolve-PulseResearchLeaf -Root $Root -RelativePath $relativePath
+            if ($resolved.ContainsKey('Error')) {
+                $failures.Add("$($descriptor.Id): $($resolved.Error)")
+                continue
+            }
+
+            $markdown = [System.IO.File]::ReadAllText($resolved.Path)
+            $counts = [System.Collections.Generic.Dictionary[string, int]]::new(
+                [System.StringComparer]::Ordinal
+            )
+            foreach ($match in [regex]::Matches($markdown, '(?m)^#{1,6} (.+)$')) {
+                $anchor = Get-PulseMarkdownHeadingAnchor -HeadingText $match.Groups[1].Value
+                if ($counts.ContainsKey($anchor)) {
+                    $counts[$anchor]++
+                } else {
+                    $counts[$anchor] = 1
+                }
+            }
+
+            if (-not $counts.ContainsKey($fragment)) {
+                $failures.Add("$($descriptor.Id): heading anchor '$fragment' is not present in '$relativePath'.")
+            } elseif ($counts[$fragment] -ne 1) {
+                $failures.Add("$($descriptor.Id): heading anchor '$fragment' is not unique in '$relativePath'.")
+            }
+        }
+
+        return @($failures)
+    }
 }
 
 Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
@@ -313,5 +404,30 @@ Import-Module TenantPulse -RequiredVersion __TENANTPULSE_VERSION__ -Force
         # replaced behind another module's back.
         $probe.GraphAuthentication | Should -Be '2.39.0'
         $probe.SecretManagementLoaded | Should -BeFalse
+    }
+}
+
+Describe 'Packaged research path and heading anchors' -Tag 'QA' {
+    It 'copies research into the built module from the build workflow' {
+        $buildYaml = Get-Content -LiteralPath (Join-Path $script:repoRoot 'build.yaml') -Raw
+        $buildYaml | Should -Match '(?m)^\s*- Copy_Research_Docs\s*$'
+        $buildYaml | Should -Match '(?s)Build_Module_ModuleBuilder.*?Copy_Research_Docs.*?package_module_nupkg'
+    }
+
+    It 'resolves every shipping descriptor path and unique heading from the built module' {
+        $builtRoot = Join-Path $script:repoRoot "output/module/TenantPulse/$script:releaseVersion"
+        Test-Path -LiteralPath $builtRoot -PathType Container | Should -BeTrue
+        @(Get-PulseShippingResearchFailures -Root $builtRoot) | Should -BeNullOrEmpty
+    }
+
+    It 'resolves every shipping descriptor path and unique heading from the nupkg' {
+        $packagePath = Join-Path $script:repoRoot "output/TenantPulse.$script:releaseVersion.nupkg"
+        Test-Path -LiteralPath $packagePath -PathType Leaf | Should -BeTrue
+        $extractRoot = Join-Path $TestDrive 'tenantpulse-nupkg'
+        if (Test-Path -LiteralPath $extractRoot) {
+            Remove-Item -LiteralPath $extractRoot -Recurse -Force
+        }
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($packagePath, $extractRoot)
+        @(Get-PulseShippingResearchFailures -Root $extractRoot) | Should -BeNullOrEmpty
     }
 }

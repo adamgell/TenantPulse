@@ -42,6 +42,16 @@
     dataset map's live cross-check, since expansion artifacts are not GraphKit-collected
     datasets and have no DatasetMap.psd1 entry to check against; a future expansion family
     is added to this same registry, not to the dataset map.
+
+    References.Research path and heading (DOC1): the required scalar is not just non-empty
+    text. It must be a repository-relative path plus a Markdown heading fragment
+    (`docs/research/iha-v2/<file>.md#<anchor>`), never rooted/absolute and never containing
+    `..`. When -RepoRoot is supplied, the path is resolved from that root with ordinal
+    (case-exact) directory walking, the leaf must exist, and the fragment must match
+    exactly one unique normalized ATX heading anchor in that file. Normalization is
+    lowercase, strip every character except `[a-z0-9 _-]`, then spaces to hyphens without
+    collapsing consecutive hyphens. Callers that omit -RepoRoot still get the structural
+    checks so fixture catalogs with synthetic paths keep loading.
 #>
 
 function Test-PulseCheckDescriptor {
@@ -61,7 +71,12 @@ function Test-PulseCheckDescriptor {
         [Parameter()]
         [AllowNull()]
         [AllowEmptyString()]
-        [string] $DatasetMapPath
+        [string] $DatasetMapPath,
+
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $RepoRoot
     )
 
     $validSeverities = @('Critical', 'High', 'Medium', 'Low', 'Info')
@@ -172,6 +187,124 @@ function Test-PulseCheckDescriptor {
 
         if (-not $ok) { return $null }
         return [string[]] $items
+    }
+
+    function Get-PulseMarkdownHeadingAnchor {
+        param([string] $HeadingText)
+        $text = $HeadingText.ToLowerInvariant()
+        $text = [regex]::Replace($text, '[^a-z0-9 _-]', '')
+        return $text.Replace(' ', '-')
+    }
+
+    function Test-PulseResearchReference {
+        param(
+            [string] $Value,
+            [string] $ResearchRepoRoot
+        )
+
+        $hashIndex = $Value.IndexOf('#')
+        if ($hashIndex -lt 0) {
+            $errors.Add("${Label}: References.Research: must include a heading fragment.")
+            return
+        }
+
+        $relativePath = $Value.Substring(0, $hashIndex)
+        $fragment = $Value.Substring($hashIndex + 1)
+
+        if ([string]::IsNullOrWhiteSpace($relativePath) -or [System.IO.Path]::IsPathRooted($relativePath)) {
+            $errors.Add("${Label}: References.Research: path must be repository-relative, not absolute.")
+            return
+        }
+
+        if ([string]::IsNullOrWhiteSpace($fragment)) {
+            $errors.Add("${Label}: References.Research: must include a heading fragment.")
+            return
+        }
+
+        $segments = @($relativePath -split '[\\/]+' | Where-Object { $_ -ne '' })
+        if ($segments -contains '..') {
+            $errors.Add("${Label}: References.Research: path must not contain '..'.")
+            return
+        }
+
+        if ([string]::IsNullOrWhiteSpace($ResearchRepoRoot)) {
+            return
+        }
+
+        if (-not (Test-Path -LiteralPath $ResearchRepoRoot -PathType Container)) {
+            $errors.Add("${Label}: References.Research: repository root is not a directory.")
+            return
+        }
+
+        $current = [System.IO.Path]::GetFullPath($ResearchRepoRoot)
+        $rootFull = $current.TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar
+        )
+
+        foreach ($segment in $segments) {
+            if ($segment -eq '.') {
+                continue
+            }
+
+            $children = @(Get-ChildItem -LiteralPath $current -Force -ErrorAction SilentlyContinue)
+            $ordinal = @($children | Where-Object {
+                    [string]::Equals($_.Name, $segment, [System.StringComparison]::Ordinal)
+                })
+            if ($ordinal.Count -eq 1) {
+                $current = $ordinal[0].FullName
+                continue
+            }
+
+            $ignoreCase = @($children | Where-Object {
+                    [string]::Equals($_.Name, $segment, [System.StringComparison]::OrdinalIgnoreCase)
+                })
+            if ($ignoreCase.Count -ge 1) {
+                $errors.Add("${Label}: References.Research: file '$relativePath' does not match on-disk path casing.")
+                return
+            }
+
+            $errors.Add("${Label}: References.Research: file '$relativePath' is not present.")
+            return
+        }
+
+        if (-not (Test-Path -LiteralPath $current -PathType Leaf)) {
+            $errors.Add("${Label}: References.Research: file '$relativePath' is not present.")
+            return
+        }
+
+        $currentFull = [System.IO.Path]::GetFullPath($current)
+        $rootPrefix = $rootFull + [System.IO.Path]::DirectorySeparatorChar
+        if (-not (
+                $currentFull.Equals($rootFull, [System.StringComparison]::Ordinal) -or
+                $currentFull.StartsWith($rootPrefix, [System.StringComparison]::Ordinal)
+            )) {
+            $errors.Add("${Label}: References.Research: path must not contain '..'.")
+            return
+        }
+
+        $markdown = [System.IO.File]::ReadAllText($current)
+        $headingMatches = [regex]::Matches($markdown, '(?m)^#{1,6} (.+)$')
+        $counts = [System.Collections.Generic.Dictionary[string, int]]::new(
+            [System.StringComparer]::Ordinal
+        )
+        foreach ($match in $headingMatches) {
+            $anchor = Get-PulseMarkdownHeadingAnchor -HeadingText $match.Groups[1].Value
+            if ($counts.ContainsKey($anchor)) {
+                $counts[$anchor]++
+            } else {
+                $counts[$anchor] = 1
+            }
+        }
+
+        if (-not $counts.ContainsKey($fragment)) {
+            $errors.Add("${Label}: References.Research: heading anchor '$fragment' is not present.")
+            return
+        }
+
+        if ($counts[$fragment] -ne 1) {
+            $errors.Add("${Label}: References.Research: heading anchor '$fragment' is not unique.")
+        }
     }
 
     # Id
@@ -407,7 +540,10 @@ function Test-PulseCheckDescriptor {
         $errors.Add("${Label}: References: is required and must be a hashtable.")
     } else {
         $references = $Descriptor.References
-        Test-PulseScalarStringField -Container $references -Key 'Research' -FieldPath 'References.Research' -Required | Out-Null
+        $research = Test-PulseScalarStringField -Container $references -Key 'Research' -FieldPath 'References.Research' -Required
+        if ($null -ne $research) {
+            Test-PulseResearchReference -Value $research -ResearchRepoRoot $RepoRoot
+        }
         Test-PulseStringArrayField -Container $references -Key 'Authorities' -FieldPath 'References.Authorities' | Out-Null
 
         # References.Cis - OPTIONAL, cite-only CIS benchmark cross-references (Task 4.5).
