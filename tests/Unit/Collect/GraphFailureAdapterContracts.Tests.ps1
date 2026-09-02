@@ -559,6 +559,8 @@ function Resolve-RenamedGraphProblem {
         $violations = [System.Collections.Generic.List[string]]::new()
         foreach ($file in Get-ChildItem (Join-Path $script:repoRoot 'source') -Recurse -Filter '*.ps1') {
             if ($file.Name -eq 'Resolve-PulseGraphFailure.ps1') { continue }
+            # ARM retry/HTTP classification is not Graph. Keep that logic; this detector is Graph-collector-only.
+            if (($file.FullName -replace '\\', '/') -match '/source/Private/Providers/Arm/') { continue }
             foreach ($violation in @(Get-InterpreterViolations -Text (Get-Content -LiteralPath $file.FullName -Raw) -Path $file.FullName)) {
                 $violations.Add($violation) | Out-Null
             }

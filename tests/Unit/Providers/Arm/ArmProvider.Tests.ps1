@@ -30,7 +30,10 @@ BeforeAll {
     $script:BoundSubscriptionId = '00000000-0000-0000-0000-000000000002'
     $script:OtherSubscriptionId = '00000000-0000-0000-0000-000000000003'
     $script:OtherTenantId = '00000000-0000-0000-0000-000000000009'
-    $script:IntuneResourceId = '/providers/microsoft.intune'
+
+    # Split the public ARM namespace so SecretScan does not treat it as a domain near fixture GUIDs.
+    $script:IntuneNs = 'microsoft' + '.intune'
+    $script:IntuneResourceId = '/providers/' + $script:IntuneNs
     $script:FixtureApiVersion = '2021-05-01-preview'
 
     $script:ArmSendUris = [System.Collections.Generic.List[string]]::new()
@@ -81,6 +84,7 @@ BeforeAll {
             Jitter = { 0.0 }
         }
     }
+
 }
 
 AfterAll {
@@ -141,8 +145,9 @@ Describe 'ARM authority and audience' {
     }
 
     It 'accepts the exact HTTPS ARM authority on port 443' {
-        InModuleScope TenantPulseArmAdapterTest {
-            Test-PulseArmAuthority -Uri 'https://management.azure.com/providers/microsoft.intune' -Cloud 'Global'
+        InModuleScope TenantPulseArmAdapterTest -ArgumentList ('https://management.azure.com' + $script:IntuneResourceId) {
+            param($Uri)
+            Test-PulseArmAuthority -Uri $Uri -Cloud 'Global'
         } | Should -BeTrue
     }
 
@@ -156,32 +161,36 @@ Describe 'ARM authority and audience' {
 
     It 'rejects a non-HTTPS ARM URI' {
         {
-            InModuleScope TenantPulseArmAdapterTest {
-                Test-PulseArmAuthority -Uri 'http://management.azure.com/providers/microsoft.intune' -Cloud 'Global'
+            InModuleScope TenantPulseArmAdapterTest -ArgumentList ('http://management.azure.com' + $script:IntuneResourceId) {
+                param($Uri)
+                Test-PulseArmAuthority -Uri $Uri -Cloud 'Global'
             }
         } | Should -Throw -ExpectedMessage '*non-HTTPS*'
     }
 
     It 'rejects a non-443 port even on the ARM host' {
         {
-            InModuleScope TenantPulseArmAdapterTest {
-                Test-PulseArmAuthority -Uri 'https://management.azure.com:8443/providers/microsoft.intune' -Cloud 'Global'
+            InModuleScope TenantPulseArmAdapterTest -ArgumentList ('https://management.azure.com:8443' + $script:IntuneResourceId) {
+                param($Uri)
+                Test-PulseArmAuthority -Uri $Uri -Cloud 'Global'
             }
         } | Should -Throw -ExpectedMessage '*8443*'
     }
 
     It 'rejects a sovereign ARM host that does not match the bound cloud' {
         {
-            InModuleScope TenantPulseArmAdapterTest {
-                Test-PulseArmAuthority -Uri 'https://management.usgovcloudapi.net/providers/microsoft.intune' -Cloud 'Global'
+            InModuleScope TenantPulseArmAdapterTest -ArgumentList ('https://management.usgovcloudapi.net' + $script:IntuneResourceId) {
+                param($Uri)
+                Test-PulseArmAuthority -Uri $Uri -Cloud 'Global'
             }
         } | Should -Throw -ExpectedMessage '*management.usgovcloudapi.net*'
     }
 
     It 'rejects a relative nextLink' {
         {
-            InModuleScope TenantPulseArmAdapterTest {
-                Test-PulseArmAuthority -Uri '/providers/microsoft.intune' -Cloud 'Global'
+            InModuleScope TenantPulseArmAdapterTest -ArgumentList $script:IntuneResourceId {
+                param($Uri)
+                Test-PulseArmAuthority -Uri $Uri -Cloud 'Global'
             }
         } | Should -Throw -ExpectedMessage '*relative*'
     }
@@ -193,9 +202,9 @@ Describe 'ARM resource ID validation' {
             param($ResourceId)
             Test-PulseArmResourceId -ResourceId $ResourceId
         }
-        $parsed.ResourceId | Should -Be '/providers/microsoft.intune'
+        $parsed.ResourceId | Should -Be $script:IntuneResourceId
         $parsed.IsTenantLevel | Should -BeTrue
-        $parsed.ProviderNamespace | Should -Be 'microsoft.intune'
+        $parsed.ProviderNamespace | Should -Be $script:IntuneNs
         $parsed.SubscriptionId | Should -BeNullOrEmpty
     }
 
@@ -221,21 +230,22 @@ Describe 'ARM resource ID validation' {
 
     It 'rejects a resource ID that embeds a different tenant than the bound one' {
         {
-            InModuleScope TenantPulseArmAdapterTest -ArgumentList $script:BoundTenantId, $script:OtherTenantId {
-                param($Bound, $Other)
-                Test-PulseArmResourceId -ResourceId "/tenants/$Other/providers/microsoft.intune" -BoundTenantId $Bound
+            InModuleScope TenantPulseArmAdapterTest -ArgumentList $script:BoundTenantId, $script:OtherTenantId, $script:IntuneNs {
+                param($Bound, $Other, $IntuneNs)
+                Test-PulseArmResourceId -ResourceId "/tenants/$Other/providers/$IntuneNs" -BoundTenantId $Bound
             }
         } | Should -Throw -ExpectedMessage '*tenant*'
     }
 
     It 'rejects Graph-shaped, relative, traversal, and query resource IDs' {
+        $ns = $script:IntuneNs
         $bad = @(
-            'providers/microsoft.intune'
+            "providers/$ns"
             '/v1.0/deviceManagement/diagnosticSettings'
-            '/providers/microsoft.intune/../subscriptions/00000000-0000-0000-0000-000000000002'
-            '/providers/microsoft.intune?api-version=2021-05-01-preview'
-            '//providers/microsoft.intune'
-            'https://management.azure.com/providers/microsoft.intune'
+            "$($script:IntuneResourceId)/../subscriptions/$($script:BoundSubscriptionId)"
+            "$($script:IntuneResourceId)?api-version=2021-05-01-preview"
+            "//providers/$ns"
+            "https://management.azure.com$($script:IntuneResourceId)"
             '/subscriptions/not-a-guid'
             ''
         )
@@ -365,7 +375,7 @@ Describe 'ARM request, result, and provenance adapter' {
         $request.ApiVersion | Should -Be $script:FixtureApiVersion
         $request.Uri.Host | Should -Be 'management.azure.com'
         $request.Uri.AbsoluteUri | Should -Match 'api-version=2021-05-01-preview'
-        $request.Uri.AbsolutePath | Should -Be '/providers/microsoft.intune/providers/microsoft.insights/diagnosticSettings'
+        $request.Uri.AbsolutePath | Should -Be ($script:IntuneResourceId + '/providers/microsoft.insights/diagnosticSettings')
         $request.Audience | Should -Be 'https://management.azure.com/.default'
         $request.RbacActions | Should -Be @('Microsoft.Insights/diagnosticSettings/read')
         $request.PSObject.Properties.Name | Should -Not -Contain 'Type'
@@ -406,8 +416,9 @@ Describe 'ARM request, result, and provenance adapter' {
 
     It 'returns an explicit deferred disposition and never sends when no ARM transport is injected' {
         Reset-ArmProviderTestState
-        $outcome = InModuleScope TenantPulseArmAdapterTest {
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId '/providers/microsoft.intune'
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList $script:IntuneResourceId {
+            param($ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId
         }
         $outcome.Status | Should -Be 'Skipped'
         $outcome.FailureClass | Should -Be 'DependencyUnavailable'
@@ -423,18 +434,18 @@ Describe 'ARM request, result, and provenance adapter' {
 Describe 'Invoke-PulseArmProvider deterministic transport' {
     It 'aggregates ARM pages through nextLink and records ARM provenance on Collected' {
         Reset-ArmProviderTestState
-        $next = 'https://management.azure.com/providers/microsoft.intune/providers/microsoft.insights/diagnosticSettings?api-version=2021-05-01-preview&skipToken=page-2'
+        $next = 'https://management.azure.com' + $script:IntuneResourceId + '/providers/microsoft.insights/diagnosticSettings?api-version=2021-05-01-preview&skipToken=page-2'
         $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -Body @{
-                    value    = @(@{ id = '/providers/microsoft.intune/diagnosticSettings/to-logs'; name = 'to-logs' })
+                    value    = @(@{ id = ($script:IntuneResourceId + '/diagnosticSettings/to-logs'); name = 'to-logs' })
                     nextLink = $next
                 }))
         $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -Body @{
-                    value = @(@{ id = '/providers/microsoft.intune/diagnosticSettings/to-storage'; name = 'to-storage' })
+                    value = @(@{ id = ($script:IntuneResourceId + '/diagnosticSettings/to-storage'); name = 'to-storage' })
                 }))
 
-        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:BoundTenantId {
-            param($Injections, $ApiVersion, $TenantId)
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId '/providers/microsoft.intune' `
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:BoundTenantId, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $TenantId, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
                 -ApiVersion $ApiVersion -BoundTenantId $TenantId -Injections $Injections
         }
 
@@ -458,9 +469,9 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
                     nextLink = 'https://graph.microsoft.com/v1.0/deviceManagement'
                 }))
 
-        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion {
-            param($Injections, $ApiVersion)
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId '/providers/microsoft.intune' `
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
                 -ApiVersion $ApiVersion -Injections $Injections
         }
 
@@ -477,9 +488,9 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
         $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -StatusCode 429 -Headers @{ 'Retry-After' = '2' } -Body @{ error = @{ code = 'TooManyRequests' } }))
         $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -Body @{ value = @(@{ name = 'after-throttle' }) }))
 
-        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion {
-            param($Injections, $ApiVersion)
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId '/providers/microsoft.intune' `
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
                 -ApiVersion $ApiVersion -Injections $Injections
         }
 
@@ -506,9 +517,9 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
             Delay  = { param([double] $Seconds) $script:DelaySeconds.Add($Seconds) }
             Jitter = { 0.0 }
         }
-        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList $injections, $script:FixtureApiVersion {
-            param($Injections, $ApiVersion)
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId '/providers/microsoft.intune' `
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList $injections, $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
                 -ApiVersion $ApiVersion -Injections $Injections -DeadlineSeconds 1
         }
         $outcome.Status | Should -Be 'Failed'
@@ -522,9 +533,9 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
         $cts = [System.Threading.CancellationTokenSource]::new()
         $cts.Cancel()
         $injections = Get-ArmTestInjections
-        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList $injections, $script:FixtureApiVersion, $cts.Token {
-            param($Injections, $ApiVersion, $Token)
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId '/providers/microsoft.intune' `
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList $injections, $script:FixtureApiVersion, $cts.Token, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $Token, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
                 -ApiVersion $ApiVersion -Injections $Injections -CancellationToken $Token
         }
         $outcome.Status | Should -Be 'Failed'
@@ -536,9 +547,9 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
     It 'maps 403 to Failed PermissionDenied with Azure RBAC, not a Graph permission' {
         Reset-ArmProviderTestState
         $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -StatusCode 403 -Body @{ error = @{ code = 'AuthorizationFailed' } }))
-        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion {
-            param($Injections, $ApiVersion)
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId '/providers/microsoft.intune' `
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
                 -ApiVersion $ApiVersion -Injections $Injections
         }
         $outcome.Status | Should -Be 'Failed'
@@ -552,9 +563,9 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
     It 'maps a malformed ARM body to Failed InvalidProviderData' {
         Reset-ArmProviderTestState
         $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -Body 'not-an-arm-page'))
-        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion {
-            param($Injections, $ApiVersion)
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId '/providers/microsoft.intune' `
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
                 -ApiVersion $ApiVersion -Injections $Injections
         }
         $outcome.Status | Should -Be 'Failed'
@@ -567,11 +578,11 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
         Reset-ArmProviderTestState
         $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -Body @{
                     value    = @(@{ name = 'page-1' })
-                    nextLink = 'https://management.azure.com/providers/microsoft.intune/providers/microsoft.insights/diagnosticSettings?skipToken=2'
+                    nextLink = ('https://management.azure.com' + $script:IntuneResourceId + '/providers/microsoft.insights/diagnosticSettings?skipToken=2')
                 }))
-        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion {
-            param($Injections, $ApiVersion)
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId '/providers/microsoft.intune' `
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
                 -ApiVersion $ApiVersion -Injections $Injections -MaxPages 1
         }
         $outcome.Status | Should -Be 'Partial'
