@@ -13,7 +13,13 @@
     and records status/apiVersion/sha256/itemCount/collectedUtc in the manifest. For
     -Status Failed or -Status Skipped, no dataset file is written - only the manifest
     entry, via Set-PulseManifestEntry, which is the sole function allowed to touch
-    manifest.json.
+    manifest.json. -Envelope (AC-26) maps a GraphKit.OperationResult onto that same
+    status contract: Collected is persisted only for Succeeded/Known/not-truncated
+    envelopes. Truncated, Indeterminate, page-cap, or otherwise incomplete 2xx envelopes
+    become Partial (usable rows) or Failed/Indeterminate (no safe rows). A missing or
+    malformed envelope becomes Failed/InvalidProviderData. A discarded envelope passed as
+    -Data is detected by GraphKit.OperationResult identity and mapped the same way.
+
 
     -TenantId/-Pseudonym are optional (both must be supplied together to take effect;
     Invoke-PulseCollection's own catch-all callers for Failed/Skipped never pass -Data at
@@ -42,6 +48,11 @@ function Write-PulseDataset {
 
         [Parameter()]
         [object[]] $Data = @(),
+
+        [Parameter()]
+        [AllowNull()]
+        $Envelope,
+
 
         [Parameter(Mandatory)]
         [ValidateSet('v1.0', 'beta')]
@@ -98,6 +109,31 @@ function Write-PulseDataset {
     )
 
     Assert-PulseDatasetName -Name $Name
+
+    $envelopeBound = $PSBoundParameters.ContainsKey('Envelope')
+    $envelopeCandidate = $null
+    if ($envelopeBound) {
+        $envelopeCandidate = $Envelope
+    } else {
+        $dataItems = @($Data)
+        if ($dataItems.Count -eq 1 -and (Test-PulseGraphResultEnvelope -InputObject $dataItems[0])) {
+            $envelopeCandidate = $dataItems[0]
+        }
+    }
+
+    if ($envelopeBound -or $null -ne $envelopeCandidate) {
+        $mapped = ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelopeCandidate `
+            -Dataset $Name -ApiVersion $ApiVersion -Provider $Provider -Operations $Operations
+        $Status = $mapped.Status
+        $Data = $mapped.Rows
+        $Gaps = $mapped.Gaps
+        $ReasonCode = $mapped.ReasonCode
+        $Detail = $mapped.Detail
+        $FailureClass = $mapped.FailureClass
+        if ($null -ne $mapped.Provider) { $Provider = $mapped.Provider }
+        $Operations = $mapped.Operations
+    }
+
 
     $effectiveReasonCode = if (-not [string]::IsNullOrWhiteSpace($ReasonCode)) {
         $ReasonCode

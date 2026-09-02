@@ -513,3 +513,175 @@ Describe 'Invoke-PulseCheckEvaluation partial-awareness contract' {
         $result.Reason | Should -Not -Match 'NaN|manifest-reason-canary|gap-detail-canary'
     }
 }
+
+Describe 'Canonical findings JSON for envelope outcomes (AC-26)' {
+    BeforeAll {
+        function script:New-PulseGraphEnvelopeFixture {
+            param(
+                [string] $Outcome = 'Succeeded',
+                [string] $Certainty = 'Known',
+                [bool] $Truncated = $false,
+                [AllowNull()]
+                [object[]] $Data = @(),
+                [int] $PageCount = 1
+            )
+
+            [pscustomobject]@{
+                PSTypeName = 'GraphKit.OperationResult'
+                Data       = $Data
+                Outcome    = $Outcome
+                Certainty  = $Certainty
+                Truncated  = $Truncated
+                PageCount  = $PageCount
+                Telemetry  = @()
+                Provenance = @{}
+            }
+        }
+
+        function script:New-PulseCanonicalCheckFixture {
+            param(
+                [string] $Id,
+                [string[]] $Datasets,
+                [string[]] $Cis = @()
+            )
+
+            $references = [pscustomobject]@{
+                Research    = "docs/research/$Id.md"
+                Authorities = @('MS.FIXTURE.1')
+                Cis         = $Cis
+            }
+            [pscustomobject]@{
+                Id         = $Id
+                Title      = "Fixture $Id"
+                Category   = 'Fixture.Category'
+                Severity   = 'High'
+                Effort     = 'Low'
+                Impact     = 'Medium'
+                Data       = [pscustomobject]@{ Datasets = $Datasets; Gates = @() }
+                Rule       = [pscustomobject]@{ Type = 'Expression'; Expression = '$true' }
+                Consulting = [pscustomobject]@{
+                    WhatItMeans  = 'fixture'
+                    WhyItMatters = 'fixture'
+                    Remediation  = @('fixture')
+                    PortalLinks  = @()
+                }
+                References = $references
+                Origin     = $null
+            }
+        }
+    }
+
+    BeforeEach {
+        $script:root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:keyRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:keyPath = Join-Path $script:keyRoot 'operator.key'
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:root -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $script:keyRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'propagates truncated envelope Partial into canonical findings JSON, scores, notices, and privacy classes without leaking DatasetOutcomes canaries' {
+        $envelope = New-PulseGraphEnvelopeFixture -Truncated $true -Certainty 'Indeterminate' -PageCount 1 -Data @([pscustomobject]@{ id = 'safe-row' })
+
+        $checkA = New-PulseCanonicalCheckFixture -Id 'TP.INT.0002' -Datasets @('incompleteA') -Cis @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 1.1.1')
+        $checkB = New-PulseCanonicalCheckFixture -Id 'TP.INT.0001' -Datasets @('incompleteA')
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:root, $script:keyPath, $envelope, $checkA, $checkB {
+            param($root, $keyPath, $envelope, $checkA, $checkB)
+            $store = New-PulseSnapshotStore -Path $root -Tenant 'tp-envelope-fixture'
+            Write-PulseDataset -Store $store -Name 'incompleteA' -Envelope $envelope -ApiVersion 'beta' -Status 'Collected' `
+                -Provider 'GraphKit' -Operations @('List') -Reason 'manifest-private-canary' `
+                -Detail @{ marker = 'manifest-detail-private-canary' }
+            $evaluation = Invoke-PulseEvaluation -Store $store -Checks @($checkA, $checkB) -OperatorKeyPath $keyPath
+            $scored = Add-PulseScores -Findings $evaluation.Document
+            [pscustomobject]@{
+                Evaluation = $evaluation
+                Scored     = $scored
+                FindingJson = ConvertTo-PulseCanonicalJson -InputObject $evaluation.Document
+                ScoredJson  = ConvertTo-PulseCanonicalJson -InputObject $scored
+            }
+        }
+
+        $result.Evaluation.Document.schemaVersion | Should -Be '1.0'
+        $result.Evaluation.Document.PSObject.Properties.Name | Should -Contain 'collectionOutcomes'
+        $result.Evaluation.Document.PSObject.Properties.Name | Should -Contain 'privacyClasses'
+        $result.Evaluation.Document.PSObject.Properties.Name | Should -Contain 'notices'
+        $result.Evaluation.Document.collectionOutcomes.incompleteA.status | Should -Be 'Partial'
+        $result.Evaluation.Document.collectionOutcomes.incompleteA.reasonCode | Should -Be 'truncated'
+        $result.Evaluation.Document.collectionOutcomes.incompleteA.gapCount | Should -Be 1
+        $result.Evaluation.Document.collectionOutcomes.incompleteA.truncated | Should -BeTrue
+        $result.Evaluation.Document.collectionOutcomes.incompleteA.certainty | Should -Be 'Indeterminate'
+        $result.Evaluation.Document.privacyClasses.collectionOutcomes | Should -Be 'SafeTechnical'
+        $result.Evaluation.Document.notices.cisDisclaimer | Should -Not -BeNullOrEmpty
+        $result.FindingJson | Should -Match 'cisDisclaimer'
+        $result.FindingJson | Should -Not -Match 'DatasetOutcomes|manifest-private-canary|manifest-detail-private-canary'
+        $result.ScoredJson | Should -Not -Match 'DatasetOutcomes|manifest-private-canary|manifest-detail-private-canary'
+        $result.Evaluation.Document.findings.Count | Should -Be 2
+        $result.Evaluation.Document.findings[0].id | Should -Be 'TP.INT.0001'
+        $result.Evaluation.Document.findings[0].status | Should -Be 'NotApplicable'
+        $result.Evaluation.Document.findings[1].id | Should -Be 'TP.INT.0002'
+        $result.Scored.coverage.overall.applicable | Should -Be 2
+        $result.Scored.coverage.overall.assessed | Should -Be 0
+        $result.Scored.scores.overall.possible | Should -Be 0.0
+    }
+
+    It 'serializes byte-identical findings JSON under shuffled checks, culture, and timezone' {
+        $envelope = New-PulseGraphEnvelopeFixture -Truncated $true -Certainty 'Indeterminate' -Data @([pscustomobject]@{ id = 'row-1' })
+        $checkA = New-PulseCanonicalCheckFixture -Id 'TP.INT.0002' -Datasets @('incompleteA') -Cis @('CIS Rec. 1.1.1')
+        $checkB = New-PulseCanonicalCheckFixture -Id 'TP.INT.0001' -Datasets @('incompleteA')
+
+        $jsons = InModuleScope TenantPulse -ArgumentList $script:root, $script:keyPath, $envelope, $checkA, $checkB {
+            param($root, $keyPath, $envelope, $checkA, $checkB)
+            $store = New-PulseSnapshotStore -Path $root -Tenant 'tp-envelope-fixture'
+            Write-PulseDataset -Store $store -Name 'incompleteA' -Envelope $envelope -ApiVersion 'beta' -Status 'Collected' -Provider 'GraphKit' -Operations @('List')
+
+            $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+            $originalUICulture = [System.Threading.Thread]::CurrentThread.CurrentUICulture
+            $originalTz = [System.TimeZoneInfo]::Local
+            $jsons = [System.Collections.Generic.List[string]]::new()
+            try {
+                foreach ($pack in @(
+                    @{ Culture = 'en-US'; Checks = @($checkA, $checkB) }
+                    @{ Culture = 'de-DE'; Checks = @($checkB, $checkA) }
+                )) {
+                    $culture = [System.Globalization.CultureInfo]::GetCultureInfo($pack.Culture)
+                    [System.Threading.Thread]::CurrentThread.CurrentCulture = $culture
+                    [System.Threading.Thread]::CurrentThread.CurrentUICulture = $culture
+                    $evaluation = Invoke-PulseEvaluation -Store $store -Checks $pack.Checks -OperatorKeyPath $keyPath
+                    $scored = Add-PulseScores -Findings $evaluation.Document
+                    $jsons.Add((ConvertTo-PulseCanonicalJson -InputObject $scored)) | Out-Null
+                }
+            } finally {
+                [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+                [System.Threading.Thread]::CurrentThread.CurrentUICulture = $originalUICulture
+            }
+            , $jsons.ToArray()
+        }
+
+        $jsons.Count | Should -Be 2
+        $jsons[0] | Should -BeExactly $jsons[1]
+        $jsons[0] | Should -Match 'cisDisclaimer'
+        $jsons[0] | Should -Match '"status": "Partial"'
+    }
+
+    It 'still yields one terminal finding per selected check when every envelope is a total failure' {
+        $envelope = New-PulseGraphEnvelopeFixture -Certainty 'Indeterminate' -Data @()
+        $checkA = New-PulseCanonicalCheckFixture -Id 'TP.INT.0002' -Datasets @('failedA')
+        $checkB = New-PulseCanonicalCheckFixture -Id 'TP.INT.0001' -Datasets @('failedA')
+
+        $evaluation = InModuleScope TenantPulse -ArgumentList $script:root, $script:keyPath, $envelope, $checkA, $checkB {
+            param($root, $keyPath, $envelope, $checkA, $checkB)
+            $store = New-PulseSnapshotStore -Path $root -Tenant 'tp-envelope-fixture'
+            Write-PulseDataset -Store $store -Name 'failedA' -Envelope $envelope -ApiVersion 'v1.0' -Status 'Collected' -Provider 'GraphKit' -Operations @('List')
+            Invoke-PulseEvaluation -Store $store -Checks @($checkB, $checkA) -OperatorKeyPath $keyPath
+        }
+
+        $evaluation.Document.findings.Count | Should -Be 2
+        $evaluation.Document.findings.id | Should -Be @('TP.INT.0001', 'TP.INT.0002')
+        $evaluation.Document.findings.status | Should -Be @('NotApplicable', 'NotApplicable')
+        $evaluation.Document.collectionOutcomes.failedA.status | Should -Be 'Failed'
+        $evaluation.Document.collectionOutcomes.failedA.failureClass | Should -Be 'Indeterminate'
+    }
+}

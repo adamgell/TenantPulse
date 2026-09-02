@@ -142,6 +142,7 @@
     unsorted or hand-built array still gets a correctly ordered document.
 #>
 
+
 function Invoke-PulseEvaluation {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -402,18 +403,29 @@ function Invoke-PulseEvaluation {
     }
 
     $document = [pscustomobject]@{
-        schemaVersion = '1.0'
-        generatedUtc  = $manifest.createdUtc
-        tenant        = $manifest.tenant
-        producer      = [pscustomobject]@{
+        schemaVersion       = '1.0'
+        generatedUtc        = $manifest.createdUtc
+        tenant              = $manifest.tenant
+        producer            = [pscustomobject]@{
             tenantPulse         = $moduleVersion
             graphKit             = $manifest.producer.graphKit
             scoringModelVersion = '1.0'
         }
-        coverage      = $null
-        scores        = $null
-        findings      = $findings.ToArray()
-        notices       = [pscustomobject]@{
+        coverage            = $null
+        scores              = $null
+        findings            = $findings.ToArray()
+        collectionOutcomes  = ConvertTo-PulseCanonicalCollectionOutcomes -Datasets $manifest.datasets
+        privacyClasses      = [pscustomobject]@{
+            tenant             = 'Identity'
+            producer           = 'SafeTechnical'
+            coverage           = 'SafeTechnical'
+            scores             = 'SafeTechnical'
+            findings           = 'BoundedReviewedText'
+            collectionOutcomes = 'SafeTechnical'
+            notices            = 'BoundedReviewedText'
+            references         = 'SafeTechnical'
+        }
+        notices             = [pscustomobject]@{
             cisDisclaimer = $cisDisclaimer
         }
     }
@@ -422,6 +434,86 @@ function Invoke-PulseEvaluation {
         Document     = $document
         RedactionMap = $redactionMap
     }
+}
+
+function ConvertTo-PulseCanonicalCollectionOutcomes {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        $Datasets
+    )
+
+    $result = [ordered]@{}
+    if ($null -eq $Datasets) {
+        return [pscustomobject]$result
+    }
+
+    $names = @()
+    if ($Datasets -is [System.Collections.IDictionary]) {
+        $names = @($Datasets.Keys)
+    } else {
+        $names = @($Datasets.PSObject.Properties.Name)
+    }
+
+    if ($names.Count -gt 0) {
+        $nameStrings = [string[]] @($names | ForEach-Object { [string] $_ })
+        $order = [int[]] (0 .. ($nameStrings.Count - 1))
+        $comparison = [System.Comparison[int]] { param($a, $b) [string]::CompareOrdinal($nameStrings[$a], $nameStrings[$b]) }
+        [System.Array]::Sort($order, $comparison)
+        $names = @(foreach ($i in $order) { $nameStrings[$i] })
+    }
+
+    foreach ($name in $names) {
+        $entry = if ($Datasets -is [System.Collections.IDictionary]) { $Datasets[$name] } else { $Datasets.$name }
+        $gapCount = 0
+        if ($null -ne $entry -and $null -ne $entry.gaps) {
+            $gapCount = @($entry.gaps).Count
+        }
+
+        $truncated = $false
+        $certainty = $null
+        $failureClass = $null
+        $reasonCode = $null
+        $status = $null
+        if ($null -ne $entry) {
+            $status = [string] $entry.status
+            $reasonCode = [string] $entry.reasonCode
+            if ($null -ne $entry.failureClass -and -not [string]::IsNullOrWhiteSpace([string] $entry.failureClass)) {
+                $failureClass = [string] $entry.failureClass
+            }
+            $detail = $entry.detail
+            if ($null -ne $detail) {
+                $truncatedValue = $null
+                $certaintyValue = $null
+                if ($detail -is [System.Collections.IDictionary]) {
+                    if ($detail.Contains('truncated')) { $truncatedValue = $detail['truncated'] }
+                    if ($detail.Contains('certainty')) { $certaintyValue = $detail['certainty'] }
+                } else {
+                    if ($detail.PSObject.Properties['truncated']) { $truncatedValue = $detail.truncated }
+                    if ($detail.PSObject.Properties['certainty']) { $certaintyValue = $detail.certainty }
+                }
+                if ($null -ne $truncatedValue) {
+                    try { $truncated = [bool] $truncatedValue } catch { $truncated = $false }
+                }
+                if ($null -ne $certaintyValue -and -not [string]::IsNullOrWhiteSpace([string] $certaintyValue)) {
+                    $certainty = [string] $certaintyValue
+                }
+            }
+        }
+
+        $result[$name] = [pscustomobject]@{
+            status       = $status
+            reasonCode   = $reasonCode
+            failureClass = $failureClass
+            gapCount     = $gapCount
+            truncated    = $truncated
+            certainty    = $certainty
+        }
+    }
+
+    return [pscustomobject]$result
 }
 
 # Private helper (not exported): resolves one check descriptor against the manifest/store

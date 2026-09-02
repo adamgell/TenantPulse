@@ -83,8 +83,32 @@ a `Document` (no fresh `RedactionMap`) cannot redact.
       "origin": null                                // or { "project", "id", "license" }
     }
     // ... one entry per check, sorted ordinally by id
-  ]
-}
+  ],
+  "collectionOutcomes": {                         // sanitized per-dataset projection; never
+    "conditionalAccessPolicies": {                // copies DatasetOutcomes, gap scope/detail,
+      "status": "Partial",                        // provider, or operation text
+      "reasonCode": "truncated",
+      "failureClass": null,
+      "gapCount": 1,
+      "truncated": true,
+      "certainty": "Indeterminate"
+    }
+  },
+  "privacyClasses": {                             // 1.0 vocabulary for major document
+    "tenant": "Identity",                         // sections. Field-level enforcement is TP9A.
+    "producer": "SafeTechnical",
+    "coverage": "SafeTechnical",
+    "scores": "SafeTechnical",
+    "findings": "BoundedReviewedText",
+    "collectionOutcomes": "SafeTechnical",
+    "notices": "BoundedReviewedText",
+    "references": "SafeTechnical"
+  },
+  "notices": {
+    "cisDisclaimer": "..." | null                 // JSON preserves every non-null notice;
+  }                                               // CIS text is present only when a finding
+}                                                 // cites CIS. Package THIRD-PARTY-NOTICES.md
+                                                  // is separate and is not this object.
 ```
 
 Every object in this document - `Document` itself, each finding, each evidence entry,
@@ -160,8 +184,11 @@ For each check, in order:
    Each outcome exposes exactly `Status`, `FailureClass`, `ReasonCode`, `Detail`, `Provider`,
    `ApiVersion`, `Operations`, and `Gaps`; manifest-only `reason`, `sha256`, `itemCount`, and
    `collectedUtc` are absent. `DatasetOutcomes` is an in-memory evaluation input only. It is
-   never copied into a finding, scoring document, snapshot, or report, so findings schema
-   remains `1.0`, snapshot schema remains `2.0.0`, and scoring model remains `1.0`.
+   never copied into a finding, scoring document, snapshot, or report. The findings document
+   instead carries a sanitized `collectionOutcomes` projection (`status`, `reasonCode`,
+   `failureClass`, `gapCount`, `truncated`, `certainty`) plus `privacyClasses` and `notices`.
+   Findings schema remains `1.0`, snapshot schema remains `2.0.0`, and scoring model remains `1.0`.
+
 
 ### Built-in partial-aware checks
 

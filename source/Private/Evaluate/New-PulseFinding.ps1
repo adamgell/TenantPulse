@@ -24,6 +24,10 @@
     Error remains engine-assigned only (a thrown rule, or a shape the engine could not
     interpret) - no rule function or expression can ever construct an Error result.
 
+    Privacy classification of the findings document is owned by Invoke-PulseEvaluation
+    (`privacyClasses` on Document). RuleResult objects do not carry a privacy class.
+
+
     -Evidence accepts loosely-shaped input (hashtables or objects with Identity/Detail/
     SortKey/RedactDetailKeys members, matched case-insensitively) and normalizes every
     entry to a plain {Identity; Detail; SortKey; RedactDetailKeys} pscustomobject with
