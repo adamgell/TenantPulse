@@ -323,10 +323,12 @@ function Invoke-PulseCollection {
         if ($entry.PSObject.Properties['IdFromDataset'] -and $entry.IdFromDataset) {
             $dependencyRows = $collectedRows[$entry.IdFromDataset]
             $dependencyId = $null
-            if ($null -ne $dependencyRows -and @($dependencyRows).Count -gt 0) {
-                $firstRow = @($dependencyRows)[0]
-                if ($firstRow.PSObject.Properties['id'] -and $firstRow.id) {
-                    $dependencyId = [string] $firstRow.id
+            $rowList = @($dependencyRows)
+            if ($null -ne $dependencyRows -and $rowList.Count -gt 0 -and $null -ne $rowList[0]) {
+                $firstRow = $rowList[0]
+                $idProperty = $firstRow.PSObject.Properties['id']
+                if ($null -ne $idProperty -and $idProperty.Value) {
+                    $dependencyId = [string] $idProperty.Value
                 }
             }
 
@@ -376,7 +378,7 @@ function Invoke-PulseCollection {
             if ($extraParameters.Count -gt 0) {
                 $graphObjectParams.Parameters = $extraParameters
             }
-            $rawGraphResult = Get-GraphObject @graphObjectParams
+            $rawGraphResult = @(Get-GraphObject @graphObjectParams)
             $envelope = Convert-PulseGraphObjectResult -Result $rawGraphResult
             $rows = @(Get-PulseGraphObjectRows -Envelope $envelope)
             # SECRET CONTRACT (C1 fix): Sensitive-flagged properties (per TypedPolicyMaps.psd1
@@ -396,7 +398,10 @@ function Invoke-PulseCollection {
             # tenant id unredacted, not just the two datasets that happened to surface it.
             if (Test-PulseGraphEnvelopeIncomplete -Envelope $envelope) {
                 $gap = New-PulseCollectionGap -Scope $entry.Dataset -FailureClass 'Indeterminate' `
-                    -ReasonCode 'truncated' -Detail @{ certainty = [string] $envelope.Certainty; truncated = [bool] $envelope.Truncated } `
+                    -ReasonCode 'truncated' -Detail @{
+                        certainty = [string] (Get-PulseGraphEnvelopeProperty -Envelope $envelope -Name 'certainty')
+                        truncated = [bool] (Get-PulseGraphEnvelopeProperty -Envelope $envelope -Name 'truncated')
+                    } `
                     -Operation $entry.Operation -ApiVersion $entry.ApiVersion
                 if (@($rows).Count -eq 0) {
                     Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
@@ -408,7 +413,6 @@ function Invoke-PulseCollection {
                     Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Partial' `
                         -ReasonCode 'truncated' -Detail @{ truncated = $true } -Provider 'GraphKit' `
                         -Operations @($entry.Operation) -Gaps @($gap) -TenantId $contextTenantId -Pseudonym $TenantPseudonym
-                    $collectedRows[$entry.Dataset] = $rows
                 }
             }
             else {

@@ -521,27 +521,56 @@ function Get-PulseDatasetAuthorization {
     return [pscustomobject]@{ Decision = 'Granted'; ReasonCode = 'granted'; Operations = $candidates }
 }
 
-function Convert-PulseGraphObjectResult {
-    [CmdletBinding()]
+function Get-PulseGraphEnvelopeProperty {
     param(
-        [AllowNull()]
-        $Result
+        [AllowNull()] $Envelope,
+        [Parameter(Mandatory)] [string] $Name
     )
 
-    $items = @($Result)
-    if ($items.Count -eq 1 -and $null -ne $items[0]) {
-        $candidate = $items[0]
-        $hasOutcome = $false
-        $hasCertainty = $false
-        if ($candidate -is [System.Collections.IDictionary]) {
-            $hasOutcome = $candidate.Contains('Outcome')
-            $hasCertainty = $candidate.Contains('Certainty')
+    if ($null -eq $Envelope) { return $null }
+    if ($Envelope -is [System.Collections.IDictionary]) {
+        foreach ($key in @($Envelope.Keys)) {
+            if ([string]::Equals([string] $key, $Name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $Envelope[$key]
+            }
         }
-        else {
-            $hasOutcome = [bool] $candidate.PSObject.Properties['Outcome']
-            $hasCertainty = [bool] $candidate.PSObject.Properties['Certainty']
+        return $null
+    }
+
+    $property = $Envelope.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Test-PulseGraphEnvelopePropertyExists {
+    param(
+        [AllowNull()] $Envelope,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    if ($null -eq $Envelope) { return $false }
+    if ($Envelope -is [System.Collections.IDictionary]) {
+        foreach ($key in @($Envelope.Keys)) {
+            if ([string]::Equals([string] $key, $Name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
         }
-        if ($hasOutcome -and $hasCertainty) { return $candidate }
+        return $false
+    }
+
+    return ($null -ne $Envelope.PSObject.Properties[$Name])
+}
+
+function New-PulseSucceededGraphEnvelope {
+    param(
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        [object[]] $Data = @()
+    )
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in @($Data)) {
+        if ($null -ne $item) { $rows.Add($item) }
     }
 
     return [pscustomobject]@{
@@ -549,38 +578,57 @@ function Convert-PulseGraphObjectResult {
         Outcome    = 'Succeeded'
         Certainty  = 'Known'
         Truncated  = $false
-        Data       = $items
+        Data       = $rows.ToArray()
     }
+}
+
+function Convert-PulseGraphObjectResult {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        $Result
+    )
+
+    if ($null -eq $Result) {
+        return New-PulseSucceededGraphEnvelope -Data @()
+    }
+
+    $items = @($Result)
+    if ($items.Count -eq 1 -and $null -ne $items[0]) {
+        $candidate = $items[0]
+        if ((Test-PulseGraphEnvelopePropertyExists -Envelope $candidate -Name 'outcome') -and
+            (Test-PulseGraphEnvelopePropertyExists -Envelope $candidate -Name 'certainty')) {
+            return $candidate
+        }
+    }
+
+    return New-PulseSucceededGraphEnvelope -Data $items
 }
 
 function Get-PulseGraphObjectRows {
     param([AllowNull()] $Envelope)
 
-    if ($null -eq $Envelope) { return @() }
-    if ($Envelope -is [System.Collections.IDictionary] -and $Envelope.Contains('Data')) {
-        return @($Envelope['Data'])
+    $rows = [System.Collections.Generic.List[object]]::new()
+    if ($null -eq $Envelope) { return $rows.ToArray() }
+
+    $data = Get-PulseGraphEnvelopeProperty -Envelope $Envelope -Name 'data'
+    if ($null -eq $data) { return $rows.ToArray() }
+
+    foreach ($item in @($data)) {
+        if ($null -ne $item) { $rows.Add($item) }
     }
-    if ($Envelope.PSObject.Properties['Data']) {
-        return @($Envelope.Data)
-    }
-    return @()
+    return $rows.ToArray()
 }
 
 function Test-PulseGraphEnvelopeIncomplete {
     param([AllowNull()] $Envelope)
 
     if ($null -eq $Envelope) { return $false }
+    $truncatedRaw = Get-PulseGraphEnvelopeProperty -Envelope $Envelope -Name 'truncated'
+    $certainty = Get-PulseGraphEnvelopeProperty -Envelope $Envelope -Name 'certainty'
     $truncated = $false
-    $certainty = $null
-    if ($Envelope -is [System.Collections.IDictionary]) {
-        if ($Envelope.Contains('Truncated')) { $truncated = [bool] $Envelope['Truncated'] }
-        if ($Envelope.Contains('Certainty')) { $certainty = [string] $Envelope['Certainty'] }
-    }
-    else {
-        if ($Envelope.PSObject.Properties['Truncated']) { $truncated = [bool] $Envelope.Truncated }
-        if ($Envelope.PSObject.Properties['Certainty']) { $certainty = [string] $Envelope.Certainty }
-    }
-    return ($truncated -or [string]::Equals($certainty, 'Indeterminate', [System.StringComparison]::OrdinalIgnoreCase))
+    if ($null -ne $truncatedRaw) { $truncated = [bool] $truncatedRaw }
+    return ($truncated -or [string]::Equals([string] $certainty, 'Indeterminate', [System.StringComparison]::OrdinalIgnoreCase))
 }
 
 function Invoke-PulseGraphRead {
@@ -610,7 +658,15 @@ function Invoke-PulseGraphRead {
         $graphObjectParams.Parameters = $Parameters
     }
 
-    $envelope = Convert-PulseGraphObjectResult -Result (Get-GraphObject @graphObjectParams)
+    $raw = @(Get-GraphObject @graphObjectParams)
+    $envelope = Convert-PulseGraphObjectResult -Result $raw
+    if (Test-PulseGraphEnvelopeIncomplete -Envelope $envelope) {
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('Graph envelope incomplete'),
+            'GraphKit.OperationIncomplete',
+            [System.Management.Automation.ErrorCategory]::InvalidResult,
+            $envelope)
+    }
     return @(Get-PulseGraphObjectRows -Envelope $envelope)
 }
 

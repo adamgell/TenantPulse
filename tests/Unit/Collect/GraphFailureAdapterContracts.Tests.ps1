@@ -17,6 +17,19 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    InModuleScope TenantPulse {
+        function Test-GraphPermission { param() }
+    }
+    Mock Test-GraphPermission -ModuleName TenantPulse {
+        @(
+            [pscustomobject]@{ Finding = 'Configured'; Value = 'Unknown' }
+            [pscustomobject]@{ Finding = 'Granted'; Value = 'Yes' }
+            [pscustomobject]@{ Finding = 'MissingGrant'; Value = 'None' }
+            [pscustomobject]@{ Finding = 'ExcessGranted'; Value = 'None' }
+            [pscustomobject]@{ Finding = 'AuthenticationCompatible'; Value = 'Yes' }
+        )
+    }
+
 
     function New-AdapterGraphErrorRecord {
         param($Outcome, $Certainty, $StatusCode, $Category)
