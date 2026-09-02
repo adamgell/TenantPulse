@@ -625,6 +625,35 @@ function Test-PulseCheckDescriptor {
         $errors.Add("${Label}: Origin: must be `$null or a hashtable.")
     }
 
+    # Privacy (TP9A): optional. Catalog static fields are BoundedReviewedText /
+    # SafeOperatorLabel by contract. Tenant-derived evidence fields MAY be declared
+    # under Privacy.EvidenceFields = @{ key = '<class>' }. Unknown class names fail
+    # closed at catalog load. Absence is the compatibility path (local-only).
+    if ($Descriptor.ContainsKey('Privacy') -and $null -ne $Descriptor.Privacy) {
+        if ($Descriptor.Privacy -isnot [hashtable]) {
+            $errors.Add("${Label}: Privacy: must be a hashtable.")
+        } else {
+            $privacy = $Descriptor.Privacy
+            $privacyMaps = @('EvidenceFields', 'CatalogFields')
+            foreach ($mapName in $privacyMaps) {
+                if (-not $privacy.ContainsKey($mapName) -or $null -eq $privacy[$mapName]) {
+                    continue
+                }
+                $map = $privacy[$mapName]
+                if ($map -isnot [hashtable]) {
+                    $errors.Add("${Label}: Privacy.${mapName}: must be a hashtable.")
+                    continue
+                }
+                foreach ($fieldName in @($map.Keys)) {
+                    $className = $map[$fieldName]
+                    if ($className -isnot [string] -or -not (Test-PulsePrivacyClassName -Class $className)) {
+                        $errors.Add("${Label}: Privacy.${mapName}.${fieldName}: '$className' is not a 1.0 privacy class (Identity|SecretSensitive|SafeTechnical|SafeOperatorLabel|BoundedReviewedText).")
+                    }
+                }
+            }
+        }
+    }
+
     # Deliberately NOT `return , $errors.ToArray()`: the unary comma would suppress
     # pipeline unrolling and hand callers back a single object (an array) instead of the
     # flat set of error strings, corrupting every `@(Test-PulseCheckDescriptor ...)` call

@@ -29,12 +29,21 @@
 
 
     -Evidence accepts loosely-shaped input (hashtables or objects with Identity/Detail/
-    SortKey/RedactDetailKeys members, matched case-insensitively) and normalizes every
-    entry to a plain {Identity; Detail; SortKey; RedactDetailKeys} pscustomobject with
-    SortKey defaulted to Identity when omitted or blank and RedactDetailKeys defaulted to
-    an empty array when omitted, via the shared ConvertTo-PulseNormalizedEvidence helper
-    (same file).
+    SortKey/RedactDetailKeys/FieldClasses members, matched case-insensitively) and
+    normalizes every entry to a plain {Identity; Detail; SortKey; RedactDetailKeys;
+    FieldClasses} pscustomobject with SortKey defaulted to Identity when omitted or blank,
+    RedactDetailKeys defaulted to an empty array when omitted, and FieldClasses defaulted
+    to an empty hashtable when omitted, via the shared ConvertTo-PulseNormalizedEvidence
+    helper (same file).
 
+    PRIVACY CLASSIFICATION (TP9A / AC-25): every tenant-derived field on a classified
+    1.0 finding must declare one of Identity, SecretSensitive, SafeTechnical,
+    SafeOperatorLabel, or BoundedReviewedText. Pass -ReasonCode plus FieldClasses covering
+    Identity, SortKey, and every Detail key, then -RequireClassification to fail closed at
+    construction. Free-text -Reason and optional RedactDetailKeys remain the compatibility
+    layer: RedactDetailKeys names are mapped to Identity, but PrivacyComplete stays false
+    and those outputs must be labeled local-only. Protect-PulseReason is that same
+    compatibility layer for uncapped exception text.
     REDACT-DETAIL-KEYS (Phase 3 closing fix series, item 4 - minimal contract extension):
     an evidence entry MAY additionally carry -RedactDetailKeys, a string array naming
     identity-bearing keys WITHIN that entry's own Detail (e.g. `@('appleIdentifier')`) -
@@ -105,7 +114,15 @@ function New-PulseFinding {
         [Parameter()]
         [AllowNull()]
         [AllowEmptyString()]
-        [string] $Reason
+        [string] $Reason,
+
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $ReasonCode,
+
+        [Parameter()]
+        [switch] $RequireClassification
     )
 
     if ($Status -eq 'NotApplicable' -and [string]::IsNullOrEmpty($Reason)) {
@@ -114,11 +131,32 @@ function New-PulseFinding {
 
     $normalized = ConvertTo-PulseNormalizedEvidence -Evidence $Evidence
 
+    $reasonComplete = [string]::IsNullOrEmpty($Reason) -or -not [string]::IsNullOrEmpty($ReasonCode)
+    if ($reasonComplete -and -not [string]::IsNullOrEmpty($Reason) -and -not (Test-PulseValueFitsPrivacyClass -Class 'BoundedReviewedText' -Value $Reason)) {
+        $reasonComplete = $false
+    }
+
+    $evidenceComplete = $true
+    foreach ($entry in @($normalized)) {
+        if (-not (Test-PulseClassifiedEvidenceComplete -Entry $entry)) {
+            $evidenceComplete = $false
+            break
+        }
+    }
+
+    $privacyComplete = $reasonComplete -and $evidenceComplete
+
+    if ($RequireClassification -and -not $privacyComplete) {
+        throw 'New-PulseFinding: unclassified tenant-derived field. Every 1.0 field must declare a privacy class.'
+    }
+
     return [pscustomobject]@{
-        PSTypeName = 'TenantPulse.RuleResult'
-        Status     = $Status
-        Evidence   = $normalized
-        Reason     = $Reason
+        PSTypeName       = 'TenantPulse.RuleResult'
+        Status           = $Status
+        Evidence         = $normalized
+        Reason           = $Reason
+        ReasonCode       = $ReasonCode
+        PrivacyComplete  = $privacyComplete
     }
 }
 
@@ -149,6 +187,7 @@ function ConvertTo-PulseNormalizedEvidence {
         $detail = $null
         $sortKey = $null
         $redactDetailKeys = $null
+        $fieldClasses = $null
 
         # Key/property matching is case-insensitive (PowerShell's default string -eq),
         # deliberately - a duck-typed RuleResult a rule author hand-builds without going
@@ -159,6 +198,7 @@ function ConvertTo-PulseNormalizedEvidence {
                 elseif ($key -eq 'Detail') { $detail = $item[$key] }
                 elseif ($key -eq 'SortKey') { $sortKey = $item[$key] }
                 elseif ($key -eq 'RedactDetailKeys') { $redactDetailKeys = $item[$key] }
+                elseif ($key -eq 'FieldClasses') { $fieldClasses = $item[$key] }
             }
         } else {
             foreach ($propertyName in $item.PSObject.Properties.Name) {
@@ -166,6 +206,7 @@ function ConvertTo-PulseNormalizedEvidence {
                 elseif ($propertyName -eq 'Detail') { $detail = $item.$propertyName }
                 elseif ($propertyName -eq 'SortKey') { $sortKey = $item.$propertyName }
                 elseif ($propertyName -eq 'RedactDetailKeys') { $redactDetailKeys = $item.$propertyName }
+                elseif ($propertyName -eq 'FieldClasses') { $fieldClasses = $item.$propertyName }
             }
         }
 
@@ -208,12 +249,40 @@ function ConvertTo-PulseNormalizedEvidence {
                 }
             )
         }
+        $normalizedFieldClasses = @{}
+        if ($null -ne $fieldClasses) {
+            if ($fieldClasses -is [System.Collections.IDictionary]) {
+                foreach ($classKey in @($fieldClasses.Keys)) {
+                    $normalizedFieldClasses[[string] $classKey] = [string] $fieldClasses[$classKey]
+                }
+            } else {
+                foreach ($classProperty in @($fieldClasses.PSObject.Properties)) {
+                    $normalizedFieldClasses[$classProperty.Name] = [string] $classProperty.Value
+                }
+            }
+        }
+
+        foreach ($redactKey in $normalizedRedactDetailKeys) {
+            if (-not $normalizedFieldClasses.ContainsKey($redactKey)) {
+                $normalizedFieldClasses[$redactKey] = 'Identity'
+            }
+        }
+
+        if (-not $normalizedFieldClasses.ContainsKey('Identity')) {
+            $normalizedFieldClasses['Identity'] = 'Identity'
+        }
+        if (-not $normalizedFieldClasses.ContainsKey('SortKey')) {
+            if ([string] $sortKey -eq [string] $identity) {
+                $normalizedFieldClasses['SortKey'] = 'Identity'
+            }
+        }
 
         $normalized.Add([pscustomobject]@{
             Identity         = [string] $identity
             Detail           = $detail
             SortKey          = [string] $sortKey
             RedactDetailKeys = $normalizedRedactDetailKeys
+            FieldClasses     = $normalizedFieldClasses
         })
     }
 

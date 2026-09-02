@@ -28,6 +28,25 @@
     DPAPI is deliberately not used: DPAPI-protected data is bound to the encrypting user
     profile/machine, which would break key portability (copying operator.key to another
     host or restoring it from backup) - the wrong tradeoff for this threat model.
+
+    OPERATOR KEY LIFECYCLE (TP9A / AC-07): there is no public rotate cmdlet. C0 has not
+    selected one. Supported operator procedure:
+
+    Backup: copy the 32-byte operator.key file (default ~/.tenantpulse/operator.key) with
+    owner-only permissions to operator-controlled offline storage. Never copy it into a
+    snapshot, findings file, log, ticket, vault reference, or git repository.
+
+    Replacement: after backing up the previous file, write a new cryptographically random
+    32-byte key to the same path. The next assessment under the new key emits different
+    tp-... pseudonyms for the same source identities.
+
+    Join-break: reports produced under key generation N cannot be joined to reports
+    produced under generation N+1 on identity. This is intentional. Restore the backed-up
+    key to rejoin historical reports from that generation.
+
+    Synthetic keys used by tests must live only under test temp roots, never under
+    ~/.tenantpulse or a snapshot root. Real configured-key creation, backup, rotation,
+    revocation, or storage change remains approval-gated.
 #>
 
 function Get-PulseOperatorKey {

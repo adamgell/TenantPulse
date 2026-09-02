@@ -320,10 +320,18 @@ function Invoke-PulseEvaluation {
             $reason = Protect-PulseReason -Message $reason -ProfileId '' -Pseudonym $reasonPseudonym
         }
 
+        $reasonCode = $null
+        if ($result -is [System.Collections.IDictionary]) {
+            if ($result.ContainsKey('ReasonCode') -and -not [string]::IsNullOrEmpty([string] $result.ReasonCode)) {
+                $reasonCode = [string] $result.ReasonCode
+            }
+        } elseif ($result.PSObject.Properties.Name -contains 'ReasonCode' -and -not [string]::IsNullOrEmpty([string] $result.ReasonCode)) {
+            $reasonCode = [string] $result.ReasonCode
+        }
+
         $consultingSource = $check.Consulting
         $referencesSource = $check.References
         $originSource = $check.Origin
-
         $finding = [pscustomobject]@{
             id         = $check.Id
             title      = $check.Title
@@ -367,6 +375,10 @@ function Invoke-PulseEvaluation {
                     license = $originSource.License
                 }
             }
+        }
+
+        if (-not [string]::IsNullOrEmpty($reasonCode)) {
+            $finding | Add-Member -NotePropertyName reasonCode -NotePropertyValue $reasonCode
         }
 
         $findings.Add($finding)
@@ -956,7 +968,37 @@ function Invoke-PulseCheckEvaluation {
                 $reason = $ruleOutput.Reason
             }
 
-            return @{ Status = $status; Evidence = $evidence; Reason = $reason }
+            $reasonCode = $null
+            if ($ruleOutput.PSObject.Properties.Name -contains 'ReasonCode' -and -not [string]::IsNullOrEmpty([string] $ruleOutput.ReasonCode)) {
+                $reasonCode = [string] $ruleOutput.ReasonCode
+            }
+
+            $privacyComplete = $false
+            if ($ruleOutput.PSObject.Properties.Name -contains 'PrivacyComplete') {
+                $privacyComplete = [bool] $ruleOutput.PrivacyComplete
+            }
+
+            if ($null -ne $Check.Privacy -and $null -ne $Check.Privacy.EvidenceFields) {
+                $declared = $Check.Privacy.EvidenceFields
+                foreach ($item in @($evidence)) {
+                    if ($null -eq $item.FieldClasses) {
+                        $item | Add-Member -NotePropertyName FieldClasses -NotePropertyValue @{} -Force
+                    }
+                    foreach ($fieldName in @($declared.Keys)) {
+                        if (-not $item.FieldClasses.ContainsKey([string] $fieldName)) {
+                            $item.FieldClasses[[string] $fieldName] = [string] $declared[$fieldName]
+                        }
+                    }
+                }
+            }
+
+            return @{
+                Status           = $status
+                Evidence         = $evidence
+                Reason           = $reason
+                ReasonCode       = $reasonCode
+                PrivacyComplete  = $privacyComplete
+            }
         }
 
         if ($Check.Rule.Type -eq 'Expression') {

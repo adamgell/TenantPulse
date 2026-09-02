@@ -25,12 +25,42 @@ so a later render step (`-Redact` on `Invoke-PulseAssessment`, T1.8) can substit
 pseudonyms for raw identities without re-running evaluation. A render-only path that only has
 a `Document` (no fresh `RedactionMap`) cannot redact.
 
-> **Current privacy boundary:** schema `1.0` predates the product-program R5 contract. It
-> does not require one of the five privacy classes for every tenant-derived field, and its
-> free-form `reason`/error and optional `RedactDetailKeys` behavior must not be represented as
-> complete de-identification. R5 must version and migrate the schema, loader, checks, snapshot
-> projections, and all renderers together before a findings file is considered protected by
-> classification rather than by the narrower mechanisms documented here.
+> **1.0 privacy classification:** every tenant-derived field that can reach a snapshot,
+> finding, gap, error, sort key, or JSON document declares exactly one class:
+> `Identity` (HMAC-pseudonymize), `SecretSensitive` (irreversible redaction),
+> `SafeTechnical` (retain counts/booleans/ISO timestamps/relative paths/already-`tp-`
+> tokens), `SafeOperatorLabel` (retain policy/setting names), or
+> `BoundedReviewedText` (retain author-reviewed or reason-coded text; HTML consumers
+> must HTML-encode it). Construction of a classified value with a missing or unknown
+> class fails closed. `ConvertTo-PulseSafeShareDocument` is the supported classified
+> path and also fails closed on unclassified fields. Optional `RedactDetailKeys` and
+> free-text reasons remain a compatibility layer via `Protect-PulseReason`; those
+> outputs are local-only (`privacy.complete = false`, `privacy.boundary = "local-only"`)
+> and must not be represented as safe-share artifacts. C0 D6 (operator safe-share UX)
+> remains Proposed; this contract is the recommended working default, not an
+> owner-locked public command. ReportBundle/XLSX classification is TP9B.
+
+Classified / safe-share documents add:
+
+```
+privacy = {
+  classification: "1.0",
+  complete: true,
+  boundary: "classified",
+  compatLayer: false
+}
+```
+
+`reasonCode` is a lowercase hyphenated token. Reason text, when present, is
+BoundedReviewedText and cannot carry an identity- or secret-shaped value. Catalog
+static fields (`title`, `category`, `consulting`, `references`) are
+BoundedReviewedText / SafeOperatorLabel by loader contract.
+
+Operator-key lifecycle: there is no public rotate cmdlet. Backup the 32-byte
+`operator.key` offline; replacement writes a new random 32-byte key and breaks
+cross-generation joins; restoring a backup rejoins that generation. Synthetic keys
+exist only under test temp roots. Real configured-key changes remain approval-gated.
+
 
 ## Document shape
 

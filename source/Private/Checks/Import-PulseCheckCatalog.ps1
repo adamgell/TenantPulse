@@ -189,6 +189,7 @@ function Import-PulseCheckCatalog {
             Consulting = $d.Consulting
             References = $d.References
             Origin     = $d.Origin
+            Privacy    = if ($d.ContainsKey('Privacy')) { $d.Privacy } else { $null }
         }
     })
 

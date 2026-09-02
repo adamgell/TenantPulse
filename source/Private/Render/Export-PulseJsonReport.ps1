@@ -77,7 +77,13 @@ function Export-PulseJsonReport {
 
         [Parameter()]
         [AllowNull()]
-        [hashtable] $RedactionMap
+        [hashtable] $RedactionMap,
+
+        [Parameter()]
+        [byte[]] $OperatorKey,
+
+        [Parameter()]
+        [switch] $RequireClassification
     )
 
     if ($Document.PSObject.Properties.Name -contains 'RedactionMap') {
@@ -141,6 +147,10 @@ function Export-PulseJsonReport {
                 }
             }
         }
+    }
+
+    if ($RequireClassification) {
+        $documentToWrite = ConvertTo-PulseSafeShareDocument -Document $documentToWrite -RedactionMap $RedactionMap -OperatorKey $OperatorKey
     }
 
     $resolvedOutputPath = (Resolve-Path -LiteralPath $OutputPath).ProviderPath

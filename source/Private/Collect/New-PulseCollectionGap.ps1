@@ -47,8 +47,36 @@ function New-PulseCollectionGap {
 
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
-        [string] $ApiVersion
+        [string] $ApiVersion,
+
+        [Parameter()]
+        [AllowNull()]
+        [hashtable] $FieldClasses,
+
+        [Parameter()]
+        [switch] $RequireClassification
     )
+
+    if ($RequireClassification) {
+        if ($null -ne $Detail) {
+            $classes = @{}
+            if ($null -ne $FieldClasses) {
+                foreach ($key in @($FieldClasses.Keys)) {
+                    $classes[[string] $key] = [string] $FieldClasses[$key]
+                }
+            }
+
+            foreach ($key in @($Detail.Keys)) {
+                $className = $classes[[string] $key]
+                if (-not (Test-PulsePrivacyClassName -Class $className)) {
+                    throw "New-PulseCollectionGap: Detail.$key is unclassified."
+                }
+                if (-not (Test-PulseValueFitsPrivacyClass -Class $className -Value $Detail[$key])) {
+                    throw "New-PulseCollectionGap: Detail.$key does not fit privacy class '$className'."
+                }
+            }
+        }
+    }
 
     return [pscustomobject][ordered]@{
         Scope        = $Scope
@@ -58,4 +86,5 @@ function New-PulseCollectionGap {
         Operation    = $Operation
         ApiVersion   = $ApiVersion
     }
+
 }

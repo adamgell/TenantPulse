@@ -17,6 +17,13 @@
     Invoke-PulseCollection is routed through this function, including reasons built from
     fixed, non-exception text - the routing is unconditional so no future reason source
     can be added without the redaction path being obvious to bypass.
+
+    COMPATIBILITY LAYER (TP9A): this substring-replace plus 500-character cap is not the
+    1.0 classified contract. Classified construction uses ConvertTo-PulseClassifiedReason
+    (reason code plus classified arguments). Outputs that still flow through this function
+    are local-only (privacy.complete = false) and must not be represented as safe-share
+    artifacts. Keep this function until every caller moves to classified reason codes.
+
 #>
 
 function Protect-PulseReason {
