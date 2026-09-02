@@ -87,7 +87,8 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
 
     $roleAssignments = @()
     try {
-        $roleAssignments = @(Get-GraphObject -Context $Context -Type 'DeviceManagementUnifiedRoleAssignment' -Operation 'ListBeta' -ErrorAction Stop)
+        $roleAssignments = @(Invoke-PulseGraphRead -Context $Context -Type 'DeviceManagementUnifiedRoleAssignment' -Operation 'ListBeta')
+
     } catch {
         return New-RbacFailureOutcome -Operation 'DeviceManagementUnifiedRoleAssignment.ListBeta' -ErrorRecord $_
     }
@@ -204,7 +205,8 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
     foreach ($groupId in $groupIds) {
         $groupRows = @()
         try {
-            $groupRows = @(Get-GraphObject -Context $Context -Type 'Group' -Operation 'Get' -Parameters @{ id = $groupId } -ErrorAction Stop)
+            $groupRows = @(Invoke-PulseGraphRead -Context $Context -Type 'Group' -Operation 'Get' -Parameters @{ id = $groupId })
+
         } catch {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
             $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass $failure.FailureClass `

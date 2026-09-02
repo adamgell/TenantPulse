@@ -172,13 +172,15 @@ function Invoke-PulseSecurityBaselinePlan {
 
     $gaps = [System.Collections.Generic.List[object]]::new()
     try {
-        $templates = @(Get-GraphObject -Context $Context -Type 'DeviceManagementTemplate' -Operation 'ListBeta' -ErrorAction Stop)
+        $templates = @(Invoke-PulseGraphRead -Context $Context -Type 'DeviceManagementTemplate' -Operation 'ListBeta')
+
     } catch {
         return New-BaselineReadFailure -Operation 'DeviceManagementTemplate.ListBeta' -ErrorRecord $_
     }
 
     try {
-        $currentTemplates = @(Get-GraphObject -Context $Context -Type 'DeviceManagementConfigurationPolicyTemplate' -Operation 'ListBeta' -ErrorAction Stop)
+        $currentTemplates = @(Invoke-PulseGraphRead -Context $Context -Type 'DeviceManagementConfigurationPolicyTemplate' -Operation 'ListBeta')
+
     } catch {
         $currentTemplates = @()
         $gaps.Add((New-BaselineReadGap -Scope 'surface:configurationPolicyTemplates' `
@@ -191,7 +193,8 @@ function Invoke-PulseSecurityBaselinePlan {
         }
     }
     try {
-        $policies = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta' -ErrorAction Stop)
+        $policies = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta')
+
     } catch {
         $policies = @()
         $gaps.Add((New-BaselineReadGap -Scope 'surface:configurationPolicies' `
@@ -204,7 +207,8 @@ function Invoke-PulseSecurityBaselinePlan {
         }
     }
     try {
-        $intents = @(Get-GraphObject -Context $Context -Type 'DeviceManagementIntent' -Operation 'ListBeta' -ErrorAction Stop)
+        $intents = @(Invoke-PulseGraphRead -Context $Context -Type 'DeviceManagementIntent' -Operation 'ListBeta')
+
     } catch {
         $intents = @()
         $gaps.Add((New-BaselineReadGap -Scope 'surface:deviceManagementIntents' `
@@ -346,8 +350,9 @@ function Invoke-PulseSecurityBaselinePlan {
         }
 
         try {
-            $assignments = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicyAssignment' `
-                    -Operation 'ListBeta' -Parameters @{ id = $policyId } -ErrorAction Stop)
+            $assignments = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationPolicyAssignment' `
+                    -Operation 'ListBeta' -Parameters @{ id = $policyId })
+
         } catch {
             $gaps.Add((New-BaselineReadGap -Scope $scope `
                     -Operation 'ConfigurationPolicyAssignment.ListBeta' -ErrorRecord $_))

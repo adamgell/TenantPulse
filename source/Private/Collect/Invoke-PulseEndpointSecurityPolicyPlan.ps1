@@ -68,7 +68,8 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
 
     $policies = @()
     try {
-        $policies = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta' -ErrorAction Stop)
+        $policies = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta')
+
     } catch {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
         if ($failure.AbortCollection) {
@@ -133,8 +134,9 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
         $policyId = [string] $selectedPolicy.PolicyId
         $settings = @()
         try {
-            $settings = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' `
-                    -Parameters @{ id = $policyId } -ErrorAction Stop)
+            $settings = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' `
+                    -Parameters @{ id = $policyId })
+
         } catch {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass $failure.FailureClass `

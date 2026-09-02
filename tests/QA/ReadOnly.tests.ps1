@@ -285,3 +285,61 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         }
     }
 }
+
+Describe 'Permission preflight operation union is Read/Safe' -Tag 'QA', 'ReadOnly' {
+    BeforeAll {
+        $built = Get-ChildItem (Join-Path $PSScriptRoot '../../output/module/TenantPulse') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+        if (-not $built) {
+            throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
+        }
+        Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    }
+
+    It 'resolves every ordinary, composite-child, expansion, and additional Graph operation as Read/Safe' {
+        $datasetMap = Import-PowerShellDataFile -Path $script:datasetMapPath
+        $manifest = @(
+            foreach ($name in ($datasetMap.Keys | Sort-Object -Culture ([System.Globalization.CultureInfo]::InvariantCulture))) {
+                $entry = $datasetMap[$name]
+                [pscustomobject]@{
+                    Dataset    = $name
+                    Type       = $entry.Type
+                    Operation  = $entry.Operation
+                    ApiVersion = $entry.ApiVersion
+                    Pending    = [bool] $entry.Pending
+                }
+            }
+        )
+        $appHealth = @(
+            @{ Type = 'MobileApp'; Operation = 'List'; ApiVersion = 'beta' }
+        )
+
+        $operations = InModuleScope TenantPulse -ArgumentList $manifest, $appHealth {
+            param($manifest, $appHealth)
+            Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings -AdditionalOperations $appHealth
+        }
+
+        $operations | Should -Not -BeNullOrEmpty
+        $violations = [System.Collections.Generic.List[string]]::new()
+        $resolvedCount = 0
+        foreach ($operation in $operations) {
+            try {
+                $descriptor = Get-GraphOperation -Type $operation.Type -Operation $operation.Operation -ErrorAction Stop
+            } catch {
+                # Composite children may target primitives not yet in public GraphKit 0.3.0.
+                # Pending DatasetMap entries already have their own Expected Read/Safe gate.
+                continue
+            }
+
+            $resolvedCount++
+            if ([string] $descriptor.ThrottleClass -ne 'Read' -or [string] $descriptor.ReplayPolicy -ne 'Safe') {
+                $violations.Add("$($operation.Type)/$($operation.Operation) is NOT read-only (ThrottleClass='$($descriptor.ThrottleClass)', ReplayPolicy='$($descriptor.ReplayPolicy)')")
+            }
+        }
+
+        $resolvedCount | Should -BeGreaterThan 0 -Because 'the preflight union must include at least one released GraphKit descriptor'
+        $violations | Should -BeNullOrEmpty -Because ("preflight may only union Read/Safe operations:`n" + ($violations -join "`n"))
+
+    }
+}
+

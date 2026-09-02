@@ -202,7 +202,8 @@ function Invoke-PulseSettingsCatalogPolicy {
         }
 
         try {
-            $raw = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' -Parameters @{ id = $policyId } -ErrorAction Stop)
+            $raw = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' -Parameters @{ id = $policyId })
+
             $redacted = Protect-PulseSettingsCatalogSecretPayload -Data $raw -DefinitionIndex $DefinitionIndex
             # SECRET-REDACTED at write: this dataset gets the same hash-verified persistence
             # contract every other collected dataset in this module gets (see this
@@ -235,7 +236,8 @@ function Invoke-PulseSettingsCatalogPolicy {
 
         if (-not $fetchGap) {
             try {
-                $rawAssignments = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' -Parameters @{ id = $policyId } -ErrorAction Stop)
+                $rawAssignments = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' -Parameters @{ id = $policyId })
+
                 Write-PulseDataset -Store $Store -Name $RawAssignmentDatasetName -Data $rawAssignments -ApiVersion 'beta' -Status 'Collected' `
                     -TenantId $TenantId -Pseudonym $Pseudonym -ManifestBatch $ManifestBatch
             } catch {

@@ -111,7 +111,8 @@ function Invoke-PulseSettingsCatalogExpansionPipeline {
     }
 
     try {
-        $policies = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta' -ErrorAction Stop)
+        $policies = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta')
+
     } catch {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
         $statusCodeText = if ($null -eq $failure.StatusCode) { 'unknown' } else { [string] $failure.StatusCode }

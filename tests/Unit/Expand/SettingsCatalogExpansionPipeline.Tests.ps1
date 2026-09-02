@@ -21,8 +21,19 @@ BeforeAll {
 
     InModuleScope TenantPulse {
         function Get-GraphObject { param() }
+        function Test-GraphPermission { param() }
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
+    Mock Test-GraphPermission -ModuleName TenantPulse {
+        @(
+            [pscustomobject]@{ Finding = 'Configured'; Value = 'Unknown' }
+            [pscustomobject]@{ Finding = 'Granted'; Value = 'Yes' }
+            [pscustomobject]@{ Finding = 'MissingGrant'; Value = 'None' }
+            [pscustomobject]@{ Finding = 'ExcessGranted'; Value = 'None' }
+            [pscustomobject]@{ Finding = 'AuthenticationCompatible'; Value = 'Yes' }
+        )
+    }
+
 
     function New-ExpansionPipelineGraphErrorRecord {
         param($Outcome, $Certainty, $StatusCode, $Category, [string] $PrivateMarker)

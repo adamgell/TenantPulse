@@ -5,9 +5,14 @@
     Dataset name - iterated here in the order given, not re-sorted, so that invariant
     lives in exactly one place) and, for every entry:
 
+        - Invoke-PulsePermissionPreflight (once per immutable context) must have Granted
+          the dataset's Graph operations before any target Get-GraphObject is sent.
+          MissingGrant, ServicePrincipalMissing, incompatible/unknown authentication,
+          bootstrap-trap errors, and malformed finding sets write Failed with no request.
         - Pending (see DatasetMap.psd1's header): writes Skipped with reason
           'descriptor-pending: awaiting GraphKit release' and makes no Graph call at all -
           there is no descriptor yet to resolve or assert against.
+
         - Otherwise: asserts the descriptor is read-only (Assert-PulseReadOnlyDescriptor).
           A read-only-predicate violation is fatal and re-thrown, aborting the whole run -
           it is a module-authoring bug. An ApiVersion drift (that function's
@@ -96,7 +101,15 @@ function Invoke-PulseCollection {
         # one run-wide network-abort signal rather than a collector-local Boolean.
         [Parameter()]
         [AllowNull()]
-        [pscustomobject] $NetworkAbortState = $null
+        [pscustomobject] $NetworkAbortState = $null,
+
+
+        # Immutable catalog-wide authorization decision from Invoke-PulsePermissionPreflight.
+        # When omitted, this function resolves the selected operation union and preflights
+        # once before any target data operation.
+        [Parameter()]
+        [AllowNull()]
+        $AuthorizationDecision = $null
     )
 
     $contextTenantId = $null
@@ -136,6 +149,12 @@ function Invoke-PulseCollection {
         }
     }
 
+    if ($null -eq $AuthorizationDecision) {
+        $preflightOperations = @(Get-PulsePermissionPreflightOperations -Manifest $Manifest)
+        $AuthorizationDecision = Invoke-PulsePermissionPreflight -Context $Context -Operations $preflightOperations
+    }
+
+
     for ($i = 0; $i -lt $Manifest.Count; $i++) {
         $entry = $Manifest[$i]
 
@@ -172,6 +191,25 @@ function Invoke-PulseCollection {
                 -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations @($entry.Operation)
             continue
         }
+        $datasetAuthorization = Get-PulseDatasetAuthorization -AuthorizationDecision $AuthorizationDecision -ManifestEntry $entry
+        if ($datasetAuthorization.Decision -ne 'Granted') {
+            $failureClass = if ($datasetAuthorization.Decision -eq 'Denied') { 'PermissionDenied' } else { 'GateUnknown' }
+            $reason = Protect-PulseReason -Message ("permission-preflight: {0}" -f $datasetAuthorization.ReasonCode) `
+                -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+            $operations = @(
+                foreach ($candidate in @($datasetAuthorization.Operations)) {
+                    if ($null -ne $candidate -and $candidate.Operation) { [string] $candidate.Operation }
+                }
+            )
+
+            if ($operations.Count -eq 0) { $operations = @($entry.Operation) }
+            Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
+                -Reason $reason -ReasonCode $datasetAuthorization.ReasonCode `
+                -Detail @{ decision = $datasetAuthorization.Decision } -FailureClass $failureClass `
+                -Provider 'GraphKit' -Operations $operations -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+            continue
+        }
+
         if ($null -ne $planCommand) {
             try {
                 if ($planCommand -isnot [scriptblock] -and $planCommand -isnot [System.Management.Automation.CommandInfo]) {
@@ -329,16 +367,18 @@ function Invoke-PulseCollection {
 
         try {
             $graphObjectParams = @{
-                Context     = $Context
-                Type        = $entry.Type
-                Operation   = $entry.Operation
-                ErrorAction = 'Stop'
+                Context         = $Context
+                Type            = $entry.Type
+                Operation       = $entry.Operation
+                PassThruResult  = $true
+                ErrorAction     = 'Stop'
             }
             if ($extraParameters.Count -gt 0) {
                 $graphObjectParams.Parameters = $extraParameters
             }
-
-            $rows = @(Get-GraphObject @graphObjectParams)
+            $rawGraphResult = Get-GraphObject @graphObjectParams
+            $envelope = Convert-PulseGraphObjectResult -Result $rawGraphResult
+            $rows = @(Get-PulseGraphObjectRows -Envelope $envelope)
             # SECRET CONTRACT (C1 fix): Sensitive-flagged properties (per TypedPolicyMaps.psd1
             # - e.g. windows10CustomConfiguration's omaSettings[].value) are redacted
             # BEFORE this row set ever reaches Write-PulseDataset - the raw dataset file
@@ -354,8 +394,28 @@ function Invoke-PulseCollection {
             # Protect-PulseGraphRowTenantId's own docstring for the full story. Every
             # Collected write goes through this so no dataset content ever ships the raw
             # tenant id unredacted, not just the two datasets that happened to surface it.
-            Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Collected' -TenantId $contextTenantId -Pseudonym $TenantPseudonym
-            $collectedRows[$entry.Dataset] = $rows
+            if (Test-PulseGraphEnvelopeIncomplete -Envelope $envelope) {
+                $gap = New-PulseCollectionGap -Scope $entry.Dataset -FailureClass 'Indeterminate' `
+                    -ReasonCode 'truncated' -Detail @{ certainty = [string] $envelope.Certainty; truncated = [bool] $envelope.Truncated } `
+                    -Operation $entry.Operation -ApiVersion $entry.ApiVersion
+                if (@($rows).Count -eq 0) {
+                    Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
+                        -ReasonCode 'indeterminate' -Detail @{ truncated = $true } -FailureClass 'Indeterminate' `
+                        -Provider 'GraphKit' -Operations @($entry.Operation) -Gaps @($gap) `
+                        -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+                }
+                else {
+                    Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Partial' `
+                        -ReasonCode 'truncated' -Detail @{ truncated = $true } -Provider 'GraphKit' `
+                        -Operations @($entry.Operation) -Gaps @($gap) -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+                    $collectedRows[$entry.Dataset] = $rows
+                }
+            }
+            else {
+                Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Collected' -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+                $collectedRows[$entry.Dataset] = $rows
+            }
+
         } catch {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
 

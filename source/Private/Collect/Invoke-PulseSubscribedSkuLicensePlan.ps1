@@ -79,7 +79,8 @@ function Invoke-PulseSubscribedSkuLicensePlan {
 
     $rows = @()
     try {
-        $rows = @(Get-GraphObject -Context $Context -Type 'SubscribedSku' -Operation 'List' -ErrorAction Stop)
+        $rows = @(Invoke-PulseGraphRead -Context $Context -Type 'SubscribedSku' -Operation 'List')
+
     } catch {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
         if ($failure.AbortCollection) {

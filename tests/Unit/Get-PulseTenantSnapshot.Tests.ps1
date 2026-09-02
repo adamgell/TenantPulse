@@ -28,12 +28,23 @@ BeforeAll {
         function Get-GraphObject { param() }
         function Invoke-GraphOperation { param() }
         function Get-GraphOperation { param() }
+        function Test-GraphPermission { param() }
     }
 
     Mock Get-GraphContext -ModuleName TenantPulse { throw 'Get-GraphContext must be mocked in this test.' }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
     Mock Invoke-GraphOperation -ModuleName TenantPulse { throw 'Invoke-GraphOperation must be mocked in this test.' }
     Mock Get-GraphOperation -ModuleName TenantPulse { throw 'Get-GraphOperation must be mocked in this test.' }
+    Mock Test-GraphPermission -ModuleName TenantPulse {
+        @(
+            [pscustomobject]@{ Finding = 'Configured'; Value = 'Unknown' }
+            [pscustomobject]@{ Finding = 'Granted'; Value = 'Yes' }
+            [pscustomobject]@{ Finding = 'MissingGrant'; Value = 'None' }
+            [pscustomobject]@{ Finding = 'ExcessGranted'; Value = 'None' }
+            [pscustomobject]@{ Finding = 'AuthenticationCompatible'; Value = 'Yes' }
+        )
+    }
+
 
     function New-TestCheck {
         param(

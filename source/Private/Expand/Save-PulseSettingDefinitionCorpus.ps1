@@ -157,7 +157,8 @@ function Save-PulseSettingDefinitionCorpus {
     }
 
     try {
-        $rows = @(Get-GraphObject -Context $Context -Type 'ConfigurationSettingDefinition' -Operation 'ListBeta' -ErrorAction Stop)
+        $rows = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationSettingDefinition' -Operation 'ListBeta')
+
     } catch {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
         $statusCodeText = if ($null -eq $failure.StatusCode) { 'unknown' } else { [string] $failure.StatusCode }

@@ -722,7 +722,18 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings wiring' {
         InModuleScope TenantPulse {
             function Get-GraphContext { param() }
             function Get-GraphObject { param() }
+            function Test-GraphPermission { param() }
         }
+        Mock Test-GraphPermission -ModuleName TenantPulse {
+            @(
+                [pscustomobject]@{ Finding = 'Configured'; Value = 'Unknown' }
+                [pscustomobject]@{ Finding = 'Granted'; Value = 'Yes' }
+                [pscustomobject]@{ Finding = 'MissingGrant'; Value = 'None' }
+                [pscustomobject]@{ Finding = 'ExcessGranted'; Value = 'None' }
+                [pscustomobject]@{ Finding = 'AuthenticationCompatible'; Value = 'Yes' }
+            )
+        }
+
     }
 
     BeforeEach {

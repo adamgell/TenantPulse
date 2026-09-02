@@ -275,22 +275,50 @@ function Get-PulseTenantSnapshot {
         Reason                = $null
     }
 
+    $preflightOperations = @(Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings:$ExpandSettings)
+    $authorizationDecision = Invoke-PulsePermissionPreflight -Context $context -Operations $preflightOperations
+
     Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId `
         -TenantPseudonym $tenantPseudonym -ProviderPlanRegistry $resolvedProviderPlanRegistry `
-        -NetworkAbortState $networkAbortState
+        -NetworkAbortState $networkAbortState -AuthorizationDecision $authorizationDecision
+
 
     if ($ExpandSettings) {
         $expansionSuppressedReason = Protect-PulseReason -Message 'authentication-failed: network expansion suppressed' `
             -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
+        $expansionBlocked = $false
+        $expansionBlockReasonCode = $null
+        foreach ($expansionOperation in @(Get-PulsePermissionPreflightOperations -Manifest @() -ExpandSettings)) {
+            $expansionDecision = Get-PulseOperationAuthorization -AuthorizationDecision $authorizationDecision `
+                -Type $expansionOperation.Type -Operation $expansionOperation.Operation
+            if ($expansionDecision.Decision -ne 'Granted') {
+                $expansionBlocked = $true
+                $expansionBlockReasonCode = $expansionDecision.ReasonCode
+                break
+            }
+        }
+        if ($expansionBlocked) {
+            $expansionSuppressedReason = Protect-PulseReason -Message ("permission-preflight: {0}" -f $expansionBlockReasonCode) `
+                -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
+        }
+        $skipExpansionGraph = $networkAbortState.AuthenticationAborted -or $expansionBlocked
 
-        if ($networkAbortState.AuthenticationAborted) {
+        if ($skipExpansionGraph) {
             # No request was sent for the expansion root, so Skipped is accurate here. Do
             # not overwrite an ordinary-manifest entry if a future check starts consuming
             # this dataset directly and collection already recorded its attempted outcome.
             if (@($manifest | Where-Object { $_.Dataset -eq 'configurationPolicies' }).Count -eq 0) {
+                $expansionFailureClass = if ($expansionBlocked) {
+                    if ($expansionBlockReasonCode -eq 'authentication-unknown' -or $expansionBlockReasonCode -eq 'malformed-finding-set' -or $expansionBlockReasonCode -eq 'bootstrap-trap') {
+                        'GateUnknown'
+                    }
+                    else { 'PermissionDenied' }
+                }
+                else { 'AuthenticationFailed' }
+                $expansionReasonCode = if ($expansionBlocked) { $expansionBlockReasonCode } else { 'authentication-failed' }
                 Write-PulseDataset -Store $store -Name 'configurationPolicies' -ApiVersion 'beta' -Status 'Skipped' `
-                    -Reason $expansionSuppressedReason -ReasonCode 'authentication-failed' `
-                    -Detail @{ status = 'network expansion suppressed' } -FailureClass 'AuthenticationFailed' `
+                    -Reason $expansionSuppressedReason -ReasonCode $expansionReasonCode `
+                    -Detail @{ status = 'network expansion suppressed' } -FailureClass $expansionFailureClass `
                     -Provider 'GraphKit' -Operations @('ListBeta')
             }
             Set-PulseExpansionEntry -Store $store -Name 'settingsCatalog' -Status 'NotExpanded' -Reason $expansionSuppressedReason
@@ -307,7 +335,7 @@ function Get-PulseTenantSnapshot {
         # check-driven Invoke-PulseCollection call above - and fans out assignments (both
         # descriptors already released, unlike T2.2's own deferred assignments). Same void-
         # return discipline as the call above - see this file's own docstring.
-        if ($networkAbortState.AuthenticationAborted) {
+        if ($skipExpansionGraph) {
             foreach ($expansionName in @('compliance', 'deviceConfiguration')) {
                 Set-PulseExpansionEntry -Store $store -Name $expansionName -Status 'NotExpanded' -Reason $expansionSuppressedReason
             }
@@ -315,6 +343,7 @@ function Get-PulseTenantSnapshot {
             $null = Invoke-PulseTypedPolicyExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId `
                 -TenantPseudonym $tenantPseudonym -NetworkAbortState $networkAbortState
         }
+
 
         # Task 2.6: conflict detection - purely derived from the family expansion jsonl
         # artifacts just produced above, never Graph. Same void-return discipline as the

@@ -222,7 +222,8 @@ function Invoke-PulseTypedPolicyExpansion {
             }
         } else {
             try {
-                $rawAssignments = @(Get-GraphObject -Context $Context -Type $AssignmentType -Operation 'List' -Parameters @{ id = $policyId } -ErrorAction Stop)
+                $rawAssignments = @(Invoke-PulseGraphRead -Context $Context -Type $AssignmentType -Operation 'List' -Parameters @{ id = $policyId })
+
                 Write-PulseDataset -Store $Store -Name $rawDatasetName -Data $rawAssignments -ApiVersion 'v1.0' -Status 'Collected' `
                     -TenantId $TenantId -Pseudonym $Pseudonym
             } catch {
