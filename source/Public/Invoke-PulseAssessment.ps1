@@ -87,10 +87,10 @@
         Returns a summary object: { SnapshotPath; FindingsPath; ReportPaths; Scores;
         Coverage }. SnapshotPath is the store's root directory. FindingsPath is the
         canonical-JSON scored findings file this call wrote - the same file ReportPaths.Json
-        points at (ReportPaths exists as a format-keyed lookup for future renderers; Phase 1
-        ships only Json). Scores/Coverage are the scored document's own .scores/.coverage
-        properties, handed back directly so a caller does not have to re-open the report
-        file just to read them.
+        points at. -Format Html also writes tenantpulse-report.html and records it on
+        ReportPaths.Html; JSON remains canonical and is always written. Scores/Coverage are
+        the scored document's own .scores/.coverage properties, handed back directly so a
+        caller does not have to re-open the report file just to read them.
 
     .EXAMPLE
         Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out'
@@ -144,8 +144,9 @@
         Include match for the same check, on any axis.
 
     .PARAMETER Format
-        Output report format. Phase 1 supports only 'Json', the default and only accepted
-        value today - kept as an explicit parameter so a future renderer is additive.
+        Output report format. 'Json' (default) writes tenantpulse-findings.json. 'Html'
+        also writes a self-contained tenantpulse-report.html from that canonical findings
+        file. JSON is always produced; Html never talks to Graph or re-reads a snapshot.
 
     .PARAMETER Redact
         Replace every evidence identity in the rendered report with its pseudonym, built
@@ -189,7 +190,7 @@ function Invoke-PulseAssessment {
         [string[]] $ExcludeCheck,
 
         [Parameter()]
-        [ValidateSet('Json')]
+        [ValidateSet('Json', 'Html')]
         [string] $Format = 'Json',
 
         [Parameter()]
@@ -299,20 +300,31 @@ function Invoke-PulseAssessment {
     # onward separately.
     $redactionMapToApply = if ($Redact) { $evaluation.RedactionMap } else { $null }
 
-    # Dispatches on -Format even though ValidateSet allows only 'Json' today - kept
-    # explicit (rather than always calling the Json renderer unconditionally) so a future
-    # renderer is additive here, not a rewrite of this dispatch. The 'default' arm is
-    # unreachable while ValidateSet allows only 'Json' - documented scaffolding for a
-    # future format, kept deliberately rather than removed.
-    $reportPath = switch ($Format) {
-        'Json' { Export-PulseJsonReport -Document $scoredDocument -OutputPath $resolvedOutputPath -RedactionMap $redactionMapToApply }
+    # JSON is always the canonical artifact. -Format Html additionally renders a
+    # self-contained HTML report from the JSON just written (findings-only; never Graph
+    # or the snapshot store).
+    $jsonPath = Export-PulseJsonReport -Document $scoredDocument -OutputPath $resolvedOutputPath -RedactionMap $redactionMapToApply
+    $htmlPath = $null
+    switch ($Format) {
+        'Json' { }
+        'Html' {
+            $renderedJson = Get-Content -LiteralPath $jsonPath -Raw -ErrorAction Stop
+            $htmlDocument = ConvertFrom-PulseJsonPreservingStrings -Json $renderedJson -Depth 64
+            $htmlPath = Export-PulseHtmlReport -Document $htmlDocument -OutputPath $resolvedOutputPath
+        }
         default { throw "Invoke-PulseAssessment: unsupported -Format '$Format'." }
+    }
+
+    $reportPaths = if ($null -ne $htmlPath) {
+        [pscustomobject]@{ Json = $jsonPath; Html = $htmlPath }
+    } else {
+        [pscustomobject]@{ Json = $jsonPath }
     }
 
     return [pscustomobject]@{
         SnapshotPath = $store.Root
-        FindingsPath = $reportPath
-        ReportPaths  = [pscustomobject]@{ Json = $reportPath }
+        FindingsPath = $jsonPath
+        ReportPaths  = $reportPaths
         Scores       = $scoredDocument.scores
         Coverage     = $scoredDocument.coverage
     }

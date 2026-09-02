@@ -5,12 +5,15 @@
     .DESCRIPTION
         Export-PulseReport is TenantPulse's render-only path: it reads an existing findings
         document (already produced and scored by Invoke-PulseAssessment or Invoke-PulseCheck)
-        from -FindingsPath, and re-serializes it through the same canonical-JSON renderer
-        (ConvertTo-PulseCanonicalJson) to <OutputPath>/tenantpulse-findings.json. Because
-        canonical JSON is a deterministic function of the object graph, re-rendering the
-        SAME findings document is byte-identical to the original file - this command adds
-        no wall-clock timestamp, no re-evaluation, no re-scoring, nothing that could make
-        two renders of the same input differ.
+        from -FindingsPath, and re-renders it without re-evaluation or re-scoring. -Format
+        Json (the default) re-serializes the document through ConvertTo-PulseCanonicalJson to
+        <OutputPath>/tenantpulse-findings.json. -Format Html writes a self-contained
+        tenantpulse-report.html from the same findings document: inline CSS only, no scripts,
+        no network-loading URLs. Because canonical JSON is a deterministic function of the
+        object graph, re-rendering the SAME findings document as Json is byte-identical to the
+        original file - this command adds no wall-clock timestamp, no re-evaluation, no
+        re-scoring, nothing that could make two Json renders of the same input differ. Html
+        rendering is likewise a pure function of the findings document.
 
         NO -Redact PARAMETER: this command has none, deliberately, and cannot be made to
         accept one. Redaction depends on a per-evaluation redaction map (raw evidence
@@ -30,17 +33,24 @@
         Reads an existing findings document and re-renders it, unchanged, to
         ./copy/tenantpulse-findings.json.
 
+    .EXAMPLE
+        Export-PulseReport -FindingsPath './out/tenantpulse-findings.json' -Format Html -OutputPath './copy'
+
+        Reads an existing findings document and writes a self-contained HTML report to
+        ./copy/tenantpulse-report.html.
+
     .PARAMETER FindingsPath
         Path to an existing findings JSON file (as written by Invoke-PulseAssessment or
         Invoke-PulseCheck) to read and re-render.
 
     .PARAMETER Format
-        Output report format. Phase 1 supports only 'Json', the default and only accepted
-        value today - kept as an explicit parameter so a future renderer is additive.
+        Output report format. 'Json' (default) writes tenantpulse-findings.json. 'Html'
+        writes a self-contained tenantpulse-report.html from the same findings document.
+        Both formats consume canonical findings JSON only; neither talks to Graph.
 
     .PARAMETER OutputPath
-        Directory to write the re-rendered tenantpulse-findings.json into. Created if it
-        does not already exist.
+        Directory to write the re-rendered report into. Created if it does not already
+        exist. Json writes tenantpulse-findings.json; Html writes tenantpulse-report.html.
 #>
 function Export-PulseReport {
     [CmdletBinding()]
@@ -51,7 +61,7 @@ function Export-PulseReport {
         [string] $FindingsPath,
 
         [Parameter()]
-        [ValidateSet('Json')]
+        [ValidateSet('Json', 'Html')]
         [string] $Format = 'Json',
 
         [Parameter(Mandatory)]
@@ -78,16 +88,22 @@ function Export-PulseReport {
     $rawFindingsJson = Get-Content -LiteralPath $FindingsPath -Raw -ErrorAction Stop
     $document = ConvertFrom-PulseJsonPreservingStrings -Json $rawFindingsJson -Depth 64
 
-    # Dispatches on -Format even though ValidateSet allows only 'Json' today - kept
-    # explicit (rather than always calling the Json renderer unconditionally) so a future
-    # renderer is additive here, not a rewrite of this dispatch.
+    # Dispatches on -Format. Json remains the canonical renderer; Html is additive and
+    # still reads only the findings document already loaded above.
     $reportPath = switch ($Format) {
         'Json' { Export-PulseJsonReport -Document $document -OutputPath $OutputPath }
+        'Html' { Export-PulseHtmlReport -Document $document -OutputPath $OutputPath }
         default { throw "Export-PulseReport: unsupported -Format '$Format'." }
+    }
+
+    $reportPaths = if ($Format -eq 'Html') {
+        [pscustomobject]@{ Html = $reportPath }
+    } else {
+        [pscustomobject]@{ Json = $reportPath }
     }
 
     return [pscustomobject]@{
         FindingsPath = $FindingsPath
-        ReportPaths  = [pscustomobject]@{ Json = $reportPath }
+        ReportPaths  = $reportPaths
     }
 }

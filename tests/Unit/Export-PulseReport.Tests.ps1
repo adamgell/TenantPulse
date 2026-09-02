@@ -24,7 +24,7 @@ Describe 'Export-PulseReport' {
         { Export-PulseReport -FindingsPath (Join-Path $script:outputRoot 'missing.json') -Format Json -OutputPath $script:outputRoot } | Should -Throw
     }
 
-    It 'rejects a -Format value other than Json' {
+    It 'rejects a -Format value other than Json or Html' {
         $findingsPath = Join-Path $script:outputRoot 'tenantpulse-findings.json'
         Set-Content -LiteralPath $findingsPath -Value '{}' -NoNewline
 
@@ -47,6 +47,34 @@ Describe 'Export-PulseReport' {
         $expectedPath = Join-Path $newOutputPath 'tenantpulse-findings.json'
         $result.ReportPaths.Json | Should -Be $expectedPath
         Test-Path -LiteralPath $expectedPath -PathType Leaf | Should -BeTrue
+    }
+
+    It 'writes tenantpulse-report.html for -Format Html without calling Graph' {
+        $sourceDocument = InModuleScope TenantPulse {
+            ConvertTo-PulseCanonicalJson -InputObject ([pscustomobject]@{
+                schemaVersion = '1.0'
+                generatedUtc  = '2026-08-15T00:00:00.000Z'
+                tenant        = 'tp-fixturetenant'
+                producer      = [pscustomobject]@{ tenantPulse = '0.3.0'; graphKit = $null; scoringModelVersion = '1.0' }
+                coverage      = [pscustomobject]@{ overall = [pscustomobject]@{ assessed = 0; applicable = 0; percent = 0.0 }; byCategory = @{} }
+                scores        = [pscustomobject]@{ overall = [pscustomobject]@{ earned = 0.0; possible = 0.0; percent = 0.0 }; byCategory = @{} }
+                findings      = @()
+                notices       = [pscustomobject]@{ cisDisclaimer = $null }
+            })
+        }
+        $findingsPath = Join-Path $script:outputRoot 'source-findings.json'
+        Set-Content -LiteralPath $findingsPath -Value $sourceDocument -NoNewline
+
+        Mock Get-GraphObject -ModuleName TenantPulse { throw 'Export-PulseReport Html must not call Graph.' }
+
+        $htmlRoot = Join-Path $script:outputRoot 'html-out'
+        $result = Export-PulseReport -FindingsPath $findingsPath -Format Html -OutputPath $htmlRoot
+
+        $expectedPath = Join-Path $htmlRoot 'tenantpulse-report.html'
+        $result.FindingsPath | Should -Be $findingsPath
+        $result.ReportPaths.Html | Should -Be $expectedPath
+        Test-Path -LiteralPath $expectedPath -PathType Leaf | Should -BeTrue
+        (Get-Content -LiteralPath $expectedPath -Raw) | Should -Match 'id="executive-summary"'
     }
 
     # Item 2 (final fix wave): parity with Invoke-PulseAssessment's return object.

@@ -99,7 +99,7 @@ Describe 'Invoke-PulseAssessment' {
         { Invoke-PulseAssessment -ProfileId 'contoso-tenant-id' -OutputPath '' } | Should -Throw
     }
 
-    It 'rejects a -Format value other than Json' {
+    It 'rejects a -Format value other than Json or Html' {
         { Invoke-PulseAssessment -ProfileId 'contoso-tenant-id' -OutputPath $script:outputRoot -Format 'Xml' } | Should -Throw
     }
 
@@ -159,5 +159,24 @@ Describe 'Invoke-PulseAssessment' {
 
         $doc = Get-Content -LiteralPath $summary.FindingsPath -Raw | ConvertFrom-Json
         $doc.findings.Count | Should -Be 0
+    }
+
+    It 'writes canonical JSON and a self-contained HTML report when -Format Html is supplied' {
+        $inScope = (New-TestAssessmentCatalog -Id 'TP.ENT.9001' -Category 'Entra.ConditionalAccess' -Datasets @('conditionalAccessPolicies'))[0]
+
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($inScope) }
+        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
+        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+
+        $summary = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot; Format = 'Html' }
+
+        Test-Path -LiteralPath $summary.FindingsPath -PathType Leaf | Should -BeTrue
+        $summary.FindingsPath | Should -Match 'tenantpulse-findings\.json$'
+        $summary.ReportPaths.Json | Should -Be $summary.FindingsPath
+        Test-Path -LiteralPath $summary.ReportPaths.Html -PathType Leaf | Should -BeTrue
+        $summary.ReportPaths.Html | Should -Match 'tenantpulse-report\.html$'
+        (Get-Content -LiteralPath $summary.ReportPaths.Html -Raw) | Should -Match 'id="executive-summary"'
+        (Get-Content -LiteralPath $summary.ReportPaths.Html -Raw) | Should -Match 'TP\.ENT\.9001'
     }
 }
