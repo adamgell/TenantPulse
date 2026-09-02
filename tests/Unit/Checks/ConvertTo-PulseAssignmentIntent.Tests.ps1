@@ -123,4 +123,96 @@ Describe 'ConvertTo-PulseAssignmentIntent' {
         $result.State | Should -Be 'ExcludeOnly'
         $result.IsAssigned | Should -BeFalse
     }
+
+    It 'classifies a normalized group target as Include (parity with raw graph shape)' {
+        $assignments = @(
+            @{ intent = 'include'; targetType = 'group'; groupId = 'grp-include-norm' }
+        )
+        $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+        $result.State | Should -Be 'Include'
+        $result.IsAssigned | Should -BeTrue
+        $result.IncludeGroupIds | Should -Contain 'grp-include-norm'
+        $result.IncludeKinds | Should -Contain 'Group'
+    }
+
+    It 'classifies a normalized exclusionGroup target as ExcludeOnly (parity with raw graph shape)' {
+        $assignments = @(
+            @{ intent = 'exclude'; targetType = 'exclusionGroup'; groupId = 'grp-ex-norm' }
+        )
+        $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+        $result.State | Should -Be 'ExcludeOnly'
+        $result.IsAssigned | Should -BeFalse
+        $result.ExcludeGroupIds | Should -Contain 'grp-ex-norm'
+    }
+
+    It 'classifies a normalized allLicensedUsers target as Include (parity with raw graph shape)' {
+        $assignments = @(
+            @{ intent = 'include'; targetType = 'allLicensedUsers' }
+        )
+        $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+        $result.State | Should -Be 'Include'
+        $result.IsAssigned | Should -BeTrue
+        $result.IncludeKinds | Should -Contain 'AllUsers'
+    }
+
+    It 'classifies a normalized allDevices target as Include (parity with raw graph shape)' {
+        $assignments = @(
+            @{ intent = 'include'; targetType = 'allDevices' }
+        )
+        $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+        $result.State | Should -Be 'Include'
+        $result.IsAssigned | Should -BeTrue
+        $result.IncludeKinds | Should -Contain 'AllDevices'
+    }
+
+# ---- Normalized include/exclude parity: mixing shapes in one policy. ----
+
+    It 'classifies a mix of normalized group-include and raw graph-exclude as Include with excluded groups' {
+        $assignments = @(
+            @{ intent = 'include'; targetType = 'group'; groupId = 'grp-include-norm' }
+            @{ target = @{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'grp-ex-raw' } }
+        )
+        $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+        $result.State | Should -Be 'Include'
+        $result.IsAssigned | Should -BeTrue
+        $result.IncludeGroupIds | Should -Contain 'grp-include-norm'
+        $result.ExcludeGroupIds | Should -Contain 'grp-ex-raw'
+    }
+
+# ---- Normalized filter parity: flat filterId/filterType matches raw behavior. ----
+
+    It 'records a normalized filter id and type without treating it as assignment by itself' {
+        $assignments = @(
+            @{
+                intent         = 'include'
+                targetType     = 'group'
+                groupId        = 'grp-filter-norm'
+                filterId       = 'filter-1-norm'
+                filterType     = 'include'
+            }
+        )
+        $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+        $result.HasFilter | Should -BeTrue
+        $result.FilterIds | Should -Contain 'filter-1-norm'
+        $result.State | Should -Be 'Include'
+        $result.IsAssigned | Should -BeTrue
+    }
 }

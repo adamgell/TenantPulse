@@ -87,16 +87,30 @@ function ConvertTo-PulseAssignmentIntent {
             continue
         }
 
+        # Extract intent - both shapes carry it at the top level.
         $intent = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'intent')
-        $target = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'target'
-        if ($null -eq $target) {
-            $target = $assignment
+        $normalizedTargetType = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'targetType')
+        if (-not [string]::IsNullOrWhiteSpace($normalizedTargetType)) {
+            switch ($normalizedTargetType) {
+                'group'                    { $typeName = 'groupAssignmentTarget' }
+                'exclusionGroup'           { $typeName = 'exclusionGroupAssignmentTarget' }
+                'allLicensedUsers'         { $typeName = 'allLicensedUsersAssignmentTarget' }
+                'allDevices'               { $typeName = 'allDevicesAssignmentTarget' }
+                default                    { $typeName = $null }
+            }
+            $groupId = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'groupId')
+            $filterId = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'filterId')
+            $filterType = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'filterType')
+        } else {
+            $target = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'target'
+            if ($null -eq $target) {
+                $target = $assignment
+            }
+            $typeName = Get-PulseAssignmentODataType -Node $target
+            $groupId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'groupId')
+            $filterId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId')
+            $filterType = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType')
         }
-
-        $typeName = Get-PulseAssignmentODataType -Node $target
-        $groupId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'groupId')
-        $filterId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId')
-        $filterType = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType')
         if (-not [string]::IsNullOrWhiteSpace($filterId)) {
             $result.HasFilter = $true
             [void] $filterIds.Add($filterId)
