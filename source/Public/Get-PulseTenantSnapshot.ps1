@@ -318,7 +318,9 @@ function Get-PulseTenantSnapshot {
 
         # Task 2.6: conflict detection - purely derived from the family expansion jsonl
         # artifacts just produced above, never Graph. Same void-return discipline as the
-        # two calls above - see this file's own docstring.
+        # two calls above - see this file's own docstring. Invoke-PulseConflictDetection
+        # treats NotExpanded/Failed families (including authentication-suppressed typed-
+        # policy walks) as omitted-family gaps, so TP.INT.0006 cannot Pass a 1-of-3 scan.
         $null = Invoke-PulseConflictDetection -Store $store -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
 
         # Part A, T3.4: per-family setting-presence index - purely derived from the SAME

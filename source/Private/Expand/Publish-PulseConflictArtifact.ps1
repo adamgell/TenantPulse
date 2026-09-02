@@ -25,7 +25,10 @@
     other expansion entry populates), but this function passes it the number of SOURCE
     expansion families the conflict scan actually drew rows from - "how many things were
     walked to produce this" generalizes cleanly from "how many policies" to "how many
-    families" without needing a new manifest field.
+    families" without needing a new manifest field. Status is Expanded only when
+    -FamilyCount > 0 AND -Gaps is empty. Callers MUST put omitted NotExpanded/Failed
+    families into -Gaps; this function will not infer them, and empty remaining gaps after
+    skipped families must never be published as Expanded.
 #>
 
 function Publish-PulseConflictArtifact {

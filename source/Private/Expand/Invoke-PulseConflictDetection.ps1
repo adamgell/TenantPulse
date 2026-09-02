@@ -11,23 +11,26 @@
     split the way T2.2/T2.3's drivers need: "from existing jsonl artifacts, never Graph" is
     this function's ONLY mode.
 
-    PER-FAMILY AVAILABILITY, NOT A GAP (mirrors Invoke-PulseTypedPolicyExpansionPipeline's
-    own per-family independence): a family whose own manifest.expansions entry does not
-    exist, or is NotExpanded/Failed, is an EXPECTED absence (the G-gate core slice never
-    ran that family this snapshot, or it genuinely had nothing to expand) - it is silently
-    skipped, contributing no rows and no gap. A family whose entry claims Expanded/Partial
-    but whose on-disk file is missing or no longer matches its recorded hash IS a genuine
-    integrity failure (tampering, disk corruption, a stale manifest) and is recorded as a
-    conflicts-artifact gap so it is visible in the manifest rather than silently dropped.
-    A verified Partial family contributes both its usable rows AND every recorded source
-    gap: a policy rejected upstream cannot disappear and turn a partial scan into a bare
-    zero-conflict result.
+    PER-FAMILY AVAILABILITY: a family whose own manifest.expansions entry does not exist
+    is an EXPECTED absence (the G-gate core slice never ran that family this snapshot) -
+    it is silently skipped, contributing no rows and no gap. A NotExpanded family whose
+    raw dataset was never collected (pipeline reason like 'deviceCompliancePolicies
+    unavailable', no recorded gaps) is the same expected absence. A family that is
+    Failed, NotExpanded with recorded source gaps (all-policies-failed / authentication
+    abort), or NotExpanded because authentication aborted the walk, is NOT expected
+    absence: those families contribute every recorded source gap AND a FamilyUnavailable
+    disclosure so a 1-of-3 scan cannot publish Expanded with empty gaps. A family whose
+    entry claims Expanded/Partial but whose on-disk file is missing or no longer matches
+    its recorded hash IS a genuine integrity failure (tampering, disk corruption, a stale
+    manifest) and is recorded as a conflicts-artifact gap so it is visible in the
+    manifest rather than silently dropped. A verified Partial family contributes both
+    its usable rows AND every recorded source gap: a policy rejected upstream cannot
+    disappear and turn a partial scan into a bare zero-conflict result.
 
     ZERO FAMILIES AVAILABLE -> NotExpanded (Publish-PulseConflictArtifact's own
     -FamilyCount 0 path), naming which case applies. ZERO CONFLICTS FOUND from >=1 usable
-    family is a VALID, Expanded outcome (detection proven by fixtures, not corpus luck -
-    the plan's own T2.7 rule, already true here since this function never special-cases an
-    empty result).
+    family is a VALID Expanded outcome ONLY when no omitted family contributed a gap
+    (detection proven by fixtures, not corpus luck - the plan's own T2.7 rule).
 #>
 
 function Invoke-PulseConflictDetection {
@@ -60,9 +63,23 @@ function Invoke-PulseConflictDetection {
         $hasEntry = $manifest.expansions -and $manifest.expansions.ContainsKey($familyName)
         if (-not $hasEntry) { continue }
 
-        $entryStatus = $manifest.expansions[$familyName].status
+        $sourceEntry = $manifest.expansions[$familyName]
+        $entryStatus = $sourceEntry.status
         if ($entryStatus -ne 'Expanded' -and $entryStatus -ne 'Partial') {
-            # Expected absence of usable data for this family this snapshot - not a gap.
+            $gapCountBefore = $gapEntries.Count
+            Add-PulseConflictCopiedSourceGaps -Target $gapEntries -SourceEntry $sourceEntry -FamilyName $familyName `
+                -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+            $copiedSourceGaps = $gapEntries.Count -gt $gapCountBefore
+
+            $reasonText = ''
+            if ($sourceEntry -is [System.Collections.IDictionary] -and $sourceEntry.Contains('reason')) {
+                $reasonText = [string] $sourceEntry['reason']
+            }
+            $authenticationOmitted = $reasonText.IndexOf('authentication-failed', [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+            if ($copiedSourceGaps -or $authenticationOmitted -or $entryStatus -eq 'Failed') {
+                $detail = Protect-PulseReason -Message "category:FamilyUnavailable;family:$familyName" -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+                $gapEntries.Add([pscustomobject]@{ policyId = ''; reason = $detail }) | Out-Null
+            }
             continue
         }
 
@@ -70,32 +87,8 @@ function Invoke-PulseConflictDetection {
             $familyRows = Get-PulseExpansionRows -Store $Store -Name $familyName
             $familyGaps = [System.Collections.Generic.List[object]]::new()
             if ($entryStatus -eq 'Partial') {
-                $sourceEntry = $manifest.expansions[$familyName]
-                # Assign directly rather than through an `if` expression: PowerShell
-                # enumerates array output from statement blocks, collapsing a valid one-gap
-                # array to its single dictionary element.
-                $sourceGaps = $null
-                if ($sourceEntry.Contains('gaps')) { $sourceGaps = $sourceEntry['gaps'] }
-                if ($sourceGaps -isnot [System.Collections.IList] -or $sourceGaps.Count -eq 0) {
-                    throw "Partial source expansion '$familyName' has no usable gap array."
-                }
-                foreach ($sourceGap in $sourceGaps) {
-                    if ($sourceGap -isnot [System.Collections.IDictionary] -or
-                        -not $sourceGap.Contains('policyId') -or $sourceGap['policyId'] -isnot [string] -or
-                        -not $sourceGap.Contains('reason') -or $sourceGap['reason'] -isnot [string] -or
-                        [string]::IsNullOrWhiteSpace([string] $sourceGap['reason'])) {
-                        throw "Partial source expansion '$familyName' has a malformed gap entry."
-                    }
-                    $sourcePolicyId = [string] $sourceGap['policyId']
-                    $sourceReason = [string] $sourceGap['reason']
-                    $safePolicyId = Protect-PulseReason -Message $sourcePolicyId -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
-                    $safeReason = Protect-PulseReason -Message $sourceReason -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
-                    if (-not [string]::Equals($sourcePolicyId, $safePolicyId, [System.StringComparison]::Ordinal) -or
-                        -not [string]::Equals($sourceReason, $safeReason, [System.StringComparison]::Ordinal)) {
-                        throw "Partial source expansion '$familyName' has a privacy-unsafe gap entry."
-                    }
-                    $familyGaps.Add([pscustomobject]@{ policyId = $sourcePolicyId; reason = $sourceReason }) | Out-Null
-                }
+                Add-PulseConflictCopiedSourceGaps -Target $familyGaps -SourceEntry $sourceEntry -FamilyName $familyName `
+                    -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId -Required
             }
             foreach ($row in $familyRows) { $allRows.Add($row) | Out-Null }
             foreach ($sourceGap in $familyGaps) { $gapEntries.Add($sourceGap) | Out-Null }
@@ -128,4 +121,70 @@ function Invoke-PulseConflictDetection {
     $conflicts = ConvertTo-PulseConflictRecords -Rows $allRows.ToArray()
 
     return Publish-PulseConflictArtifact -Store $Store -Conflicts $conflicts -Gaps $sortedGaps -FamilyCount $verifiedFamilyCount
+}
+
+function Add-PulseConflictCopiedSourceGaps {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [System.Collections.Generic.List[object]] $Target,
+
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        $SourceEntry,
+
+        [Parameter(Mandatory)]
+        [string] $FamilyName,
+
+        [Parameter()]
+        [string] $ProfileId = '',
+
+        [Parameter()]
+        [string] $Pseudonym = 'tp-unknown',
+
+        [Parameter()]
+        [AllowNull()]
+        [string] $TenantId,
+
+        [Parameter()]
+        [switch] $Required
+    )
+
+    $sourceGaps = $null
+    if ($null -ne $SourceEntry -and $SourceEntry -is [System.Collections.IDictionary] -and $SourceEntry.Contains('gaps')) {
+        $sourceGaps = $SourceEntry['gaps']
+    }
+    if ($sourceGaps -isnot [System.Collections.IList] -or $sourceGaps.Count -eq 0) {
+        if ($Required) {
+            throw "Partial source expansion '$FamilyName' has no usable gap array."
+        }
+        return
+    }
+
+    foreach ($sourceGap in $sourceGaps) {
+        if ($sourceGap -isnot [System.Collections.IDictionary] -or
+            -not $sourceGap.Contains('policyId') -or $sourceGap['policyId'] -isnot [string] -or
+            -not $sourceGap.Contains('reason') -or $sourceGap['reason'] -isnot [string] -or
+            [string]::IsNullOrWhiteSpace([string] $sourceGap['reason'])) {
+            if ($Required) {
+                throw "Partial source expansion '$FamilyName' has a malformed gap entry."
+            }
+            continue
+        }
+
+        $sourcePolicyId = [string] $sourceGap['policyId']
+        $sourceReason = [string] $sourceGap['reason']
+        $safePolicyId = Protect-PulseReason -Message $sourcePolicyId -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+        $safeReason = Protect-PulseReason -Message $sourceReason -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+        if (-not [string]::Equals($sourcePolicyId, $safePolicyId, [System.StringComparison]::Ordinal) -or
+            -not [string]::Equals($sourceReason, $safeReason, [System.StringComparison]::Ordinal)) {
+            if ($Required) {
+                throw "Partial source expansion '$FamilyName' has a privacy-unsafe gap entry."
+            }
+            continue
+        }
+
+        $Target.Add([pscustomobject]@{ policyId = $sourcePolicyId; reason = $sourceReason }) | Out-Null
+    }
 }

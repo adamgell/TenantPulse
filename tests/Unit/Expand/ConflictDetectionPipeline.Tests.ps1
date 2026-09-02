@@ -85,6 +85,48 @@ Describe 'Invoke-PulseConflictDetection' {
         }
     }
 
+    It 'does not publish Expanded empty-gap conflicts when typed-policy families are NotExpanded after authentication abort' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            $catalogRows = @([pscustomobject]@{
+                    schemaVersion = '1'; policyId = 'sc1'; policyType = 'settingsCatalog'; policyName = 'Catalog One'
+                    templateFamily = $null; isBaseline = $false; settingPath = 'def-catalog'; settingDefinitionId = 'def-catalog'
+                    settingName = 'catalogSetting'; nameResolved = $true; instanceId = 'sc1/p:def-catalog'; value = 'v'
+                    valueLabel = $null; labelResolved = $false; redacted = $false; valueState = $null; applicability = $null
+                    assignments = @()
+                })
+            Publish-PulseExpansionRows -Store $store -Name 'settingsCatalog' -Rows $catalogRows -Gaps @() -PolicyCount 1 | Out-Null
+
+            $complianceGaps = @(
+                [pscustomobject]@{ policyId = 'p1'; reason = 'category:AssignmentFetchFailed' }
+                [pscustomobject]@{ policyId = 'p2'; reason = 'category:NotAttemptedAfterAuthenticationFailure' }
+                [pscustomobject]@{ policyId = 'p3'; reason = 'category:NotAttemptedAfterAuthenticationFailure' }
+            )
+            Publish-PulseExpansionRows -Store $store -Name 'compliance' -Rows @() -Gaps $complianceGaps -PolicyCount 3 | Out-Null
+
+            Set-PulseExpansionEntry -Store $store -Name 'deviceConfiguration' -Status 'NotExpanded' `
+                -Reason 'authentication-failed: network expansion suppressed'
+
+            $result = Invoke-PulseConflictDetection -Store $store
+            $result.Status | Should -Not -Be 'Expanded' -Because 'omitted typed-policy families must not launder a 1-of-3 scan into Expanded'
+            $result.Gaps.Count | Should -BeGreaterThan 0 -Because 'NotExpanded recorded gaps and omitted families must remain visible'
+            @($result.Gaps.policyId) | Should -Contain 'p1'
+            @($result.Gaps.policyId) | Should -Contain 'p2'
+            @($result.Gaps.policyId) | Should -Contain 'p3'
+            @($result.Gaps.reason) | Should -Contain 'category:AssignmentFetchFailed'
+            @($result.Gaps.reason) | Should -Contain 'category:NotAttemptedAfterAuthenticationFailure'
+            ($result.Gaps | ForEach-Object { [string] $_.reason }) | Should -Contain 'category:FamilyUnavailable;family:compliance'
+            ($result.Gaps | ForEach-Object { [string] $_.reason }) | Should -Contain 'category:FamilyUnavailable;family:deviceConfiguration'
+
+            $reader = New-PulseArtifactReader -Store $store
+            $finding = Test-PulseConflictingPolicySettings -Datasets @{} -Context @{ ArtifactReader = $reader }
+            $finding.Status | Should -Not -Be 'Pass' -Because 'TP.INT.0006 must not Pass a partial-family scan as a clean zero-conflict result'
+            $finding.Reason | Should -Match 'PARTIAL SCAN'
+            $finding.Reason | Should -Match 'compliance'
+            $finding.Reason | Should -Match 'deviceConfiguration'
+        }
+    }
+
     It 'propagates a Partial source family gap so an omitted policy cannot produce an unqualified zero-conflict result' {
         InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)
