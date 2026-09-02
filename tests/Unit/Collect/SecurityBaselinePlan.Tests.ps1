@@ -579,4 +579,38 @@ Describe 'TP.INT.0029 security-baseline row fixtures' {
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
     }
+
+    It 'classifies every enumerated baseline as Expanded, Partial, or NotExpanded with equal totals' {
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('assignment failed'),
+            'GraphKit.OperationFailed.500',
+            [System.Management.Automation.ErrorCategory]::InvalidResult,
+            $null)
+        $result = Invoke-SecurityBaselinePlanFixture -CurrentTemplates @(
+            [pscustomobject]@{ id = 'template-current'; baseId = 'base-windows'; version = 2; displayName = 'Windows baseline'; displayVersion = '24H2'; lifecycleState = 'active'; templateFamily = 'baseline' }
+            [pscustomobject]@{ id = 'template-old'; baseId = 'base-edge'; version = 1; displayName = 'Edge baseline'; displayVersion = 'v1'; lifecycleState = 'superseded'; templateFamily = 'baseline' }
+        ) -Policies @(
+            [pscustomobject]@{ id = 'policy-current'; name = 'Windows profile'; isAssigned = $true; templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline'; templateDisplayName = 'Windows baseline'; templateDisplayVersion = '24H2' } }
+            [pscustomobject]@{ id = 'policy-old'; name = 'Edge profile'; isAssigned = $false; templateReference = [pscustomobject]@{ templateId = 'template-old'; templateFamily = 'baseline'; templateDisplayName = 'Edge baseline'; templateDisplayVersion = 'v1' } }
+        ) -Assignments @{
+            'policy-current' = @([pscustomobject]@{ id = 'assignment-1'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'; deviceAndAppManagementAssignmentFilterType = 'none' }; source = 'direct'; sourceId = $null })
+        } -AssignmentErrors @{
+            'policy-old' = $errorRecord
+        }
+
+        $result.Outcome.Status | Should -Be 'Partial'
+        @($result.Outcome.Rows).Count | Should -Be 1
+        $result.Outcome.Detail.enumeratedCount | Should -Be 2
+        ($result.Outcome.Detail.expandedCount + $result.Outcome.Detail.partialCount + $result.Outcome.Detail.notExpandedCount) |
+            Should -Be $result.Outcome.Detail.enumeratedCount
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicyAssignment.ListBeta'
+        $result.Outcome.Gaps[0].ApiVersion | Should -Be 'beta'
+        $result.Outcome.Operations | Should -Be @(
+            'DeviceManagementTemplate.ListBeta'
+            'DeviceManagementConfigurationPolicyTemplate.ListBeta'
+            'ConfigurationPolicy.ListBeta'
+            'ConfigurationPolicyAssignment.ListBeta'
+            'DeviceManagementIntent.ListBeta'
+        )
+    }
 }

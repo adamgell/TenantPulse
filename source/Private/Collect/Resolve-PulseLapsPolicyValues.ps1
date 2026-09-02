@@ -34,29 +34,49 @@ function Resolve-PulseLapsPolicyValues {
             throw "LAPS $Criterion setting was not returned."
         }
 
-
+        $sawKnownTrue = $false
+        $sawKnownFalse = $false
+        $sawUnknown = $false
+        $tokenCount = 0
         foreach ($row in $Rows) {
             foreach ($tokenValue in @($row.Tokens)) {
+                $tokenCount++
                 $token = [string] $tokenValue
                 $number = Get-TrailingNumber -Token $token
                 switch ($Criterion) {
                     'Backup' {
-                        if ($number -eq 1 -or $token -match '(?i)(entra|azure|aad)') { return [bool] $true }
+                        if ($number -eq 1 -or $token -match '(?i)(entra|azure|aad)') { $sawKnownTrue = $true; continue }
+                        if ($number -in @(0, 2) -or $token -match '(?i)(none|onprem|active.?directory)') { $sawKnownFalse = $true; continue }
+                        $sawUnknown = $true
                     }
                     'Complexity' {
-                        if ($null -ne $number -and $number -ge 4) { return [bool] $true }
+                        if ($null -ne $number) {
+                            if ($number -ge 4) { $sawKnownTrue = $true } else { $sawKnownFalse = $true }
+                            continue
+                        }
+                        $sawUnknown = $true
                     }
                     'Length' {
-                        if ($null -ne $number -and $number -ge 14) { return [bool] $true }
+                        if ($null -ne $number) {
+                            if ($number -ge 14) { $sawKnownTrue = $true } else { $sawKnownFalse = $true }
+                            continue
+                        }
+                        $sawUnknown = $true
                     }
                     'PostAuthentication' {
-                        if ($token -match '(?i)(reset|rotate)') { return [bool] $true }
-                        if ($number -in @(1, 3, 5, 11)) { return [bool] $true }
+                        if ($token -match '(?i)(reset|rotate)') { $sawKnownTrue = $true; continue }
+                        if ($number -in @(1, 3, 5, 11)) { $sawKnownTrue = $true; continue }
+                        if ($null -ne $number) { $sawKnownFalse = $true; continue }
+                        $sawUnknown = $true
                     }
                 }
             }
         }
 
+        if ($tokenCount -eq 0 -or $sawUnknown) {
+            throw "LAPS $Criterion setting value is unknown."
+        }
+        if ($sawKnownTrue) { return [bool] $true }
         return [bool] $false
     }
 

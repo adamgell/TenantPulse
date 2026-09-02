@@ -448,4 +448,84 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $result.Calls[2].Kind | Should -Be 'Graph'
         $result.Calls[2].Type | Should -Be 'ConfigurationPolicy'
     }
+
+    It 'keeps an unrecognized BitLocker encryption token unknown instead of Boolean-coercing it' {
+        $policy = New-EndpointPolicy -Id 'bitlocker-unknown' -Name 'Unknown token' -Family 'endpointSecurityDiskEncryption'
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies @($policy) `
+            -SettingsByPolicy @{
+                'bitlocker-unknown' = @(New-EndpointSetting -DefinitionId $child -Value 'not-a-known-encryption-type')
+            }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be 'unknown-setting'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicySetting.ListBeta'
+        $result.Outcome.Gaps[0].ApiVersion | Should -Be 'beta'
+        $result.Outcome.Detail.enumeratedCount | Should -Be 1
+        $result.Outcome.Detail.expandedCount | Should -Be 0
+        $result.Outcome.Detail.partialCount | Should -Be 1
+        $result.Outcome.Detail.notExpandedCount | Should -Be 0
+        ($result.Outcome.Detail.expandedCount + $result.Outcome.Detail.partialCount + $result.Outcome.Detail.notExpandedCount) |
+            Should -Be $result.Outcome.Detail.enumeratedCount
+    }
+
+    It 'keeps an unparseable LAPS criterion unknown instead of Boolean-coercing it' {
+        $policy = New-EndpointPolicy -Id 'laps-unknown' -Name 'Unknown LAPS' -Family 'endpointSecurityAccountProtection' -TemplateId 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796'
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityLapsPolicies' `
+            -Policies @($policy) `
+            -SettingsByPolicy @{
+                'laps-unknown' = @(
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_unspecified')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_1')
+                )
+            }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be 'unknown-setting'
+        ($result.Outcome.Detail.expandedCount + $result.Outcome.Detail.partialCount + $result.Outcome.Detail.notExpandedCount) |
+            Should -Be $result.Outcome.Detail.enumeratedCount
+    }
+
+    It 'classifies every enumerated BitLocker policy as Expanded, Partial, or NotExpanded with equal totals' {
+        $full = New-EndpointPolicy -Id 'bitlocker-full' -Name 'Full' -Family 'endpointSecurityDiskEncryption'
+        $unknown = New-EndpointPolicy -Id 'bitlocker-unknown' -Name 'Unknown' -Family 'endpointSecurityDiskEncryption'
+        $failed = New-EndpointPolicy -Id 'bitlocker-failed' -Name 'Failed' -Family 'endpointSecurityDiskEncryption'
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('settings failed'),
+            'GraphKit.OperationFailed.500',
+            [System.Management.Automation.ErrorCategory]::InvalidResult,
+            $null)
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies @($full, $unknown, $failed) `
+            -SettingsByPolicy @{
+                'bitlocker-full' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+                'bitlocker-unknown' = @(New-EndpointSetting -DefinitionId $child -Value 'mystery')
+            } `
+            -SettingErrors @{ 'bitlocker-failed' = $errorRecord }
+
+        $result.Outcome.Status | Should -Be 'Partial'
+        @($result.Outcome.Rows).Count | Should -Be 1
+        $result.Outcome.Rows[0].isFullDiskEncryption | Should -BeTrue
+        $result.Outcome.Rows[0].isFullDiskEncryption.GetType().FullName | Should -Be 'System.Boolean'
+        $result.Outcome.Detail.enumeratedCount | Should -Be 3
+        $result.Outcome.Detail.expandedCount | Should -Be 1
+        $result.Outcome.Detail.partialCount | Should -Be 1
+        $result.Outcome.Detail.notExpandedCount | Should -Be 1
+        ($result.Outcome.Detail.expandedCount + $result.Outcome.Detail.partialCount + $result.Outcome.Detail.notExpandedCount) |
+            Should -Be $result.Outcome.Detail.enumeratedCount
+        @($result.Outcome.Gaps | ForEach-Object { $_.Operation }) | Should -Be @('ConfigurationPolicySetting.ListBeta', 'ConfigurationPolicySetting.ListBeta')
+        @($result.Outcome.Gaps | ForEach-Object { $_.ApiVersion }) | Should -Be @('beta', 'beta')
+    }
 }

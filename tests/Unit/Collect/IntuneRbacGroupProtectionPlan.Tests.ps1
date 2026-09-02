@@ -384,4 +384,56 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         )
         @($result.Calls | Where-Object Kind -eq 'Graph').Count | Should -Be 1
     }
+
+    It 'classifies every enumerated group as Expanded, Partial, or NotExpanded with equal totals' {
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('group failed'),
+            'GraphKit.OperationFailed.403',
+            [System.Management.Automation.ErrorCategory]::PermissionDenied,
+            [pscustomobject]@{
+                PSTypeName = 'GraphKit.OperationResult'
+                Outcome    = 'Failed'
+                Certainty  = 'Known'
+                Telemetry  = @([pscustomobject]@{ Attempt = 1; StatusCode = 403 })
+            })
+        $result = Invoke-RbacPlanFixture `
+            -RoleAssignments @(
+                [pscustomobject]@{
+                    id = 'a-ok'
+                    roleDefinition = [pscustomobject]@{ displayName = 'Intune Administrator' }
+                    principals = @([pscustomobject]@{ '@odata.type' = '#microsoft.graph.group'; id = 'group-ok' })
+                }
+                [pscustomobject]@{
+                    id = 'a-invalid'
+                    roleDefinition = [pscustomobject]@{ displayName = 'Help Desk' }
+                    principals = @([pscustomobject]@{ '@odata.type' = '#microsoft.graph.group'; id = 'group-invalid' })
+                }
+                [pscustomobject]@{
+                    id = 'a-denied'
+                    roleDefinition = [pscustomobject]@{ displayName = 'Read Only' }
+                    principals = @([pscustomobject]@{ '@odata.type' = '#microsoft.graph.group'; id = 'group-denied' })
+                }
+            ) `
+            -Groups @{
+                'group-ok' = [pscustomobject]@{ id = 'group-ok'; displayName = 'OK'; isManagementRestricted = $true; isAssignableToRole = $false }
+                'group-invalid' = [pscustomobject]@{ id = 'group-invalid'; displayName = 'Invalid'; isManagementRestricted = 'true'; isAssignableToRole = $false }
+            } `
+            -GroupErrors @{ 'group-denied' = $errorRecord }
+
+        $result.Outcome.Status | Should -Be 'Partial'
+        @($result.Outcome.Rows).Count | Should -Be 1
+        $result.Outcome.Detail.enumeratedCount | Should -Be 3
+        $result.Outcome.Detail.expandedCount | Should -Be 1
+        $result.Outcome.Detail.partialCount | Should -Be 1
+        $result.Outcome.Detail.notExpandedCount | Should -Be 1
+        ($result.Outcome.Detail.expandedCount + $result.Outcome.Detail.partialCount + $result.Outcome.Detail.notExpandedCount) |
+            Should -Be $result.Outcome.Detail.enumeratedCount
+        $invalidGap = @($result.Outcome.Gaps | Where-Object Scope -eq 'group:group-invalid')[0]
+        $deniedGap = @($result.Outcome.Gaps | Where-Object Scope -eq 'group:group-denied')[0]
+        $invalidGap.Operation | Should -Be 'Get'
+        $invalidGap.ApiVersion | Should -Be 'v1.0'
+        $deniedGap.Operation | Should -Be 'Get'
+        $deniedGap.ApiVersion | Should -Be 'v1.0'
+        $deniedGap.FailureClass | Should -Be 'PermissionDenied'
+    }
 }

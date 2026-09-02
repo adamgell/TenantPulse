@@ -513,14 +513,31 @@ function Invoke-PulseSecurityBaselinePlan {
         [System.Array]::Sort($gapArray, $gapComparison)
     }
 
+    $expandedCount = $rows.Count
+    $partialCount = 0
+    $notExpandedCount = 0
+    foreach ($gap in $gapArray) {
+        $scope = [string] $gap.Scope
+        if ($scope -notlike 'policy:*' -and $scope -notlike 'intent:*') { continue }
+        if ([string] $gap.ReasonCode -eq 'invalid-provider-data') {
+            $partialCount++
+        } else {
+            $notExpandedCount++
+        }
+    }
+    $enumeratedCount = $expandedCount + $partialCount + $notExpandedCount
+    $terminalDetail = New-PulseCompositeTerminalDetail -EnumeratedCount $enumeratedCount -ExpandedCount $expandedCount `
+        -PartialCount $partialCount -NotExpandedCount $notExpandedCount `
+        -Extra @{ baselineCount = $rows.Count; gapCount = $gapArray.Count }
+
     if ($gapArray.Count -eq 0) {
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Collected' -Rows $rows -Gaps @() `
-            -ReasonCode 'collected' -Detail @{ baselineCount = $rows.Count } -Provider 'GraphKit' `
+            -ReasonCode 'collected' -Detail $terminalDetail -Provider 'GraphKit' `
             -ApiVersion $apiVersion -Operations $operations
     }
     if ($rows.Count -gt 0) {
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Partial' -Rows $rows -Gaps $gapArray `
-            -ReasonCode 'partial' -Detail @{ baselineCount = $rows.Count; gapCount = $gapArray.Count } `
+            -ReasonCode 'partial' -Detail $terminalDetail `
             -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
     }
     $topFailureClass = [string] $gapArray[0].FailureClass
@@ -534,6 +551,7 @@ function Invoke-PulseSecurityBaselinePlan {
     }
     return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gapArray `
         -FailureClass $topFailureClass -ReasonCode $topReasonCode `
-        -Detail @{ gapCount = $gapArray.Count } -Provider 'GraphKit' -ApiVersion $apiVersion `
+        -Detail $terminalDetail -Provider 'GraphKit' -ApiVersion $apiVersion `
         -Operations $operations
+
 }

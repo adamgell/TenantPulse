@@ -83,5 +83,6 @@ function Invoke-PulseWindowsDataProcessorPlan {
 
     return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Skipped' -Rows @() -Gaps @() `
         -FailureClass 'PlatformUnavailable' -ReasonCode 'platform-unavailable' -Detail $detail `
-        -Provider 'GraphKit' -ApiVersion 'beta' -Operations @('Get')
+        -Provider 'TenantPulse' -ApiVersion $null -Operations @()
+
 }

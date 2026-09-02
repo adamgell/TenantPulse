@@ -183,3 +183,93 @@ function Resolve-PulseProviderPlanRegistry {
 
     return $registry
 }
+
+function New-PulseCompositeTerminalDetail {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)]
+        [int] $EnumeratedCount,
+
+        [Parameter(Mandatory)]
+        [int] $ExpandedCount,
+
+        [Parameter(Mandatory)]
+        [int] $PartialCount,
+
+        [Parameter(Mandatory)]
+        [int] $NotExpandedCount,
+
+        [Parameter()]
+        [AllowNull()]
+        [hashtable] $Extra = $null
+    )
+
+    $detail = @{
+        enumeratedCount  = $EnumeratedCount
+        expandedCount    = $ExpandedCount
+        partialCount     = $PartialCount
+        notExpandedCount = $NotExpandedCount
+    }
+    if ($null -ne $Extra) {
+        foreach ($key in @($Extra.Keys)) {
+            $detail[$key] = $Extra[$key]
+        }
+    }
+    return $detail
+}
+
+function Resolve-PulseRequestedExpansions {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [object[]] $SelectedChecks,
+
+        [Parameter()]
+        [switch] $ExpandSettings
+    )
+
+    # Expansion is never default-on. An explicit opt-out and the unset default both return
+    # an honest DependencyUnavailable selection so checks that declare Data.Expansions
+    # degrade to NotApplicable instead of inventing artifacts.
+    if (-not $ExpandSettings) {
+        return [pscustomobject][ordered]@{
+            Requested     = [string[]] @()
+            OptedOut      = $true
+            FailureClass  = 'DependencyUnavailable'
+            ReasonCode    = 'dependency-unavailable'
+        }
+    }
+
+    $names = [System.Collections.Generic.SortedSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($check in @($SelectedChecks)) {
+        if ($null -eq $check) { continue }
+        $expansions = $null
+        if ($check -is [System.Collections.IDictionary]) {
+            if ($check.Contains('Data')) { $data = $check['Data'] } else { continue }
+        } elseif ($null -ne $check.PSObject.Properties['Data']) {
+            $data = $check.Data
+        } else {
+            continue
+        }
+        if ($null -eq $data) { continue }
+        if ($data -is [System.Collections.IDictionary]) {
+            if ($data.Contains('Expansions')) { $expansions = $data['Expansions'] }
+        } elseif ($null -ne $data.PSObject.Properties['Expansions']) {
+            $expansions = $data.Expansions
+        }
+        foreach ($name in @($expansions)) {
+            if ([string]::IsNullOrWhiteSpace([string] $name)) { continue }
+            $null = $names.Add([string] $name)
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        Requested     = [string[]] @($names)
+        OptedOut      = $false
+        FailureClass  = $null
+        ReasonCode    = 'requested'
+    }
+}

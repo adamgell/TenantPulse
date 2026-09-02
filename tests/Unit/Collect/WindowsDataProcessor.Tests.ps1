@@ -43,9 +43,10 @@ Describe 'Windows data processor provider disposition' {
         @($outcome.Gaps).Count | Should -Be 0
         $outcome.FailureClass | Should -Be 'PlatformUnavailable'
         $outcome.ReasonCode | Should -Be 'platform-unavailable'
-        $outcome.Provider | Should -Be 'GraphKit'
-        $outcome.ApiVersion | Should -Be 'beta'
-        $outcome.Operations | Should -Be @('Get')
+        $outcome.Provider | Should -Be 'TenantPulse'
+        $outcome.ApiVersion | Should -BeNullOrEmpty
+        @($outcome.Operations).Count | Should -Be 0
+        $outcome.Operations | Should -Not -Contain 'Get'
 
         $outcome.Detail.Contract | Should -Be 'DataProcessorServiceForWindowsFeaturesOnboarding.Get'
         $outcome.Detail.Method | Should -Be 'GET'
@@ -83,5 +84,65 @@ Describe 'Windows data processor provider disposition' {
 
         Should-NotInvoke Get-GraphObject -ModuleName TenantPulse
         Should-NotInvoke Get-GraphOperation -ModuleName TenantPulse
+    }
+
+    It 'rejects synthetic GraphKit Get metadata on the no-network PlatformUnavailable path' {
+        $outcome = InModuleScope TenantPulse {
+            Invoke-PulseWindowsDataProcessorPlan `
+                -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
+                -Dataset 'dataProcessorServiceForWindowsFeaturesOnboarding' `
+                -ManifestEntry ([pscustomobject]@{
+                    Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'
+                    Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'
+                    Operation = 'Get'
+                    ApiVersion = 'beta'
+                    Pending = $true
+                }) `
+                -ProfileId 'fixture' `
+                -TenantPseudonym 'tp-fixture'
+        }
+
+        $outcome.Provider | Should -Not -Be 'GraphKit'
+        @($outcome.Operations) | Should -Be @()
+        $outcome.Detail.RecheckTrigger | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Resolve-PulseRequestedExpansions' {
+    It 'does not request expansion by default' {
+        $selection = InModuleScope TenantPulse {
+            Resolve-PulseRequestedExpansions -SelectedChecks @(
+                [pscustomobject]@{ Id = 'TP.INT.0006'; Data = [pscustomobject]@{ Expansions = @('conflicts') } }
+            )
+        }
+
+        @($selection.Requested).Count | Should -Be 0
+        $selection.OptedOut | Should -BeTrue
+        $selection.FailureClass | Should -Be 'DependencyUnavailable'
+        $selection.ReasonCode | Should -Be 'dependency-unavailable'
+    }
+
+    It 'collects expansion families only when selected checks declare them and expansion is requested' {
+        $selection = InModuleScope TenantPulse {
+            Resolve-PulseRequestedExpansions -ExpandSettings -SelectedChecks @(
+                [pscustomobject]@{ Id = 'TP.INT.0006'; Data = [pscustomobject]@{ Expansions = @('conflicts') } }
+                [pscustomobject]@{ Id = 'TP.INT.0016'; Data = [pscustomobject]@{ Expansions = @('settingPresenceIndex', 'administrativeTemplates') } }
+            )
+        }
+
+        $selection.OptedOut | Should -BeFalse
+        @($selection.Requested) | Should -Be @('administrativeTemplates', 'conflicts', 'settingPresenceIndex')
+    }
+
+    It 'returns an honest opt-out when expansion is explicitly disabled' {
+        $selection = InModuleScope TenantPulse {
+            Resolve-PulseRequestedExpansions -ExpandSettings:$false -SelectedChecks @(
+                [pscustomobject]@{ Id = 'TP.INT.0006'; Data = [pscustomobject]@{ Expansions = @('conflicts') } }
+            )
+        }
+
+        $selection.OptedOut | Should -BeTrue
+        @($selection.Requested).Count | Should -Be 0
+        $selection.FailureClass | Should -Be 'DependencyUnavailable'
     }
 }
