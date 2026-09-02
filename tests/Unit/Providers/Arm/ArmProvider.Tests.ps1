@@ -592,3 +592,231 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
         @($outcome.Rows).Count | Should -Be 1
     }
 }
+
+Describe 'ARM retry attempt certainty' {
+    It 'classifies a received 2xx as succeeded' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmAttemptCertainty -StatusCode 200 -ResponseReceived $true
+        } | Should -Be 'Succeeded'
+    }
+
+    It 'classifies 408 and 5xx as ambiguous even when a response is received' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmAttemptCertainty -StatusCode 408 -ResponseReceived $true
+        } | Should -Be 'Ambiguous'
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmAttemptCertainty -StatusCode 503 -ResponseReceived $true
+        } | Should -Be 'Ambiguous'
+    }
+
+    It 'classifies a received non-retryable status as rejected' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmAttemptCertainty -StatusCode 403 -ResponseReceived $true
+        } | Should -Be 'Rejected'
+    }
+
+    It 'classifies a missing response as ambiguous regardless of status' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmAttemptCertainty -StatusCode 200 -ResponseReceived $false
+        } | Should -Be 'Ambiguous'
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmAttemptCertainty -StatusCode 500 -ResponseReceived $false
+        } | Should -Be 'Ambiguous'
+    }
+}
+
+Describe 'ARM Retry-After delay' {
+    It 'honors an integer Retry-After in seconds' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDelay -RetryAfter '2' -Attempt 1 -Jitter { 0.0 }
+        } | Should -Be 2
+    }
+
+    It 'honors an HTTP-date Retry-After within tolerance' {
+        $target = [datetime]::UtcNow.AddSeconds(30).ToString('r', [System.Globalization.CultureInfo]::InvariantCulture)
+        $delay = InModuleScope TenantPulseArmAdapterTest -ArgumentList $target {
+            param($RetryAfter)
+            Get-PulseArmRetryDelay -RetryAfter $RetryAfter -Attempt 1 -Jitter { 0.0 }
+        }
+        $delay | Should -BeGreaterThan 20
+        $delay | Should -BeLessOrEqual 30
+    }
+
+    It 'falls back to exponential backoff when Retry-After is absent or unparsable' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDelay -RetryAfter $null -Attempt 1 -Jitter { 0.0 }
+        } | Should -Be 1
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDelay -RetryAfter $null -Attempt 3 -Jitter { 0.0 }
+        } | Should -Be 4
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDelay -RetryAfter 'not-a-delay' -Attempt 1 -Jitter { 0.0 }
+        } | Should -Be 1
+    }
+
+    It 'caps the backoff at 32 seconds and clamps to the maximum' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDelay -RetryAfter $null -Attempt 8 -Jitter { 0.0 }
+        } | Should -Be 32
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDelay -RetryAfter '9999' -Attempt 1 -Jitter { 0.0 }
+        } | Should -Be 60
+    }
+
+    It 'applies jitter to the exponential backoff' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDelay -RetryAfter $null -Attempt 1 -Jitter { 2.5 }
+        } | Should -Be 3.5
+    }
+}
+
+Describe 'ARM retry decision edge statuses' {
+    It 'never retries a 3xx redirect' {
+        $d = InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDecision -Method 'GET' -StatusCode 302 -AttemptCertainty 'Rejected' `
+                -ForceRefreshUsed $false -CanRefresh $true
+        }
+        $d.ShouldRetry | Should -BeFalse
+        $d.FailureClass | Should -Be 'ProviderFailed'
+    }
+
+    It 'maps 400 to InvalidProviderData and 404 to ProviderFailed' {
+        $bad = InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDecision -Method 'GET' -StatusCode 400 -AttemptCertainty 'Rejected'
+        }
+        $bad.ShouldRetry | Should -BeFalse
+        $bad.FailureClass | Should -Be 'InvalidProviderData'
+
+        $missing = InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDecision -Method 'GET' -StatusCode 404 -AttemptCertainty 'Rejected'
+        }
+        $missing.ShouldRetry | Should -BeFalse
+        $missing.FailureClass | Should -Be 'ProviderFailed'
+    }
+
+    It 'refuses to retry a rejected non-429 status' {
+        $d = InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmRetryDecision -Method 'GET' -StatusCode 418 -AttemptCertainty 'Rejected'
+        }
+        $d.ShouldRetry | Should -BeFalse
+        $d.FailureClass | Should -Be 'ProviderFailed'
+    }
+}
+
+Describe 'ARM response header lookup' {
+    It 'returns null for missing or empty headers' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmResponseHeader -Headers $null -Name 'Retry-After'
+        } | Should -BeNullOrEmpty
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmResponseHeader -Headers ([hashtable]@{ 'X-Rate' = '1' }) -Name 'Retry-After'
+        } | Should -BeNullOrEmpty
+    }
+
+    It 'finds a header case-insensitively across dictionary and object shapes' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmResponseHeader -Headers ([hashtable]@{ 'retry-after' = '7' }) -Name 'Retry-After'
+        } | Should -Be '7'
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmResponseHeader -Headers ([pscustomobject]@{ 'Retry-After' = '9' }) -Name 'retry-after'
+        } | Should -Be '9'
+    }
+}
+
+Describe 'ARM page body parsing' {
+    It 'rejects a missing, scalar, value-less, or null-value body' {
+        {
+            InModuleScope TenantPulseArmAdapterTest { Get-PulseArmPageContent -Body $null }
+        } | Should -Throw -ExpectedMessage '*missing*'
+        {
+            InModuleScope TenantPulseArmAdapterTest { Get-PulseArmPageContent -Body 'raw text' }
+        } | Should -Throw -ExpectedMessage '*not an object*'
+        {
+            InModuleScope TenantPulseArmAdapterTest { Get-PulseArmPageContent -Body ([hashtable]@{ nextLink = 'x' }) }
+        } | Should -Throw -ExpectedMessage '*value array*'
+        {
+            InModuleScope TenantPulseArmAdapterTest { Get-PulseArmPageContent -Body ([hashtable]@{ value = $null }) }
+        } | Should -Throw -ExpectedMessage '*value is null*'
+    }
+
+    It 'extracts rows and nextLink from a dictionary body' {
+        $page = InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmPageContent -Body ([hashtable]@{ value = @(1, 2); nextLink = 'https://management.azure.com/next' })
+        }
+        @($page.Rows).Count | Should -Be 2
+        $page.NextLink | Should -Be 'https://management.azure.com/next'
+    }
+
+    It 'falls back to the @odata.nextLink spelling' {
+        $page = InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmPageContent -Body ([hashtable]@{ value = @(1); '@odata.nextLink' = 'https://management.azure.com/next2' })
+        }
+        $page.NextLink | Should -Be 'https://management.azure.com/next2'
+    }
+
+    It 'extracts rows from an object body without a nextLink' {
+        $page = InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmPageContent -Body ([pscustomobject]@{ value = @(1, 2, 3) })
+        }
+        @($page.Rows).Count | Should -Be 3
+        $page.NextLink | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'ARM URI authority normalization' {
+    It 'drops the default port and keeps a non-default port' {
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmUriAuthority -Uri 'https://management.azure.com/foo'
+        } | Should -Be 'management.azure.com'
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmUriAuthority -Uri 'http://management.azure.com/foo'
+        } | Should -Be 'management.azure.com'
+        InModuleScope TenantPulseArmAdapterTest {
+            Get-PulseArmUriAuthority -Uri 'https://management.azure.com:8443/foo'
+        } | Should -Be 'management.azure.com:8443'
+    }
+}
+
+Describe 'ARM outcome and provenance conversion' {
+    It 'round-trips provenance into a hashtable' {
+        $table = InModuleScope TenantPulseArmAdapterTest -ArgumentList $script:IntuneResourceId, $script:FixtureApiVersion, $script:BoundTenantId {
+            param($ResourceId, $ApiVersion, $TenantId)
+            $provenance = New-PulseArmProvenance -ResourceId $ResourceId -ApiVersion $ApiVersion -Cloud 'Global' -BoundTenantId $TenantId
+            ConvertTo-PulseArmProvenanceHashtable -Provenance $provenance
+        }
+        $table['Provider'] | Should -Be 'ARM'
+        $table['Authority'] | Should -Be 'management.azure.com'
+        $table['ResourceId'] | Should -Be $script:IntuneResourceId
+        $table['RbacActions'] | Should -Be @('Microsoft.Insights/diagnosticSettings/read')
+        $table['ApiVersion'] | Should -Be $script:FixtureApiVersion
+    }
+
+    It 'maps a Collected result onto the provider-neutral outcome as ARM GET' {
+        $outcome = InModuleScope TenantPulseArmAdapterTest {
+            ConvertTo-PulseArmCollectionOutcome -Dataset 'intuneDiagnosticSettings' -Status 'Collected' `
+                -Rows @(@{ name = 'a' }) -ReasonCode 'collected' -ApiVersion '2021-05-01-preview'
+        }
+        $outcome.Provider | Should -Be 'ARM'
+        $outcome.Operations | Should -Be @('GET')
+        $outcome.Dataset | Should -Be 'intuneDiagnosticSettings'
+        @($outcome.Rows).Count | Should -Be 1
+    }
+
+    It 'passes Detail through unchanged' {
+        $outcome = InModuleScope TenantPulseArmAdapterTest {
+            ConvertTo-PulseArmCollectionOutcome -Dataset 'd' -Status 'Skipped' -FailureClass 'DependencyUnavailable' `
+                -ReasonCode 'arm-live-contract-deferred' -Detail @{ LiveAccess = 'NotAttempted' } -ApiVersion $null
+        }
+        $outcome.FailureClass | Should -Be 'DependencyUnavailable'
+        $outcome.Detail.LiveAccess | Should -Be 'NotAttempted'
+    }
+
+    It 'refuses rows on a Failed outcome' {
+        {
+            InModuleScope TenantPulseArmAdapterTest {
+                ConvertTo-PulseArmCollectionOutcome -Dataset 'd' -Status 'Failed' -FailureClass 'ProviderFailed' `
+                    -ReasonCode 'provider-failed' -Rows @(@{ name = 'x' })
+            }
+        } | Should -Throw -ExpectedMessage '*cannot carry usable Rows*'
+    }
+}
