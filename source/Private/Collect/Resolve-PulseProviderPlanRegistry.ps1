@@ -99,7 +99,10 @@ function Resolve-PulseProviderPlanRegistry {
         param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym, $NetworkAbortState)
         Invoke-PulseSubscribedSkuLicensePlan @PSBoundParameters
     }
-
+    $groupClosurePlan = {
+        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym, $NetworkAbortState)
+        Invoke-PulseGroupClosurePlan @PSBoundParameters
+    }
     $registry = @{
         subscribedSkus                                    = @{
             Command = $subscribedSkuLicensePlan
@@ -146,6 +149,16 @@ function Resolve-PulseProviderPlanRegistry {
             SupportsNetworkAbortState = $true
             Operations = @(ConvertTo-PulseProviderPlanOperations -Dataset 'securityBaselinesAssignedAndCurrent' `
                     -Operations $script:PulseCompositeChildOperations['securityBaselinesAssignedAndCurrent'])
+        }
+        groupClosure                                      = @{
+            Command = $groupClosurePlan
+            RequiresNetwork = $true
+            SupportsNetworkAbortState = $true
+            Operations = @(ConvertTo-PulseProviderPlanOperations -Dataset 'groupClosure' -Operations @(
+                    @{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' }
+                    @{ Type = 'DirectoryRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+                    @{ Type = 'GroupMember'; Operation = 'List'; ApiVersion = 'v1.0' }
+                ))
         }
     }
 
