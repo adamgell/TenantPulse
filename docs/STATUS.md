@@ -37,25 +37,32 @@ decisive proof, zero rows or malformed outcome, gap, or row data is `Error`. Fin
 snapshot schema `2.0.0`, and scoring model `1.0` remain unchanged.
 
 This tranche's evidence is deterministic source/package testing only. It adds no new live-service
-or publication proof. The initial 2,508-test local gate was superseded after independent
-whole-branch review added two provider-plan regressions and corrected the caught structured-error
-path. The final local Task 7 gate is complete at exact tested commit
-`2eb958a6dd9a883306ece7e035040a8c35c0fd40`: the synchronized minimum is 2,510, the active
-NotRun allowance is zero, and the package-first full gate passed 2,510/2,510 with zero failures,
-errors, skips, NotRun, or failed containers. Proof run
-`aa6994cb-8901-4103-b39a-2751603ab3de` binds all 59 shipped files and the exact result pair to
-the local candidate archive SHA-256
-`8d786e1de01ebf08be1931ab610bbffef90a792b1270c2097e5968182e7bcba3`. The built manifest
-SHA-256 is `9d644284774346fa7e9e4ce6a725f306288b426ed8cda74d35493b56fc086de8`; the built module
-SHA-256 is `16bb0074f414ec34dcc828d72b9053c52d507970fea4bd6215adf9e40fdc1c08`.
+or publication proof. Independent review after the earlier 2,510-test candidate found four
+applicable correctness gaps: message-only provider failures could lose canonical authentication or
+permission classification; authentication-aborted expansion pipelines could omit unattempted
+policies or the top-level `collectionFailure`; and a relevant Endpoint Security policy without a
+usable identifier could be treated as authoritative absence. All four are closed at exact tested
+commit `21f6a1025331aa6d14bfb47b32bec403d2ff994d`, tree
+`b6732cf8734a8020b3470f1c431a848ef81e21c0`. The synchronized minimum is 2,517, the active NotRun
+allowance is zero, and the package-first full gate passed 2,517/2,517 with zero failures, errors,
+skips, NotRun, or failed containers.
+
+Proof run `9ef9712e-bddc-4dc9-82f0-f085ab874656` binds all 59 shipped files and the exact result pair.
+The 418,518-byte local candidate archive SHA-256 is
+`386d79effd65afbf1deaca17d57ab3c08a6b63111144ff6a59fc3ed4726a994f`; the tested-release-proof
+SHA-256 is `54ab272f55b2321f81ff8b793e2612aa13581cdb3be501fb935fca8d73513b9e`. The built manifest
+SHA-256 is `62e746a73e616acf14421ddf2355fb258a4af2fa3cf51d4ee015028c8a0432b3`; the built module SHA-256 is
+`1f65e7a1b98c18207aca01c90d33acf3878e957359c460f7a6bf34468ce204a7`.
 
 Source, built, packaged, and clean child-process import gates all preserve exact GraphKit `0.3.0`.
-The publisher revalidated that proof and completed a no-key/no-`-Publish` dry run; nothing was
-published. Independent whole-branch review is complete; push/PR/CodeRabbit, exact-head six-job CI
-plus gitleaks, merge, and merged-main CI remain pending. Local `gitleaks` is not installed, so only
-the repo-local Secret/PII/control-byte gate is locally proven. The immutable TenantPulse `0.2.0`
-evidence table and exact-package live record below are historical release proof, not proof for the
-unreleased `0.3.0` source.
+The publisher revalidated this exact proof in no-key/no-`-Publish` mode and reported that nothing
+was published. A read-only controller-local freeze records `local-package-first` scope,
+`externalTransferApproved = false`, and that the serialized test object contains synthetic
+credential fixtures. Independent code and proof reviews found no P0-P3 issue in the corrected
+candidate. Push/PR/CodeRabbit, exact-head six-job CI plus gitleaks, merge, and merged-main CI remain
+pending. Local `gitleaks` is not installed, so only the repo-local Secret/PII/control-byte gate is
+locally proven. The immutable TenantPulse `0.2.0` evidence table and exact-package live record below
+are historical release proof, not proof for the unreleased `0.3.0` source.
 
 | Evidence state | Proof |
 |---|---|
