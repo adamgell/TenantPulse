@@ -713,6 +713,12 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    expansion families. R6 requires a cross-repository bounded producer/consumer train before
    expansion can become the default. Sequential-only remains the safe live posture until shared
    identity and throttle coordination is root-caused and proven.
-8. **`TP.INT.0010`**, reserved until a separate GraphKit ARM provider exists and a protected
+8. **R9 provisioning and adoption — split disposition.** Reusable GraphKit app-registration
+   provisioning and actual-grant verification remain applicable producer work. With no installed
+   users, legacy consumers, customer-tenant consumers, or repoint targets, adopter migration,
+   customer repointing, rollback-window operation, legacy-authentication retirement, and destructive
+   directory cleanup are `NotApplicable` and must not be executed for closeout. Reopen those gates
+   only if an adopter is later identified.
+9. **`TP.INT.0010`**, reserved until a separate GraphKit ARM provider exists and a protected
    diagnostic-settings read proves its service contract. ARM must not enter the Microsoft Graph
    descriptor catalog.

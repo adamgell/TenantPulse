@@ -69,6 +69,11 @@ The current product-program boundary is narrower than a finished successor relea
   Intune assignment awareness, exclusion-only assignment semantics, deterministic evidence caps,
   and a supported renderer beyond JSON remain to be implemented and proven. R5 privacy and R6 scale
   are separately open in `docs/STATUS.md`.
+- **R9 has a split disposition.** Reusable GraphKit app-registration provisioning and actual-grant
+  verification remain applicable. The owner-confirmed absence of installed users, legacy consumers,
+  customer-tenant consumers, and repoint targets makes adopter migration, customer repointing,
+  rollback-window operation, legacy-runtime retirement, and destructive directory cleanup
+  `NotApplicable` rather than pending gates. They must not be performed to create completion evidence.
 
 ## Quick start
 
