@@ -52,11 +52,23 @@ BeforeAll {
         })
     }
 
-    function Get-PulseMarkdownHeadingAnchor {
+    function Get-PulseMarkdownHeadingAnchors {
         param([Parameter(Mandatory)] [string] $HeadingText)
-        $text = $HeadingText.ToLowerInvariant()
-        $text = [regex]::Replace($text, '[^a-z0-9 _-]', '')
-        return $text.Replace(' ', '-')
+        # Fold figure/en/em dashes so restored headings like "AM01–AM04" match ASCII
+        # hyphen fragments, but keep the stripped-dash slug too: other restored headings
+        # (and spaced em-dashes) were catalogued without that fold.
+        $anchors = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::Ordinal
+        )
+        foreach ($dashClass in @($null, '[\u2012\u2013]', '[\u2012\u2013\u2014]')) {
+            $text = $HeadingText.ToLowerInvariant()
+            if ($null -ne $dashClass) {
+                $text = [regex]::Replace($text, $dashClass, '-')
+            }
+            $text = [regex]::Replace($text, '[^a-z0-9 _-]', '')
+            [void] $anchors.Add($text.Replace(' ', '-'))
+        }
+        return $anchors
     }
 
     function Resolve-PulseResearchLeaf {
@@ -125,11 +137,12 @@ BeforeAll {
                 [System.StringComparer]::Ordinal
             )
             foreach ($match in [regex]::Matches($markdown, '(?m)^#{1,6} (.+)$')) {
-                $anchor = Get-PulseMarkdownHeadingAnchor -HeadingText $match.Groups[1].Value
-                if ($counts.ContainsKey($anchor)) {
-                    $counts[$anchor]++
-                } else {
-                    $counts[$anchor] = 1
+                foreach ($anchor in @(Get-PulseMarkdownHeadingAnchors -HeadingText $match.Groups[1].Value)) {
+                    if ($counts.ContainsKey($anchor)) {
+                        $counts[$anchor]++
+                    } else {
+                        $counts[$anchor] = 1
+                    }
                 }
             }
 

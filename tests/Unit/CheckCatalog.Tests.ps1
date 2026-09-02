@@ -1044,6 +1044,30 @@ Describe 'Test-PulseCheckDescriptor' {
             @($errors).Count | Should -Be 0
         }
 
+        It 'matches an en-dash heading to a hyphen fragment' {
+            $repoRoot = Join-Path $TestDrive 'research-endash'
+            $docDir = Join-Path $repoRoot 'docs/research/iha-v2'
+            New-Item -ItemType Directory -Path $docDir -Force | Out-Null
+            $enDash = [char]0x2013
+            Set-Content -LiteralPath (Join-Path $docDir 'sample.md') -Value @"
+# Sample
+## AM01${enDash}AM04 Cluster
+"@ -Encoding utf8NoBOM
+
+            $errors = InModuleScope TenantPulse -ArgumentList $script:researchBaseDescriptor, $repoRoot {
+                param($base, $root)
+                function Test-PulseFixtureRule { $true }
+                $descriptor = $base.Clone()
+                $descriptor.References = @{
+                    Research    = 'docs/research/iha-v2/sample.md#am01-am04-cluster'
+                    Authorities = @('https://learn.microsoft.com/')
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -RepoRoot $root
+            }
+
+            @($errors).Count | Should -Be 0
+        }
+
         It 'reports a missing research file' {
             $repoRoot = Join-Path $TestDrive 'research-missing-file'
             New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null

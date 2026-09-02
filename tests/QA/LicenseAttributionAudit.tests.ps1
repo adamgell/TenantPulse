@@ -144,7 +144,16 @@ Describe 'License/attribution audit' {
             $repoRoot = (Resolve-Path (Join-Path (Split-Path -Parent $PSCommandPath) '../..')).ProviderPath
             $proseFiles = New-Object System.Collections.Generic.List[object]
             foreach ($f in (Get-ChildItem -LiteralPath (Join-Path $repoRoot 'source') -Recurse -File -Include '*.psd1', '*.ps1' -ErrorAction SilentlyContinue)) { $proseFiles.Add($f) }
-            foreach ($f in (Get-ChildItem -LiteralPath (Join-Path $repoRoot 'docs') -Recurse -File -Include '*.md' -ErrorAction SilentlyContinue)) { $proseFiles.Add($f) }
+            foreach ($f in (Get-ChildItem -LiteralPath (Join-Path $repoRoot 'docs') -Recurse -File -Include '*.md' -ErrorAction SilentlyContinue)) {
+                # Restored docs/research/iha-v2/ is the cite-only source for shipping
+                # descriptors. Those historical blobs are not product prose and must not
+                # be rewritten to satisfy this sweep.
+                $relative = $f.FullName.Substring($repoRoot.Length).TrimStart([char[]]@('\', '/')) -replace '\\', '/'
+                if ($relative.StartsWith('docs/research/iha-v2/', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    continue
+                }
+                $proseFiles.Add($f)
+            }
             foreach ($f in (Get-ChildItem -LiteralPath $repoRoot -File -Filter '*.md' -ErrorAction SilentlyContinue)) { $proseFiles.Add($f) }
             $script:RepoRoot = $repoRoot
             $script:CisProseFiles = @($proseFiles | Sort-Object FullName -Unique)

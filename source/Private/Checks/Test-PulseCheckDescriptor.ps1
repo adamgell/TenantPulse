@@ -49,8 +49,11 @@
     `..`. When -RepoRoot is supplied, the path is resolved from that root with ordinal
     (case-exact) directory walking, the leaf must exist, and the fragment must match
     exactly one unique normalized ATX heading anchor in that file. Normalization is
-    lowercase, strip every character except `[a-z0-9 _-]`, then spaces to hyphens without
-    collapsing consecutive hyphens. Callers that omit -RepoRoot still get the structural
+    lowercase, fold Unicode dashes (U+2013/U+2014/U+2012) to ASCII hyphen, strip every
+    character except `[a-z0-9 _-]`, then spaces to hyphens without collapsing consecutive
+    hyphens. Each heading also accepts the historical stripped-dash slug and the
+    en/figure-dash-only fold so restored research matches catalog fragments generated
+    either way. Callers that omit -RepoRoot still get the structural
     checks so fixture catalogs with synthetic paths keep loading.
 #>
 
@@ -189,11 +192,23 @@ function Test-PulseCheckDescriptor {
         return [string[]] $items
     }
 
-    function Get-PulseMarkdownHeadingAnchor {
+    function Get-PulseMarkdownHeadingAnchors {
         param([string] $HeadingText)
-        $text = $HeadingText.ToLowerInvariant()
-        $text = [regex]::Replace($text, '[^a-z0-9 _-]', '')
-        return $text.Replace(' ', '-')
+        # Fold figure/en/em dashes so restored headings like "AM01–AM04" match ASCII
+        # hyphen fragments, but keep the stripped-dash slug too: other restored headings
+        # (and spaced em-dashes) were catalogued without that fold.
+        $anchors = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::Ordinal
+        )
+        foreach ($dashClass in @($null, '[\u2012\u2013]', '[\u2012\u2013\u2014]')) {
+            $text = $HeadingText.ToLowerInvariant()
+            if ($null -ne $dashClass) {
+                $text = [regex]::Replace($text, $dashClass, '-')
+            }
+            $text = [regex]::Replace($text, '[^a-z0-9 _-]', '')
+            [void] $anchors.Add($text.Replace(' ', '-'))
+        }
+        return $anchors
     }
 
     function Test-PulseResearchReference {
@@ -289,11 +304,12 @@ function Test-PulseCheckDescriptor {
             [System.StringComparer]::Ordinal
         )
         foreach ($match in $headingMatches) {
-            $anchor = Get-PulseMarkdownHeadingAnchor -HeadingText $match.Groups[1].Value
-            if ($counts.ContainsKey($anchor)) {
-                $counts[$anchor]++
-            } else {
-                $counts[$anchor] = 1
+            foreach ($anchor in @(Get-PulseMarkdownHeadingAnchors -HeadingText $match.Groups[1].Value)) {
+                if ($counts.ContainsKey($anchor)) {
+                    $counts[$anchor]++
+                } else {
+                    $counts[$anchor] = 1
+                }
             }
         }
 
