@@ -362,8 +362,11 @@ function Invoke-PulseSettingsCatalogExpansion {
     $rawDatasetPrefix = 'configurationPolicySettings-'
     $rawAssignmentDatasetPrefix = 'configurationPolicyAssignments-'
 
-    $allRows = [System.Collections.Generic.List[object]]::new()
+    $fragmentRows = [System.Collections.Generic.List[object]]::new()
+    $fragmentIds = [System.Collections.Generic.List[string]]::new()
+    $manifestBatch = [System.Collections.Generic.List[object]]::new()
     $gapEntries = [System.Collections.Generic.List[object]]::new()
+    $script:PulseExpansionFragmentPolicyCount = 32
 
     # READ-ONLY ENFORCEMENT (P0/task-review Critical) - TWO ASSERTION POINTS, BY DESIGN, NOT
     # A CONTRADICTION (re-review round 2 fix - a prior revision of this comment claimed the
@@ -456,6 +459,23 @@ function Invoke-PulseSettingsCatalogExpansion {
     # $batch fan-out (GraphKit's server-side batching) is the sanctioned future scale lever
     # if fan-out speed is ever needed again (Phase 2b) - it shares one connection/token and
     # one throttle coordinator by construction, unlike a client-side RunspacePool.
+    $chunkStart = 0
+    $flushExpansionFragment = {
+        param([int] $EndInclusive)
+        if ($EndInclusive -lt $chunkStart) { return }
+        $chunkIds = [string[]] @(
+            for ($chunkIndex = $chunkStart; $chunkIndex -le $EndInclusive; $chunkIndex++) {
+                $eligiblePolicies[$chunkIndex].PolicyId
+            }
+        )
+        $fragmentId = New-PulseExpansionFragmentId -StartOrdinal $chunkStart -EndOrdinal $EndInclusive -PolicyIds $chunkIds
+        $redactedChunk = Protect-PulseGraphRowTenantId -Data $fragmentRows.ToArray() -TenantId $TenantId -Pseudonym $Pseudonym
+        $null = Write-PulseExpansionFragment -Store $Store -Name $Name -FragmentId $fragmentId -Rows $redactedChunk
+        $fragmentIds.Add($fragmentId) | Out-Null
+        $fragmentRows.Clear()
+        $chunkStart = $EndInclusive + 1
+    }
+
     for ($eligibleIndex = 0; $eligibleIndex -lt $eligiblePolicies.Count; $eligibleIndex++) {
         $eligible = $eligiblePolicies[$eligibleIndex]
         $policy = $eligible.Policy
@@ -466,22 +486,27 @@ function Invoke-PulseSettingsCatalogExpansion {
             $result = Invoke-PulseSettingsCatalogPolicy -Store $Store -Policy $policy -Context $Context -DefinitionIndex $DefinitionIndex `
                 -FromCapturedPayloads $FromCapturedPayloads.IsPresent -RawDatasetName $rawDatasetName `
                 -RawAssignmentDatasetName $rawAssignmentDatasetName `
-                -TenantId $TenantId -Pseudonym $Pseudonym -NetworkAbortState $NetworkAbortState
+                -TenantId $TenantId -Pseudonym $Pseudonym -NetworkAbortState $NetworkAbortState `
+                -ManifestBatch $manifestBatch
         } catch {
-            # WORKER DRAIN applies here too (P0-5's own spirit, preserved from the deleted
-            # parallel path): an unexpected exception from one policy must not skip
-            # publication of every policy already collected.
             Write-Verbose "Invoke-PulseSettingsCatalogExpansion: unexpected exception processing policy '$($eligible.PolicyId)': $($_.Exception.Message)"
             $gapEntries.Add([pscustomobject]@{ policyId = $eligible.PolicyId; reason = 'category:WorkerException' }) | Out-Null
         }
         if ($null -ne $result) {
-            foreach ($row in $result.Rows) { $allRows.Add($row) | Out-Null }
+            foreach ($row in $result.Rows) { $fragmentRows.Add($row) | Out-Null }
             if ($result.Gap) {
                 $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
                 $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
             }
         }
+        $isChunkEnd = (($eligibleIndex - $chunkStart + 1) -ge $script:PulseExpansionFragmentPolicyCount) -or ($eligibleIndex -eq ($eligiblePolicies.Count - 1))
+        if ($isChunkEnd) {
+            & $flushExpansionFragment $eligibleIndex
+        }
         if ($NetworkAbortState.AuthenticationAborted) {
+            if ($fragmentRows.Count -gt 0) {
+                & $flushExpansionFragment $eligibleIndex
+            }
             for ($remainingIndex = $eligibleIndex + 1; $remainingIndex -lt $eligiblePolicies.Count; $remainingIndex++) {
                 $gapEntries.Add([pscustomobject]@{
                         policyId = $eligiblePolicies[$remainingIndex].PolicyId
@@ -492,24 +517,10 @@ function Invoke-PulseSettingsCatalogExpansion {
         }
     }
 
-    # DETERMINISTIC MERGE: sort strictly on (policyId, settingPath, instanceId), ordinal -
-    # never on worker completion order. Duplicate row identities cannot reach this point
-    # (see this file's own docstring - ConvertTo-PulseSettingRows throws internally on a
-    # collision, turned into a per-policy Gap upstream), so no further dedup pass is
-    # needed here.
-    $sortedRows = $allRows.ToArray()
-    $rowComparison = [System.Comparison[object]] {
-        param($a, $b)
-        $c = [string]::CompareOrdinal([string] $a.policyId, [string] $b.policyId)
-        if ($c -ne 0) { return $c }
-        $c = [string]::CompareOrdinal([string] $a.settingPath, [string] $b.settingPath)
-        if ($c -ne 0) { return $c }
-        return [string]::CompareOrdinal([string] $a.instanceId, [string] $b.instanceId)
+    if ($manifestBatch.Count -gt 0) {
+        Set-PulseManifestEntry -Store $Store -DatasetEntries $manifestBatch.ToArray()
     }
-    [System.Array]::Sort($sortedRows, $rowComparison)
 
-    # GAPS SORTED ORDINALLY (P1-7) on (policyId, reason) - deterministic regardless of
-    # worker completion order or prevalidation-vs-fetch-failure ordering.
     $sortedGaps = $gapEntries.ToArray()
     $gapComparison = [System.Comparison[object]] {
         param($a, $b)
@@ -517,37 +528,11 @@ function Invoke-PulseSettingsCatalogExpansion {
         if ($c -ne 0) { return $c }
         return [string]::CompareOrdinal([string] $a.reason, [string] $b.reason)
     }
-    [System.Array]::Sort($sortedGaps, $gapComparison)
+    if ($sortedGaps.Count -gt 1) {
+        [System.Array]::Sort($sortedGaps, $gapComparison)
+    }
 
-    # UNIFIED PUBLICATION (post-T2.3-review retrofit): staging/hash/crash-consistent-publish
-    # is now owned by the ONE shared Publish-PulseExpansionRows implementation (see that
-    # file's own docstring for the full crash-safety accounting - P0-6's generation-named-
-    # file-before-manifest-mutex ordering and P1-10's temp/hash cleanup both live there now,
-    # not duplicated here). This function's OWN inline copy of that logic - written for
-    # T2.2, before Publish-PulseExpansionRows existed - was an intentional, but UNDISCLOSED,
-    # fork: T2.3 (Invoke-PulseTypedPolicyExpansion.ps1) extracted the shared helper rather
-    # than copying this function's block, and that fork was never called out as project debt
-    # at the time. It is closed here: this call site and Invoke-PulseTypedPolicyExpansion's
-    # own now both go through the identical staging/hash/publish code path. The
-    # ALL-POLICIES-FAILED -> NotExpanded rule (task-review omp-Medium fix) is unchanged,
-    # just owned by the shared helper now instead of being re-implemented here.
-    # RAW-TENANT-ID-IN-ROW-CONTENT (T2.7 live-gate finding, reproduced live on Ivy24 -
-    # a real Settings Catalog policy's own configured VALUE, a OneDrive Known-Folder-Move
-    # opt-in setting, legitimately carries the tenant's own GUID as admin-entered
-    # configuration data - not a secret, not a GraphKit provenance stamp, but still the raw
-    # tenant identifier reaching an artifact outside its 'tp-...' pseudonym, which T1.11's
-    # own live-gate contract treats as a leak regardless of source). Protect-
-    # PulseGraphRowTenantId already walks every string value in a row tree and redacts an
-    # exact match of the raw tenant id to its pseudonym (built for T1.11's raw-dataset
-    # writes); this expansion pipeline serializes independently via Publish-
-    # PulseExpansionRows/ConvertTo-PulseCanonicalJsonLine and never went through it. Applied
-    # here, once, over the final merged+sorted row set, immediately before publication -
-    # same fail-closed contract as the T1.11 call site (a redaction failure throws, caught
-    # by this function's own OUTER FAILURE BOUNDARY caller, never publishes an unredacted
-    # artifact). A $null/empty -TenantId (the function's own contract) is a safe no-op.
-    $redactedRows = Protect-PulseGraphRowTenantId -Data $sortedRows -TenantId $TenantId -Pseudonym $Pseudonym
-
-    return Publish-PulseExpansionRows -Store $Store -Name $Name -Rows $redactedRows -Gaps $sortedGaps `
-        -PolicyCount $policyList.Count `
+    return Merge-PulseExpansionFragments -Store $Store -Name $Name -FragmentIds $fragmentIds.ToArray() `
+        -Gaps $sortedGaps -PolicyCount $policyList.Count `
         -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
 }

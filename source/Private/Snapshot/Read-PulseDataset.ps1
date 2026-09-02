@@ -59,18 +59,48 @@ function Read-PulseDataset {
         throw "Read-PulseDataset: dataset file '$fileName' is missing from the snapshot store."
     }
 
-    # RAW BYTES, not decoded-then-re-encoded text (see this file's own docstring, omp
-    # finding #2) - the hash below is always of exactly what is on disk.
-    $rawBytes = [System.IO.File]::ReadAllBytes($datasetPath)
-    $hashBytes = [System.Security.Cryptography.SHA256]::HashData($rawBytes)
-    $actualSha256 = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+    # Two-pass file read: hash the literal on-disk bytes, then parse without decoding the
+    # whole document into a single .NET string (the previous GetString + ConvertFrom-Json
+    # path doubled the UTF-16 working set of a large dataset).
+    $fileStream = [System.IO.File]::Open($datasetPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha.ComputeHash($fileStream)
+        } finally {
+            $sha.Dispose()
+        }
+        $actualSha256 = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
 
-    if ($actualSha256 -ne $entry.sha256) {
-        throw "Read-PulseDataset: hash mismatch for dataset file '$fileName' - expected $($entry.sha256), got $actualSha256. The file no longer matches what the manifest recorded at write time."
+        if ($actualSha256 -ne $entry.sha256) {
+            throw "Read-PulseDataset: hash mismatch for dataset file '$fileName' - expected $($entry.sha256), got $actualSha256. The file no longer matches what the manifest recorded at write time."
+        }
+
+        $fileStream.Position = 0
+        $document = [System.Text.Json.JsonDocument]::Parse($fileStream)
+        try {
+            $root = $document.RootElement
+            $rows = [System.Collections.Generic.List[object]]::new()
+            if ($root.ValueKind -eq [System.Text.Json.JsonValueKind]::Array) {
+                foreach ($element in $root.EnumerateArray()) {
+                    $rows.Add((ConvertFrom-Json -InputObject $element.GetRawText() -Depth 64)) | Out-Null
+                }
+            } elseif ($root.ValueKind -eq [System.Text.Json.JsonValueKind]::Null) {
+                # empty
+            } else {
+                $rows.Add((ConvertFrom-Json -InputObject $root.GetRawText() -Depth 64)) | Out-Null
+            }
+        } finally {
+            $document.Dispose()
+        }
+    } finally {
+        $fileStream.Dispose()
     }
 
-    $content = [System.Text.Encoding]::UTF8.GetString($rawBytes)
-    $parsed = ConvertFrom-Json -InputObject $content -Depth 64
+    $rowArray = [object[]] @($rows.ToArray())
+    if ($null -ne $entry.itemCount -and $entry.itemCount -ne '' -and [int] $entry.itemCount -ne $rowArray.Count) {
+        throw "Read-PulseDataset: itemCount mismatch for dataset file '$fileName' - expected $($entry.itemCount), got $($rowArray.Count). The file is truncated or corrupt."
+    }
 
-    return , [object[]] @($parsed)
+    return , $rowArray
 }

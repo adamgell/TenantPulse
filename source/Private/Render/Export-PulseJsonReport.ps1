@@ -145,8 +145,10 @@ function Export-PulseJsonReport {
 
     $resolvedOutputPath = (Resolve-Path -LiteralPath $OutputPath).ProviderPath
     $reportPath = Join-Path $resolvedOutputPath 'tenantpulse-findings.json'
-    $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $documentToWrite
-    Set-Content -LiteralPath $reportPath -Value $canonicalJson -NoNewline -Encoding utf8NoBOM
+    $null = Publish-PulseAtomicStreamFile -Path $reportPath -WriteAction {
+        param($fileStream)
+        Write-PulseCanonicalJsonToStream -InputObject $documentToWrite -Stream $fileStream
+    }
 
     return $reportPath
 }

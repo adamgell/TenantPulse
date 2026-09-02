@@ -223,7 +223,11 @@ $CollectedUtc,
         [Parameter(ParameterSetName = 'Expansion')]
         [AllowNull()]
         [AllowEmptyString()]
-        [string] $ExpansionPublishFinalPath
+        [string] $ExpansionPublishFinalPath,
+
+        [Parameter(Mandatory, ParameterSetName = 'DatasetBatch')]
+        [AllowEmptyCollection()]
+        [System.Collections.IDictionary[]] $DatasetEntries
     )
 
     if ($PSCmdlet.ParameterSetName -eq 'Dataset') {
@@ -241,6 +245,10 @@ $CollectedUtc,
         }
         if ($Status -in @('Failed', 'Skipped') -and $null -eq $FailureClass) {
             $FailureClass = if ($Status -eq 'Skipped') { 'GateUnknown' } else { 'ProviderFailed' }
+        }
+    } elseif ($PSCmdlet.ParameterSetName -eq 'DatasetBatch') {
+        foreach ($batchEntry in @($DatasetEntries)) {
+            Assert-PulseDatasetName -Name ([string] $batchEntry['Name'])
         }
     } elseif ($PSCmdlet.ParameterSetName -eq 'Reference') {
         Assert-PulseDatasetName -Name $ReferenceName -Kind 'reference name'
@@ -341,6 +349,46 @@ $CollectedUtc,
                 redactedSecretCount = $ExpansionRedactedSecretCount
                 gaps                = $expansionGapsValue
                 reason              = $ExpansionReason
+            }
+        }
+        elseif ($PSCmdlet.ParameterSetName -eq 'DatasetBatch') {
+            if (-not $manifest.Contains('datasets') -or $null -eq $manifest.datasets) {
+                $manifest.datasets = [ordered]@{}
+            }
+            foreach ($batchEntry in @($DatasetEntries)) {
+                $batchName = [string] $batchEntry['Name']
+                $batchStatus = [string] $batchEntry['Status']
+                $batchReason = $batchEntry['Reason']
+                $batchReasonCode = $batchEntry['ReasonCode']
+                $batchFailureClass = $batchEntry['FailureClass']
+                if ([string]::IsNullOrWhiteSpace([string] $batchReasonCode)) {
+                    $batchReasonCode = if ($null -ne $batchReason -and -not [string]::IsNullOrWhiteSpace([string] $batchReason)) {
+                        [string] $batchReason
+                    } else {
+                        $batchStatus.ToLowerInvariant()
+                    }
+                }
+                if ($batchStatus -in @('Failed', 'Skipped') -and $null -eq $batchFailureClass) {
+                    $batchFailureClass = if ($batchStatus -eq 'Skipped') { 'GateUnknown' } else { 'ProviderFailed' }
+                }
+                $batchOperations = $batchEntry['Operations']
+                $batchGaps = $batchEntry['Gaps']
+                $operationsValue = if ($null -eq $batchOperations) { , @() } else { , @($batchOperations) }
+                $gapsValue = if ($null -eq $batchGaps) { , @() } else { , @($batchGaps) }
+                $manifest.datasets[$batchName] = [ordered]@{
+                    status       = $batchStatus
+                    apiVersion   = $batchEntry['ApiVersion']
+                    failureClass = $batchFailureClass
+                    reasonCode   = $batchReasonCode
+                    detail       = $batchEntry['Detail']
+                    provider     = $batchEntry['Provider']
+                    operations   = $operationsValue
+                    gaps         = $gapsValue
+                    reason       = $batchReason
+                    sha256       = $batchEntry['Sha256']
+                    itemCount    = $batchEntry['ItemCount']
+                    collectedUtc = $batchEntry['CollectedUtc']
+                }
             }
         }
         else {

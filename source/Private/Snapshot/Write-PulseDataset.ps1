@@ -105,7 +105,14 @@ function Write-PulseDataset {
 
         [Parameter()]
         [ValidateRange(1, 1000)]
-        [int] $Depth = 64
+        [int] $Depth = 64,
+
+        # When supplied, the dataset file is still streamed and hashed, but the manifest
+        # entry is appended to this list instead of rewritten per call. Callers flush with
+        # Set-PulseManifestEntry -DatasetEntries after a batch of writes.
+        [Parameter()]
+        [AllowNull()]
+        [System.Collections.IList] $ManifestBatch = $null
     )
 
     Assert-PulseDatasetName -Name $Name
@@ -155,6 +162,22 @@ function Write-PulseDataset {
         -Provider $Provider -ApiVersion $ApiVersion -Operations $Operations
 
     if ($Status -in @('Failed', 'Skipped')) {
+        $failedEntry = [ordered]@{
+            Name         = $Name
+            Status       = $Status
+            Reason       = $Reason
+            ReasonCode   = $outcome.ReasonCode
+            Detail       = $outcome.Detail
+            FailureClass = $outcome.FailureClass
+            Provider     = $outcome.Provider
+            Operations   = $outcome.Operations
+            Gaps         = $outcome.Gaps
+            ApiVersion   = $outcome.ApiVersion
+        }
+        if ($null -ne $ManifestBatch) {
+            $ManifestBatch.Add($failedEntry) | Out-Null
+            return
+        }
         Set-PulseManifestEntry -Store $Store -Name $Name -Status $Status -Reason $Reason `
             -ReasonCode $outcome.ReasonCode -Detail $outcome.Detail -FailureClass $outcome.FailureClass `
             -Provider $outcome.Provider -Operations $outcome.Operations -Gaps $outcome.Gaps `
@@ -169,17 +192,33 @@ function Write-PulseDataset {
     if (-not [string]::IsNullOrEmpty($TenantId) -and -not [string]::IsNullOrEmpty($Pseudonym)) {
         $items = Protect-PulseGraphRowTenantId -Data $items -TenantId $TenantId -Pseudonym $Pseudonym
     }
-    $canonicalJson = ConvertTo-PulseCanonicalJson -InputObject $items -Depth $Depth
     $datasetPath = Join-Path $Store.DatasetsPath "$Name.json"
-
-    # Hash-what-you-write: the exact UTF-8 byte array is both persisted and hashed.
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($canonicalJson)
-    Set-PulseAtomicFileContent -Path $datasetPath -Bytes $bytes
-
-    $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
-    $sha256 = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+    $sha256 = Publish-PulseAtomicStreamFile -Path $datasetPath -WriteAction {
+        param($fileStream)
+        Write-PulseCanonicalJsonToStream -InputObject $items -Stream $fileStream -Depth $Depth
+    }
 
     $collectedUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [System.Globalization.CultureInfo]::InvariantCulture)
+
+    $collectedEntry = [ordered]@{
+        Name         = $Name
+        Status       = $Status
+        Reason       = $Reason
+        ReasonCode   = $outcome.ReasonCode
+        Detail       = $outcome.Detail
+        FailureClass = $outcome.FailureClass
+        Provider     = $outcome.Provider
+        Operations   = $outcome.Operations
+        Gaps         = $outcome.Gaps
+        ApiVersion   = $outcome.ApiVersion
+        Sha256       = $sha256
+        ItemCount    = $items.Count
+        CollectedUtc = $collectedUtc
+    }
+    if ($null -ne $ManifestBatch) {
+        $ManifestBatch.Add($collectedEntry) | Out-Null
+        return
+    }
 
     Set-PulseManifestEntry -Store $Store -Name $Name -Status $Status -Reason $Reason `
         -ReasonCode $outcome.ReasonCode -Detail $outcome.Detail -FailureClass $outcome.FailureClass `

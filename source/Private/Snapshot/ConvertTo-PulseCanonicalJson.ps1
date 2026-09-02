@@ -45,7 +45,7 @@ function Write-PulseCanonicalJsonValue {
         [object] $Value,
 
         [Parameter(Mandatory)]
-        [System.Text.StringBuilder] $Builder,
+        $Builder,
 
         [Parameter(Mandatory)]
         [int] $IndentLevel,

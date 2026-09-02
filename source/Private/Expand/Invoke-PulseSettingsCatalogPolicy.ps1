@@ -89,7 +89,11 @@ function Invoke-PulseSettingsCatalogPolicy {
 
         [Parameter()]
         [AllowNull()]
-        [pscustomobject] $NetworkAbortState = $null
+        [pscustomobject] $NetworkAbortState = $null,
+
+        [Parameter()]
+        [AllowNull()]
+        [System.Collections.IList] $ManifestBatch = $null
     )
 
     function New-PulseStructuredGapReason {
@@ -197,7 +201,7 @@ function Invoke-PulseSettingsCatalogPolicy {
             # counts in, so a chain the redactor accepted must not then trip a SHALLOWER
             # default here and get misclassified as a fetch failure one step later.
             Write-PulseDataset -Store $Store -Name $RawDatasetName -Data $redacted -ApiVersion 'beta' -Status 'Collected' `
-                -Depth $script:PulseSettingsCatalogRawPayloadMaxDepth -TenantId $TenantId -Pseudonym $Pseudonym
+                -Depth $script:PulseSettingsCatalogRawPayloadMaxDepth -TenantId $TenantId -Pseudonym $Pseudonym -ManifestBatch $ManifestBatch
             $settingsPayload = $redacted
         } catch {
             Write-Verbose "Invoke-PulseSettingsCatalogPolicy: fetch failed for policy '$policyId': $($_.Exception.Message)"
@@ -221,7 +225,7 @@ function Invoke-PulseSettingsCatalogPolicy {
             try {
                 $rawAssignments = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' -Parameters @{ id = $policyId } -ErrorAction Stop)
                 Write-PulseDataset -Store $Store -Name $RawAssignmentDatasetName -Data $rawAssignments -ApiVersion 'beta' -Status 'Collected' `
-                    -TenantId $TenantId -Pseudonym $Pseudonym
+                    -TenantId $TenantId -Pseudonym $Pseudonym -ManifestBatch $ManifestBatch
             } catch {
                 Write-Verbose "Invoke-PulseSettingsCatalogPolicy: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
                 $failure = Resolve-PulseGraphFailure -ErrorRecord $_
