@@ -227,6 +227,78 @@ Describe 'Invoke-PulseCollection provider plans' {
         InModuleScope TenantPulse { $script:secondPlanCalls } | Should -Be 0
     }
 
+    It 'preserves a message-only authentication classification and aborts later network-backed plans' {
+        $planRegistry = InModuleScope TenantPulse {
+            $script:messageOnlySecondPlanCalls = 0
+            @{
+                firstPlan = {
+                    throw 'AADSTS700016: token acquisition failed'
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:messageOnlySecondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'must-not-be-collected' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.ListBeta')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'First.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.firstPlan.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.firstPlan.reasonCode | Should -Be 'authentication-failed'
+        $saved.datasets.secondPlan.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.collectionFailure | Should -Not -BeNullOrEmpty
+        InModuleScope TenantPulse { $script:messageOnlySecondPlanCalls } | Should -Be 0
+    }
+
+    It 'preserves a message-only permission classification without aborting later network-backed plans' {
+        $planRegistry = InModuleScope TenantPulse {
+            $script:messageOnlyPermissionSecondPlanCalls = 0
+            @{
+                firstPlan = {
+                    throw '403 Forbidden'
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:messageOnlyPermissionSecondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'collected-after-permission-denial' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.ListBeta')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'First.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.firstPlan.failureClass | Should -Be 'PermissionDenied'
+        $saved.datasets.firstPlan.reasonCode | Should -Be 'permission-denied'
+        $saved.datasets.secondPlan.status | Should -Be 'Collected'
+        $saved.collectionFailure | Should -BeNullOrEmpty
+        InModuleScope TenantPulse { $script:messageOnlyPermissionSecondPlanCalls } | Should -Be 1
+    }
+
     It 'does not abort later network-backed plans for a non-authentication provider-plan failure' {
         $planRegistry = InModuleScope TenantPulse {
             $script:secondPlanCalls = 0

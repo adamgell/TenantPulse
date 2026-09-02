@@ -236,7 +236,11 @@ function Invoke-PulseCollection {
                 }
             } catch {
                 $failure = Resolve-PulseGraphFailure -ErrorRecord $_
-                if ($failure.HasStructuredSignal) {
+                $hasCanonicalProviderFailure = $failure.HasStructuredSignal -or
+                    $failure.FailureClass -ne 'ProviderFailed' -or
+                    $failure.ReasonCode -ne 'provider-failed' -or
+                    $failure.AbortCollection
+                if ($hasCanonicalProviderFailure) {
                     $statusCodeText = if ($null -eq $failure.StatusCode) { 'unknown' } else { [string] $failure.StatusCode }
                     $canonicalReason = "graph-request-failed: failureClass=$($failure.FailureClass); reasonCode=$($failure.ReasonCode); statusCode=$statusCodeText"
                     $reason = Protect-PulseReason -Message $canonicalReason `

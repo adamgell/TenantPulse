@@ -82,6 +82,7 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     }
 
     $selectedPolicies = [System.Collections.Generic.List[object]]::new()
+    $gaps = [System.Collections.Generic.List[object]]::new()
     foreach ($policy in $policies) {
         if ($null -eq $policy) { continue }
         $templateReference = Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'templateReference'
@@ -102,6 +103,9 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
 
         $policyId = [string] (Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'id')
         if ([string]::IsNullOrWhiteSpace($policyId)) {
+            $gaps.Add((New-PulseCollectionGap -Scope 'policy:unknown' -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'missing-policy-id' -Detail @{ missing = 'id' } `
+                    -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta')) | Out-Null
             continue
         }
         $policyName = [string] (Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'name')
@@ -125,7 +129,6 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     }
 
     $rows = [System.Collections.Generic.List[object]]::new()
-    $gaps = [System.Collections.Generic.List[object]]::new()
     foreach ($selectedPolicy in $selected) {
         $policyId = [string] $selectedPolicy.PolicyId
         $settings = @()

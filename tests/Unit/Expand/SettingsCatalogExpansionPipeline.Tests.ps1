@@ -136,6 +136,38 @@ Describe 'Invoke-PulseSettingsCatalogExpansionPipeline' {
 
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' }
     }
+
+    It 'persists the global authentication failure when the expansion aborts authentication and then throws' {
+        $policies = @([pscustomobject]@{
+                id = 'policy-1'; name = 'P1'
+                templateReference = [pscustomobject]@{ templateId = ''; templateFamily = 'none' }
+            })
+        $definitions = @([pscustomobject]@{ id = 'setting-a'; name = 'a'; displayName = 'A' })
+        $privateMarker = 'PRIVATE' + '-POST-AUTH-SETTINGS-THROW'
+        $script:settingsPostAuthThrowMarker = $privateMarker
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { $policies }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $definitions }
+        Mock Invoke-PulseSettingsCatalogExpansion -ModuleName TenantPulse {
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            throw $script:settingsPostAuthThrowMarker
+        }
+        $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $state {
+            param($store, $context, $state)
+            Invoke-PulseSettingsCatalogExpansionPipeline -Store $store -Context $context `
+                -ProfileId 'contoso-lab' -TenantPseudonym 'tp-abc123' -NetworkAbortState $state
+        }
+
+        $manifestText = Get-Content -LiteralPath $script:store.ManifestPath -Raw
+        $manifest = $manifestText | ConvertFrom-Json
+        $manifest.expansions.settingsCatalog.status | Should -Be 'Failed'
+        $manifest.collectionFailure | Should -Not -BeNullOrEmpty
+        $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))
+        $state.AuthenticationAborted | Should -BeTrue
+        Should-Invoke Invoke-PulseSettingsCatalogExpansion -ModuleName TenantPulse -Times 1 -Exactly
+    }
 }
 
 Describe 'Get-PulseTenantSnapshot -ExpandSettings' {

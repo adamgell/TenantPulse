@@ -99,6 +99,11 @@ function Invoke-PulseTypedPolicyExpansionPipeline {
             Write-Verbose "Invoke-PulseTypedPolicyExpansionPipeline: unexpected exception in '$($family.ExpansionName)': $($_.Exception.Message)"
             $reason = Protect-PulseReason -Message 'unexpected-pipeline-failure' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
             Set-PulseExpansionEntry -Store $Store -Name $family.ExpansionName -Status 'Failed' -Reason $reason
+            if ($NetworkAbortState.AuthenticationAborted) {
+                $collectionFailure = Protect-PulseReason -Message 'authentication-failed' -ProfileId $ProfileId `
+                    -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                Set-PulseManifestEntry -Store $Store -CollectionFailure $collectionFailure
+            }
         }
     }
 }

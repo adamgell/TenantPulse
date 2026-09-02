@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 2510 / -AllowNotRun 0 (see
+    # MinimumTests 2517 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -295,12 +295,15 @@ else {
     # structured Graph-failure regressions preserving the canonical outcome and
     # authentication abort. The authoritative pre-ratchet run had zero NotRun, so
     # publication accepts no NotRun block.
+    # 2510 -> 2517 after independent review: +2 provider classification,
+    # +2 pipeline-manifest, and +3 missing-policy-id regressions; existing
+    # expansion-abort cases now also assert complete gap ledgers.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 2510 `
+        -MinimumTests 2517 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {

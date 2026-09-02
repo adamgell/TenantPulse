@@ -550,9 +550,18 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
     }
 
     It 'stops typed assignment fan-out on first or middle authentication failure, but isolates a non-auth failure' -ForEach @(
-        @{ Name = 'first auth'; FailId = 'p1'; Status = 401; ExpectedCalls = 1 }
-        @{ Name = 'middle auth'; FailId = 'p2'; Status = 401; ExpectedCalls = 2 }
-        @{ Name = 'first provider'; FailId = 'p1'; Status = 503; ExpectedCalls = 3 }
+        @{
+            Name = 'first auth'; FailId = 'p1'; Status = 401; ExpectedCalls = 1; ExpectedStatus = 'NotExpanded'
+            ExpectedGapIds = @('p1', 'p2', 'p3'); ExpectedNotAttempted = @('p2', 'p3')
+        }
+        @{
+            Name = 'middle auth'; FailId = 'p2'; Status = 401; ExpectedCalls = 2; ExpectedStatus = 'Partial'
+            ExpectedGapIds = @('p2', 'p3'); ExpectedNotAttempted = @('p3')
+        }
+        @{
+            Name = 'first provider'; FailId = 'p1'; Status = 503; ExpectedCalls = 3; ExpectedStatus = 'Partial'
+            ExpectedGapIds = @('p1'); ExpectedNotAttempted = @()
+        }
     ) {
         $policies = 1..3 | ForEach-Object { New-TestCompliancePolicy -Id "p$_" }
         $target = [pscustomobject]@{
@@ -577,7 +586,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         }
 
         $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
-        $null = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance, $state {
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance, $state {
             param($store, $context, $policies, $typeMap, $state)
             Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies $policies -PolicyType 'compliance' `
                 -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance' `
@@ -586,6 +595,14 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
 
         $script:typedFanoutCalls | Should -Be $ExpectedCalls
         $state.AuthenticationAborted | Should -Be ($Status -eq 401)
+        $summary.Status | Should -Be $ExpectedStatus
+        @($summary.Gaps.policyId) | Should -Be $ExpectedGapIds
+        @($summary.Gaps | Where-Object reason -eq 'category:NotAttemptedAfterAuthenticationFailure' | ForEach-Object policyId) |
+            Should -Be $ExpectedNotAttempted
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.expansions.compliance.status | Should -Be $ExpectedStatus
+        @($manifest.expansions.compliance.gaps.policyId) | Should -Be $ExpectedGapIds
     }
 
     It 'planted Sensitive property value never appears in the manifest or the jsonl artifact' {

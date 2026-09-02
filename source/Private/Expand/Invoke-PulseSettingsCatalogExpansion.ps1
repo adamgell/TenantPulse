@@ -456,10 +456,12 @@ function Invoke-PulseSettingsCatalogExpansion {
     # $batch fan-out (GraphKit's server-side batching) is the sanctioned future scale lever
     # if fan-out speed is ever needed again (Phase 2b) - it shares one connection/token and
     # one throttle coordinator by construction, unlike a client-side RunspacePool.
-    foreach ($eligible in $eligiblePolicies) {
+    for ($eligibleIndex = 0; $eligibleIndex -lt $eligiblePolicies.Count; $eligibleIndex++) {
+        $eligible = $eligiblePolicies[$eligibleIndex]
         $policy = $eligible.Policy
         $rawDatasetName = "$rawDatasetPrefix$($eligible.PolicyId)"
         $rawAssignmentDatasetName = "$rawAssignmentDatasetPrefix$($eligible.PolicyId)"
+        $result = $null
         try {
             $result = Invoke-PulseSettingsCatalogPolicy -Store $Store -Policy $policy -Context $Context -DefinitionIndex $DefinitionIndex `
                 -FromCapturedPayloads $FromCapturedPayloads.IsPresent -RawDatasetName $rawDatasetName `
@@ -471,14 +473,23 @@ function Invoke-PulseSettingsCatalogExpansion {
             # publication of every policy already collected.
             Write-Verbose "Invoke-PulseSettingsCatalogExpansion: unexpected exception processing policy '$($eligible.PolicyId)': $($_.Exception.Message)"
             $gapEntries.Add([pscustomobject]@{ policyId = $eligible.PolicyId; reason = 'category:WorkerException' }) | Out-Null
-            continue
         }
-        foreach ($row in $result.Rows) { $allRows.Add($row) | Out-Null }
-        if ($result.Gap) {
-            $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
-            $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
+        if ($null -ne $result) {
+            foreach ($row in $result.Rows) { $allRows.Add($row) | Out-Null }
+            if ($result.Gap) {
+                $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+                $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
+            }
         }
-        if ($NetworkAbortState.AuthenticationAborted) { break }
+        if ($NetworkAbortState.AuthenticationAborted) {
+            for ($remainingIndex = $eligibleIndex + 1; $remainingIndex -lt $eligiblePolicies.Count; $remainingIndex++) {
+                $gapEntries.Add([pscustomobject]@{
+                        policyId = $eligiblePolicies[$remainingIndex].PolicyId
+                        reason   = 'category:NotAttemptedAfterAuthenticationFailure'
+                    }) | Out-Null
+            }
+            break
+        }
     }
 
     # DETERMINISTIC MERGE: sort strictly on (policyId, settingPath, instanceId), ordinal -

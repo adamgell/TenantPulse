@@ -283,6 +283,76 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicySetting' }).Count | Should -Be 0
     }
 
+    It 'fails closed when a relevant <Label> policy has no usable id' -ForEach @(
+        @{
+            Label      = 'BitLocker'
+            Dataset    = 'endpointSecurityDiskEncryptionPolicies'
+            Family     = 'endpointSecurityDiskEncryption'
+            TemplateId = ''
+            IncludeId  = $false
+            IdValue    = $null
+        }
+        @{
+            Label      = 'LAPS'
+            Dataset    = 'endpointSecurityLapsPolicies'
+            Family     = 'endpointSecurityAccountProtection'
+            TemplateId = 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796'
+            IncludeId  = $true
+            IdValue    = '   '
+        }
+    ) {
+        $policyProperties = [ordered]@{
+            name = "Malformed $Label policy"
+            templateReference = [pscustomobject]@{
+                templateFamily = $Family
+                templateId     = $TemplateId
+            }
+        }
+        if ($IncludeId) { $policyProperties.id = $IdValue }
+        $policy = [pscustomobject] $policyProperties
+
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset $Dataset `
+            -Policies @($policy) `
+            -SettingsByPolicy @{}
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:unknown'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be 'missing-policy-id'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicy.ListBeta'
+        @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicySetting' }).Count | Should -Be 0
+    }
+
+    It 'keeps a valid BitLocker row but marks the collection partial when a relevant peer has no id' {
+        $valid = New-EndpointPolicy -Id 'bitlocker-valid' -Name 'Valid BitLocker' -Family 'endpointSecurityDiskEncryption'
+        $malformed = [pscustomobject]@{
+            name = 'Malformed BitLocker'
+            templateReference = [pscustomobject]@{
+                templateFamily = 'endpointSecurityDiskEncryption'
+                templateId     = ''
+            }
+        }
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies @($malformed, $valid) `
+            -SettingsByPolicy @{
+                'bitlocker-valid' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+            }
+
+        $result.Outcome.Status | Should -Be 'Partial'
+        @($result.Outcome.Rows).Count | Should -Be 1
+        $result.Outcome.Rows[0].policyId | Should -Be 'bitlocker-valid'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be 'missing-policy-id'
+        @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicySetting' }).Count | Should -Be 1
+    }
+
     It 'records the same qualified primitive provenance for <PolicyCount> selected policies' -ForEach @(
         @{ PolicyCount = 0 }
         @{ PolicyCount = 1 }

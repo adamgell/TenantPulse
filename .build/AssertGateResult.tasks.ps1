@@ -529,7 +529,12 @@
 # regressions proving that thrown structured Graph failures preserve their canonical
 # provider-plan outcome and that authentication aborts later network-backed plans.
 # 2510 is the real, measured `./build.ps1 -Tasks test` total before this ratchet changed.
-$script:tenantPulseGateMinimumTests = 2510
+# 2510 -> 2517 after the independent R1a review: +2 message-only provider-failure
+# classifications, +2 post-auth pipeline-failure manifests, and +3 Endpoint Security
+# missing-policy-id fail-closed regressions. Existing first/middle-auth expansion cases
+# also gained exact gap-ledger assertions without increasing the discovered test count.
+# 2517 is the real, measured `./build.ps1 -Tasks test` discovery total before this ratchet changed.
+$script:tenantPulseGateMinimumTests = 2517
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

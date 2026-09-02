@@ -62,4 +62,41 @@ Describe 'Invoke-PulseTypedPolicyExpansionPipeline' {
         $manifest.expansions.deviceConfiguration.status | Should -Be 'NotExpanded'
         $manifest.expansions.deviceConfiguration.reason | Should -Match 'deviceConfigurations unavailable'
     }
+
+    It 'persists the global authentication failure when one family aborts authentication and then throws' {
+        $policy = [pscustomobject]@{
+            id = 'p1'; displayName = 'Win'; '@odata.type' = '#microsoft.graph.windows10CompliancePolicy'
+            bitLockerEnabled = $true
+        }
+        InModuleScope TenantPulse -ArgumentList $script:store, $policy {
+            param($store, $policy)
+            Write-PulseDataset -Store $store -Name 'deviceCompliancePolicies' -Data @($policy) `
+                -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        $privateMarker = 'PRIVATE' + '-POST-AUTH-TYPED-THROW'
+        $script:typedPostAuthThrowMarker = $privateMarker
+        Mock Invoke-PulseTypedPolicyExpansion -ModuleName TenantPulse {
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            throw $script:typedPostAuthThrowMarker
+        }
+        $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $state {
+            param($store, $context, $state)
+            Invoke-PulseTypedPolicyExpansionPipeline -Store $store -Context $context `
+                -ProfileId 'contoso-lab' -TenantPseudonym 'tp-abc123' -NetworkAbortState $state
+        }
+
+        $manifestText = Get-Content -LiteralPath $script:store.ManifestPath -Raw
+        $manifest = $manifestText | ConvertFrom-Json
+        $manifest.expansions.compliance.status | Should -Be 'Failed'
+        $manifest.expansions.deviceConfiguration.status | Should -Be 'NotExpanded'
+        $manifest.collectionFailure | Should -Not -BeNullOrEmpty
+        $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))
+        $state.AuthenticationAborted | Should -BeTrue
+        Should-Invoke Invoke-PulseTypedPolicyExpansion -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
 }

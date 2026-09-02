@@ -143,7 +143,8 @@ function Invoke-PulseTypedPolicyExpansion {
     $allRows = [System.Collections.Generic.List[object]]::new()
     $gapEntries = [System.Collections.Generic.List[object]]::new()
 
-    foreach ($policy in $policyList) {
+    for ($policyIndex = 0; $policyIndex -lt $policyList.Count; $policyIndex++) {
+        $policy = $policyList[$policyIndex]
         $policyIdRaw = Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'id'
         $policyId = if ($null -ne $policyIdRaw) { [string] $policyIdRaw } else { $null }
 
@@ -225,7 +226,21 @@ function Invoke-PulseTypedPolicyExpansion {
 
         if ($assignmentGap) {
             $gapEntries.Add([pscustomobject]@{ policyId = $policyId; reason = $assignmentGap }) | Out-Null
-            if ($NetworkAbortState.AuthenticationAborted) { break }
+            if ($NetworkAbortState.AuthenticationAborted) {
+                for ($remainingIndex = $policyIndex + 1; $remainingIndex -lt $policyList.Count; $remainingIndex++) {
+                    $remainingIdRaw = Get-PulseSettingsCatalogValueProperty -Node $policyList[$remainingIndex] -PropertyName 'id'
+                    $remainingId = if ($null -ne $remainingIdRaw -and -not [string]::IsNullOrWhiteSpace([string] $remainingIdRaw)) {
+                        [string] $remainingIdRaw
+                    } else {
+                        ''
+                    }
+                    $gapEntries.Add([pscustomobject]@{
+                            policyId = $remainingId
+                            reason   = (New-PulseTypedGapReason -Category 'NotAttemptedAfterAuthenticationFailure')
+                        }) | Out-Null
+                }
+                break
+            }
             continue
         }
 
