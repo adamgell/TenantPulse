@@ -388,3 +388,55 @@ Describe 'Perf: raw per-policy dataset write scaling (manifest growth characteri
         }
     }
 }
+
+Describe 'TP10A: streaming persist, batched manifest, fragments, renderer bounds (no invented budget)' {
+    It 'round-trips a streamed dataset, batches manifest entries, and keeps ExpandSettings off' {
+        $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        try {
+            $result = InModuleScope TenantPulse -ArgumentList $storeRoot {
+                param($storeRoot)
+                $store = New-PulseSnapshotStore -Path $storeRoot
+                $rows = 1..8 | ForEach-Object { [pscustomobject]@{ id = "$_"; v = $_ } }
+                $expected = ConvertTo-PulseCanonicalJson -InputObject $rows
+                Write-PulseDataset -Store $store -Name 'Sample' -Data $rows -ApiVersion 'v1.0' -Status 'Collected'
+                $onDisk = [System.IO.File]::ReadAllText((Join-Path $store.DatasetsPath 'Sample.json'))
+                $readBack = Read-PulseDataset -Store $store -Name 'Sample'
+
+                $batch = [System.Collections.Generic.List[object]]::new()
+                Write-PulseDataset -Store $store -Name 'BatchA' -Data @([pscustomobject]@{ id = 'a' }) -ApiVersion 'v1.0' -Status 'Collected' -ManifestBatch $batch
+                Write-PulseDataset -Store $store -Name 'BatchB' -Data @([pscustomobject]@{ id = 'b' }) -ApiVersion 'v1.0' -Status 'Collected' -ManifestBatch $batch
+                $beforeBatch = Get-PulseSnapshotManifest -Store $store
+                Set-PulseManifestEntry -Store $store -DatasetEntries $batch.ToArray()
+                $afterBatch = Get-PulseSnapshotManifest -Store $store
+
+                $fragRows = @(
+                    [pscustomobject]@{ policyId = 'p1'; settingPath = 's/1'; instanceId = '0'; nameResolved = $true; redacted = $false }
+                    [pscustomobject]@{ policyId = 'p2'; settingPath = 's/1'; instanceId = '0'; nameResolved = $true; redacted = $false }
+                )
+                $fid = New-PulseExpansionFragmentId -StartOrdinal 0 -EndOrdinal 1 -PolicyIds @('p1', 'p2')
+                $null = Write-PulseExpansionFragment -Store $store -Name 'settingsCatalog' -FragmentId $fid -Rows $fragRows
+                $merged = Merge-PulseExpansionFragments -Store $store -Name 'settingsCatalog' -FragmentIds @($fid) -Gaps @() -PolicyCount 2
+
+                [pscustomobject]@{
+                    BytesMatch     = ($onDisk -eq $expected)
+                    ReadCount      = $readBack.Count
+                    BatchDeferred  = -not $beforeBatch.datasets.Contains('BatchA')
+                    BatchApplied   = $afterBatch.datasets.Contains('BatchA') -and $afterBatch.datasets.Contains('BatchB')
+                    MergeRows      = $merged.RowCount
+                    ExpandSwitch   = (Get-Command Get-PulseTenantSnapshot).Parameters['ExpandSettings'].SwitchParameter
+                    NoMaxParallel  = -not (Get-Command Invoke-PulseSettingsCatalogExpansion).Parameters.ContainsKey('MaxParallel')
+                }
+            }
+
+            $result.BytesMatch | Should -BeTrue
+            $result.ReadCount | Should -Be 8
+            $result.BatchDeferred | Should -BeTrue
+            $result.BatchApplied | Should -BeTrue
+            $result.MergeRows | Should -Be 2
+            $result.ExpandSwitch | Should -BeTrue
+            $result.NoMaxParallel | Should -BeTrue
+        } finally {
+            Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}

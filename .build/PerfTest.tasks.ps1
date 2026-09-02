@@ -19,11 +19,12 @@
     conflict-detection pipeline, or Write-PulseDataset/Read-PulseDataset - see
     docs/spike/2026-08-16-t27-perf-container.md for the recorded hardware/method/numbers
     this task's own budgets were derived from.
-
-    Every budget asserted under tests/Perf/ is [measured locally] x 1.5 headroom, per the
-    plan's own instruction - never a guessed round number. A budget failure here means an
-    actual regression against THIS machine's own prior measurement, not an arbitrary
-    external SLA.
+    Every numeric budget asserted under tests/Perf/ is [measured locally] x 1.5 headroom, per
+    the plan's own instruction - never a guessed round number. TP10A structural scale tests
+    in the same container (streaming persist/read, batched manifest replacement, fragment-
+    and-merge expansion, bounded JSON renderer input, atomic rename, resumable fragments,
+    chunk-boundary determinism, ExpandSettings remaining opt-in) assert contracts only -
+    they do not invent numeric pass budgets.
 #>
 
 task perftest {
