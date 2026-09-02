@@ -28,7 +28,10 @@ function Test-PulseUpdateRingDeadlines {
     )
 
     $configurations = @($Datasets.deviceConfigurations)
-    $updateRings = @($configurations | Where-Object { $_.'@odata.type' -eq '#microsoft.graph.windowsUpdateForBusinessConfiguration' })
+    $updateRings = @($configurations | Where-Object {
+        $_.'@odata.type' -eq '#microsoft.graph.windowsUpdateForBusinessConfiguration' -and
+        (ConvertTo-PulseAssignmentIntent -Assignments (Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'assignments')).IsAssigned
+    })
 
     $hasDeadline = {
         param($ring)

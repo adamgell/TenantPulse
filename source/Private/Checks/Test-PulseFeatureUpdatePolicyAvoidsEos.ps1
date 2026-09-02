@@ -42,12 +42,27 @@ function Test-PulseFeatureUpdatePolicyAvoidsEos {
         [hashtable] $Context = @{}
     )
 
-    $profiles = @($Datasets.windowsFeatureUpdateProfiles)
+    $rawProfiles = @($Datasets.windowsFeatureUpdateProfiles)
+    $unknownAssignment = $false
+    $profiles = [System.Collections.Generic.List[object]]::new()
+    foreach ($profile in $rawProfiles) {
+        $intent = ConvertTo-PulseAssignmentIntent -Assignments (Get-PulseSettingsCatalogValueProperty -Node $profile -PropertyName 'assignments')
+        if ($intent.State -eq 'Unknown' -or $intent.State -eq 'Malformed') {
+            $unknownAssignment = $true
+            continue
+        }
+        if ($intent.IsAssigned) {
+            $profiles.Add($profile) | Out-Null
+        }
+    }
+    if ($unknownAssignment) {
+        return New-PulseFinding -Status Fail -Reason 'One or more Windows Feature Update profiles have unknown or malformed assignment data; existence-only coverage is not accepted.'
+    }
+    $profiles = @($profiles)
 
     if ($profiles.Count -eq 0) {
         return New-PulseFinding -Status NotApplicable -Reason 'No Windows Feature Update deployment profiles are configured for this tenant - there is nothing for this check to evaluate (mirrors Maester''s own skip-if-none-configured behavior for this check, not a Pass).'
     }
-
     $cutoffBaseText = $null
     if ($Context -and $Context.ContainsKey('EvaluationCutoffBase') -and $Context.EvaluationCutoffBase) {
         $cutoffBaseText = [string] $Context.EvaluationCutoffBase

@@ -68,7 +68,14 @@ function Test-PulseCompliancePolicyPerPlatform {
     }
 
     $policies = @($Datasets.deviceCompliancePolicies)
-    $policyTypes = @($policies | ForEach-Object { [string] $_.'@odata.type' })
+    $assignedPolicyTypes = [System.Collections.Generic.List[string]]::new()
+    foreach ($policy in $policies) {
+        $intent = ConvertTo-PulseAssignmentIntent -Assignments (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'assignments')
+        if (-not $intent.IsAssigned) { continue }
+        $odataType = [string] (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName '@odata.type')
+        if ($odataType) { $assignedPolicyTypes.Add($odataType) | Out-Null }
+    }
+    $policyTypes = @($assignedPolicyTypes)
 
     $inScopePlatforms = @()
     $outOfScopePlatforms = @()

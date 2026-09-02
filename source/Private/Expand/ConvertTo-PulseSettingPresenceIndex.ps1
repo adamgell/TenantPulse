@@ -108,12 +108,13 @@ function ConvertTo-PulseSettingPresenceIndex {
     function Get-PulsePresencePolicyClassification {
         param([string] $PolicyId, [object[]] $Assignments, [bool] $AssignmentsWereNull)
         if ($classificationByPolicy.ContainsKey($PolicyId)) { return $classificationByPolicy[$PolicyId] }
-        $classification = if ($AssignmentsWereNull) {
-            'Unknown'
-        } elseif (@($Assignments).Count -eq 0) {
+        $intent = ConvertTo-PulseAssignmentIntent -Assignments $(if ($AssignmentsWereNull) { $null } else { $Assignments })
+        $classification = if ($intent.State -eq 'Include') {
+            'Assigned'
+        } elseif ($intent.State -eq 'Empty' -or $intent.State -eq 'ExcludeOnly') {
             'NotAssigned'
         } else {
-            'Assigned'
+            'Unknown'
         }
         $classificationByPolicy[$PolicyId] = $classification
         return $classification

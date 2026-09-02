@@ -33,7 +33,10 @@ BeforeAll {
             [string] $PolicyId,
             [string] $DefinitionId,
             [AllowNull()] [object] $Value,
-            [bool] $Redacted = $false
+            [bool] $Redacted = $false,
+            [AllowNull()] $Assignments = @(
+                @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'grp-assigned' } }
+            )
         )
         [pscustomobject]@{
             schemaVersion       = '1'
@@ -53,7 +56,7 @@ BeforeAll {
             redacted            = $Redacted
             valueState          = $null
             applicability       = $null
-            assignments         = $null
+            assignments         = $Assignments
         }
     }
 
@@ -201,11 +204,14 @@ Describe 'TP.INT.0017 - App Control for Business policy enforcing (not audit-onl
         $finding.reason | Should -Match 'expansions.settingPresenceIndex'
     }
 
-    It 'does not require confirmed assignment - Settings Catalog assignments are deferred and Maester keys existence' {
-        $finding = Invoke-PulseAppControlCheckFixture -Rows (New-PulseEnforcingBuiltInRows)
+    It 'does not Pass on an enforcing policy whose assignment status is unknown' {
+        $rows = @(
+            (New-PulseAppControlRow -PolicyId 'p1' -DefinitionId $script:BuildOptionsId -Value $script:BuiltInItemId -Assignments $null)
+            (New-PulseAppControlRow -PolicyId 'p1' -DefinitionId $script:AuditModeId -Value $script:AuditDisabledItemId -Assignments $null)
+        )
+        $finding = Invoke-PulseAppControlCheckFixture -Rows $rows
 
-        $finding.status | Should -Be 'Pass'
-        $finding.reason | Should -Match 'deferred/unknown'
+        $finding.status | Should -Be 'Fail'
     }
 
     It 'produces the identical status and reason across two evaluations of the SAME snapshot (determinism)' {

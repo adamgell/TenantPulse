@@ -75,6 +75,9 @@ BeforeAll {
             '@odata.type'                       = '#microsoft.graph.windowsUpdateForBusinessConfiguration'
             deadlineForFeatureUpdatesInDays     = $FeatureDeadline
             deadlineForQualityUpdatesInDays     = $QualityDeadline
+            assignments                        = @(
+                @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'grp-assigned' } }
+            )
         }
     }
 }

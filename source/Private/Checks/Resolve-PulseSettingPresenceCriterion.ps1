@@ -163,9 +163,12 @@ function Get-PulseSettingPresenceMatchingPolicies {
     $result.AnyUnknownAssignment = [bool] $entry.anyUnknownAssignment
 
     foreach ($valueGroup in @($entry.values)) {
-        $ids = @($valueGroup.policyIds)
+        $ids = @($valueGroup.assignedPolicyIds)
+        if ($ids.Count -eq 0) {
+            $ids = @()
+        }
         if ([bool] $valueGroup.redacted) {
-            foreach ($id in $ids) {
+            foreach ($id in @($valueGroup.policyIds)) {
                 if (-not [string]::IsNullOrEmpty([string] $id)) {
                     [void] $redacted.Add([string] $id)
                 }

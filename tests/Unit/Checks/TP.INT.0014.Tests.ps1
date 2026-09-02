@@ -130,7 +130,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
             (New-PulsePartialGapFixture)
             (New-PulsePartialGapFixture -Scope 'second-scope-canary' -ProviderDetail 'second-provider-detail-canary')
         )
-        $witness = [pscustomobject]@{ policyId = 'p-witness'; policyName = 'Full'; isFullDiskEncryption = $true }
+        $witness = [pscustomobject]@{ policyId = 'p-witness'; policyName = 'Full'; isFullDiskEncryption = $true; assignmentIntent = 'Include' }
         $malformed = [pscustomobject]@{ policyId = 'p-broken'; policyName = 'Broken'; isFullDiskEncryption = 1 }
         $upnCanary = 'admin' + [char] 64 + 'example' + '.invalid'
         $secretCanary = 'sec' + 'ret=fixture-only'
@@ -231,7 +231,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
     }
 
     It 'Partial: a valid witness outranks a non-witness row with no identity in either row order' {
-        $witness = [pscustomobject]@{ policyId = 'p-witness'; policyName = 'Full'; isFullDiskEncryption = $true }
+        $witness = [pscustomobject]@{ policyId = 'p-witness'; policyName = 'Full'; isFullDiskEncryption = $true; assignmentIntent = 'Include' }
         $malformed = [pscustomobject]@{ policyName = 'Used space only'; isFullDiskEncryption = $false }
 
         foreach ($rows in @(@($witness, $malformed), @($malformed, $witness))) {
@@ -249,7 +249,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
     }
 
     It 'Collected: any malformed row returns Error even when a valid witness exists, in either order' {
-        $witness = [pscustomobject]@{ policyId = 'p-witness'; policyName = 'Full'; isFullDiskEncryption = $true }
+        $witness = [pscustomobject]@{ policyId = 'p-witness'; policyName = 'Full'; isFullDiskEncryption = $true; assignmentIntent = 'Include' }
         $malformed = [pscustomobject]@{ policyId = 'p-broken'; policyName = 'Broken'; isFullDiskEncryption = 1 }
         foreach ($rows in @(@($witness, $malformed), @($malformed, $witness))) {
             $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
@@ -263,7 +263,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
             @{
                 Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Partial'
-                Data = @([pscustomobject]@{ policyName = 'Full but unidentified'; isFullDiskEncryption = $true })
+                Data = @([pscustomobject]@{ policyName = 'Full but unidentified'; isFullDiskEncryption = $true; assignmentIntent = 'Include' })
                 FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
                 Operations = @('ConfigurationPolicySettings.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
             }
@@ -288,7 +288,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
             @{
                 Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Partial'
-                Data = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true })
+                Data = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true; assignmentIntent = 'Include' })
                 FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
                 Operations = @('ConfigurationPolicySettings.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
                 ManifestOverrides = @{ gaps = 'not-an-array' }
@@ -302,7 +302,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         $fixture = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -ReturnFixture -Datasets @(
             @{
                 Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'
-                Data = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true })
+                Data = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true; assignmentIntent = 'Include' })
                 ManifestOverrides = @{ status = 'persisted-status-canary'; reason = 'persisted-reason-canary' }
             }
         )
@@ -317,7 +317,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
     }
 
     It 'does not mutate direct caller datasets or outcome projections' {
-        $datasets = @{ endpointSecurityDiskEncryptionPolicies = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true }) }
+        $datasets = @{ endpointSecurityDiskEncryptionPolicies = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true; assignmentIntent = 'Include' }) }
         $outcomes = @{ endpointSecurityDiskEncryptionPolicies = @{ Status = 'Partial'; Gaps = @(@{ Scope = 'x' }) } }
         $before = $datasets | ConvertTo-Json -Depth 20 -Compress
         $outcomeBefore = $outcomes | ConvertTo-Json -Depth 20 -Compress
@@ -334,7 +334,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
 
     It 'direct calls reject null, unsupported, and non-scalar outcome projections with one bounded canary-free error' {
         $observed = InModuleScope TenantPulse {
-            $datasets = @{ endpointSecurityDiskEncryptionPolicies = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true }) }
+            $datasets = @{ endpointSecurityDiskEncryptionPolicies = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true; assignmentIntent = 'Include' }) }
             $statusCanary = 'unsupported-status-canary'
             $cases = @(
                 @{ Name = 'missing declared key'; Outcomes = @{} }
@@ -365,7 +365,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
 
     It 'Pass: at least one policy enforces full-disk encryption' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
-            @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ policyId = 'p1'; policyName = 'BitLocker Full'; isFullDiskEncryption = $true }) }
+            @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ policyId = 'p1'; policyName = 'BitLocker Full'; isFullDiskEncryption = $true; assignmentIntent = 'Include' }) }
         )
 
         $finding.status | Should -Be 'Pass'
@@ -395,7 +395,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
     It 'Pass: a mix of full and used-space-only policies still passes on the presence of one full policy, evidence includes both' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
             @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
-                [pscustomobject]@{ policyId = 'p1'; policyName = 'BitLocker Full'; isFullDiskEncryption = $true }
+                [pscustomobject]@{ policyId = 'p1'; policyName = 'BitLocker Full'; isFullDiskEncryption = $true; assignmentIntent = 'Include' }
                 [pscustomobject]@{ policyId = 'p2'; policyName = 'BitLocker Used-Space-Only'; isFullDiskEncryption = $false }
             ) }
         )

@@ -45,6 +45,7 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     $descriptorSpecs = @(
         @{ Type = 'ConfigurationPolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         @{ Type = 'ConfigurationPolicySetting'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+        @{ Type = 'ConfigurationPolicyAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
     )
     foreach ($spec in $descriptorSpecs) {
         Assert-PulseReadOnlyDescriptor -Type $spec.Type -Operation $spec.Operation -ApiVersion $spec.ApiVersion
@@ -58,6 +59,7 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     $operations = @(
         'ConfigurationPolicy.ListBeta'
         'ConfigurationPolicySetting.ListBeta'
+        'ConfigurationPolicyAssignment.ListBeta'
     )
 
     $isBitLocker = $Dataset -eq 'endpointSecurityDiskEncryptionPolicies'
@@ -155,24 +157,44 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             }
             continue
         }
+        $assignmentIntent = 'Unknown'
+        try {
+            $assignmentRows = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' `
+                    -Parameters @{ id = $policyId } -ErrorAction Stop)
+            $assignmentIntent = [string] (ConvertTo-PulseAssignmentIntent -Assignments $assignmentRows).State
+        } catch {
+            $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+            $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass $failure.FailureClass `
+                    -ReasonCode $failure.ReasonCode `
+                    -Detail @{ policyId = $policyId } `
+                    -Operation 'ConfigurationPolicyAssignment.ListBeta' -ApiVersion 'beta')) | Out-Null
+            if ($failure.AbortCollection) {
+                $NetworkAbortState.AuthenticationAborted = $true
+                $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                break
+            }
+            continue
+        }
 
         try {
             if ($isBitLocker) {
                 $isFullDiskEncryption = Resolve-PulseBitLockerPolicyValue -Settings $settings
                 $rows.Add([pscustomobject][ordered]@{
-                        policyId              = $policyId
-                        policyName            = [string] $selectedPolicy.PolicyName
-                        isFullDiskEncryption  = [bool] $isFullDiskEncryption
+                        policyId             = $policyId
+                        policyName           = [string] $selectedPolicy.PolicyName
+                        isFullDiskEncryption = [bool] $isFullDiskEncryption
+                        assignmentIntent     = $assignmentIntent
                     }) | Out-Null
             } else {
                 $lapsValues = Resolve-PulseLapsPolicyValues -Settings $settings
                 $rows.Add([pscustomobject][ordered]@{
-                        policyId               = $policyId
-                        policyName             = [string] $selectedPolicy.PolicyName
-                        backsUpToEntra         = [bool] $lapsValues.backsUpToEntra
+                        policyId                = $policyId
+                        policyName              = [string] $selectedPolicy.PolicyName
+                        backsUpToEntra          = [bool] $lapsValues.backsUpToEntra
                         hasSufficientComplexity = [bool] $lapsValues.hasSufficientComplexity
-                        hasSufficientLength    = [bool] $lapsValues.hasSufficientLength
-                        hasPostAuthAction      = [bool] $lapsValues.hasPostAuthAction
+                        hasSufficientLength     = [bool] $lapsValues.hasSufficientLength
+                        hasPostAuthAction       = [bool] $lapsValues.hasPostAuthAction
+                        assignmentIntent        = $assignmentIntent
                     }) | Out-Null
             }
             $expandedCount++

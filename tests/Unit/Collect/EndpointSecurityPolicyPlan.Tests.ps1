@@ -95,6 +95,11 @@ BeforeAll {
                     }
                     return @($script:EndpointFixture.SettingsByPolicy[$policyId])
                 }
+                if ($Type -eq 'ConfigurationPolicyAssignment') {
+                    return @(
+                        @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'grp-assigned' } }
+                    )
+                }
                 throw "Unexpected Graph call '$Type/$Operation'."
             }
 
@@ -377,6 +382,7 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $result.Outcome.Operations | Should -Be @(
             'ConfigurationPolicy.ListBeta'
             'ConfigurationPolicySetting.ListBeta'
+            'ConfigurationPolicyAssignment.ListBeta'
         )
     }
 
@@ -437,7 +443,7 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
             -Policies @($policy) `
             -SettingsByPolicy @{ 'bitlocker-one' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1')) }
 
-        @($result.Calls | Where-Object Kind -eq 'Descriptor').Count | Should -Be 2
+        @($result.Calls | Where-Object Kind -eq 'Descriptor').Count | Should -Be 3
         $result.Calls[0].Kind | Should -Be 'Descriptor'
         $result.Calls[0].Type | Should -Be 'ConfigurationPolicy'
         $result.Calls[0].Operation | Should -Be 'ListBeta'
@@ -445,8 +451,10 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $result.Calls[1].Type | Should -Be 'ConfigurationPolicySetting'
         $result.Calls[1].Operation | Should -Be 'ListBeta'
         $result.Calls[1].ApiVersion | Should -Be 'beta'
-        $result.Calls[2].Kind | Should -Be 'Graph'
-        $result.Calls[2].Type | Should -Be 'ConfigurationPolicy'
+        $result.Calls[2].Type | Should -Be 'ConfigurationPolicyAssignment'
+        $result.Calls[2].Operation | Should -Be 'ListBeta'
+        $result.Calls[3].Kind | Should -Be 'Graph'
+        $result.Calls[3].Type | Should -Be 'ConfigurationPolicy'
     }
 
     It 'keeps an unrecognized BitLocker encryption token unknown instead of Boolean-coercing it' {

@@ -96,7 +96,8 @@ function Test-PulseLapsConfigurationMeetsBar {
         $meetsBar = ([bool] $policy.backsUpToEntra) -and
             ([bool] $policy.hasSufficientComplexity) -and
             ([bool] $policy.hasSufficientLength) -and
-            ([bool] $policy.hasPostAuthAction)
+            ([bool] $policy.hasPostAuthAction) -and
+            (Test-PulseCompositeRowIsAssigned -Row $policy)
         if ($meetsBar) {
             $compliantPolicies.Add($policy)
         }

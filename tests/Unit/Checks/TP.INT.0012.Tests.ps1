@@ -66,7 +66,25 @@ BeforeAll {
             Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-}
+
+    function script:New-PulseFeatureUpdateProfile {
+        param(
+            [string] $Id,
+            [string] $DisplayName,
+            [string] $FeatureUpdateVersion,
+            [string] $EndOfSupportDate = $null
+        )
+        [pscustomobject]@{
+            id                   = $Id
+            displayName          = $DisplayName
+            featureUpdateVersion = $FeatureUpdateVersion
+            endOfSupportDate     = $EndOfSupportDate
+            assignments          = @(
+                @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'grp-assigned' } }
+            )
+        }
+    }
+ }
 
 Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support builds' {
     It 'catalog: loads and validates cleanly via Import-PulseCheckCatalog (self-check)' {
@@ -76,7 +94,7 @@ Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support buil
 
     It 'Pass: every profile targets a version whose end-of-support date is far in the future' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
-            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'p1'; displayName = 'Ring A'; featureUpdateVersion = 'Windows 11, version 25H2'; endOfSupportDate = '2028-10-11T06:59:59Z' }) }
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 25H2' -EndOfSupportDate '2028-10-11T06:59:59Z')) }
         )
 
         $finding.status | Should -Be 'Pass'
@@ -84,7 +102,7 @@ Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support buil
 
     It 'Fail: a profile targets a version whose end-of-support date has already passed' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
-            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'p1'; displayName = 'Ring A'; featureUpdateVersion = 'Windows 11, version 22H2'; endOfSupportDate = '2025-10-15T06:59:59Z' }) }
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 22H2' -EndOfSupportDate '2025-10-15T06:59:59Z')) }
         )
 
         $finding.status | Should -Be 'Fail'
@@ -95,8 +113,8 @@ Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support buil
     It 'Fail: a mix of expired and current profiles reports only the expired one(s) as evidence' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
             @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
-                [pscustomobject]@{ id = 'p1'; displayName = 'Ring A (expired)'; featureUpdateVersion = 'Windows 11, version 22H2'; endOfSupportDate = '2025-10-15T06:59:59Z' }
-                [pscustomobject]@{ id = 'p2'; displayName = 'Ring B (current)'; featureUpdateVersion = 'Windows 11, version 25H2'; endOfSupportDate = '2028-10-11T06:59:59Z' }
+                (New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A (expired)' -FeatureUpdateVersion 'Windows 11, version 22H2' -EndOfSupportDate '2025-10-15T06:59:59Z')
+                (New-PulseFeatureUpdateProfile -Id 'p2' -DisplayName 'Ring B (current)' -FeatureUpdateVersion 'Windows 11, version 25H2' -EndOfSupportDate '2028-10-11T06:59:59Z')
             ) }
         )
 
@@ -107,7 +125,7 @@ Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support buil
 
     It 'Pass: a profile with an absent endOfSupportDate is not treated as offending (field-absence, never assumed expired)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
-            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @([pscustomobject]@{ id = 'p1'; displayName = 'Ring A'; featureUpdateVersion = 'Windows 11, version 25H2' }) }
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 25H2')) }
         )
 
         $finding.status | Should -Be 'Pass'

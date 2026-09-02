@@ -30,7 +30,10 @@ BeforeAll {
             [string] $PolicyId,
             [string] $DefinitionId,
             [AllowNull()] [object] $Value,
-            [bool] $Redacted = $false
+            [bool] $Redacted = $false,
+            [AllowNull()] $Assignments = @(
+                @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'grp-assigned' } }
+            )
         )
         [pscustomobject]@{
             schemaVersion       = '1'
@@ -50,7 +53,7 @@ BeforeAll {
             redacted            = $Redacted
             valueState          = $null
             applicability       = $null
-            assignments         = $null
+            assignments         = $Assignments
         }
     }
 

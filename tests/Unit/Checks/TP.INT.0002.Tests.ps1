@@ -71,6 +71,17 @@ BeforeAll {
         param([string] $Id, [string] $OperatingSystem)
         [pscustomobject]@{ id = $Id; deviceName = "device-$Id"; operatingSystem = $OperatingSystem }
     }
+
+    function script:New-PulseAssignedCompliancePolicy {
+        param([string] $Id, [string] $ODataType)
+        [pscustomobject]@{
+            id            = $Id
+            '@odata.type' = $ODataType
+            assignments   = @(
+                @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'grp-assigned' } }
+            )
+        }
+    }
 }
 
 Describe 'TP.INT.0002 - A compliance policy exists for every enrolled platform' {
@@ -91,8 +102,8 @@ Describe 'TP.INT.0002 - A compliance policy exists for every enrolled platform' 
     It 'Pass: Windows and iOS enrolled, both have a compliance policy' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
             @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
-                [pscustomobject]@{ id = 'p1'; '@odata.type' = '#microsoft.graph.windows10CompliancePolicy' }
-                [pscustomobject]@{ id = 'p2'; '@odata.type' = '#microsoft.graph.iosCompliancePolicy' }
+                (New-PulseAssignedCompliancePolicy -Id 'p1' -ODataType '#microsoft.graph.windows10CompliancePolicy')
+                (New-PulseAssignedCompliancePolicy -Id 'p2' -ODataType '#microsoft.graph.iosCompliancePolicy')
             ) }
             @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
                 (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
@@ -106,7 +117,7 @@ Describe 'TP.INT.0002 - A compliance policy exists for every enrolled platform' 
     It 'Fail: Android is enrolled but has no compliance policy of any Android variant' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
             @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
-                [pscustomobject]@{ id = 'p1'; '@odata.type' = '#microsoft.graph.windows10CompliancePolicy' }
+                (New-PulseAssignedCompliancePolicy -Id 'p1' -ODataType '#microsoft.graph.windows10CompliancePolicy')
             ) }
             @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
                 (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
@@ -150,7 +161,7 @@ Describe 'TP.INT.0002 - A compliance policy exists for every enrolled platform' 
     It 'Pass: Android compliance matches any Android policy variant (androidWorkProfileCompliancePolicy)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
             @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
-                [pscustomobject]@{ id = 'p1'; '@odata.type' = '#microsoft.graph.androidWorkProfileCompliancePolicy' }
+                (New-PulseAssignedCompliancePolicy -Id 'p1' -ODataType '#microsoft.graph.androidWorkProfileCompliancePolicy')
             ) }
             @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
                 (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Android')
@@ -169,4 +180,35 @@ Describe 'TP.INT.0002 - A compliance policy exists for every enrolled platform' 
         $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Be 'throttled: too many requests'
     }
-}
+
+    It 'Fail: exclude-only assignment does not cover an enrolled platform' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
+            @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{
+                    id            = 'p1'
+                    '@odata.type' = '#microsoft.graph.windows10CompliancePolicy'
+                    assignments   = @(
+                        @{ target = @{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'grp-ex' } }
+                    )
+                }
+            ) }
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
+            ) }
+        )
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence[0].identity | Should -Be 'Windows'
+    }
+
+    It 'Fail: a policy without assignments cannot existence-only Pass' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
+            @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'p1'; '@odata.type' = '#microsoft.graph.windows10CompliancePolicy' }
+            ) }
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
+            ) }
+        )
+        $finding.status | Should -Be 'Fail'
+    }
+ }

@@ -41,8 +41,9 @@ BeforeAll {
             [object] $HasPostAuthAction = $true
         )
         $row = [ordered]@{
-            policyId   = $PolicyId
-            policyName = $PolicyName
+            policyId          = $PolicyId
+            policyName        = $PolicyName
+            assignmentIntent  = 'Include'
         }
         if ($null -ne $BacksUpToEntra) { $row.backsUpToEntra = $BacksUpToEntra }
         if ($null -ne $HasSufficientComplexity) { $row.hasSufficientComplexity = $HasSufficientComplexity }

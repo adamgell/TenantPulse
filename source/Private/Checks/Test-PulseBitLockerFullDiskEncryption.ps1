@@ -143,7 +143,7 @@ function Test-PulseBitLockerFullDiskEncryption {
             continue
         }
 
-        if ([bool] $policy.isFullDiskEncryption) {
+        if ([bool] $policy.isFullDiskEncryption -and (Test-PulseCompositeRowIsAssigned -Row $policy)) {
             $qualifyingPolicies.Add($policy)
         }
     }
