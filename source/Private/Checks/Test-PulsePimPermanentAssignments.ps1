@@ -47,47 +47,43 @@ function Test-PulsePimPermanentAssignments {
         [hashtable] $Context = @{}
     )
 
-    $roleDefinitions = @($Datasets.directoryRoleDefinitions)
-    $privilegedRoleIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($roleDefinition in $roleDefinitions) {
-        $isPrivileged = Get-PulseSettingsCatalogValueProperty -Node $roleDefinition -PropertyName 'isPrivileged'
-        if ($null -ne $isPrivileged -and [bool] $isPrivileged) {
-            $roleDefId = Get-PulseSettingsCatalogValueProperty -Node $roleDefinition -PropertyName 'id'
-            if ($null -ne $roleDefId) { $privilegedRoleIds.Add([string] $roleDefId) | Out-Null }
-        }
-    }
-
-    if ($privilegedRoleIds.Count -eq 0) {
+    $closure = Get-PulseRoleAssignmentClosure -Datasets $Datasets -Context $Context
+    if ($closure.PrivilegedRoleCount -eq 0) {
         return New-PulseFinding -Status Fail -Reason 'No role definition in directoryRoleDefinitions is flagged isPrivileged=true - cannot identify the privileged-role set to evaluate PIM posture against.'
     }
 
-    $exclusionContext = Get-PulseCaExclusionContext -Context $Context -Datasets $Datasets
-    $exemptPrincipals = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($id in (@($exclusionContext.ServiceAccounts) + @($exclusionContext.BreakGlassAccounts))) {
-        if ($id) { $exemptPrincipals.Add([string] $id) | Out-Null }
-    }
-
-    $instances = @($Datasets.roleAssignmentScheduleInstances)
-    $permanentActive = @($instances | Where-Object {
-        $assignmentType = Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'assignmentType'
-        $endDateTime = Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'endDateTime'
-        $roleDefinitionId = [string] (Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'roleDefinitionId')
-        ([string] $assignmentType -eq 'Assigned') -and [string]::IsNullOrEmpty([string] $endDateTime) -and $privilegedRoleIds.Contains($roleDefinitionId)
-    })
+    $memberMap = ConvertTo-PulseGroupMemberMap -GroupMembers $(
+        if ($Datasets -and $Datasets.ContainsKey('groupMembers')) { $Datasets.groupMembers } else { $null }
+    )
 
     $offending = @()
     $exempt = @()
-    foreach ($instance in $permanentActive) {
+    foreach ($instance in @($closure.PermanentActiveInstances)) {
         $principalId = [string] (Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'principalId')
-        if ($exemptPrincipals.Contains($principalId)) {
-            $exempt += $instance
-        } else {
+        $expanded = @($principalId)
+        if ($memberMap.Present -and $memberMap.Map.Contains($principalId)) {
+            $expanded = @($memberMap.Map[$principalId])
+        }
+        $hasOffending = $false
+        foreach ($expandedId in $expanded) {
+            if ($closure.PermanentOffendingPrincipals -contains [string] $expandedId) {
+                $hasOffending = $true
+                break
+            }
+        }
+        if ($hasOffending) {
             $offending += $instance
+        } else {
+            $exempt += $instance
         }
     }
 
+    if ($closure.Incomplete -and $offending.Count -eq 0) {
+        return New-PulseFinding -Status Fail -Reason "Group membership closure is incomplete (sampled or capped); cannot prove zero permanent-active privileged-role assignments. Caps are visible and this check does not Pass."
+    }
+
     if ($offending.Count -eq 0) {
-        $reason = "0 non-exempt permanent-active assignments across $($privilegedRoleIds.Count) privileged role(s)."
+        $reason = "0 non-exempt permanent-active assignments across $($closure.PrivilegedRoleCount) privileged role(s)."
         if ($exempt.Count -gt 0) {
             $reason += " $($exempt.Count) permanent-active assignment(s) held by a declared break-glass/service account and treated as legitimate."
         }
@@ -115,5 +111,5 @@ function Test-PulsePimPermanentAssignments {
         }
     })
 
-    return New-PulseFinding -Status Fail -Reason "$($offending.Count) permanent-active (not PIM-eligible, no expiration) assignment(s) across $($privilegedRoleIds.Count) privileged role(s) are not covered by a declared break-glass/service-account exemption - ScuBA MS.AAD.7.4v1 (SHALL NOT)." -Evidence $evidence
+    return New-PulseFinding -Status Fail -Reason "$($offending.Count) permanent-active (not PIM-eligible, no expiration) assignment(s) across $($closure.PrivilegedRoleCount) privileged role(s) are not covered by a declared break-glass/service-account exemption - ScuBA MS.AAD.7.4v1 (SHALL NOT)." -Evidence $evidence
 }

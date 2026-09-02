@@ -86,7 +86,6 @@ BeforeAll {
         param([hashtable[]] $Instances, [hashtable] $Context = @{})
         Invoke-PulseCheckFixture -CheckId 'TP.ENT.0022' -Datasets @(
             @{ Name = 'roleAssignmentScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = $Instances }
-            @{ Name = 'roleEligibilityScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
             @{ Name = 'directoryRoleDefinitions'; ApiVersion = 'beta'; Status = 'Collected'; Data = New-PulseRoleDefinitions }
         ) -Context $Context
     }
@@ -141,7 +140,6 @@ Describe 'TP.ENT.0022 - Zero permanent-active assignments for privileged roles (
     It 'Fail: not flagged when isPrivileged has no true entries at all' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0022' -Datasets @(
             @{ Name = 'roleAssignmentScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
-            @{ Name = 'roleEligibilityScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
             @{ Name = 'directoryRoleDefinitions'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(@{ id = 'role-x'; displayName = 'Helpdesk'; isPrivileged = $false }) }
         )
         $finding.status | Should -Be 'Fail'
@@ -151,7 +149,6 @@ Describe 'TP.ENT.0022 - Zero permanent-active assignments for privileged roles (
     It 'descriptor-pending: NotApplicable when roleAssignmentScheduleInstances was skipped (no released GraphKit descriptor)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0022' -Datasets @(
             @{ Name = 'roleAssignmentScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Skipped'; Reason = 'descriptor-pending: awaiting GraphKit release' }
-            @{ Name = 'roleEligibilityScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
             @{ Name = 'directoryRoleDefinitions'; ApiVersion = 'beta'; Status = 'Collected'; Data = New-PulseRoleDefinitions }
         )
 
@@ -159,14 +156,13 @@ Describe 'TP.ENT.0022 - Zero permanent-active assignments for privileged roles (
         $finding.reason | Should -Be 'descriptor-pending: awaiting GraphKit release'
     }
 
-    It 'descriptor-pending: NotApplicable when roleEligibilityScheduleInstances was skipped (no released GraphKit descriptor)' {
+    It 'does not suppress evaluation when unused roleEligibilityScheduleInstances is skipped' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0022' -Datasets @(
             @{ Name = 'roleAssignmentScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
             @{ Name = 'roleEligibilityScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Skipped'; Reason = 'descriptor-pending: awaiting GraphKit release' }
             @{ Name = 'directoryRoleDefinitions'; ApiVersion = 'beta'; Status = 'Collected'; Data = New-PulseRoleDefinitions }
         )
 
-        $finding.status | Should -Be 'NotApplicable'
-        $finding.reason | Should -Be 'descriptor-pending: awaiting GraphKit release'
+        $finding.status | Should -Be 'Pass'
     }
 }

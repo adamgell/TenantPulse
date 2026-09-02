@@ -34,43 +34,35 @@ function Test-PulsePrivilegedRoleAssignmentCount {
     )
 
     $threshold = 10
+    $closure = Get-PulseRoleAssignmentClosure -Datasets $Datasets
 
-    $roleDefinitions = @($Datasets.directoryRoleDefinitions)
-    $privilegedRoleIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($roleDefinition in $roleDefinitions) {
-        $isPrivileged = Get-PulseSettingsCatalogValueProperty -Node $roleDefinition -PropertyName 'isPrivileged'
-        if ($null -ne $isPrivileged -and [bool] $isPrivileged) {
-            $roleDefId = Get-PulseSettingsCatalogValueProperty -Node $roleDefinition -PropertyName 'id'
-            if ($null -ne $roleDefId) {
-                $privilegedRoleIds.Add([string] $roleDefId) | Out-Null
-            }
-        }
-    }
-
-    if ($privilegedRoleIds.Count -eq 0) {
+    if ($closure.PrivilegedRoleCount -eq 0) {
         return New-PulseFinding -Status Fail -Reason 'No role definition in directoryRoleDefinitions is flagged isPrivileged=true - cannot identify the privileged-role set to count assignments against.'
     }
 
-    $roleAssignments = @($Datasets.directoryRoleAssignments)
-    $privilegedAssignments = @($roleAssignments | Where-Object { $privilegedRoleIds.Contains([string] $_.roleDefinitionId) })
-
-    $roleNameById = @{}
-    foreach ($roleDefinition in $roleDefinitions) {
-        $roleDefId = Get-PulseSettingsCatalogValueProperty -Node $roleDefinition -PropertyName 'id'
-        $displayName = Get-PulseSettingsCatalogValueProperty -Node $roleDefinition -PropertyName 'displayName'
-        if ($null -ne $roleDefId) {
-            $roleNameById[[string] $roleDefId] = [string] $displayName
-        }
+    $count = $closure.UniqueEffectiveActiveCount
+    if ($closure.Incomplete -and $count -lt $threshold) {
+        return New-PulseFinding -Status Fail -Reason "Group membership closure is incomplete (sampled or capped); cannot prove privileged-role assignment count is below $threshold. Caps are visible and this check does not Pass."
     }
 
-    if ($privilegedAssignments.Count -lt $threshold) {
-        return New-PulseFinding -Status Pass -Reason "$($privilegedAssignments.Count) active privileged-role assignment(s) across $($privilegedRoleIds.Count) privileged role(s) - below Microsoft's fewer-than-$threshold guidance. Note: direct assignments only, does not expand role-assignable-group membership (see this check's own Consulting text for that known limitation)."
+    $roleNameById = $closure.RoleDisplayNames
+    $privilegedAssignments = @($closure.DirectActiveAssignments)
+
+    if ($count -lt $threshold) {
+        $limitNote = if ($closure.GroupMembersPresent) {
+            'Effective count expands role-assignable-group membership.'
+        } else {
+            'Note: direct assignments only, does not expand role-assignable-group membership (see this check''s own Consulting text for that known limitation).'
+        }
+        return New-PulseFinding -Status Pass -Reason "$count active privileged-role assignment(s) across $($closure.PrivilegedRoleCount) privileged role(s) - below Microsoft's fewer-than-$threshold guidance. $limitNote"
     }
 
     $evidence = @($privilegedAssignments | ForEach-Object {
-        $roleName = if ($roleNameById.ContainsKey([string] $_.roleDefinitionId)) { $roleNameById[[string] $_.roleDefinitionId] } else { $null }
+        $roleName = $null
+        $roleDefinitionId = [string] $_.roleDefinitionId
+        if ($roleNameById.Contains($roleDefinitionId)) { $roleName = $roleNameById[$roleDefinitionId] }
         @{ Identity = [string] $_.id; Detail = @{ principalId = $_.principalId; roleDefinitionId = $_.roleDefinitionId; roleDisplayName = $roleName } }
     })
 
-    return New-PulseFinding -Status Fail -Reason "$($privilegedAssignments.Count) active privileged-role assignments across $($privilegedRoleIds.Count) privileged role(s) meets or exceeds Microsoft's fewer-than-$threshold guidance. Note: direct assignments only - a role assigned to a group undercounts true blast radius (see this check's own Consulting text)." -Evidence $evidence
+    return New-PulseFinding -Status Fail -Reason "$count active privileged-role assignments across $($closure.PrivilegedRoleCount) privileged role(s) meets or exceeds Microsoft's fewer-than-$threshold guidance." -Evidence $evidence
 }
