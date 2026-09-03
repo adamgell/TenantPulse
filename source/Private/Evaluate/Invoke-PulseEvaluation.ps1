@@ -478,10 +478,22 @@ function ConvertTo-PulseCanonicalCollectionOutcomes {
         $reasonCode = $null
         $status = $null
         if ($null -ne $entry) {
-            $status = [string] $entry.status
-            $reasonCode = [string] $entry.reasonCode
-            if ($null -ne $entry.failureClass -and -not [string]::IsNullOrWhiteSpace([string] $entry.failureClass)) {
-                $failureClass = [string] $entry.failureClass
+            # Bound status to the canonical collection-status allowlist (the same set
+            # Invoke-PulseCheckEvaluation understands). An unsupported or non-string
+            # persisted status maps to null rather than serializing verbatim into the
+            # SafeTechnical collectionOutcomes projection.
+            $rawStatus = $entry.status
+            if ($rawStatus -is [string] -and $rawStatus -cin @('Collected', 'Partial', 'Pending', 'Failed', 'Skipped')) {
+                $status = $rawStatus
+            }
+
+            # reasonCode/failureClass are trusted structured metadata only when the
+            # status is canonical; an unsupported-status entry contributes none of them.
+            if ($null -ne $status) {
+                $reasonCode = [string] $entry.reasonCode
+                if ($null -ne $entry.failureClass -and -not [string]::IsNullOrWhiteSpace([string] $entry.failureClass)) {
+                    $failureClass = [string] $entry.failureClass
+                }
             }
             $detail = $entry.detail
             if ($null -ne $detail) {
