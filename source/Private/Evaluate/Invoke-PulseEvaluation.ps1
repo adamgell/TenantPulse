@@ -485,15 +485,11 @@ function ConvertTo-PulseCanonicalCollectionOutcomes {
             }
             $detail = $entry.detail
             if ($null -ne $detail) {
-                $truncatedValue = $null
-                $certaintyValue = $null
-                if ($detail -is [System.Collections.IDictionary]) {
-                    if ($detail.Contains('truncated')) { $truncatedValue = $detail['truncated'] }
-                    if ($detail.Contains('certainty')) { $certaintyValue = $detail['certainty'] }
-                } else {
-                    if ($detail.PSObject.Properties['truncated']) { $truncatedValue = $detail.truncated }
-                    if ($detail.PSObject.Properties['certainty']) { $certaintyValue = $detail.certainty }
-                }
+                # Graph envelope signals (truncated/certainty) are read through the sole
+                # interpreter surface, never as direct member access - see
+                # Resolve-PulseGraphFailure's own docstring for why that contract exists.
+                $truncatedValue = Get-PulseGraphSignal -InputObject $detail -Name 'truncated'
+                $certaintyValue = Get-PulseGraphSignal -InputObject $detail -Name 'certainty'
                 if ($null -ne $truncatedValue) {
                     try { $truncated = [bool] $truncatedValue } catch { $truncated = $false }
                 }
@@ -994,52 +990,13 @@ function Invoke-PulseCheckEvaluation {
     }
 }
 
-# Private helper: projects a dataset-name -> object[] hashtable without a canonical-JSON
-# round-trip. Each check still receives a NEW hashtable and NEW row objects whose
-# top-level properties are copied, so a rule mutating $Datasets['x'] or $row.id cannot
-# change the shared cache. Nested values remain shared references (not a deep clone).
-function ConvertTo-PulseProjectedRow {
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        $Row,
-
-        [int] $Depth = 32
-    )
-
-    if ($null -eq $Row -or $Depth -le 0) {
-        return $Row
-    }
-    if ($Row -is [string] -or $Row -is [bool] -or $Row -is [datetime] -or $Row -is [datetimeoffset] -or
-            $Row -is [byte] -or $Row -is [int16] -or $Row -is [int32] -or $Row -is [int64] -or
-            $Row -is [sbyte] -or $Row -is [uint16] -or $Row -is [uint32] -or $Row -is [uint64] -or
-            $Row -is [single] -or $Row -is [double] -or $Row -is [decimal]) {
-        return $Row
-    }
-    if ($Row -is [System.Collections.IDictionary]) {
-        $copy = @{}
-        foreach ($key in @($Row.Keys)) {
-            $copy[$key] = ConvertTo-PulseProjectedRow -Row $Row[$key] -Depth ($Depth - 1)
-        }
-        return $copy
-    }
-    if ($Row -is [System.Management.Automation.PSObject]) {
-        $copy = @{}
-        foreach ($property in $Row.PSObject.Properties) {
-            $copy[$property.Name] = ConvertTo-PulseProjectedRow -Row $property.Value -Depth ($Depth - 1)
-        }
-        return $copy
-    }
-    if ($Row -is [System.Collections.IEnumerable] -and $Row -isnot [string]) {
-        $items = [System.Collections.Generic.List[object]]::new()
-        foreach ($item in @($Row)) {
-            $items.Add((ConvertTo-PulseProjectedRow -Row $item -Depth ($Depth - 1))) | Out-Null
-        }
-        return $items.ToArray()
-    }
-    return $Row
-}
-
+# Private helper (not exported): deep-clones a dataset-name -> object[] hashtable via the
+# existing ConvertTo-PulseCanonicalJson -> ConvertFrom-Json round-trip, so it reuses the
+# already-tested serializer instead of hand-rolling a recursive clone. The clone's record
+# objects come back as ordered hashtables (ConvertFrom-Json -AsHashtable) rather than the
+# original PSCustomObjects Read-PulseDataset returns - a deliberate, documented type change:
+# rule authors get normal member/dot-access either way (PowerShell supports it on both), and
+# the round-trip through canonical JSON incidentally proves the data is itself serializable.
 function ConvertTo-PulseClonedDatasets {
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -1052,17 +1009,12 @@ function ConvertTo-PulseClonedDatasets {
         return @{}
     }
 
-    $projected = @{}
-    foreach ($name in @($Datasets.Keys)) {
-        $rows = [object[]] @($Datasets[$name])
-        $copy = [object[]]::new($rows.Count)
-        for ($i = 0; $i -lt $rows.Count; $i++) {
-            $copy[$i] = ConvertTo-PulseProjectedRow -Row $rows[$i]
-        }
-        $projected[$name] = $copy
-    }
-    return $projected
+    $json = ConvertTo-PulseCanonicalJson -InputObject $Datasets
+    return ConvertFrom-Json -InputObject $json -AsHashtable -Depth 64
 }
+
+# Private helper (not exported): validates the persisted outcome surface used by a
+# partial-aware rule and returns a canonical New-PulseCollectionOutcome result. Persisted
 # Gaps must retain their JSON array shape; every required gap string must already be a
 # string rather than merely be string-coercible. Each accepted gap is rebuilt through
 # New-PulseCollectionGap so extra raw manifest keys cannot cross the rule boundary.
@@ -1144,6 +1096,11 @@ function ConvertTo-PulseValidatedEvaluationOutcome {
         -ApiVersion $Entry['apiVersion'] -Operations $Entry['operations']
 }
 
+# Private helper (not exported): independently deep-clones the dataset-outcome projection
+# supplied only to catalog-validated partial-aware Function rules. Keeping this as a
+# separate canonical JSON round-trip from ConvertTo-PulseClonedDatasets is deliberate: a
+# rule must never gain a shared nested reference between its row input, the manifest, and
+# the outcome metadata it may mutate while deciding a monotonic Partial result.
 function ConvertTo-PulseClonedDatasetOutcomes {
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -1156,11 +1113,8 @@ function ConvertTo-PulseClonedDatasetOutcomes {
         return @{}
     }
 
-    $projected = @{}
-    foreach ($name in @($DatasetOutcomes.Keys)) {
-        $projected[$name] = ConvertTo-PulseProjectedRow -Row $DatasetOutcomes[$name]
-    }
-    return $projected
+    $json = ConvertTo-PulseCanonicalJson -InputObject $DatasetOutcomes
+    return ConvertFrom-Json -InputObject $json -AsHashtable -Depth 64
 }
 
 

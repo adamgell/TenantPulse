@@ -188,3 +188,46 @@ function Resolve-PulseGraphFailure {
         return $fallback
     }
 }
+
+# Private helper (not exported): safely reads one persisted Graph envelope signal (e.g.
+# 'truncated' or 'certainty') from a detail/outcome object that may be either a hashtable
+# or a PSCustomObject. This is the ONLY place outside Resolve-PulseGraphFailure itself that
+# is allowed to interpret a GraphKit signal name: callers that need a raw signal value route
+# through here rather than reading a named member directly, which keeps the
+# "sole production interpreter" contract enforceable by the source scan in
+# GraphFailureAdapterContracts.Tests.ps1. Totally non-throwing - an absent or unreadable
+# signal returns $null.
+function Get-PulseGraphSignal {
+    [CmdletBinding()]
+    [OutputType([object])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [object] $InputObject,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $Name
+    )
+
+    if ($null -eq $InputObject) {
+        return $null
+    }
+
+    try {
+        if ($InputObject -is [System.Collections.IDictionary]) {
+            if ($InputObject.Contains($Name)) {
+                return $InputObject[$Name]
+            }
+            return $null
+        }
+
+        $property = $InputObject.PSObject.Properties[$Name]
+        if ($null -eq $property) {
+            return $null
+        }
+        return $property.Value
+    } catch {
+        return $null
+    }
+}
