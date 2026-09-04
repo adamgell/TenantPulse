@@ -4,7 +4,7 @@
 [![PSGallery Downloads](https://img.shields.io/powershellgallery/dt/TenantPulse)](https://www.powershellgallery.com/packages/TenantPulse)
 [![PowerShell 7.4+](https://img.shields.io/badge/PowerShell-7.4%2B-blue)](https://github.com/PowerShell/PowerShell)
 
-> Read-only tenant health assessment for Microsoft Intune and Entra — a versioned check catalog, deterministic scoring, and findings reports with opt-in identity pseudonymization, built on [GraphKit](https://github.com/AdamGell/GraphKit).
+> Read-only tenant health assessment for Microsoft Intune and Entra — a versioned check catalog, deterministic scoring, and canonical JSON plus self-contained HTML findings reports, built on [GraphKit](https://github.com/AdamGell/GraphKit).
 
 TenantPulse is a read-only PowerShell module that assesses a Microsoft Intune/Entra
 tenant's health against a versioned set of checks, and produces a deterministic, scored
@@ -65,10 +65,11 @@ The current product-program boundary is narrower than a finished successor relea
 - **R3 is partial.** Runtime correctly performs no network request and returns
   `PlatformUnavailable`, but the static map and outcome provenance still describe a GraphKit `Get`
   operation that never occurs.
-- **R4 is open.** Bounded group closure, application-registration credential coverage, complete
-  Intune assignment awareness, exclusion-only assignment semantics, deterministic evidence caps,
-  and a supported renderer beyond JSON remain to be implemented and proven. R5 privacy and R6 scale
-  are separately open in `docs/STATUS.md`.
+- **R4 is partial.** The self-contained HTML findings renderer is implemented and deterministically
+  tested as the second supported renderer. Bounded relationship coverage, application-registration
+  credential coverage, complete Intune assignment awareness, exclusion-only assignment semantics,
+  and deterministic evidence caps remain to be completed. R5 privacy and R6 scale are tracked
+  separately in `docs/STATUS.md`.
 - **R9 has a split disposition.** Reusable GraphKit app-registration provisioning and actual-grant
   verification remain applicable. The owner-confirmed absence of installed users, legacy consumers,
   customer-tenant consumers, and repoint targets makes adopter migration, customer repointing,
@@ -94,7 +95,8 @@ Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out'
 This collects a snapshot, evaluates every check in the catalog, scores the result, and
 writes a canonical-JSON findings report to `./out/tenantpulse-findings.json` - along with the
 raw snapshot store under `./out/snapshot/` (see **Where files are written**, below, before
-you decide where `-OutputPath` should point).
+you decide where `-OutputPath` should point). Add `-Format Html` to also write the
+self-contained `./out/tenantpulse-report.html` renderer.
 
 ## The five public commands
 
@@ -102,9 +104,9 @@ you decide where `-OutputPath` should point).
 |---|---|
 | `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
 | `Get-PulseCheckCatalog` | Lists every check descriptor in the catalog (id, title, category, severity, authorities) as a lightweight, read-only view - useful for discovering what `-IncludeCategory`/`-IncludeCheck` values exist before running an assessment. |
-| `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render a findings report. Supports `-Redact` to pseudonymize evidence identities in the rendered report. |
+| `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render canonical JSON. `-Format Html` also writes a self-contained HTML report; `-Redact` remains the local-only compatibility pseudonymization path. |
 | `Invoke-PulseCheck` | Runs a scoped subset of checks (by id or category) against a fresh or existing snapshot - the same pipeline as `Invoke-PulseAssessment`, narrowed to exactly the checks you name. |
-| `Export-PulseReport` | Re-renders an already-scored findings JSON file, unchanged, to a new location. Render-only - no re-evaluation, no re-scoring, and (deliberately) no `-Redact`: see its own help for why. |
+| `Export-PulseReport` | Re-renders an already-scored findings JSON file as canonical JSON or self-contained HTML. Render-only - no Graph, snapshot read, re-evaluation, or re-scoring, and (deliberately) no `-Redact`: see its own help for why. |
 
 Run `Get-Help <command> -Full` for the complete parameter and example reference on any of
 these; every one of them ships detailed comment-based help.
@@ -165,6 +167,8 @@ never picks a location on your behalf or writes outside that directory. A full
   sensitivity note above)
 - `./out/tenantpulse-findings.json` - the scored, canonical-JSON findings report (evidence
   identities are pseudonymized only if you passed `-Redact`)
+- `./out/tenantpulse-report.html` - additionally written when `-Format Html` is selected;
+  a self-contained rendering of the canonical findings JSON
 
 The operator key used for pseudonymization lives at `~/.tenantpulse/operator.key` by
 default (overridable) - back it up if you need pseudonyms to stay stable across machines,
@@ -173,23 +177,33 @@ a pseudonym is required to reproduce it.
 
 ## Sharing a findings artifact
 
-`-Redact` always pseudonymizes evidence identities. It replaces a sort key only when that
-key is itself an exact entry in the redaction map (including the usual default where sort key
-equals identity); a custom composite sort key can still retain an identity fragment. It also
-pseudonymizes the small set of `evidence[].detail` keys that their producing rules explicitly
-mark through `RedactDetailKeys`. It does **not** enforce a complete classification over every
-Detail value, reason, error, label, sort key, or future renderer field. A `-Redact` render can
-therefore still contain tenant-derived names or free text and is **not** on its own safe to post
-publicly or hand outside the tenant's trust boundary.
+TenantPulse now has a versioned 1.0 privacy-classification framework. Classified construction
+uses exactly five classes: `Identity`, `SecretSensitive`, `SafeTechnical`,
+`SafeOperatorLabel`, and `BoundedReviewedText`. Identity values are HMAC-pseudonymized,
+secret-sensitive values are irreversibly replaced, safe technical values and intentionally
+retained operator labels remain useful, and reviewed text stays bounded and must be HTML-encoded.
+Missing, unknown, or value-incompatible classifications fail closed.
 
-For a findings JSON you actually intend to publish or share outside that boundary (e.g. a
-committed `docs/gates/*.json` reference artifact), run it through
-`scripts/Protect-PulseGateArtifact.ps1` first - a required gate-artifact scrub that replaces every
-string leaf inside every finding's `evidence[].detail` with a stable pseudonym, no
-per-field-name allowlist (see that script's own docstring for why a field-name allowlist is
-exactly the failure mode it exists to avoid). Then review the resulting artifact under the
-intended sharing boundary. The script is not a general PII classifier and does not prove the
-later R5 privacy contract; a `-Redact` render alone is even narrower.
+`ConvertTo-PulseSafeShareDocument`, reached by the private JSON exporter's
+`-RequireClassification` path, is the fail-closed classified JSON boundary. It emits
+`privacy.classification = "1.0"`, `privacy.complete = true`, and
+`privacy.boundary = "classified"` only after every required field has passed classification.
+The public safe-share workflow remains undecided under C0 D6, so TenantPulse does not currently
+expose `-RequireClassification` as a public assessment/export switch. Catalog checks are not yet
+fully migrated to classified construction; do not infer that an ordinary findings file is a
+classified safe-share artifact.
+
+`-Redact`, `RedactDetailKeys`, and `Protect-PulseReason` remain the compatibility path. They
+pseudonymize known identities and bound selected text, but they do not establish complete field
+classification. Treat their output as local-only (`privacy.complete = false`,
+`privacy.boundary = "local-only"` in the compatibility envelope), not as safe to share outside
+the tenant's trust boundary. `scripts/Protect-PulseGateArtifact.ps1` remains a purpose-built
+legacy scrub for reviewed gate artifacts; it is not the classified safe-share contract.
+
+There is no public operator-key rotate cmdlet. Back up the 32-byte `operator.key` offline with
+owner-only permissions before replacement. A newly generated replacement intentionally breaks
+identity joins with reports produced under the prior key; restoring that backed-up generation
+restores those joins. Never store the key in snapshots, reports, logs, tickets, or source control.
 
 The **snapshot store** (`./out/snapshot/` - see **Snapshot data is sensitive at rest** above)
 is local-only and never safe to share in any form. It is the sensitive collection/evaluation
@@ -377,9 +391,21 @@ What the current catalog does **not** cover, honestly:
   conflict indexes also treat exclusion-only scope as assigned or possibly overlapping instead of
   effectively targeting nobody.
 - **Bounded output and presentation.** Many affected findings still lack a deterministic evidence
-  cap with emitted/omitted counts. The governing R4 design requires a supported renderer beyond
-  JSON, but no specific non-JSON format/output contract has been selected and none has been
-  implemented or proven.
+  cap with emitted/omitted counts. Self-contained HTML is now the supported second renderer;
+  JSON remains canonical, and neither renderer changes collection, evaluation, or scoring.
+
+## HTML findings reports
+
+`Export-PulseReport -Format Html` writes `tenantpulse-report.html` from an existing scored
+findings JSON document. `Invoke-PulseAssessment -Format Html` always writes the canonical
+`tenantpulse-findings.json` first, then writes `tenantpulse-report.html` beside it. HTML is a
+second renderer, not a new artifact manifest or findings schema.
+
+The HTML file is self-contained: CSS is inline, scripts are absent, and it contains no
+network-loading URLs. It consumes findings JSON only and never calls Graph, opens a snapshot,
+re-evaluates checks, or recalculates scores. Tenant-derived and reviewed text is HTML-encoded,
+and the renderer preserves the findings document's existing notices rather than inventing or
+recomputing them.
 
 ## Settings expansion (Phase 2)
 

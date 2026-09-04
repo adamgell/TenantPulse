@@ -3,14 +3,17 @@ TOPIC
 
 SHORT DESCRIPTION
     Read-only tenant health engine that evaluates Microsoft Intune and Entra
-    configuration against a versioned set of checks, producing a deterministic,
-    pseudonymized, scored findings report.
+    configuration against a versioned set of checks, producing deterministic,
+    scored canonical JSON and self-contained HTML findings reports.
 
 LONG DESCRIPTION
     TenantPulse reads a tenant exclusively through GraphKit's read-class
     descriptors (ThrottleClass 'Read', ReplayPolicy 'Safe'), evaluates the
     resulting snapshot against a versioned set of checks, scores the result,
-    and renders a deterministic findings report. It never calls
+    and renders deterministic findings reports. JSON is canonical; HTML is a
+    self-contained second renderer with inline CSS, no scripts, and no
+    network-loading URLs. Rendering HTML consumes findings JSON only and never
+    calls Graph or opens a snapshot. TenantPulse never calls
     Connect-MgGraph, never constructs Graph URIs of its own, and never
     performs a write operation against a tenant.
 
@@ -26,18 +29,22 @@ LONG DESCRIPTION
     so renaming a profile never changes it. -Redact (on Invoke-PulseAssessment
     and Invoke-PulseCheck) additionally substitutes evidence identities (and
     identity-defaulted sortKeys) with their own 'tp-...' pseudonym in the
-    rendered report. -Redact does NOT redact everything: a rule-authored
-    evidence Detail field (for example a device name a check chose to
-    surface) and free-text reason strings are left as rule authors wrote
-    them - see Invoke-PulseAssessment's own -Redact parameter help for the
-    full, honestly-stated residual.
+    rendered report. -Redact and RedactDetailKeys are the local-only
+    compatibility path: they do not classify every tenant-derived field and
+    do not by themselves make an artifact safe to share. TenantPulse's private
+    classified JSON path uses one of Identity, SecretSensitive, SafeTechnical,
+    SafeOperatorLabel, or BoundedReviewedText for every required field and
+    fails closed on missing classification. C0 D6 has not selected a public
+    safe-share workflow, and there is no public operator-key rotate cmdlet.
 
     SNAPSHOT SENSITIVITY
 
-    A snapshot store's dataset files hold raw, unredacted tenant data exactly
-    as Graph returned it. Only the manifest's tenant field and collection
-    reasons are pseudonymized. Treat a snapshot directory as sensitive at
-    rest, the same way you would treat a raw Graph API export.
+    A snapshot store's dataset files hold sensitive tenant-derived data. They
+    are not byte-for-byte Graph responses: narrow manifest, reason, tenant-id,
+    and typed-policy protections are applied, but most collected values remain
+    available to evaluation. Treat a snapshot directory as sensitive at rest,
+    the same way you would treat a raw Graph API export; it is never a
+    shareable artifact.
 
     HONEST DEGRADATION
 
@@ -75,6 +82,11 @@ EXAMPLES
 
     Same as above, but every evidence identity in the rendered report is
     substituted with its pseudonym.
+
+    PS C:\> Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out' -Format Html
+
+    Writes canonical './out/tenantpulse-findings.json' and a self-contained
+    './out/tenantpulse-report.html' from the same scored findings document.
 
     PS C:\> Invoke-PulseCheck -ProfileId 'contoso' -OutputPath './out' -Id 'TP.ENT.0005'
 

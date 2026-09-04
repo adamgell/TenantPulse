@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Self-contained HTML findings reports through `Export-PulseReport -Format Html` and
+  `Invoke-PulseAssessment -Format Html`. JSON remains canonical and is always written by the
+  assessment path; HTML is a second findings-only renderer with inline CSS, no scripts, no
+  network-loading URLs, and no Graph or snapshot access.
+- TenantPulse 1.0 privacy-classification constructors for `Identity`, `SecretSensitive`,
+  `SafeTechnical`, `SafeOperatorLabel`, and `BoundedReviewedText`, plus fail-closed
+  `ConvertTo-PulseSafeShareDocument` conversion and privacy mutation canaries.
+
 ### Fixed
 
 - Graph collection now fails closed unless `Get-GraphObject -PassThruResult` returns exactly one complete `GraphKit.OperationResult`; null, rows-only, multiple, type-spoofed, and malformed results can no longer be persisted as `Collected`, while bounded partial rows retain indeterminate, truncation, and page-cap detail.
@@ -23,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The other 49 checks remain `NotApplicable` when their dataset status is `Partial`. For the four opt-ins, a structurally valid non-decisive Partial result is also `NotApplicable`; without decisive proof, zero usable rows or malformed outcomes, gaps, or rows are `Error`.
 - Findings schema `1.0`, snapshot schema `2.0.0`, and scoring model `1.0` are unchanged. This deterministic source/package tranche makes no new live-service or publication claim.
 - Review finding 14 remains rejected/obsolete on first-party schema evidence: supported schema 1.0.0/1.1.0 writers could not emit `Partial`, so migration rejects that later state without rewriting the manifest.
+- Classified JSON export now requires complete field classification before it emits a
+  `privacy.boundary = "classified"` document. `-Redact`, `RedactDetailKeys`, and
+  `Protect-PulseReason` remain the local-only compatibility layer; C0 D6 still leaves the public
+  safe-share workflow undecided, and no public operator-key rotate cmdlet was added.
 
 ## [0.2.0] - 2026-08-30
 

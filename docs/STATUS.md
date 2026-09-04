@@ -689,22 +689,24 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    performs no network work and evaluates as `Skipped` / `PlatformUnavailable` / `NotApplicable`.
    Its static map and structured outcome still falsely name GraphKit and `Get`; closure requires a
    strict disposition, `Provider = TenantPulse`, empty operations, and no descriptor fallback.
-5. **R4 coverage, relationships, and presentation — open.** Required work includes bounded,
+5. **R4 coverage, relationships, and presentation — partial.** Self-contained HTML is implemented
+   and deterministically tested as the second findings renderer; JSON remains canonical, and the
+   HTML path does not change the export manifest or touch Graph/snapshots. Remaining work includes bounded,
    policy/root-scoped Conditional Access and role group closure; unique effective role counting;
    GraphKit `Application.List` plus combined app/service-principal credential hygiene; authoritative
    assignment handling for `TP.INT.0002`, `0004`, `0011`, `0012`, `0014`, `0015`, `0017`, `0018`,
    and producer-complete `0028`; exclusion-only semantics; deterministic evidence caps with omitted
-   counts; and one supported non-JSON renderer. The all-unparseable `TP.ENT.0019` population must
+   counts. The all-unparseable `TP.ENT.0019` population must
    become `NotApplicable`, not Pass. `TP.ENT.0022` keeps one group assignment as one violation;
    expansion there is blast-radius evidence only.
-6. **R5 privacy contract — open (0 of 53 checks migrated to an enforced field-classification
-   schema).** Current protections are useful precursors, not the R5 contract:
-   `RedactDetailKeys` is optional, tenant-derived reason/error text can remain free-form,
-   render-only cannot reconstruct the in-memory redaction map, and the external gate-artifact
-   scrub intentionally destroys safe values. Manifest-recorded expansion paths are hash-checked
-   after joining but are not yet constrained to the snapshot root. R5 still requires one
-   versioned classification contract across all checks, engine/snapshot projections, and every
-   renderer; path-containment plus mutation tests; and a fresh protected-live artifact review.
+6. **R5 privacy contract — partial.** The versioned 1.0 classification primitives, five privacy
+   classes, classified constructors, fail-closed `ConvertTo-PulseSafeShareDocument` path, reason
+   codes, compatibility envelope, and QA mutation canaries now exist. Catalog checks are not fully
+   migrated to classified construction, however, and ordinary `-Redact` /
+   `RedactDetailKeys` / `Protect-PulseReason` output remains local-only rather than a safe-share
+   claim. C0 D6 is still Proposed, so there is no owner-locked public safe-share workflow and no
+   public rotate cmdlet. A fresh protected-live sanitized sweep and the ReportBundle/XLSX
+   classification work tracked by TP9B also remain open.
 7. **R6 scale/default contract — open (0 of 9 end-to-end criteria closed).** Current perf
    fixtures are useful baselines but are excluded from normal CI, measure endpoint heap deltas
    rather than observed process peaks, and do not span collection through rendering. GraphKit

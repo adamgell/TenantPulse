@@ -82,7 +82,12 @@
         -RedactDetailKeys closes the specific gap this fix round audited and marked, not
         every possible one. -Redact should be read as "identity fields, plus every Detail
         key its own rule author has explicitly marked, are pseudonymized" - not "this
-        report is fully de-identified".
+        report is fully de-identified". It is the compatibility identity-substitution
+        path and its output remains local-only. The private JSON exporter's
+        -RequireClassification path calls ConvertTo-PulseSafeShareDocument and fails closed
+        on any unclassified field before assigning privacy.boundary = 'classified'. C0 D6
+        has not selected a public safe-share workflow, so Invoke-PulseAssessment does not
+        expose that switch. No public operator-key rotate cmdlet exists.
 
         Returns a summary object: { SnapshotPath; FindingsPath; ReportPaths; Scores;
         Coverage }. SnapshotPath is the store's root directory. FindingsPath is the
@@ -149,9 +154,14 @@
         file. JSON is always produced; Html never talks to Graph or re-reads a snapshot.
 
     .PARAMETER Redact
-        Replace every evidence identity in the rendered report with its pseudonym, built
-        from this call's own fresh evaluation. Not available on Export-PulseReport, whose
-        render-only path never has an evaluation-time redaction map to draw from.
+        Compatibility identity substitution: replace every evidence identity and explicitly
+        marked RedactDetailKeys value in the rendered report with its pseudonym, built from
+        this call's own fresh evaluation. This does not establish complete field
+        classification and must be treated as local-only output. Classified fail-closed
+        sharing is currently available only through -RequireClassification on the private
+        JSON exporter; C0 D6 has not selected a public safe-share workflow. Redact is not
+        available on Export-PulseReport, whose render-only path never has an evaluation-time
+        redaction map to draw from.
 
     .PARAMETER ExpandSettings
         Phase 2 (T2.2): pass-through to Get-PulseTenantSnapshot's own -ExpandSettings.
