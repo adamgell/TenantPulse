@@ -178,6 +178,28 @@ Describe 'Get-PulseCollectionManifest' {
         $manifest[0].Pending | Should -BeTrue
     }
 
+    It 'carries a provider plan without manufacturing Graph descriptor metadata' {
+        $check = New-TestCheck -Id 'TP.INT.0009' -Datasets @('platformDisposition')
+        $map = @{
+            platformDisposition = @{
+                Plan       = 'Invoke-PulseWindowsDataProcessorPlan'
+                ApiVersion = $null
+            }
+        }
+
+        $manifest = InModuleScope TenantPulse -ArgumentList @($check), $map {
+            param($checks, $map)
+            Get-PulseCollectionManifest -Checks $checks -DatasetMap $map
+        }
+
+        @($manifest).Count | Should -Be 1
+        $manifest[0].Plan | Should -BeExactly 'Invoke-PulseWindowsDataProcessorPlan'
+        $manifest[0].Type | Should -BeNullOrEmpty
+        $manifest[0].Operation | Should -BeNullOrEmpty
+        $manifest[0].ApiVersion | Should -BeNullOrEmpty
+        $manifest[0].Pending | Should -BeFalse
+    }
+
     It 'returns an empty array for zero checks' {
         $manifest = InModuleScope TenantPulse -ArgumentList @(), @{} {
             param($checks, $map)

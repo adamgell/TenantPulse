@@ -1,16 +1,16 @@
 <#
-    The shared dataset -> GraphKit descriptor map.
+    The shared dataset -> collection-provider map.
 
     This is the single source of truth every TenantPulse layer that talks about datasets
     pivots on: check authors (Task 1.9) reference dataset names in a descriptor's
     Data.Datasets, Import-PulseCheckCatalog (Task 1.4) cross-checks those names against
     this file's top-level keys, the static read-only gate (Task 1.10) walks every entry
-    here to prove every Type/Operation pair is Read/Safe without touching a live tenant,
-    and the collector (Task 1.5) resolves each entry into the {Type;Operation;ApiVersion}
-    GraphKit needs to actually collect it.
+    here to prove every direct Graph descriptor and every Graph-backed provider plan is
+    Read/Safe without touching a live tenant, and the collector (Task 1.5) resolves each
+    entry through exactly one of those two paths.
 
-    Shape: a plain hashtable (not an array), keyed by dataset name, each value itself a
-    hashtable with:
+    Shape: a plain hashtable (not an array), keyed by dataset name. A direct Graph entry
+    carries:
         Type          - the GraphKit operation Type, e.g. 'ConditionalAccessPolicy'.
         Operation     - the GraphKit operation Operation, e.g. 'List' or 'Get'.
         ApiVersion    - 'v1.0' or 'beta', matching the resolved GraphKit descriptor's own
@@ -25,7 +25,19 @@
                         (Organization.GetMdmAuthority) is a $select-in-path read that needs
                         the org id.
 
-    Pending flag: a dataset entry may also carry `Pending = $true`. This marks a dataset
+    A TenantPulse-owned provider-plan entry carries:
+        Plan          - the private TenantPulse plan command selected by the dataset-keyed
+                        provider registry. It never doubles as a GraphKit Type/Operation.
+        ApiVersion    - the aggregate Graph API version when every child operation shares
+                        one, or $null for a no-network disposition with no Graph contract.
+
+    Provider-plan entries MUST NOT carry Type, Operation, Pending,
+    ExpectedThrottleClass, or ExpectedReplayPolicy. Their exact Graph child-operation
+    union is declared in Resolve-PulseProviderPlanRegistry and independently verified by
+    the permission-preflight/read-only gates. This avoids inventing generic GraphKit
+    `Walk` or `Get` operations for behavior implemented by TenantPulse composition.
+
+    Pending flag: a direct Graph dataset entry may also carry `Pending = $true`. This marks a dataset
     whose GraphKit descriptor does not exist yet in a RELEASED GraphKit version - the
     collector (Get-PulseTenantSnapshot / Invoke-PulseCollection) must classify it Skipped
     with reason 'descriptor-pending: awaiting GraphKit release' and must NOT call
@@ -34,9 +46,8 @@
     flag and the collector starts actually collecting the dataset with no other code change
     required.
 
-    LIVE-TENANT VERIFICATION NOTE (2026-08-15, Task 1.9): six datasets below are Pending as
-    of GraphKit's currently-released version - their descriptors exist in GraphKit's
-    committed-but-unreleased catalog and go live when 0.1.1 is cut:
+    HISTORICAL LIVE-TENANT VERIFICATION NOTE (2026-08-15, Task 1.9): six datasets were
+    Pending before GraphKit 0.1.1 shipped their descriptors:
         securityDefaultsPolicy, directoryRoleAssignments, directoryRoleDefinitions,
         organization, organizationMdmAuthority, entraDevices.
     mdmAuthority (the single-dataset shape this map used before this task) does NOT work
@@ -149,11 +160,11 @@
     # OperationApprovalPolicy/List descriptor. Pending dropped.
     operationApprovalPolicies = @{ Type = 'OperationApprovalPolicy'; Operation = 'List'; ApiVersion = 'beta' }
 
-    # Task 3.2 PENDING (TP.INT.0009): still no released GraphKit descriptor for this
-    # Get (beta). ExpectedThrottleClass/ExpectedReplayPolicy declare the Read/Safe
-    # shape the static read-only gate (tests/QA/ReadOnly.tests.ps1) requires for every
-    # Pending entry.
-    dataProcessorServiceForWindowsFeaturesOnboarding = @{ Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # TP.INT.0009: TenantPulse-owned, no-network platform disposition. There is no
+    # released GraphKit descriptor or published permission contract, so this entry names
+    # only the plan that records that fact. ApiVersion is null because no Graph request is
+    # authorized or attempted.
+    dataProcessorServiceForWindowsFeaturesOnboarding = @{ Plan = 'Invoke-PulseWindowsDataProcessorPlan'; ApiVersion = $null }
 
     # Task 3.2 (TP.INT.0011/0012): GraphKit 0.2.2 shipped the official
     # IntuneBrandingProfile/List and WindowsFeatureUpdateProfile/List descriptors.
@@ -163,16 +174,15 @@
 
     # Task 3.2 (TP.INT.0013): composite 4-call Graph fan-out (roleDefinitions ->
     # roleAssignments -> roleAssignments/{id} -> groups/{id}), flattened to the per-group
-    # shape Test-PulseRbacGroupsProtected.ps1's own docstring documents. No released
-    # GraphKit descriptor exists for this composite walk.
-    intuneRbacGroupProtection = @{ Type = 'IntuneRbacGroupProtectionWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # shape Test-PulseRbacGroupsProtected.ps1's own docstring documents. TenantPulse
+    # composes released GraphKit primitives; there is no generic GraphKit Walk operation.
+    intuneRbacGroupProtection = @{ Plan = 'Invoke-PulseIntuneRbacGroupProtectionPlan'; ApiVersion = 'beta' }
 
     # Task 3.2 (TP.INT.0014): templateFamily-filtered configurationPolicies list + a
     # per-policy settings walk, resolved down to {policyId, policyName,
-    # isFullDiskEncryption} - see Test-PulseBitLockerFullDiskEncryption.ps1's own
-    # docstring for why the CSP suffix-matching itself is deliberately deferred to
-    # whichever composite descriptor eventually ships, not re-implemented here.
-    endpointSecurityDiskEncryptionPolicies = @{ Type = 'EndpointSecurityDiskEncryptionPolicyWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # isFullDiskEncryption}. The provider plan composes ConfigurationPolicy,
+    # ConfigurationPolicySetting, and ConfigurationPolicyAssignment Read/Safe primitives.
+    endpointSecurityDiskEncryptionPolicies = @{ Plan = 'Invoke-PulseEndpointSecurityPolicyPlan'; ApiVersion = 'beta' }
 
     # Task 3.2 (TP.INT.0015): same templateFamily-filtered configurationPolicies + settings
     # walk pattern as TP.INT.0014 above, filtered to the LAPS template
@@ -180,7 +190,7 @@
     # Test-PulseLapsConfigurationMeetsBar.ps1's own docstring "template ID trap" note),
     # resolved to {policyId, policyName, backsUpToEntra, hasSufficientComplexity,
     # hasSufficientLength, hasPostAuthAction}.
-    endpointSecurityLapsPolicies = @{ Type = 'EndpointSecurityLapsPolicyWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    endpointSecurityLapsPolicies = @{ Plan = 'Invoke-PulseEndpointSecurityPolicyPlan'; ApiVersion = 'beta' }
 
     # Task 3.3 LIVE entries: confirmed via a live Get-GraphOperation -List enumeration of
     # the installed GraphKit 0.1.1 catalog against source/Data/Checks/TP.INT.00{20,21,23,25,27,28}.psd1
@@ -225,19 +235,16 @@
     # /deviceManagement/configurationPolicyTemplates in addition to ConfigurationPolicy and
     # ConfigurationPolicyAssignment; the legacy branch separately uses
     # DeviceManagementTemplate.ListBeta and DeviceManagementIntent.ListBeta.
-    # This synthetic Pending Walk entry remains the static manifest placeholder; the normal
-    # collection registry routes it through Invoke-PulseSecurityBaselinePlan before the
-    # descriptor-pending fallback. ExpectedThrottleClass/ExpectedReplayPolicy declare the
-    # Read/Safe shape enforced for every such placeholder.
-    securityBaselinesAssignedAndCurrent = @{ Type = 'SecurityBaselineAssignedAndCurrentWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # The map names the TenantPulse plan directly; the provider registry declares and the
+    # gates verify its five released GraphKit child operations.
+    securityBaselinesAssignedAndCurrent = @{ Plan = 'Invoke-PulseSecurityBaselinePlan'; ApiVersion = 'beta' }
 
     # Bounded, cycle-safe group membership closure. This is a TenantPulse-owned composite
-    # over released GraphKit read primitives, so the synthetic Walk remains Pending in the
-    # Graph descriptor map while Resolve-PulseProviderPlanRegistry supplies the runtime
-    # plan. `groupMembers` is the stable consumer name used by checks; `groupClosure` is the
-    # explicit composite name. Both route to the same plan and caps.
-    groupMembers = @{ Type = 'GroupClosureWalk'; Operation = 'Walk'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
-    groupClosure = @{ Type = 'GroupClosureWalk'; Operation = 'Walk'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    # over released GraphKit read primitives. `groupMembers` is the stable consumer name
+    # used by checks; `groupClosure` is the explicit composite name. Both route to the same
+    # TenantPulse plan and caps without claiming a GraphKit Walk descriptor.
+    groupMembers = @{ Plan = 'Invoke-PulseGroupClosurePlan'; ApiVersion = 'v1.0' }
+    groupClosure = @{ Plan = 'Invoke-PulseGroupClosurePlan'; ApiVersion = 'v1.0' }
 
     # Task 4.2 (EIDSCA port, wave 1): GraphKit 0.2.2 shipped the official
     # AuthorizationPolicy/Get descriptor. Pending dropped. GraphKit's descriptor is

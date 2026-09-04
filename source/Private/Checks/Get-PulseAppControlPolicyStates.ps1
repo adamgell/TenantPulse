@@ -7,7 +7,7 @@
     when enforce + active control (+ Managed Installer for 0018) land on ONE
     policy. A tenant that audits on policy A and uploads empty XML on policy B
     must Fail. Get-PulseSettingPresenceMatchingPolicies supplies the per-value
-    policyIds the presence index now keeps; this function intersects them.
+    assignedPolicyIds the presence index now keeps; this function intersects them.
 
     CORPUS-VERIFIED definitionIds / option itemIds (live capture
     scratch/live-27/snapshot/reference/settingDefinitions.json, 18,227
@@ -26,10 +26,11 @@
     same capture. Microsoft's published Graph schema docs still omit the
     property. Implementation keys the live ids, not the unpublished field.
 
-    ASSIGNMENT: Settings Catalog rows still carry assignments:null (G-gate).
-    Matching Maester, existence of the policy is enough - this classifier
-    uses policyIds, not assignedPolicyIds. An unassigned App Control
-    policy still Passes the same way Maester's template-family fetch does.
+    ASSIGNMENT: Settings Catalog assignment targets are collected and the presence index
+    publishes assignedPolicyIds separately from unknown/unassigned policyIds. Only
+    assignedPolicyIds participate in the same-policy intersections below. A policy with
+    no confirmed positive assignment target cannot satisfy TP.INT.0017/0018; unknown
+    assignment state remains disclosure-only and never becomes assigned by inference.
 
     XML emptiness: a non-empty string is active control for an upload
     policy. A redacted XML value on an upload policy is NOT treated as

@@ -406,7 +406,11 @@ function Get-PulseTenantSnapshot {
         # Administrative Templates are a released, opt-in expansion family. They share
         # this switch but not the Settings Catalog walker. A preflight/authentication block
         # records an honest NotExpanded entry without allowing the family to send.
-        if ($skipExpansionGraph) {
+        if ($skipExpansionGraph -or $networkAbortState.AuthenticationAborted) {
+            if ($networkAbortState.AuthenticationAborted) {
+                $expansionSuppressedReason = Protect-PulseReason -Message 'authentication-failed: network expansion suppressed' `
+                    -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
+            }
             Set-PulseExpansionEntry -Store $store -Name 'administrativeTemplates' -Status 'NotExpanded' -Reason $expansionSuppressedReason
         } else {
             $null = Invoke-PulseAdministrativeTemplateExpansion -Store $store -Context $context -Requested `

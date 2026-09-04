@@ -51,20 +51,21 @@ The current product-program boundary is narrower than a finished successor relea
   product contract still needs an explicit decision. No current verified evidence establishes a
   remote refresh/push, exact remote-head review, merge, or merged-main CI for the runtime tree.
   Nothing in this paragraph promotes it over the immutable public `0.2.0` package.
-- **R1b is partial.** Settings Catalog assignments and typed include/exclude intent exist, but
-  Administrative Template expansion, the governing program's expansion-summary dataset, protected
-  live proof with populated assignment targets, and stale pre-implementation map/reason text remain
-  open. A local Phase 2 task once descoped that summary; the later governing R1b contract supersedes
-  that task-local decision.
-- **R2 is partial.** Four real Read/Safe provider plans exist, but the static dataset map still
-  publishes synthetic `Pending` / `Walk` tuples and the current composite outcomes do not preserve
-  complete operation provenance. Known certainty defects remain in Endpoint Security template
-  handling, unknown BitLocker/LAPS values, and the independent current-versus-legacy baseline paths.
-  Protected-live proof of the BitLocker raw-value mapping and LAPS template identity is also still
-  required before those Pending representations can close.
-- **R3 is partial.** Runtime correctly performs no network request and returns
-  `PlatformUnavailable`, but the static map and outcome provenance still describe a GraphKit `Get`
-  operation that never occurs.
+- **R1b deterministic implementation is complete; protected-live proof remains separate.** Settings
+  Catalog assignments, typed include/exclude intent, Administrative Template expansion, and the
+  expansion-summary artifact are implemented. A shared authentication abort now blocks expansion
+  before descriptor resolution or Graph I/O, missing presentation-value ids produce deterministic
+  Partial gaps, and App Control decisions use the collected `assignedPolicyIds`. A protected live
+  shape/count proof with populated assignment targets remains an evidence gate, not missing code.
+- **R2 deterministic representation and certainty closeout is complete; protected-live proof remains
+  separate.** Composite datasets are declared as TenantPulse `Plan` entries, and preflight/read-only
+  gates validate their exact released GraphKit child operations. Endpoint Security surfaces absent
+  or unrecognized template metadata as explicit gaps, and current security-baseline collection is
+  independent of legacy-template failure. Protected-live proof of BitLocker raw-value mapping and
+  LAPS template identity remains required before making service-behavior claims.
+- **R3 deterministic representation is complete.** The Windows data-processor dataset names a
+  no-network TenantPulse plan, returns `PlatformUnavailable`, records null API version and an empty
+  operation set, and never claims a GraphKit `Get` operation that did not occur.
 - **R4 is partial.** The self-contained HTML findings renderer is implemented and deterministically
   tested as the second supported renderer. Bounded relationship coverage, application-registration
   credential coverage, complete Intune assignment awareness, exclusion-only assignment semantics,
@@ -365,14 +366,13 @@ provider/permission outcome and the check fails closed rather than inventing a l
 | TP.INT.0030 | Intune.Compliance | Medium | Live | Fleet compliance rate below acceptable threshold |
 | TP.INT.0031 | Intune.SettingsCatalog | Critical | Live | BitLocker CSP settings present and correct across all Settings Catalog policies |
 
-The four composite rows still retain synthetic `Pending` / `Walk` map tuples because they do not
-map to a single Graph operation. Current runtime dispatch is safe: TenantPulse's default provider
-registry intercepts them and composes only GraphKit Read/Safe primitives. That safety does not make
-the placeholder schema final; removing the invented production tuples and recording every actual
-primitive in structured outcomes is open R2 work. The Windows data-processor runtime similarly
-performs no network request and emits `PlatformUnavailable`, but its static map and outcome
-provenance still claim a GraphKit `Get`; correcting that representation is open R3 work. The cleanup
-rule is no longer Pending: GraphKit `0.3.0` ships its direct Read/Safe collection descriptor.
+Composite datasets are explicit TenantPulse `Plan` entries rather than synthetic GraphKit
+`Pending` / `Walk` tuples. The default provider registry declares every GraphKit child primitive;
+permission preflight and the static read-only gate validate that exact operation union before a plan
+can dispatch. The Windows data-processor entry is also a TenantPulse plan, but intentionally has a
+null API version and empty operation set because it performs no network request and emits
+`PlatformUnavailable`. The cleanup rule is a direct entry because GraphKit `0.3.0` ships its
+Read/Safe collection descriptor.
 
 What the current catalog does **not** cover, honestly:
 

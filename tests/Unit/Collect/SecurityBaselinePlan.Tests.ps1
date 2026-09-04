@@ -172,6 +172,37 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
         )
     }
 
+    It 'keeps the current-baseline branch when the independent legacy template surface fails' {
+        $result = Invoke-SecurityBaselinePlanFixture -TemplateError '503 Service Unavailable' -CurrentTemplates @(
+            [pscustomobject]@{
+                id = 'template-current'; lifecycleState = 'active'; templateFamily = 'baseline'
+            }
+        ) -Policies @(
+            [pscustomobject]@{
+                id = 'policy-current'; name = 'Current Windows baseline'
+                templateReference = [pscustomobject]@{ templateId = 'template-current'; templateFamily = 'baseline' }
+            }
+        ) -Assignments @{
+            'policy-current' = @(
+                [pscustomobject]@{
+                    id = 'assignment-current'
+                    target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget' }
+                }
+            )
+        }
+
+        $result.Outcome.Status | Should -Be 'Partial'
+        @($result.Outcome.Rows).Count | Should -Be 1
+        $result.Outcome.Rows[0].id | Should -Be 'policy-current'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'surface:deviceManagementTemplates'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'DeviceManagementTemplate.ListBeta'
+        @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)" }) | Should -Contain 'DeviceManagementConfigurationPolicyTemplate/ListBeta'
+        @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)" }) | Should -Contain 'ConfigurationPolicy/ListBeta'
+        @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)" }) | Should -Contain 'ConfigurationPolicyAssignment/ListBeta'
+        @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)" }) | Should -Not -Contain 'DeviceManagementIntent/ListBeta'
+    }
+
     It 'also collects the four documented legacy intent families and normalizes their family names' {
         $result = Invoke-SecurityBaselinePlanFixture -Templates @(
             [pscustomobject]@{ id = 't-win'; templateType = 'securityBaseline'; isDeprecated = $false; intentCount = 1 }
@@ -290,12 +321,18 @@ Describe 'Invoke-PulseSecurityBaselinePlan' {
         @($first.Outcome.Gaps.Scope) | Should -Be @('intent:intent-a', 'intent:intent-z', 'template:template-current')
     }
 
-    It 'classifies a template collection permission failure before attempting either profile surface' {
+    It 'preserves a legacy-template permission failure while still attempting the independent current profile surface' {
         $result = Invoke-SecurityBaselinePlanFixture -TemplateError ([System.UnauthorizedAccessException]::new('fixture permission denied'))
 
         $result.Outcome.Status | Should -Be 'Failed'
         $result.Outcome.FailureClass | Should -BeIn @('PermissionDenied', 'ProviderFailed')
-        @($result.Calls | Where-Object Kind -eq 'Graph').Count | Should -Be 1
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'surface:deviceManagementTemplates'
+        @($result.Calls | Where-Object Kind -eq 'Graph' | ForEach-Object { "$($_.Type)/$($_.Operation)" }) | Should -Be @(
+            'DeviceManagementTemplate/ListBeta'
+            'DeviceManagementConfigurationPolicyTemplate/ListBeta'
+            'ConfigurationPolicy/ListBeta'
+        )
     }
 
     It 'preserves a sole profile-surface permission failure at the top level' {

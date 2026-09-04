@@ -51,6 +51,39 @@ Describe 'Invoke-PulseAdministrativeTemplateExpansion' {
         $manifest.expansions.administrativeTemplates.reason | Should -Match 'dependency-unavailable'
     }
 
+    It 'honors an existing shared authentication abort before descriptor resolution or any Graph request' {
+        Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {
+            throw 'a pre-aborted expansion must not resolve descriptors'
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            throw 'a pre-aborted expansion must not send'
+        }
+        $abortState = [pscustomobject]@{
+            AuthenticationAborted = $true
+            Reason                = 'authentication-failed: collection aborted'
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store, $abortState {
+            param($store, $abortState)
+            Invoke-PulseAdministrativeTemplateExpansion -Store $store `
+                -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
+                -Requested -ProfileId 'fixture' -Pseudonym 'tp-test' -TenantId 'tenant' `
+                -NetworkAbortState $abortState
+        }
+
+        $result.Status | Should -Be 'NotExpanded'
+        $result.FailureClass | Should -Be 'AuthenticationFailed'
+        $result.PolicyCount | Should -Be 0
+        $result.RowCount | Should -Be 0
+        @($result.Operations).Count | Should -Be 0
+        Should-NotInvoke Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse
+        Should-NotInvoke Get-GraphObject -ModuleName TenantPulse
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.expansions.administrativeTemplates.status | Should -Be 'NotExpanded'
+        $manifest.expansions.administrativeTemplates.reason | Should -Match 'authentication-failed'
+    }
+
     It 'walks GraphKit GroupPolicyConfiguration, DefinitionValue, and PresentationValue ListBeta primitives' {
         $result = InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)
@@ -163,6 +196,59 @@ Describe 'Invoke-PulseAdministrativeTemplateExpansion' {
         ($result.ExpandedCount + $result.PartialCount + $result.NotExpandedCount) | Should -Be $result.PolicyCount
         $result.Gaps.Count | Should -BeGreaterThan 0
         @($result.Gaps | ForEach-Object { $_.reason }) | Should -Match 'GroupPolicy'
+    }
+
+    It 'marks a presentation value with no stable id as Partial instead of fabricating a random evidence identity' {
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse { }
+            Mock Get-GraphObject -ModuleName TenantPulse {
+                param($Context, $Type, $Operation, $Parameters)
+                if ($Type -eq 'GroupPolicyConfiguration') {
+                    return New-PulseTestGraphEnvelope -Data @(
+                        [pscustomobject]@{ id = 'gp-missing-presentation-id'; displayName = 'Missing presentation identity' }
+                    )
+                }
+                if ($Type -eq 'GroupPolicyDefinitionValue') {
+                    return New-PulseTestGraphEnvelope -Data @(
+                        [pscustomobject]@{
+                            id = 'dv-stable'
+                            enabled = $true
+                            definition = [pscustomobject]@{ id = 'def-stable'; displayName = 'Stable setting'; categoryPath = 'Windows' }
+                        }
+                    )
+                }
+                if ($Type -eq 'GroupPolicyPresentationValue') {
+                    return New-PulseTestGraphEnvelope -Data @(
+                        [pscustomobject]@{
+                            value = '2'
+                            presentation = [pscustomobject]@{ id = 'presentation-definition'; label = 'Level' }
+                        }
+                    )
+                }
+                throw "Unexpected Graph call '$Type/$Operation'."
+            }
+
+            Invoke-PulseAdministrativeTemplateExpansion -Store $store `
+                -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
+                -Requested -ProfileId 'fixture' -Pseudonym 'tp-test' -TenantId 'tenant'
+        }
+
+        $result.Status | Should -Be 'Partial'
+        $result.PolicyCount | Should -Be 1
+        $result.ExpandedCount | Should -Be 0
+        $result.PartialCount | Should -Be 1
+        $result.NotExpandedCount | Should -Be 0
+        $result.RowCount | Should -Be 1
+        @($result.Gaps).Count | Should -Be 1
+        $result.Gaps[0].policyId | Should -Be 'gp-missing-presentation-id'
+        $result.Gaps[0].reason | Should -Match 'category:EmptyPresentationValueId;operation:GroupPolicyPresentationValue.ListBeta'
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $artifactPath = Join-Path $script:store.Root $manifest.expansions.administrativeTemplates.path
+        $rows = @(Get-Content -LiteralPath $artifactPath |
+                ForEach-Object { $_ | ConvertFrom-Json })
+        @($rows.instanceId) | Should -Be @('dv-stable')
     }
 
     It 'fails closed when the configuration list is returned as rows without a GraphKit envelope' {

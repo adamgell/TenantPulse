@@ -15,8 +15,9 @@
     Classification is Get-PulseAppControlPolicyStates (corpus-verified live
     ids; see that helper's docstring for the Maester-dead-id correction).
 
-    ASSIGNMENT: Settings Catalog assignments are still deferred (G-gate).
-    Matching Maester, policy existence is enough.
+    ASSIGNMENT: Pass requires the same enforcing/active-control/Managed Installer policy
+    to have a confirmed positive Settings Catalog assignment target. Unknown or
+    unassigned policy identities are excluded by Get-PulseAppControlPolicyStates.
 
     HONESTY: same NotApplicable / PARTIAL SCAN / redaction-Warn / unknown-
     assignment disclosure contract as TP.INT.0017.
@@ -59,7 +60,7 @@ function Test-PulseManagedInstallerPairedWithEnforcingAppControl {
     $classified = Get-PulseAppControlPolicyStates -Artifact $artifact
     $policies = @($classified.Policies)
     $unknownDisclosure = if ($classified.AnyUnknownAssignment) {
-        ' One or more App Control settings sit on a policy whose assignment status is deferred/unknown (Settings Catalog assignments are not collected in this slice) - assignment is not part of this check''s bar.'
+        ' One or more App Control settings sit on a policy whose assignment status is unknown; those policies are excluded from the qualifying assigned-policy set and cannot make this check Pass.'
     } else { '' }
 
     $evidence = @(

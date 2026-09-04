@@ -3,19 +3,18 @@
     role-assignable groups (Task 3.2, Maester port MT.1103 -
     Test-MtIntuneRbacGroupsProtected, MIT).
 
-    PENDING COMPOSITE DATASET: this check's real input is a 4-call Graph fan-out
+    TENANTPULSE PROVIDER PLAN: this check's real input is a 4-call Graph fan-out
     (deviceManagement/roleDefinitions -> .../roleAssignments -> roleAssignments/{id} ->
     groups/{id}?$select=displayName,isManagementRestricted,isAssignableToRole,id) that has
-    no released GraphKit 0.1.1 descriptor as a single composite operation - the research
+    no generic GraphKit operation because composition belongs to TenantPulse - the research
     entry itself names this the most expensive Maester Intune port call graph in this
-    batch. DatasetMap.psd1 declares 'intuneRbacGroupProtection' Pending=$true, holding the
-    ALREADY-FLATTENED per-group shape Maester's own function itself builds internally
+    batch. DatasetMap.psd1 names Invoke-PulseIntuneRbacGroupProtectionPlan directly; it
+    produces the flattened per-group shape Maester's own function itself builds internally
     ({roleDefinitionName, groupId, groupDisplayName, isManagementRestricted,
     isAssignableToRole} - one row per distinct role-assignment-member-group pair) rather
-    than the four raw Graph call shapes, so the composite descriptor (whenever a G-batch
-    ships it) only needs to hand this rule the walk's END RESULT. On a live tenant this
-    resolves NotApplicable until that descriptor exists. Rule logic is real and
-    fixture-tested regardless.
+    than the four raw Graph call shapes. Its declared GraphKit Read/Safe children are
+    preflighted before dispatch, and partial child failures remain structured gaps. Rule logic
+    is fixture-tested independently of live service behavior.
 
     RULE (ported verbatim - live-verified against
     https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/groups-concept,

@@ -141,6 +141,10 @@ BeforeAll {
         # TenantPulse's own module manifest GUID (source/TenantPulse.psd1) - a public
         # package identifier, never a tenant id.
         'a2f6d0f0-6d0c-4a6b-9f7e-9c9e6f6c7c2f' # TenantPulse module GUID
+        # Intune's tenant-stable Local Administrator Password Solution policy-template id,
+        # used to distinguish LAPS from other account-protection policies. This is a
+        # product template identity, not an object id sourced from a customer tenant.
+        'adc46e5a-f4aa-4ff6-aeff-4f27bc525796' # Endpoint Security LAPS template
         # Task 2.3 typed-policy fixture synthetic ids (tests/Fixtures/TypedPolicy/*.json,
         # scripted-sanitized-real captures off Ivy24's own deviceCompliancePolicies/
         # deviceConfigurations - see tests/Fixtures/PROVENANCE.md). Deliberately

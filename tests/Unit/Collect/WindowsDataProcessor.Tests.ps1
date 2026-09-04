@@ -9,17 +9,15 @@ BeforeAll {
 }
 
 Describe 'Windows data processor provider disposition' {
-    It 'returns an explicit platform-unavailable outcome with the exact contract evidence' {
+    It 'returns an explicit platform-unavailable outcome without publishing a synthetic Graph operation' {
         $outcome = InModuleScope TenantPulse {
             Invoke-PulseWindowsDataProcessorPlan `
                 -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
                 -Dataset 'dataProcessorServiceForWindowsFeaturesOnboarding' `
                 -ManifestEntry ([pscustomobject]@{
                     Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'
-                    Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'
-                    Operation = 'Get'
-                    ApiVersion = 'beta'
-                    Pending = $true
+                    Plan = 'Invoke-PulseWindowsDataProcessorPlan'
+                    ApiVersion = $null
                 }) `
                 -ProfileId 'fixture' `
                 -TenantPseudonym 'tp-fixture'
@@ -48,12 +46,14 @@ Describe 'Windows data processor provider disposition' {
         @($outcome.Operations).Count | Should -Be 0
         $outcome.Operations | Should -Not -Contain 'Get'
 
-        $outcome.Detail.Contract | Should -Be 'DataProcessorServiceForWindowsFeaturesOnboarding.Get'
-        $outcome.Detail.Method | Should -Be 'GET'
-        $outcome.Detail.Path | Should -Be '/deviceManagement/dataProcessorServiceForWindowsFeaturesOnboarding'
-        $outcome.Detail.ApiVersion | Should -Be 'beta'
+        $outcome.Detail.Disposition | Should -Be 'NoReleasedGraphContract'
+        $outcome.Detail.PSObject.Properties.Name | Should -Not -Contain 'Contract'
+        $outcome.Detail.PSObject.Properties.Name | Should -Not -Contain 'Method'
+        $outcome.Detail.PSObject.Properties.Name | Should -Not -Contain 'Path'
+        $outcome.Detail.PSObject.Properties.Name | Should -Not -Contain 'ApiVersion'
         $outcome.Detail.GraphKit.PackageVersion | Should -Be '0.3.0'
         $outcome.Detail.GraphKit.Descriptor | Should -Be 'Absent from released catalog'
+        $outcome.Detail.GraphKit.PSObject.Properties.Name | Should -Not -Contain 'DescriptorLookup'
         $outcome.Detail.LiveProbe.Outcome | Should -Be 'Succeeded'
         $outcome.Detail.LiveProbe.ReadOnly | Should -BeTrue
         $outcome.Detail.LiveProbe.NativeBooleanFields | Should -BeTrue
@@ -76,7 +76,7 @@ Describe 'Windows data processor provider disposition' {
             $result = Invoke-PulseWindowsDataProcessorPlan `
                 -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
                 -Dataset 'dataProcessorServiceForWindowsFeaturesOnboarding' `
-                -ManifestEntry ([pscustomobject]@{ Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'; ApiVersion = 'beta' }) `
+                -ManifestEntry ([pscustomobject]@{ Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'; Plan = 'Invoke-PulseWindowsDataProcessorPlan'; ApiVersion = $null }) `
                 -ProfileId 'fixture' `
                 -TenantPseudonym 'tp-fixture'
             $result.Status | Should -Be 'Skipped'

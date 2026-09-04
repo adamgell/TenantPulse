@@ -13,16 +13,17 @@
     ids; Maester's dead `..._policy` / `*upload_policy_selected` strings are
     NOT used - see that helper's docstring).
 
-    ASSIGNMENT: Settings Catalog assignments are still deferred (G-gate).
-    Matching Maester, policy existence is enough - not confirmed-assigned.
+    ASSIGNMENT: Pass requires the same enforcing/active-control policy to have a confirmed
+    positive Settings Catalog assignment target. Unknown or unassigned policy identities
+    are excluded by Get-PulseAppControlPolicyStates.
 
     HONESTY:
       - Artifact not Available -> NotApplicable, quoting the artifact Reason.
       - PARTIAL SCAN prefix when -Artifact.Gaps is non-empty (TP.INT.0006).
       - Redacted build-options / audit-mode / XML-on-upload on a policy that
         would otherwise be the only candidate -> Warn, never Pass.
-      - Unknown-assignment disclosure is appended whenever true; it does not
-        change Pass/Fail (assignments are not part of this check's bar).
+      - Unknown-assignment disclosure is appended whenever true; an unknown policy is
+        excluded from the qualifying assigned-policy set and cannot make the check Pass.
 #>
 
 function Test-PulseAppControlPolicyEnforcing {
@@ -62,7 +63,7 @@ function Test-PulseAppControlPolicyEnforcing {
     $classified = Get-PulseAppControlPolicyStates -Artifact $artifact
     $policies = @($classified.Policies)
     $unknownDisclosure = if ($classified.AnyUnknownAssignment) {
-        ' One or more App Control settings sit on a policy whose assignment status is deferred/unknown (Settings Catalog assignments are not collected in this slice) - assignment is not part of this check''s bar.'
+        ' One or more App Control settings sit on a policy whose assignment status is unknown; those policies are excluded from the qualifying assigned-policy set and cannot make this check Pass.'
     } else { '' }
 
     $evidence = @(

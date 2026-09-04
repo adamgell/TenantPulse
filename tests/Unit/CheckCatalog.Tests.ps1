@@ -1255,15 +1255,16 @@ Describe 'Integrated administrative-template and group-closure controller contra
         $map.groupPolicyPresentationValues.Operation | Should -Be 'ListBeta'
     }
 
-    It 'maps groupMembers and groupClosure to the bounded TenantPulse walk' {
+    It 'maps groupMembers and groupClosure to the bounded TenantPulse provider plan without a synthetic Graph operation' {
         $map = Import-PowerShellDataFile -LiteralPath (Join-Path $script:repoRoot 'source/Data/DatasetMap.psd1')
 
         foreach ($name in @('groupMembers', 'groupClosure')) {
             $map.ContainsKey($name) | Should -BeTrue
-            $map[$name].Type | Should -Be 'GroupClosureWalk'
-            $map[$name].Operation | Should -Be 'Walk'
+            $map[$name].Plan | Should -Be 'Invoke-PulseGroupClosurePlan'
             $map[$name].ApiVersion | Should -Be 'v1.0'
-            $map[$name].Pending | Should -BeTrue
+            foreach ($forbiddenField in @('Type', 'Operation', 'Pending', 'ExpectedThrottleClass', 'ExpectedReplayPolicy')) {
+                $map[$name].ContainsKey($forbiddenField) | Should -BeFalse
+            }
         }
     }
 

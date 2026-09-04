@@ -192,4 +192,18 @@ Describe 'TP.INT.0018 - Managed Installer rules paired with an enforcing App Con
         $finding.status | Should -Be 'NotApplicable'
         $finding.reason | Should -Match 'expansions.settingPresenceIndex'
     }
+
+    It 'does not Pass on a qualifying Managed Installer policy whose assignment status is unknown' {
+        $rows = @(
+            (New-PulseAppControlRow -PolicyId 'p1' -DefinitionId $script:BuildOptionsId -Value $script:BuiltInItemId -Assignments $null)
+            (New-PulseAppControlRow -PolicyId 'p1' -DefinitionId $script:AuditModeId -Value $script:AuditDisabledItemId -Assignments $null)
+            (New-PulseAppControlRow -PolicyId 'p1' -DefinitionId $script:ManagedInstallerId -Value $script:MiEnabledItemId -Assignments $null)
+        )
+        $finding = Invoke-PulseManagedInstallerCheckFixture -Rows $rows
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'assignment status is unknown'
+        $finding.reason | Should -Match 'excluded from the qualifying assigned-policy set'
+        $finding.reason | Should -Not -Match 'deferred|not collected|not part of this check'
+    }
 }

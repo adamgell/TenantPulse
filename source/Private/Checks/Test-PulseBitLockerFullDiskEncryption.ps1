@@ -3,18 +3,16 @@
     Endpoint Security policy (Task 3.2, Maester port MT.1123 -
     Test-MtBitLockerFullDiskEncryption, MIT).
 
-    PENDING COMPOSITE DATASET: this check's real input is
+    TENANTPULSE PROVIDER PLAN: this check's real input is
     deviceManagement/configurationPolicies filtered to
     templateReference/templateFamily eq 'endpointSecurityDiskEncryption', THEN each
     matching policy's settings walked (.../configurationPolicies('{id}')/settings) and
-    inspected for the BitLocker CSP's system-drive encryption-type setting. No released
-    GraphKit descriptor performs this templateFamily-filtered list + per-policy settings
-    fan-out as a single composite operation. DatasetMap.psd1 declares
-    'endpointSecurityDiskEncryptionPolicies' Pending=$true, holding the ALREADY-RESOLVED
-    per-policy shape ({policyId, policyName, isFullDiskEncryption:[bool]}) a future
-    composite descriptor would need to produce - this rule deliberately does NOT
-    re-implement the suffix-matching itself; whoever builds the composite descriptor
-    resolves it once, centrally, and hands this rule a plain boolean.
+    inspected for the BitLocker CSP's system-drive encryption-type setting. DatasetMap.psd1
+    names Invoke-PulseEndpointSecurityPolicyPlan directly; that plan composes released
+    GraphKit Read/Safe list, settings, and assignment primitives and returns the resolved
+    per-policy shape ({policyId, policyName, isFullDiskEncryption:[bool]}). This rule
+    deliberately does not re-implement suffix matching; the provider plan resolves it once,
+    centrally, and hands the rule a native boolean or an explicit gap.
 
     SETTING IDENTITY - CORRECTED (T3.4 whole-task dual review, fix round 1,
     CRITICAL-ADJUDICATION finding; corpus-verified against

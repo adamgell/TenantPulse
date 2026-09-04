@@ -71,6 +71,31 @@ function Invoke-PulseAdministrativeTemplateExpansion {
         }
     }
 
+    # The shared abort can be raised by an earlier collection or expansion family. This
+    # guard is deliberately before descriptor assertions as well as Graph reads: once
+    # authentication is known bad, administrative-template expansion is a no-send path.
+    if ($NetworkAbortState.AuthenticationAborted) {
+        $abortMessage = if (-not [string]::IsNullOrWhiteSpace([string] $NetworkAbortState.Reason)) {
+            [string] $NetworkAbortState.Reason
+        } else {
+            'authentication-failed: collection aborted'
+        }
+        $reason = Protect-PulseReason -Message $abortMessage -ProfileId $ProfileId `
+            -Pseudonym $Pseudonym -TenantId $TenantId
+        Set-PulseExpansionEntry -Store $Store -Name $Name -Status 'NotExpanded' -Reason $reason
+        return [pscustomobject]@{
+            Status           = 'NotExpanded'
+            FailureClass     = 'AuthenticationFailed'
+            PolicyCount      = 0
+            ExpandedCount    = 0
+            PartialCount     = 0
+            NotExpandedCount = 0
+            RowCount         = 0
+            Gaps             = @()
+            Operations       = @()
+        }
+    }
+
     $descriptorSpecs = @(
         @{ Type = 'GroupPolicyConfiguration'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         @{ Type = 'GroupPolicyDefinitionValue'; Operation = 'ListBeta'; ApiVersion = 'beta' }
@@ -272,7 +297,15 @@ function Invoke-PulseAdministrativeTemplateExpansion {
 
             foreach ($presentationValue in $presentationValues) {
                 $presentationIdRaw = Get-PulseSettingsCatalogValueProperty -Node $presentationValue -PropertyName 'id'
-                $presentationId = if ($null -ne $presentationIdRaw) { [string] $presentationIdRaw } else { [guid]::NewGuid().ToString('N') }
+                $presentationId = if ($null -ne $presentationIdRaw) { [string] $presentationIdRaw } else { '' }
+                if ([string]::IsNullOrWhiteSpace($presentationId)) {
+                    $policyPartial = $true
+                    $gapEntries.Add([pscustomobject]@{
+                            policyId = $policyId
+                            reason   = (New-AdminTemplateGapReason -Category 'EmptyPresentationValueId' -Operation 'GroupPolicyPresentationValue.ListBeta')
+                        }) | Out-Null
+                    continue
+                }
                 $presentation = Get-PulseSettingsCatalogValueProperty -Node $presentationValue -PropertyName 'presentation'
                 $labelRaw = Get-PulseSettingsCatalogValueProperty -Node $presentation -PropertyName 'label'
                 $label = if ($null -ne $labelRaw) { [string] $labelRaw } else { $null }

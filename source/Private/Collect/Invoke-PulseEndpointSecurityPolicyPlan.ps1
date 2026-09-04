@@ -1,11 +1,12 @@
 <#
     TenantPulse-owned composite collection for TP.INT.0014 and TP.INT.0015.
 
-    GraphKit supplies only the released ConfigurationPolicy.ListBeta and
-    ConfigurationPolicySetting.ListBeta primitives. This plan performs the template-family
-    filter, sequential per-policy settings reads, and compact row resolution. A settings
-    failure or invalid child value remains scoped to its policy and cannot become an
-    authoritative empty collection or a false check result.
+    GraphKit supplies the released ConfigurationPolicy.ListBeta,
+    ConfigurationPolicySetting.ListBeta, and ConfigurationPolicyAssignment.ListBeta
+    primitives. This plan performs the template-family filter, sequential per-policy
+    child reads, and compact row resolution. Missing or unrecognized template metadata,
+    a child-read failure, or an invalid child value remains scoped to its policy and
+    cannot become an authoritative empty collection or a false check result.
 #>
 
 function Invoke-PulseEndpointSecurityPolicyPlan {
@@ -89,10 +90,52 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     $expandedCount = 0
     $partialCount = 0
     $notExpandedCount = 0
+    $recognizedTemplateFamilies = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($knownFamily in @(
+            'none'
+            'endpointSecurityAntivirus'
+            'endpointSecurityDiskEncryption'
+            'endpointSecurityFirewall'
+            'endpointSecurityEndpointDetectionAndResponse'
+            'endpointSecurityAttackSurfaceReduction'
+            'endpointSecurityAccountProtection'
+            'endpointSecurityApplicationControl'
+            'endpointSecurityEndpointPrivilegeManagement'
+            'advancedThreatProtection'
+            'baseline'
+            'baselineDefenderForEndpoint'
+            'baselineMicrosoftEdge'
+            'baselineWindows365'
+        )) {
+        $recognizedTemplateFamilies.Add($knownFamily) | Out-Null
+    }
+
     foreach ($policy in $policies) {
-        if ($null -eq $policy) { continue }
+        if ($null -eq $policy) {
+            $notExpandedCount++
+            $gaps.Add((New-PulseCollectionGap -Scope 'policy:unknown' -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'missing-template-metadata' -Detail @{ missing = 'policy-or-templateReference' } `
+                    -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta')) | Out-Null
+            continue
+        }
+        $policyId = [string] (Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'id')
+        $scope = if ([string]::IsNullOrWhiteSpace($policyId)) { 'policy:unknown' } else { "policy:$policyId" }
         $templateReference = Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'templateReference'
         $templateFamily = [string] (Get-PulseEndpointSecurityNodeProperty -Node $templateReference -PropertyName 'templateFamily')
+        if ($null -eq $templateReference -or [string]::IsNullOrWhiteSpace($templateFamily)) {
+            $notExpandedCount++
+            $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'missing-template-metadata' -Detail @{ missing = 'templateReference.templateFamily' } `
+                    -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta')) | Out-Null
+            continue
+        }
+        if (-not $recognizedTemplateFamilies.Contains($templateFamily)) {
+            $notExpandedCount++
+            $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'unrecognized-template-metadata' -Detail @{ templateFamily = $templateFamily } `
+                    -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta')) | Out-Null
+            continue
+        }
         if ($isBitLocker) {
             if (-not [string]::Equals($templateFamily, 'endpointSecurityDiskEncryption', [System.StringComparison]::OrdinalIgnoreCase)) {
                 continue
@@ -102,12 +145,18 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             if (-not [string]::Equals($templateFamily, 'endpointSecurityAccountProtection', [System.StringComparison]::OrdinalIgnoreCase)) {
                 continue
             }
+            if ([string]::IsNullOrWhiteSpace($templateId)) {
+                $notExpandedCount++
+                $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                        -ReasonCode 'missing-template-metadata' -Detail @{ missing = 'templateReference/templateId' } `
+                        -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta')) | Out-Null
+                continue
+            }
             if (-not [string]::Equals($templateId, 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796', [System.StringComparison]::OrdinalIgnoreCase)) {
                 continue
             }
         }
 
-        $policyId = [string] (Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'id')
         if ([string]::IsNullOrWhiteSpace($policyId)) {
             $notExpandedCount++
             $gaps.Add((New-PulseCollectionGap -Scope 'policy:unknown' -FailureClass 'InvalidProviderData' `

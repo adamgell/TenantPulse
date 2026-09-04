@@ -212,6 +212,9 @@ Describe 'TP.INT.0017 - App Control for Business policy enforcing (not audit-onl
         $finding = Invoke-PulseAppControlCheckFixture -Rows $rows
 
         $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'assignment status is unknown'
+        $finding.reason | Should -Match 'excluded from the qualifying assigned-policy set'
+        $finding.reason | Should -Not -Match 'deferred|not collected|not part of this check'
     }
 
     It 'produces the identical status and reason across two evaluations of the SAME snapshot (determinism)' {

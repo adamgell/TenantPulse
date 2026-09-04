@@ -1,13 +1,13 @@
 <#
     Private: compose TenantPulse's built-in provider plans with validated caller overrides.
 
-    The synthetic Pending entries in DatasetMap.psd1 are static manifest placeholders for
-    composite datasets, not an operator wiring requirement. Every shipped plan is active in
-    the normal public collection path. A caller-supplied entry replaces only the matching
-    built-in plan. Every network-backed registration declares the exact GraphKit operation
-    set it may call so the catalog-wide permission preflight can authorize the selected
-    plan before the command dispatches. Caller overrides cannot claim the built-in
-    no-network exemption and cannot use the legacy raw-scriptblock shape.
+    DatasetMap.psd1 names every TenantPulse-owned composite through an explicit Plan entry;
+    it never impersonates a generic GraphKit descriptor. Every shipped plan is active in the
+    normal public collection path. A caller-supplied entry replaces only the matching built-in
+    plan. Every network-backed registration declares the exact GraphKit operation set it may
+    call so the catalog-wide permission preflight can authorize the selected plan before the
+    command dispatches. Caller overrides cannot claim the built-in no-network exemption and
+    cannot use the legacy raw-scriptblock shape.
 #>
 
 function ConvertTo-PulseProviderPlanOperations {

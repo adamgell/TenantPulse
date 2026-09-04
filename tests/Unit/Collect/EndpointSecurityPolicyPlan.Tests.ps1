@@ -301,6 +301,49 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicySetting' }).Count | Should -Be 0
     }
 
+    It 'surfaces absent or unrecognized template metadata instead of publishing an authoritative empty endpoint-security result' -ForEach @(
+        @{
+            Label             = 'missing templateReference'
+            Dataset           = 'endpointSecurityDiskEncryptionPolicies'
+            TemplateReference = $null
+            ExpectedReason    = 'missing-template-metadata'
+        }
+        @{
+            Label             = 'missing templateFamily'
+            Dataset           = 'endpointSecurityDiskEncryptionPolicies'
+            TemplateReference = [pscustomobject]@{ templateId = 'template-without-family' }
+            ExpectedReason    = 'missing-template-metadata'
+        }
+        @{
+            Label             = 'unrecognized templateFamily'
+            Dataset           = 'endpointSecurityDiskEncryptionPolicies'
+            TemplateReference = [pscustomobject]@{ templateFamily = 'futureUnknownFamily'; templateId = 'future-template' }
+            ExpectedReason    = 'unrecognized-template-metadata'
+        }
+        @{
+            Label             = 'LAPS-candidate family without templateId'
+            Dataset           = 'endpointSecurityLapsPolicies'
+            TemplateReference = [pscustomobject]@{ templateFamily = 'endpointSecurityAccountProtection' }
+            ExpectedReason    = 'missing-template-metadata'
+        }
+    ) {
+        $policy = [pscustomobject]@{
+            id                = 'policy-metadata-gap'
+            name              = $Label
+            templateReference = $TemplateReference
+        }
+        $result = Invoke-EndpointPlanFixture -Dataset $Dataset -Policies @($policy) -SettingsByPolicy @{}
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:policy-metadata-gap'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be $ExpectedReason
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicy.ListBeta'
+        @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -ne 'ConfigurationPolicy' }).Count | Should -Be 0
+    }
+
     It 'fails closed when a relevant <Label> policy has no usable id' -ForEach @(
         @{
             Label      = 'BitLocker'

@@ -8,12 +8,13 @@
     conditionalAccessPolicies) - this walks every check exactly once, resolves each
     dataset name through the shared DatasetMap.psd1 table (the same map
     Import-PulseCheckCatalog cross-checks Data.Datasets against at catalog-load time), and
-    returns one entry per DISTINCT dataset name: { Dataset; Type; Operation; ApiVersion;
-    Pending; Plan }. Pending is carried straight through from the map (see DatasetMap.psd1's
-    header) so the collector can classify an unplanned pending dataset as Skipped without
-    attempting a Graph call or resolving a descriptor that does not exist yet. Plan is
-    optional metadata naming the TenantPulse-owned plan selected by the dataset-keyed
-    provider-plan registry.
+    returns one entry per DISTINCT dataset name. Direct Graph entries carry
+    { Dataset; Type; Operation; ApiVersion; Pending }; provider-plan entries carry
+    { Dataset; Plan; ApiVersion } and explicitly leave Type/Operation null. Pending is
+    carried straight through only for direct descriptors so the collector can classify a
+    future unreleased descriptor as Skipped without attempting a Graph call. Plan names
+    the TenantPulse-owned implementation selected by the dataset-keyed provider registry;
+    it is never reinterpreted as a GraphKit Type or Operation.
 
     A dataset name a check references that is absent from -DatasetMap is a hard error -
     Import-PulseCheckCatalog should already have caught this at catalog-load time when a
@@ -83,9 +84,24 @@ function Get-PulseCollectionManifest {
         }
 
         $mapEntry = $DatasetMap[$Name]
-        $isPending = $mapEntry.ContainsKey('Pending') -and [bool] $mapEntry.Pending
+        $hasProviderPlan = $mapEntry.ContainsKey('Plan')
+        $providerPlan = if ($hasProviderPlan) { [string] $mapEntry.Plan } else { $null }
+        if ($hasProviderPlan) {
+            if ([string]::IsNullOrWhiteSpace($providerPlan)) {
+                throw "Get-PulseCollectionManifest: provider-plan dataset '$Name' has an empty Plan value."
+            }
+            foreach ($forbiddenField in @('Type', 'Operation', 'Pending', 'ExpectedThrottleClass', 'ExpectedReplayPolicy')) {
+                if ($mapEntry.ContainsKey($forbiddenField)) {
+                    throw "Get-PulseCollectionManifest: provider-plan dataset '$Name' also declares forbidden Graph descriptor metadata '$forbiddenField'."
+                }
+            }
+        }
+
+        $isPending = -not $hasProviderPlan -and $mapEntry.ContainsKey('Pending') -and [bool] $mapEntry.Pending
         $idFromDataset = if ($mapEntry.ContainsKey('IdFromDataset')) { [string] $mapEntry.IdFromDataset } else { $null }
-        $providerPlan = if ($mapEntry.ContainsKey('Plan')) { [string] $mapEntry.Plan } else { $null }
+        $type = if ($mapEntry.ContainsKey('Type')) { $mapEntry.Type } else { $null }
+        $operation = if ($mapEntry.ContainsKey('Operation')) { $mapEntry.Operation } else { $null }
+        $apiVersion = if ($mapEntry.ContainsKey('ApiVersion')) { $mapEntry.ApiVersion } else { $null }
 
         if ($idFromDataset) {
             Resolve-Entry -Name $idFromDataset -RequestedBy $RequestedBy -Chain ($Chain + $Name)
@@ -93,9 +109,9 @@ function Get-PulseCollectionManifest {
 
         $entries[$Name] = [pscustomobject]@{
             Dataset       = $Name
-            Type          = $mapEntry.Type
-            Operation     = $mapEntry.Operation
-            ApiVersion    = $mapEntry.ApiVersion
+            Type          = $type
+            Operation     = $operation
+            ApiVersion    = $apiVersion
             Pending       = $isPending
             IdFromDataset = $idFromDataset
             Plan          = $providerPlan

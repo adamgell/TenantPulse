@@ -120,6 +120,38 @@ Describe 'Invoke-PulseCollection provider plans' {
         $registry.groupMembers.Command.ToString() | Should -Be $registry.groupClosure.Command.ToString()
     }
 
+    It 'fails a declared provider plan closed when its registration is unavailable without resolving or sending a Graph operation' {
+        Mock Get-GraphOperation -ModuleName TenantPulse { throw 'a provider-plan identity is not a Graph descriptor' }
+        Mock Get-GraphObject -ModuleName TenantPulse { throw 'a missing provider plan must never fall through to Graph' }
+        $manifest = @([pscustomobject]@{
+                Dataset       = 'declaredProviderPlan'
+                Type          = $null
+                Operation     = $null
+                ApiVersion    = $null
+                Pending       = $false
+                IdFromDataset = $null
+                Plan          = 'Invoke-MissingProviderPlan'
+            })
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context {
+                param($store, $manifest, $context)
+                Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                    -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry @{}
+            }
+        } | Should -Not -Throw
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.declaredProviderPlan.status | Should -Be 'Failed'
+        $saved.datasets.declaredProviderPlan.failureClass | Should -Be 'DependencyUnavailable'
+        $saved.datasets.declaredProviderPlan.reasonCode | Should -Be 'provider-plan-unavailable'
+        $saved.datasets.declaredProviderPlan.provider | Should -Be 'TenantPulse'
+        $saved.datasets.declaredProviderPlan.apiVersion | Should -BeNullOrEmpty
+        @($saved.datasets.declaredProviderPlan.operations).Count | Should -Be 0
+        Should-NotInvoke Get-GraphOperation -ModuleName TenantPulse
+        Should-NotInvoke Get-GraphObject -ModuleName TenantPulse
+    }
+
     It 'dispatches a dataset-keyed plan and preserves successful rows plus a failed child gap' {
         $planRegistry = InModuleScope TenantPulse {
             @{
@@ -161,8 +193,8 @@ Describe 'Invoke-PulseCollection provider plans' {
     It 'rejects a dependency cycle before a provider plan can dispatch' {
         $checks = @([pscustomobject]@{ Id = 'TP.INT.TEST'; Data = [pscustomobject]@{ Datasets = @('compositeA') } })
         $map = @{
-            compositeA = @{ Type = 'Synthetic'; Operation = 'Walk'; ApiVersion = 'beta'; Plan = 'compositeA'; IdFromDataset = 'compositeB' }
-            compositeB = @{ Type = 'Synthetic'; Operation = 'Walk'; ApiVersion = 'beta'; Plan = 'compositeB'; IdFromDataset = 'compositeA' }
+            compositeA = @{ Plan = 'compositeA'; ApiVersion = 'beta'; IdFromDataset = 'compositeB' }
+            compositeB = @{ Plan = 'compositeB'; ApiVersion = 'beta'; IdFromDataset = 'compositeA' }
         }
 
         {
@@ -627,7 +659,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         $planRegistry = InModuleScope TenantPulse { Resolve-PulseProviderPlanRegistry }
         $manifest = @(
             [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
-            [pscustomobject]@{ Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'; Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'; Type = $null; Operation = $null; ApiVersion = $null; Pending = $false; Plan = 'Invoke-PulseWindowsDataProcessorPlan' }
             [pscustomobject]@{ Dataset = 'subscribedSkus'; Type = 'SubscribedSku'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
         )
 
@@ -643,6 +675,9 @@ Describe 'Invoke-PulseCollection provider plans' {
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Skipped'
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'PlatformUnavailable'
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'platform-unavailable'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.provider | Should -Be 'TenantPulse'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.apiVersion | Should -BeNullOrEmpty
+        @($saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.operations).Count | Should -Be 0
         $saved.datasets.subscribedSkus.status | Should -Be 'Failed'
         $saved.datasets.subscribedSkus.failureClass | Should -Be 'AuthenticationFailed'
         $saved.datasets.subscribedSkus.reasonCode | Should -Be 'authentication-failed'

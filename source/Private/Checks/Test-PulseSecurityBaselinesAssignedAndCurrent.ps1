@@ -9,10 +9,9 @@
     intent primitives. Current policies join templateReference.templateId to
     configurationPolicyTemplate.id and map lifecycleState; legacy intents separately join
     intent.templateId to deviceManagementTemplate.id and use isDeprecated. Both paths keep
-    only the four tracked security-baseline families. DatasetMap.psd1 retains its synthetic
-    Pending Walk marker only as the static manifest placeholder; the normal collection path
-    routes this dataset through the built-in provider-plan registry before the Pending
-    fallback is evaluated.
+    only the four tracked security-baseline families. DatasetMap.psd1 names this TenantPulse
+    plan directly, while the provider registry declares the exact released GraphKit child
+    operation union used by permission preflight and the read-only gate.
 
     COMPACT ROW SHAPE this rule expects (defined here, matching the precedent set by
     TP.INT.0013's own compact-record contract, not raw Graph): one row per joined

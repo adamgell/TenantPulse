@@ -2,20 +2,20 @@
     Private: TP.INT.0015 rule function - LAPS configuration policy meets minimum security
     bar (Task 3.2, Maester port MT.1177 - Test-MtIntuneLAPSConfiguration, MIT).
 
-    PENDING COMPOSITE DATASET: same shape family as TP.INT.0014
+    TENANTPULSE PROVIDER PLAN: same shape family as TP.INT.0014
     (endpointSecurityDiskEncryptionPolicies) - deviceManagement/configurationPolicies
     filtered to templateFamily eq 'endpointSecurityAccountProtection', further filtered
     client-side to the LAPS templateId (adc46e5a-f4aa-4ff6-aeff-4f27bc525796 per Maester's
     own hardcoded value - the research entry's own "template ID trap" note: this GUID
     could not be independently re-verified against a live tenant from inside this task, so
     it is carried through AS-IS from Maester's own source rather than invented or altered;
-    whoever builds the composite descriptor should re-confirm it against Ivy24 before this
-    check's Pending flag is dropped), then each matching policy's settings walked and
-    resolved against the four LAPS CSP criteria below. DatasetMap.psd1 declares
-    'endpointSecurityLapsPolicies' Pending=$true, holding the ALREADY-RESOLVED per-policy
-    shape ({policyId, policyName, backsUpToEntra, hasSufficientComplexity,
-    hasSufficientLength, hasPostAuthAction}) - this rule does not re-implement Maester's
-    own opaque CSP choice-value suffix-matching itself, for the same reason
+    the protected-live evidence gate should re-confirm it against Ivy24 before claiming the
+    service shape), then each matching policy's settings are walked and resolved against the
+    four LAPS CSP criteria below. DatasetMap.psd1 names
+    Invoke-PulseEndpointSecurityPolicyPlan directly; it returns the resolved per-policy shape
+    ({policyId, policyName, backsUpToEntra, hasSufficientComplexity,
+    hasSufficientLength, hasPostAuthAction}) or explicit gaps. This rule does not re-implement
+    Maester's opaque CSP choice-value suffix-matching itself, for the same reason
     Test-PulseBitLockerFullDiskEncryption.ps1 does not (schema-version-dependent,
     unverifiable without live tenant access from inside this task).
 

@@ -246,6 +246,57 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings' {
         }
     }
 
+    It 'rechecks the shared authentication abort before Administrative Templates instead of using the cached expansion decision' {
+        InModuleScope TenantPulse {
+            function Get-GraphContext { param() }
+            function Get-GraphOperation { param() }
+            function Get-GraphObject { param() }
+        }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{
+                TenantId  = '11111111-1111-1111-1111-111111111111'
+                ProfileId = 'contoso-late-auth-abort'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
+        }
+        Mock Get-GraphOperation -ModuleName TenantPulse {
+            @{
+                Type                = $Type
+                Operation           = $Operation
+                ApiVersion          = if ($Type -eq 'SecurityDefaultsPolicy') { 'v1.0' } else { 'beta' }
+                ThrottleClass       = 'Read'
+                ReplayPolicy        = 'Safe'
+                RequiredPermissions = @()
+            }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope }
+        Mock Invoke-PulseSettingsCatalogExpansionPipeline -ModuleName TenantPulse {
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
+        }
+        Mock Invoke-PulseTypedPolicyExpansionPipeline -ModuleName TenantPulse {
+            if (-not $NetworkAbortState.AuthenticationAborted) {
+                throw 'typed expansion did not receive the shared authentication abort'
+            }
+        }
+        Mock Invoke-PulseAdministrativeTemplateExpansion -ModuleName TenantPulse {
+            throw 'Administrative Templates must not dispatch after the earlier expansion sets the shared authentication abort'
+        }
+        Mock Invoke-PulseExpansionSummary -ModuleName TenantPulse { }
+
+        $store = InModuleScope TenantPulse -ArgumentList $script:outputRoot {
+            param($outputRoot)
+            Get-PulseTenantSnapshot -ProfileId 'contoso-late-auth-abort' -OutputPath $outputRoot `
+                -IncludeCheck 'TP.ENT.0001' -ExpandSettings
+        }
+
+        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.expansions.administrativeTemplates.status | Should -Be 'NotExpanded'
+        $manifest.expansions.administrativeTemplates.reason | Should -Match 'authentication-failed'
+        Should-Invoke Invoke-PulseSettingsCatalogExpansionPipeline -ModuleName TenantPulse -Times 1 -Exactly
+        Should-NotInvoke Invoke-PulseAdministrativeTemplateExpansion -ModuleName TenantPulse
+    }
+
     It 'is OFF by default: no configurationPolicies dataset and no settingsCatalog expansion entry are written' {
         InModuleScope TenantPulse {
             function Get-GraphContext { param() }

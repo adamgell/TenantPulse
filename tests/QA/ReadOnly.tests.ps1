@@ -25,14 +25,12 @@
     drift out of sync with DatasetMap.psd1 - see the deviceManagementSettings fix in this
     same commit, caught by writing this file.
 
-    Pending-flagged entries (source/Data/DatasetMap.psd1's Pending = $true datasets) have no
-    released GraphKit descriptor to resolve at all - Get-GraphOperation would simply not
-    find them. For those, the gate instead asserts the map entry's own ExpectedThrottleClass
-    / ExpectedReplayPolicy declaration is 'Read' / 'Safe' (see DatasetMap.psd1's own comment
-    for why that is still a real, catchable assertion) and reports the skip reason plainly;
-    they get re-checked against the live catalog automatically the moment the Pending flag
-    drops, because Test-PulseReadOnlyDatasetMap then falls through to the same
-    Get-GraphOperation path every released entry uses.
+    Provider-plan entries do not impersonate GraphKit descriptors. They declare only a
+    TenantPulse Plan (and, where meaningful, ApiVersion), and the gate proves that Type,
+    Operation, Pending, and future-descriptor expectation fields are absent. The current
+    production map has no Pending placeholders; a dedicated leaf test asserts that
+    explicitly so Pester never turns an empty parameterized case set into an invisible
+    NotRun block.
 #>
 
 BeforeDiscovery {
@@ -43,7 +41,7 @@ BeforeDiscovery {
 
     $script:releasedDatasetCases = @(
         $realDatasetMap.Keys |
-            Where-Object { -not $realDatasetMap[$_].Pending } |
+            Where-Object { -not $realDatasetMap[$_].Pending -and -not $realDatasetMap[$_].Plan } |
             Sort-Object -Culture ([System.Globalization.CultureInfo]::InvariantCulture) |
             ForEach-Object {
                 @{
@@ -69,6 +67,18 @@ BeforeDiscovery {
             }
     )
 
+    $script:providerPlanDatasetCases = @(
+        $realDatasetMap.Keys |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string] $realDatasetMap[$_].Plan) } |
+            Sort-Object -Culture ([System.Globalization.CultureInfo]::InvariantCulture) |
+            ForEach-Object {
+                @{
+                    Name = $_
+                    Plan = [string] $realDatasetMap[$_].Plan
+                }
+            }
+    )
+
     # Discovery-time vacuum guard, mirroring SecretScan.tests.ps1's: if BOTH case lists are
     # empty, every -ForEach block below silently produces zero leaf tests - a
     # DatasetMap.psd1 that failed to parse into any entries (or a Where-Object filter that
@@ -77,8 +87,9 @@ BeforeDiscovery {
     # leaning on Assert-GateResult.ps1's suite-wide -MinimumTests floor to catch this for
     # THIS file specifically - that floor only notices a large-enough drop in the TOTAL
     # count, not this one file quietly going empty while other files keep growing.
-    if ($script:releasedDatasetCases.Count -eq 0 -and $script:pendingDatasetCases.Count -eq 0) {
-        throw 'Static read-only gate: discovered zero DatasetMap.psd1 entries (both released and Pending) - the map failed to parse or the read/filter logic is broken.'
+    if ($script:releasedDatasetCases.Count -eq 0 -and $script:pendingDatasetCases.Count -eq 0 -and
+        $script:providerPlanDatasetCases.Count -eq 0) {
+        throw 'Static read-only gate: discovered zero descriptor, Pending, or provider-plan DatasetMap.psd1 entries - the map failed to parse or the read/filter logic is broken.'
     }
 }
 BeforeAll {
@@ -116,6 +127,15 @@ BeforeAll {
 
         foreach ($name in ($DatasetMap.Keys | Sort-Object -Culture ([System.Globalization.CultureInfo]::InvariantCulture))) {
             $entry = $DatasetMap[$name]
+
+            if (-not [string]::IsNullOrWhiteSpace([string] $entry.Plan)) {
+                foreach ($forbiddenField in @('Type', 'Operation', 'Pending', 'ExpectedThrottleClass', 'ExpectedReplayPolicy')) {
+                    if ($entry.ContainsKey($forbiddenField)) {
+                        $violations.Add("Provider-plan dataset '$name' publishes synthetic Graph descriptor metadata '$forbiddenField'.")
+                    }
+                }
+                continue
+            }
 
             if ($entry.Pending) {
                 $expectedThrottle = [string] $entry.ExpectedThrottleClass
@@ -164,41 +184,35 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         }
     }
 
-    Context 'every Pending dataset declares an expected Read/Safe descriptor' {
-        # GraphKit 0.1.1 migration (Task 1.11): the six datasets this map used to carry
-        # Pending = $true for (securityDefaultsPolicy, directoryRoleAssignments,
-        # directoryRoleDefinitions, organization, organizationMdmAuthority, entraDevices)
-        # shipped and Pending was dropped from all of them - see DatasetMap.psd1.
-        # GraphKit 0.3.0 makes managedDeviceCleanupRules a direct released
-        # descriptor. Five placeholders remain: the Windows data processor plus the four
-        # TenantPulse-owned composite provider plans (RBAC, BitLocker, LAPS, baselines).
-        # The public snapshot path intercepts all five through its built-in plan registry;
-        # this static block still proves that no unresolved placeholder could become a
-        # mutation if it ever fell through to ordinary descriptor collection.
-        It "Pending dataset '<Name>' (<Type>/<Op>) declares ExpectedThrottleClass='Read' and ExpectedReplayPolicy='Safe'" -ForEach $script:pendingDatasetCases -AllowNullOrEmptyForEach {
-            # No live descriptor exists to resolve - GraphKit 0.3.0 genuinely does not have
-            # this Type/Operation pair yet. Confirm that (rather than silently trusting the
-            # Pending flag) so a descriptor that quietly shipped early is caught, then assert
-            # the map's own declaration is read-only.
-            { Get-GraphOperation -Type $Type -Operation $Op -ErrorAction Stop } |
-                Should -Throw -Because "dataset '$Name' is marked Pending - its descriptor must genuinely be absent from the released GraphKit catalog; if this no longer throws, GraphKit shipped it and the Pending flag (and its released-catalog follow-up) must be dropped"
-
-            $ExpectedThrottleClass | Should -Be 'Read' -Because "Pending dataset '$Name' must still declare the read-only shape its future descriptor is expected to have"
-            $ExpectedReplayPolicy | Should -Be 'Safe' -Because "Pending dataset '$Name' must still declare the read-only shape its future descriptor is expected to have"
+    Context 'legacy Pending descriptor placeholders are closed out' {
+        It 'contains no Pending dataset entries in the production map' {
+            $script:pendingDatasetCases | Should -BeNullOrEmpty -Because 'unreleased TenantPulse composites must use explicit provider-plan metadata, never invented GraphKit Type/Operation expectations'
         }
     }
 
-    It 'keeps the Windows processor entry Pending while its official contract is unresolved' {
+    Context 'TenantPulse provider plans do not impersonate GraphKit descriptors' {
+        It "provider-plan dataset '<Name>' declares plan '<Plan>' without Type/Operation/Pending metadata" -ForEach $script:providerPlanDatasetCases -AllowNullOrEmptyForEach {
+            $map = Import-PowerShellDataFile -Path $script:datasetMapPath
+            $entry = $map[$Name]
+
+            $entry.Plan | Should -BeExactly $Plan
+            $entry.ContainsKey('Type') | Should -BeFalse
+            $entry.ContainsKey('Operation') | Should -BeFalse
+            $entry.ContainsKey('Pending') | Should -BeFalse
+            $entry.ContainsKey('ExpectedThrottleClass') | Should -BeFalse
+            $entry.ContainsKey('ExpectedReplayPolicy') | Should -BeFalse
+        }
+    }
+
+    It 'represents the Windows processor disposition as a TenantPulse plan with no Graph descriptor claim' {
         $map = Import-PowerShellDataFile -Path $script:datasetMapPath
         $entry = $map['dataProcessorServiceForWindowsFeaturesOnboarding']
 
-        $entry.Pending | Should -BeTrue
-        $entry.ExpectedThrottleClass | Should -Be 'Read'
-        $entry.ExpectedReplayPolicy | Should -Be 'Safe'
-        {
-            Get-GraphOperation -Type 'DataProcessorServiceForWindowsFeaturesOnboarding' `
-                -Operation 'Get' -ErrorAction Stop
-        } | Should -Throw
+        $entry.Plan | Should -Not -BeNullOrEmpty
+        $entry.ApiVersion | Should -BeNullOrEmpty
+        $entry.ContainsKey('Type') | Should -BeFalse
+        $entry.ContainsKey('Operation') | Should -BeFalse
+        $entry.ContainsKey('Pending') | Should -BeFalse
     }
 
     It 'resolves managed-device cleanup rules through the exact GraphKit 0.3.0 Read/Safe descriptor' {

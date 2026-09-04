@@ -127,22 +127,6 @@ function Invoke-PulseSecurityBaselinePlan {
         return Resolve-PulseGraphFailure -ErrorRecord $ErrorRecord
     }
 
-    function New-BaselineReadFailure {
-        param(
-            [Parameter(Mandatory)] [string] $Operation,
-            [Parameter(Mandatory)] [System.Management.Automation.ErrorRecord] $ErrorRecord
-        )
-        $metadata = Get-BaselineFailureMetadata -ErrorRecord $ErrorRecord
-        if ($metadata.AbortCollection) {
-            $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
-        }
-        return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
-            -FailureClass $metadata.FailureClass -ReasonCode $metadata.ReasonCode `
-            -Detail @{ operation = $Operation } -Provider 'GraphKit' -ApiVersion $apiVersion `
-            -Operations $operations
-    }
-
     function New-BaselineReadGap {
         param(
             [Parameter(Mandatory)] [string] $Scope,
@@ -171,11 +155,21 @@ function Invoke-PulseSecurityBaselinePlan {
     }
 
     $gaps = [System.Collections.Generic.List[object]]::new()
+    $legacyTemplatesAvailable = $true
     try {
         $templates = @(Invoke-PulseGraphRead -Context $Context -Type 'DeviceManagementTemplate' -Operation 'ListBeta')
 
     } catch {
-        return New-BaselineReadFailure -Operation 'DeviceManagementTemplate.ListBeta' -ErrorRecord $_
+        $templates = @()
+        $legacyTemplatesAvailable = $false
+        $gaps.Add((New-BaselineReadGap -Scope 'surface:deviceManagementTemplates' `
+                -Operation 'DeviceManagementTemplate.ListBeta' -ErrorRecord $_))
+        if ($NetworkAbortState.AuthenticationAborted) {
+            return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gaps.ToArray() `
+                -FailureClass 'AuthenticationFailed' -ReasonCode 'authentication-failed' `
+                -Detail @{ operation = 'DeviceManagementTemplate.ListBeta' } `
+                -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
+        }
     }
 
     try {
@@ -206,18 +200,21 @@ function Invoke-PulseSecurityBaselinePlan {
                 -ApiVersion $apiVersion -Operations $operations
         }
     }
-    try {
-        $intents = @(Invoke-PulseGraphRead -Context $Context -Type 'DeviceManagementIntent' -Operation 'ListBeta')
+    $intents = @()
+    if ($legacyTemplatesAvailable) {
+        try {
+            $intents = @(Invoke-PulseGraphRead -Context $Context -Type 'DeviceManagementIntent' -Operation 'ListBeta')
 
-    } catch {
-        $intents = @()
-        $gaps.Add((New-BaselineReadGap -Scope 'surface:deviceManagementIntents' `
-                -Operation 'DeviceManagementIntent.ListBeta' -ErrorRecord $_))
-        if ($NetworkAbortState.AuthenticationAborted) {
-            return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gaps.ToArray() `
-                -FailureClass 'AuthenticationFailed' -ReasonCode 'authentication-failed' `
-                -Detail @{ operation = 'DeviceManagementIntent.ListBeta' } -Provider 'GraphKit' `
-                -ApiVersion $apiVersion -Operations $operations
+        } catch {
+            $intents = @()
+            $gaps.Add((New-BaselineReadGap -Scope 'surface:deviceManagementIntents' `
+                    -Operation 'DeviceManagementIntent.ListBeta' -ErrorRecord $_))
+            if ($NetworkAbortState.AuthenticationAborted) {
+                return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gaps.ToArray() `
+                    -FailureClass 'AuthenticationFailed' -ReasonCode 'authentication-failed' `
+                    -Detail @{ operation = 'DeviceManagementIntent.ListBeta' } -Provider 'GraphKit' `
+                    -ApiVersion $apiVersion -Operations $operations
+            }
         }
     }
 

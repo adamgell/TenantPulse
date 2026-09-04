@@ -71,10 +71,11 @@ are historical release proof, not proof for the unreleased `0.3.0` source.
 | Live | The exact-package Ivy24 rows and expansion counts are retained below. |
 | Published | TenantPulse 0.2.0 on PSGallery at `2026-08-30T14:07:39.587Z`; the downloaded 411284-byte archive matches `a0d5ff793b92753ab3efb4db20cf5bcf8b953e3cf81bf1a776c96a3d992417bd`. |
 
-The source implementation is wired through TenantPulse's public snapshot path. Synthetic
-`Pending` map entries for composite datasets are implementation placeholders, not the runtime
-outcome: the built-in provider registry intercepts each one before the ordinary descriptor
-fallback. Evidence levels are kept separate below.
+The published `0.2.0` archive described in this evidence table used synthetic `Pending` map
+placeholders for composite datasets while its built-in registry supplied the real runtime plans.
+Current `0.3.0` source replaces those placeholders with explicit TenantPulse `Plan` entries and
+validates each network-backed plan's exact child-operation union in preflight and read-only gates.
+Evidence levels remain separate below; a source correction does not rewrite the historical package.
 
 | Dataset/check | Exact-package evidence |
 |---|---|
@@ -671,24 +672,24 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    verified evidence establishes the candidate's reviewed exact remote head, remote matrix/gitleaks
    result, merge, or merged-main CI. The docs-only reconciliation after that runtime tree does not
    alter the frozen candidate's package-producing bytes.
-2. **R1b assignment and expansion completion — partial.** Settings Catalog assignments and typed
-   include/exclude intent exist. Administrative Template expansion, the now-governing
-   expansion-summary dataset, a protected live shape/count proof with populated assignment targets,
-   and stale pre-implementation map/reason text remain open. Existing end-to-end fixtures use
-   authoritative empty assignments and therefore do not prove overlap behavior with populated targets.
-3. **R2 composite-provider representation and certainty — partial.** Four production provider plans
-   already compose official GraphKit Read/Safe primitives, so no generic GraphKit `Walk` operation is
-   required. The dataset map nevertheless publishes invented `Pending` / `Walk` tuples, QA currently
-   blesses them, and outcome provenance is incomplete. Endpoint Security can skip malformed template
-   metadata and publish authoritative empty; unknown BitLocker/LAPS values can become false decisions;
-   and a legacy-baseline read failure suppresses the independent current baseline surface. The
-   protected-live proof of the raw BitLocker value mapping and LAPS template identity remains
-   mandatory before those Pending representations can close; the historical `0.2.0` table does not
-   prove that mapping.
-4. **R3 platform-unavailable representation — partial.** The Windows data-processor runtime correctly
-   performs no network work and evaluates as `Skipped` / `PlatformUnavailable` / `NotApplicable`.
-   Its static map and structured outcome still falsely name GraphKit and `Get`; closure requires a
-   strict disposition, `Provider = TenantPulse`, empty operations, and no descriptor fallback.
+2. **R1b protected-live acceptance — open; deterministic implementation complete.** Settings Catalog
+   assignments, typed include/exclude intent, Administrative Template expansion, and the governing
+   expansion-summary artifact are implemented. Shared authentication abort is a no-send gate,
+   presentation values without stable ids become deterministic Partial gaps, and App Control consumes
+   `assignedPolicyIds`. A protected live shape/count proof with populated assignment targets remains;
+   authoritative-empty fixtures do not prove populated-target overlap behavior.
+3. **R2 protected-live acceptance — open; deterministic representation/certainty complete.** Production
+   composite datasets are explicit TenantPulse `Plan` entries, and their exact GraphKit Read/Safe child
+   operations are enforced by preflight and QA. Endpoint Security gaps absent/unrecognized template
+   metadata, unknown BitLocker/LAPS values remain undecidable, and legacy/current baseline surfaces
+   fail independently. Protected-live proof of raw BitLocker value mapping and LAPS template identity
+   remains mandatory before claiming those service shapes; the historical `0.2.0` table does not prove
+   that mapping.
+4. **R3 platform-unavailable representation — deterministic implementation complete.** The Windows
+   data-processor plan performs no network work and evaluates as `Skipped` /
+   `PlatformUnavailable` / `NotApplicable`. Its map and outcome now declare `Provider = TenantPulse`,
+   null API version, empty operations, and no GraphKit descriptor fallback. Re-evaluate only when the
+   published service contract or GraphKit catalog changes.
 5. **R4 coverage, relationships, and presentation — partial.** Self-contained HTML is implemented
    and deterministically tested as the second findings renderer; JSON remains canonical, and the
    HTML path does not change the export manifest or touch Graph/snapshots. Remaining work includes bounded,

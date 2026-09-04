@@ -3,8 +3,8 @@
     enabled (Task 3.2, Maester port MT.1099 - Test-MtWindowsDataProcessor, MIT).
 
     PLATFORM-UNAVAILABLE DATASET (honest NA): released GraphKit 0.3.0 has no matching
-    descriptor. The built-in provider plan returns PlatformUnavailable before the
-    DatasetMap placeholder can fall back to DescriptorPending. A controlled Ivy24
+    descriptor. DatasetMap names the built-in provider plan directly; it returns
+    PlatformUnavailable without resolving or sending a Graph operation. A controlled Ivy24
     read-only GET (beta,
     /deviceManagement/dataProcessorServiceForWindowsFeaturesOnboarding) did return the
     expected singleton and both native Boolean fields, but Microsoft Learn publishes no

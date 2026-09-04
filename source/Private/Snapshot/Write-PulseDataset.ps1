@@ -58,8 +58,8 @@ function Write-PulseDataset {
 
 
         [Parameter(Mandatory)]
-        [ValidateSet('v1.0', 'beta')]
-        [string] $ApiVersion,
+        [AllowNull()]
+        $ApiVersion,
 
         [Parameter(Mandatory)]
         [ValidateSet('Collected', 'Partial', 'Failed', 'Skipped')]
@@ -117,6 +117,10 @@ function Write-PulseDataset {
         [AllowNull()]
         [System.Collections.IList] $ManifestBatch = $null
     )
+
+    if ($null -ne $ApiVersion -and [string] $ApiVersion -notin @('v1.0', 'beta')) {
+        throw "ApiVersion must be null, 'v1.0', or 'beta'."
+    }
 
     Assert-PulseDatasetName -Name $Name
 

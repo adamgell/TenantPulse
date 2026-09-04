@@ -8,9 +8,10 @@
     PlatformUnavailable outcome rather than inventing a descriptor or silently treating a
     missing catalog entry as a transient GraphKit release wait.
 
-    This plan intentionally performs no Graph call. The built-in provider registry selects
-    it for this dataset before the DatasetMap Pending fallback, replacing an indefinite
-    descriptor-pending result with the explicit platform disposition.
+    This plan intentionally performs no Graph call. DatasetMap names this TenantPulse plan
+    directly and carries no GraphKit Type/Operation/Pending tuple. The observed read is
+    retained only as historical LiveProbe evidence; it is not production operation
+    metadata and does not authorize a request.
 #>
 
 function Invoke-PulseWindowsDataProcessorPlan {
@@ -46,10 +47,7 @@ function Invoke-PulseWindowsDataProcessorPlan {
     $null = $NetworkAbortState
 
     $detail = [ordered]@{
-        Contract = 'DataProcessorServiceForWindowsFeaturesOnboarding.Get'
-        Method   = 'GET'
-        Path     = '/deviceManagement/dataProcessorServiceForWindowsFeaturesOnboarding'
-        ApiVersion = 'beta'
+        Disposition = 'NoReleasedGraphContract'
         Response = [ordered]@{
             ResourceType = 'microsoft.graph.dataProcessorServiceForWindowsFeaturesOnboarding'
             Singleton    = $true
@@ -62,7 +60,6 @@ function Invoke-PulseWindowsDataProcessorPlan {
         GraphKit = [ordered]@{
             PackageVersion = '0.3.0'
             Descriptor     = 'Absent from released catalog'
-            DescriptorLookup = 'DataProcessorServiceForWindowsFeaturesOnboarding/Get'
         }
         LiveProbe = [ordered]@{
             Environment        = 'Ivy24'

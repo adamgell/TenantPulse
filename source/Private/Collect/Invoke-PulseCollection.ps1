@@ -9,7 +9,11 @@
           the dataset's Graph operations before any target Get-GraphObject is sent.
           MissingGrant, ServicePrincipalMissing, incompatible/unknown authentication,
           bootstrap-trap errors, and malformed finding sets write Failed with no request.
-        - Pending (see DatasetMap.psd1's header): writes Skipped with reason
+        - A provider-plan entry is selected through its dataset-keyed registration and is
+          never treated as a Graph descriptor. If the map declares Plan but the registry
+          lacks that dataset, collection records Failed/DependencyUnavailable with no
+          descriptor resolution or request.
+        - Pending direct descriptors (see DatasetMap.psd1's header): writes Skipped with reason
           'descriptor-pending: awaiting GraphKit release' and makes no Graph call at all -
           there is no descriptor yet to resolve or assert against.
 
@@ -167,13 +171,14 @@ function Invoke-PulseCollection {
     for ($i = 0; $i -lt $Manifest.Count; $i++) {
         $entry = $Manifest[$i]
 
-        # Composite plans are selected only by the explicit dataset-keyed registry. A
-        # registered plan takes precedence over Pending because Pending is a temporary
-        # catalog state, not a runtime implementation for a capability with a plan.
+        # Composite plans are selected only by the explicit dataset-keyed registry. Plan
+        # metadata is a TenantPulse provider identity, never a synthetic Graph descriptor.
         $planCommand = $null
         $planRegistration = $null
         $planRequiresNetwork = $true
         $planSupportsNetworkAbortState = $false
+        $planOperationNames = @()
+        $declaredPlan = if ($entry.PSObject.Properties['Plan']) { [string] $entry.Plan } else { $null }
         if ($null -ne $ProviderPlanRegistry -and $ProviderPlanRegistry.ContainsKey($entry.Dataset)) {
             $planRegistration = $ProviderPlanRegistry[$entry.Dataset]
             if ($planRegistration -is [System.Collections.IDictionary] -and $planRegistration.Contains('Command')) {
@@ -185,9 +190,31 @@ function Invoke-PulseCollection {
                     $planRegistration.SupportsNetworkAbortState -is [bool]) {
                     $planSupportsNetworkAbortState = [bool] $planRegistration.SupportsNetworkAbortState
                 }
+                if ($planRegistration.Contains('Operations')) {
+                    $planOperationNames = @(
+                        foreach ($operationSpec in @($planRegistration.Operations)) {
+                            $operationType = [string] $operationSpec.Type
+                            $operationName = [string] $operationSpec.Operation
+                            if (-not [string]::IsNullOrWhiteSpace($operationType) -and
+                                -not [string]::IsNullOrWhiteSpace($operationName)) {
+                                '{0}.{1}' -f $operationType, $operationName
+                            }
+                        }
+                    )
+                }
             } else {
                 $planCommand = $planRegistration
             }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($declaredPlan) -and $null -eq $planCommand) {
+            $reason = Protect-PulseReason -Message 'provider-plan-unavailable: declared TenantPulse plan is not registered' `
+                -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+            Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
+                -Reason $reason -ReasonCode 'provider-plan-unavailable' -Detail @{ plan = $declaredPlan } `
+                -FailureClass 'DependencyUnavailable' -Provider 'TenantPulse' -Operations @() `
+                -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+            continue
         }
 
         # Registry membership alone does not make a plan safe after auth failure. Only the
@@ -196,9 +223,10 @@ function Invoke-PulseCollection {
         $isPendingWithoutPlan = $entry.Pending -and $null -eq $planCommand
         if ($NetworkAbortState.AuthenticationAborted -and -not $isPendingWithoutPlan -and
             ($null -eq $planCommand -or $planRequiresNetwork)) {
+            $abortOperations = if ($null -ne $planCommand) { @($planOperationNames) } else { @($entry.Operation) }
             Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
                 -Reason $NetworkAbortState.Reason -ReasonCode 'authentication-failed' -Detail @{ status = 'collection aborted' } `
-                -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations @($entry.Operation)
+                -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations $abortOperations
             continue
         }
         $datasetAuthorization = Get-PulseDatasetAuthorization -AuthorizationDecision $AuthorizationDecision `
@@ -297,7 +325,7 @@ function Invoke-PulseCollection {
                     Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion `
                         -Status 'Failed' -Reason $reason -ReasonCode $failure.ReasonCode `
                         -Detail @{ statusCode = $failure.StatusCode; hasStructuredSignal = $failure.HasStructuredSignal } `
-                        -FailureClass $failure.FailureClass -Provider 'GraphKit' -Operations @($entry.Operation) `
+                        -FailureClass $failure.FailureClass -Provider 'GraphKit' -Operations $planOperationNames `
                         -TenantId $contextTenantId -Pseudonym $TenantPseudonym
 
                     if ($failure.AbortCollection) {
@@ -314,7 +342,7 @@ function Invoke-PulseCollection {
                     Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion `
                         -Status 'Failed' -Reason $reason -ReasonCode 'provider-plan-failed' `
                         -Detail @{ dataset = $entry.Dataset } -FailureClass 'ProviderFailed' `
-                        -Provider 'GraphKit' -Operations @($entry.Operation) `
+                        -Provider 'TenantPulse' -Operations $planOperationNames `
                         -TenantId $contextTenantId -Pseudonym $TenantPseudonym
                 }
             }

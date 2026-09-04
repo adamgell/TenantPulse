@@ -24,6 +24,17 @@ BeforeAll {
 
 ### Fixed
 
+- Composite datasets now use explicit TenantPulse provider-plan metadata instead of
+  synthetic GraphKit `Pending` / `Walk` descriptors. Permission preflight includes every
+  declared child operation, including Endpoint Security policy assignments, while the
+  Windows data-processor disposition records no Graph operation or API version.
+- Endpoint Security collection now gaps absent or unrecognized template metadata instead
+  of silently publishing authoritative empty results, and current security baselines are
+  still collected when the independent legacy-template surface fails.
+- Administrative Template expansion now honors a shared authentication abort before any
+  descriptor or Graph work and gaps presentation values without stable ids instead of
+  inventing random evidence identities. App Control wording now matches its confirmed-
+  assignment behavior.
 - Application report collection now request-body pages the Intune install summary through
   `TotalRowCount`, records incomplete totals and partial group metadata as gaps, stops every
   later report read on authentication failure, recursively scrubs tenant identifiers before
