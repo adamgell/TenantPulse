@@ -32,6 +32,9 @@ BeforeAll {
             [Parameter(Mandatory)] [hashtable] $MembersByGroup,
             [Parameter()] [hashtable] $GroupErrors = @{},
             [Parameter()] [hashtable] $EnvelopesByGroup = @{},
+            [Parameter()] [switch] $DiscoverSeeds,
+            [Parameter()] [AllowEmptyCollection()] [object[]] $ConditionalAccessPolicies = @(),
+            [Parameter()] [AllowEmptyCollection()] [object[]] $RoleAssignments = @(),
             [Parameter()] [int] $MaxDepth = 8,
             [Parameter()] [int] $MaxGroups = 256,
             [Parameter()] [int] $MaxMembersPerGroup = 2000,
@@ -43,6 +46,9 @@ BeforeAll {
             MembersByGroup      = $MembersByGroup
             GroupErrors         = $GroupErrors
             EnvelopesByGroup    = $EnvelopesByGroup
+            DiscoverSeeds       = [bool] $DiscoverSeeds
+            ConditionalAccessPolicies = @($ConditionalAccessPolicies)
+            RoleAssignments     = @($RoleAssignments)
             MaxDepth            = $MaxDepth
             MaxGroups           = $MaxGroups
             MaxMembersPerGroup  = $MaxMembersPerGroup
@@ -73,6 +79,12 @@ BeforeAll {
                     Id        = $groupId
                     PageCap   = $PageCap
                 })
+                if ($Type -eq 'ConditionalAccessPolicy') {
+                    return New-PulseTestGraphEnvelope -Data @($script:ClosureFixture.ConditionalAccessPolicies)
+                }
+                if ($Type -eq 'DirectoryRoleAssignment') {
+                    return New-PulseTestGraphEnvelope -Data @($script:ClosureFixture.RoleAssignments)
+                }
                 if ($Type -ne 'GroupMember') {
                     throw "Unexpected Graph call '$Type/$Operation'."
                 }
@@ -88,17 +100,20 @@ BeforeAll {
                 return New-PulseTestGraphEnvelope
             }
 
-            $manifest = [pscustomobject]@{
+            $manifestData = [ordered]@{
                 Dataset            = 'groupClosure'
                 ApiVersion         = 'v1.0'
                 Type               = 'GroupClosureWalk'
                 Operation          = 'Walk'
-                SeedGroupIds       = @($fixture.SeedGroupIds)
                 MaxDepth           = $fixture.MaxDepth
                 MaxGroups          = $fixture.MaxGroups
                 MaxMembersPerGroup = $fixture.MaxMembersPerGroup
                 MaxTotalMembers    = $fixture.MaxTotalMembers
             }
+            if (-not $fixture.DiscoverSeeds) {
+                $manifestData.SeedGroupIds = @($fixture.SeedGroupIds)
+            }
+            $manifest = [pscustomobject] $manifestData
 
             $outcome = Invoke-PulseGroupClosurePlan `
                 -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
@@ -152,6 +167,25 @@ Describe 'Invoke-PulseGroupClosurePlan' {
         $groupA.cycleClosed | Should -BeTrue
         $groupA.memberIds | Should -Be @('user-1', 'user-2')
         @($result.Calls | Where-Object Kind -eq 'Graph').Count | Should -Be 2
+    }
+
+    It 'does not label shared diamond reachability as a cycle' {
+        $result = Invoke-GroupClosureFixture `
+            -SeedGroupIds @('grp-root') `
+            -MembersByGroup @{
+                'grp-root' = @(
+                    (New-PulseDirectoryMember -Id 'grp-left' -Type 'group')
+                    (New-PulseDirectoryMember -Id 'grp-right' -Type 'group')
+                )
+                'grp-left' = @((New-PulseDirectoryMember -Id 'grp-shared' -Type 'group'))
+                'grp-right' = @((New-PulseDirectoryMember -Id 'grp-shared' -Type 'group'))
+                'grp-shared' = @((New-PulseDirectoryMember -Id 'user-1' -Type 'user'))
+            }
+
+        $result.Outcome.Status | Should -Be 'Collected'
+        $result.Outcome.Detail.cycleCount | Should -Be 0
+        @($result.Outcome.Rows | Where-Object cycleClosed).Count | Should -Be 0
+        @($result.Calls | Where-Object Kind -eq 'Graph').Count | Should -Be 4
     }
 
     It 'deduplicates duplicate reachability of the same user' {
@@ -257,6 +291,100 @@ Describe 'Invoke-PulseGroupClosurePlan' {
         @($result.Outcome.Rows | Where-Object groupId -eq 'grp-a').Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'group:grp-b'
         $result.Outcome.Rows[0].complete | Should -BeFalse
+    }
+
+    It 'returns Partial with a scoped gap when a role-principal group probe is denied' {
+        $denied = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('Graph provider response contained permission denied'),
+            'GraphKit.OperationFailed.403',
+            [System.Management.Automation.ErrorCategory]::PermissionDenied,
+            [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Failed'; Certainty = 'Known'; Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = 403 }) }
+        )
+        $caPolicy = [pscustomobject]@{
+            id = 'ca-seed'
+            conditions = [pscustomobject]@{
+                users = [pscustomobject]@{ includeGroups = @('grp-ca'); excludeGroups = @() }
+            }
+        }
+        $result = Invoke-GroupClosureFixture `
+            -DiscoverSeeds `
+            -ConditionalAccessPolicies @($caPolicy) `
+            -RoleAssignments @([pscustomobject]@{ id = 'ra-denied'; principalId = 'grp-denied' }) `
+            -MembersByGroup @{ 'grp-ca' = @() } `
+            -GroupErrors @{ 'grp-denied' = $denied }
+
+        $result.Outcome.Status | Should -Be 'Partial'
+        $result.Outcome.Gaps[0].Scope | Should -Be 'group:grp-denied'
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'PermissionDenied'
+        @($result.Outcome.Rows).Count | Should -Be 1
+    }
+
+    It 'fails closed for a throttled role-principal group probe instead of reporting no seeds' {
+        $throttled = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('Graph provider response was throttled'),
+            'GraphKit.OperationFailed.429',
+            [System.Management.Automation.ErrorCategory]::LimitsExceeded,
+            [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Failed'; Certainty = 'Known'; Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = 429 }) }
+        )
+        $result = Invoke-GroupClosureFixture `
+            -DiscoverSeeds `
+            -RoleAssignments @([pscustomobject]@{ id = 'ra-throttled'; principalId = 'grp-throttled' }) `
+            -MembersByGroup @{} `
+            -GroupErrors @{ 'grp-throttled' = $throttled }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        $result.Outcome.ReasonCode | Should -Not -Be 'no-seed-groups'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'group:grp-throttled'
+    }
+
+    It 'fails closed for a provider-failed role-principal group probe instead of reporting no seeds' {
+        $unavailable = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('Graph provider unavailable'),
+            'GraphKit.OperationFailed.503',
+            [System.Management.Automation.ErrorCategory]::ResourceUnavailable,
+            [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Failed'; Certainty = 'Known'; Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = 503 }) }
+        )
+        $result = Invoke-GroupClosureFixture `
+            -DiscoverSeeds `
+            -RoleAssignments @([pscustomobject]@{ id = 'ra-unavailable'; principalId = 'grp-unavailable' }) `
+            -MembersByGroup @{} `
+            -GroupErrors @{ 'grp-unavailable' = $unavailable }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        $result.Outcome.ReasonCode | Should -Not -Be 'no-seed-groups'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'group:grp-unavailable'
+    }
+
+    It 'records a malformed role-assignment seed row as an explicit gap' {
+        $result = Invoke-GroupClosureFixture `
+            -DiscoverSeeds `
+            -RoleAssignments @([pscustomobject]@{ id = 'ra-missing-principal'; roleDefinitionId = 'role-ga' }) `
+            -MembersByGroup @{}
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'DirectoryRoleAssignment.List'
+    }
+
+    It 'records a malformed conditional-access seed value as an explicit gap' {
+        $caPolicy = [pscustomobject]@{
+            id = 'ca-malformed'
+            conditions = [pscustomobject]@{
+                users = [pscustomobject]@{ includeGroups = @(''); excludeGroups = @() }
+            }
+        }
+        $result = Invoke-GroupClosureFixture `
+            -DiscoverSeeds `
+            -ConditionalAccessPolicies @($caPolicy) `
+            -MembersByGroup @{}
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConditionalAccessPolicy.List'
     }
 
     It 'emits rows in ordinal groupId order regardless of seed order' {

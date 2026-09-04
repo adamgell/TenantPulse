@@ -34,6 +34,11 @@
     (Detail.exempt = $true) rather than silently dropped, so an operator reviewing the
     finding still sees every permanent assignment that exists, just distinguished from the
     ones this check is actually flagging as a gap.
+
+    A group assignment is itself one standing assignment and is never replaced by its
+    expanded members for pass/fail counting. Group expansion is retained only as blast-radius
+    evidence; an empty group or a group whose current members are all exempt still leaves the
+    standing group assignment in place.
 #>
 
 function Test-PulsePimPermanentAssignments {
@@ -56,25 +61,30 @@ function Test-PulsePimPermanentAssignments {
         if ($Datasets -and $Datasets.ContainsKey('groupMembers')) { $Datasets.groupMembers } else { $null }
     )
 
-    $offending = @()
-    $exempt = @()
+    $offending = [System.Collections.Generic.List[object]]::new()
+    $exempt = [System.Collections.Generic.List[object]]::new()
     foreach ($instance in @($closure.PermanentActiveInstances)) {
         $principalId = [string] (Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'principalId')
-        $expanded = @($principalId)
+        $groupAssignment = $false
+        $blastRadiusPrincipalIds = if ([string]::IsNullOrWhiteSpace($principalId)) { @() } else { @($principalId) }
         if ($memberMap.Present -and $memberMap.Map.Contains($principalId)) {
-            $expanded = @($memberMap.Map[$principalId])
+            $groupAssignment = $true
+            $blastRadiusPrincipalIds = @($memberMap.Map[$principalId])
         }
-        $hasOffending = $false
-        foreach ($expandedId in $expanded) {
-            if ($closure.PermanentOffendingPrincipals -contains [string] $expandedId) {
-                $hasOffending = $true
-                break
-            }
+
+        $entry = [pscustomobject]@{
+            Instance                = $instance
+            GroupAssignment         = $groupAssignment
+            BlastRadiusPrincipalIds = @($blastRadiusPrincipalIds)
         }
-        if ($hasOffending) {
-            $offending += $instance
+
+        $assignmentIsExempt = -not $groupAssignment -and
+            -not [string]::IsNullOrWhiteSpace($principalId) -and
+            $closure.PermanentExemptPrincipals -contains $principalId
+        if ($assignmentIsExempt) {
+            $exempt.Add($entry) | Out-Null
         } else {
-            $exempt += $instance
+            $offending.Add($entry) | Out-Null
         }
     }
 
@@ -91,22 +101,28 @@ function Test-PulsePimPermanentAssignments {
     }
 
     $evidence = @($offending | ForEach-Object {
+        $instance = $_.Instance
         @{
-            Identity = [string] (Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'id')
+            Identity = [string] (Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'id')
             Detail   = @{
-                principalId      = Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'principalId'
-                roleDefinitionId = Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'roleDefinitionId'
-                exempt           = $false
+                principalId             = Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'principalId'
+                roleDefinitionId        = Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'roleDefinitionId'
+                exempt                  = $false
+                groupAssignment         = [bool] $_.GroupAssignment
+                blastRadiusPrincipalIds = @($_.BlastRadiusPrincipalIds)
             }
         }
     })
     $evidence += @($exempt | ForEach-Object {
+        $instance = $_.Instance
         @{
-            Identity = [string] (Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'id')
+            Identity = [string] (Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'id')
             Detail   = @{
-                principalId      = Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'principalId'
-                roleDefinitionId = Get-PulseSettingsCatalogValueProperty -Node $_ -PropertyName 'roleDefinitionId'
-                exempt           = $true
+                principalId             = Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'principalId'
+                roleDefinitionId        = Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'roleDefinitionId'
+                exempt                  = $true
+                groupAssignment         = [bool] $_.GroupAssignment
+                blastRadiusPrincipalIds = @($_.BlastRadiusPrincipalIds)
             }
         }
     })

@@ -113,6 +113,7 @@ function Invoke-PulseGroupClosurePlan {
     $discoverFromCa = $true
     $discoverFromRoles = $true
     $seedGroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $gaps = [System.Collections.Generic.List[object]]::new()
 
     $manifestSeeds = Get-PulseSettingsCatalogValueProperty -Node $ManifestEntry -PropertyName 'SeedGroupIds'
     if ($null -ne $manifestSeeds) {
@@ -166,10 +167,18 @@ function Invoke-PulseGroupClosurePlan {
                 $conditions = Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'conditions'
                 $users = Get-PulseSettingsCatalogValueProperty -Node $conditions -PropertyName 'users'
                 foreach ($propertyName in @('includeGroups', 'excludeGroups')) {
-                    foreach ($groupId in @(Get-PulseSettingsCatalogValueProperty -Node $users -PropertyName $propertyName)) {
-                        if (-not [string]::IsNullOrWhiteSpace([string] $groupId)) {
-                            [void] $seedGroupIds.Add([string] $groupId)
+                    $groupValues = Get-PulseSettingsCatalogValueProperty -Node $users -PropertyName $propertyName
+                    if ($null -eq $groupValues) { continue }
+                    foreach ($groupId in @($groupValues)) {
+                        if ([string]::IsNullOrWhiteSpace([string] $groupId)) {
+                            $policyId = [string] (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'id')
+                            $gaps.Add((New-PulseCollectionGap -Scope 'seed:conditional-access-policy' `
+                                    -FailureClass 'InvalidProviderData' -ReasonCode 'malformed-seed-row' `
+                                    -Detail @{ policyId = $policyId; property = $propertyName } `
+                                    -Operation 'ConditionalAccessPolicy.List' -ApiVersion 'beta')) | Out-Null
+                            continue
                         }
+                        [void] $seedGroupIds.Add([string] $groupId)
                     }
                 }
             }
@@ -186,7 +195,14 @@ function Invoke-PulseGroupClosurePlan {
             $seenPrincipals = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             foreach ($assignment in $assignments) {
                 $principalId = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'principalId')
-                if ([string]::IsNullOrWhiteSpace($principalId)) { continue }
+                if ([string]::IsNullOrWhiteSpace($principalId)) {
+                    $assignmentId = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'id')
+                    $gaps.Add((New-PulseCollectionGap -Scope 'seed:directory-role-assignment' `
+                            -FailureClass 'InvalidProviderData' -ReasonCode 'malformed-seed-row' `
+                            -Detail @{ assignmentId = $assignmentId } `
+                            -Operation 'DirectoryRoleAssignment.List' -ApiVersion 'v1.0')) | Out-Null
+                    continue
+                }
                 if ($seenPrincipals.Add($principalId)) {
                     $rolePrincipalIds.Add($principalId) | Out-Null
                 }
@@ -196,11 +212,9 @@ function Invoke-PulseGroupClosurePlan {
         }
     }
 
-    $gaps = [System.Collections.Generic.List[object]]::new()
     $visited = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $queue = [System.Collections.Generic.Queue[object]]::new()
     $depthByGroup = @{}
-    $parentByGroup = @{}
     $leafMembersByGroup = @{}
     $nestedGroupsByGroup = @{}
     $truncatedGroups = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -220,13 +234,7 @@ function Invoke-PulseGroupClosurePlan {
         param([string] $GroupId, [int] $Depth, [string] $ParentId)
 
         if ([string]::IsNullOrWhiteSpace($GroupId)) { return }
-        if ($visited.Contains($GroupId)) {
-            if (-not [string]::IsNullOrWhiteSpace($ParentId)) {
-                [void] $cycleGroups.Add($ParentId)
-                [void] $cycleGroups.Add($GroupId)
-            }
-            return
-        }
+        if ($visited.Contains($GroupId)) { return }
         if ($walkState.GroupCapHit -or $visited.Count -ge $maxGroups) {
             $walkState.GroupCapHit = $true
             $walkState.Sampled = $true
@@ -245,7 +253,6 @@ function Invoke-PulseGroupClosurePlan {
 
         [void] $visited.Add($GroupId)
         $depthByGroup[$GroupId] = $Depth
-        $parentByGroup[$GroupId] = $ParentId
         $leafMembersByGroup[$GroupId] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $nestedGroupsByGroup[$GroupId] = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         $queue.Enqueue($GroupId)
@@ -264,6 +271,9 @@ function Invoke-PulseGroupClosurePlan {
             $envelope = ConvertTo-PulseGroupClosureEnvelope -Result $probe
             $probeOutcome = [string] (Get-PulseGraphSignal -InputObject $envelope -Name 'Outcome')
             if ($probeOutcome -ne 'Succeeded') {
+                $gaps.Add((New-PulseCollectionGap -Scope "group:$principalId" -FailureClass 'ProviderFailed' `
+                        -ReasonCode 'provider-failed' -Detail @{ groupId = $principalId; outcome = $probeOutcome } `
+                        -Operation 'GroupMember.List' -ApiVersion 'v1.0')) | Out-Null
                 continue
             }
             Enqueue-PulseClosureGroup -GroupId $principalId -Depth 1 -ParentId $null
@@ -280,7 +290,14 @@ function Invoke-PulseGroupClosurePlan {
                     -Detail @{ operation = 'GroupMember.List'; caps = $caps } -Provider 'GraphKit' `
                     -ApiVersion $apiVersion -Operations @($operations)
             }
-            # 400/404: this principal is not a group. Direct assignments stay direct.
+            if ($failure.StatusCode -in @(400, 404)) {
+                # A known invalid-group/not-found response proves this role principal is not
+                # a group. Direct user/service-principal assignments stay direct.
+                continue
+            }
+            $gaps.Add((New-PulseCollectionGap -Scope "group:$principalId" -FailureClass $failure.FailureClass `
+                    -ReasonCode $failure.ReasonCode -Detail @{ groupId = $principalId; statusCode = $failure.StatusCode } `
+                    -Operation 'GroupMember.List' -ApiVersion 'v1.0')) | Out-Null
         }
     }
 
@@ -392,9 +409,54 @@ function Invoke-PulseGroupClosurePlan {
                 -Operation 'GroupMember.List' -ApiVersion 'v1.0')) | Out-Null
     }
 
-    # Fold nested-group leaves into each ancestor so a seed group's memberIds are the
-    # transitive closure, not only direct members. Cycles are already closed by visited.
+    # Detect cycles from the current DFS ancestry. Global visited state is only a fetch/dedup
+    # bound: using it as the cycle signal falsely labels a diamond DAG when two parents reach
+    # the same child.
     $orderedGroupIds = ConvertTo-PulseOrdinalStringArray -Values $visited
+    $cycleVisitState = @{}
+    $currentPath = [System.Collections.Generic.List[string]]::new()
+
+    function Find-PulseGroupClosureCycle {
+        param([string] $GroupId)
+
+        $cycleVisitState[$GroupId] = 'Visiting'
+        $currentPath.Add($GroupId) | Out-Null
+
+        foreach ($nestedId in @($nestedGroupsByGroup[$GroupId])) {
+            if (-not $nestedGroupsByGroup.ContainsKey($nestedId)) { continue }
+
+            $nestedState = if ($cycleVisitState.ContainsKey($nestedId)) { [string] $cycleVisitState[$nestedId] } else { $null }
+            if ([string]::Equals($nestedState, 'Visiting', [System.StringComparison]::Ordinal)) {
+                $cycleStart = -1
+                for ($index = 0; $index -lt $currentPath.Count; $index++) {
+                    if ([string]::Equals($currentPath[$index], $nestedId, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $cycleStart = $index
+                        break
+                    }
+                }
+                if ($cycleStart -ge 0) {
+                    for ($index = $cycleStart; $index -lt $currentPath.Count; $index++) {
+                        [void] $cycleGroups.Add($currentPath[$index])
+                    }
+                }
+                continue
+            }
+            if ([string]::Equals($nestedState, 'Done', [System.StringComparison]::Ordinal)) { continue }
+            Find-PulseGroupClosureCycle -GroupId $nestedId
+        }
+
+        $currentPath.RemoveAt($currentPath.Count - 1)
+        $cycleVisitState[$GroupId] = 'Done'
+    }
+
+    foreach ($groupId in $orderedGroupIds) {
+        if (-not $cycleVisitState.ContainsKey($groupId)) {
+            Find-PulseGroupClosureCycle -GroupId $groupId
+        }
+    }
+
+    # Fold nested-group leaves into each ancestor so a seed group's memberIds are the
+    # transitive closure, not only direct members. Cycle edges are bounded by set convergence.
     $changed = $true
     $foldGuard = 0
     while ($changed -and $foldGuard -le $maxGroups) {

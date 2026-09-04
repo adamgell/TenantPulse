@@ -89,11 +89,23 @@ BeforeAll {
     }
 
     function script:Invoke-PulsePimFixture {
-        param([hashtable[]] $Instances, [hashtable] $Context = @{})
-        Invoke-PulseCheckFixture -CheckId 'TP.ENT.0022' -Datasets @(
+        param(
+            [hashtable[]] $Instances,
+            [hashtable] $Context = @{},
+            [AllowNull()] $GroupMembers = $null
+        )
+
+        $datasets = @(
             @{ Name = 'roleAssignmentScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = $Instances }
             @{ Name = 'directoryRoleDefinitions'; ApiVersion = 'beta'; Status = 'Collected'; Data = New-PulseRoleDefinitions }
-        ) -Context $Context
+        )
+        if ($null -ne $GroupMembers) {
+            $datasets += @{
+                Name = 'groupMembers'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = $GroupMembers
+            }
+        }
+
+        Invoke-PulseCheckFixture -CheckId 'TP.ENT.0022' -Datasets $datasets -Context $Context
     }
 }
 
@@ -113,6 +125,36 @@ Describe 'TP.ENT.0022 - Zero permanent-active assignments for privileged roles (
         $finding = Invoke-PulsePimFixture -Instances $instances
         $finding.status | Should -Be 'Fail'
         $finding.evidence[0].detail.exempt | Should -Be $false
+    }
+
+    It 'Fail: a permanent group assignment remains one violation when the group has no members' {
+        $groupId = 'grp-empty'
+        $instances = @(New-PulseScheduleInstance -Id 'i-empty-group' -PrincipalId $groupId)
+
+        $finding = Invoke-PulsePimFixture -Instances $instances -GroupMembers @{ $groupId = @() }
+
+        $finding.status | Should -Be 'Fail'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'i-empty-group'
+        $finding.evidence[0].detail.groupAssignment | Should -BeTrue
+        @($finding.evidence[0].detail.blastRadiusPrincipalIds).Count | Should -Be 0
+    }
+
+    It 'Fail: a permanent group assignment remains one violation when every member is exempt' {
+        $groupId = 'grp-exempt-members'
+        $breakGlassId = '66666666-6666-6666-6666-666666666666'
+        $serviceAccountId = '77777777-7777-7777-7777-777777777777'
+        $instances = @(New-PulseScheduleInstance -Id 'i-exempt-members' -PrincipalId $groupId)
+
+        $finding = Invoke-PulsePimFixture -Instances $instances `
+            -GroupMembers @{ $groupId = @($breakGlassId, $serviceAccountId) } `
+            -Context @{ BreakGlassAccounts = @($breakGlassId); ServiceAccounts = @($serviceAccountId) }
+
+        $finding.status | Should -Be 'Fail'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].detail.exempt | Should -BeFalse
+        $finding.evidence[0].detail.groupAssignment | Should -BeTrue
+        $finding.evidence[0].detail.blastRadiusPrincipalIds | Should -Be @($breakGlassId, $serviceAccountId)
     }
 
     It 'Pass, exempt: a permanent-active assignment held by a declared ServiceAccount is not flagged as offending' {
