@@ -46,33 +46,19 @@ function Test-PulseGroupClosureMemberIsGroup {
 function ConvertTo-PulseGroupClosureEnvelope {
     param($Result)
 
-    if ($null -eq $Result) {
-        return [pscustomobject][ordered]@{
-            Outcome   = 'Succeeded'
-            Certainty = 'Known'
-            Truncated = $false
-            Data      = @()
-        }
+    $envelope = Convert-PulseGraphObjectResult -Result $Result
+    if ($null -eq $envelope) {
+        throw [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('Graph envelope incomplete'),
+            'GraphKit.OperationIncomplete',
+            [System.Management.Automation.ErrorCategory]::InvalidResult,
+            $null)
     }
 
-    $outcome = Get-PulseSettingsCatalogValueProperty -Node $Result -PropertyName 'Outcome'
-    $data = Get-PulseSettingsCatalogValueProperty -Node $Result -PropertyName 'Data'
-    $truncated = Get-PulseSettingsCatalogValueProperty -Node $Result -PropertyName 'Truncated'
-    if (-not [string]::IsNullOrWhiteSpace([string] $outcome) -and $null -ne $data) {
-        return [pscustomobject][ordered]@{
-            Outcome   = [string] $outcome
-            Certainty = [string] (Get-PulseSettingsCatalogValueProperty -Node $Result -PropertyName 'Certainty')
-            Truncated = [bool] $truncated
-            Data      = @($data)
-        }
-    }
-
-    return [pscustomobject][ordered]@{
-        Outcome   = 'Succeeded'
-        Certainty = 'Known'
-        Truncated = $false
-        Data      = @($Result)
-    }
+    # This bounded walker intentionally accepts a genuine incomplete envelope so it can
+    # retain the usable page and surface the page cap as Partial. Ordinary reads route
+    # through Invoke-PulseGraphRead and require Succeeded/Known/non-truncated.
+    return $envelope
 }
 
 function Invoke-PulseGroupClosurePlan {
@@ -175,7 +161,7 @@ function Invoke-PulseGroupClosurePlan {
     if ($discoverFromCa) {
         $operations.Add('ConditionalAccessPolicy.List') | Out-Null
         try {
-            $policies = @(Get-GraphObject -Context $Context -Type 'ConditionalAccessPolicy' -Operation 'List' -ErrorAction Stop)
+            $policies = @(Invoke-PulseGraphRead -Context $Context -Type 'ConditionalAccessPolicy' -Operation 'List')
             foreach ($policy in $policies) {
                 $conditions = Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'conditions'
                 $users = Get-PulseSettingsCatalogValueProperty -Node $conditions -PropertyName 'users'
@@ -196,7 +182,7 @@ function Invoke-PulseGroupClosurePlan {
     if ($discoverFromRoles) {
         $operations.Add('DirectoryRoleAssignment.List') | Out-Null
         try {
-            $assignments = @(Get-GraphObject -Context $Context -Type 'DirectoryRoleAssignment' -Operation 'List' -ErrorAction Stop)
+            $assignments = @(Invoke-PulseGraphRead -Context $Context -Type 'DirectoryRoleAssignment' -Operation 'List')
             $seenPrincipals = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             foreach ($assignment in $assignments) {
                 $principalId = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'principalId')
@@ -273,10 +259,11 @@ function Invoke-PulseGroupClosurePlan {
     foreach ($principalId in $rolePrincipalIds) {
         if ($visited.Contains($principalId)) { continue }
         try {
-            $probe = Get-GraphObject -Context $Context -Type 'GroupMember' -Operation 'List' `
-                -Parameters @{ id = $principalId } -PassThruResult -PageCap $memberPageCap -ErrorAction Stop
+            $probe = @(Get-GraphObject -Context $Context -Type 'GroupMember' -Operation 'List' `
+                    -Parameters @{ id = $principalId } -PassThruResult -PageCap $memberPageCap -ErrorAction Stop)
             $envelope = ConvertTo-PulseGroupClosureEnvelope -Result $probe
-            if ([string] $envelope.Outcome -ne 'Succeeded') {
+            $probeOutcome = [string] (Get-PulseGraphSignal -InputObject $envelope -Name 'Outcome')
+            if ($probeOutcome -ne 'Succeeded') {
                 continue
             }
             Enqueue-PulseClosureGroup -GroupId $principalId -Depth 1 -ParentId $null
@@ -313,8 +300,8 @@ function Invoke-PulseGroupClosurePlan {
             $envelope = $probeCache[$groupId]
         } else {
             try {
-                $raw = Get-GraphObject -Context $Context -Type 'GroupMember' -Operation 'List' `
-                    -Parameters @{ id = $groupId } -PassThruResult -PageCap $memberPageCap -ErrorAction Stop
+                $raw = @(Get-GraphObject -Context $Context -Type 'GroupMember' -Operation 'List' `
+                        -Parameters @{ id = $groupId } -PassThruResult -PageCap $memberPageCap -ErrorAction Stop)
                 $envelope = ConvertTo-PulseGroupClosureEnvelope -Result $raw
             } catch {
                 $failure = Resolve-PulseGraphFailure -ErrorRecord $_
@@ -334,15 +321,18 @@ function Invoke-PulseGroupClosurePlan {
             }
         }
 
-        if ([string] $envelope.Outcome -ne 'Succeeded') {
+        $envelopeOutcome = [string] (Get-PulseGraphSignal -InputObject $envelope -Name 'Outcome')
+        if ($envelopeOutcome -ne 'Succeeded') {
             [void] $truncatedGroups.Add($groupId)
             $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass 'ProviderFailed' `
-                    -ReasonCode 'provider-failed' -Detail @{ groupId = $groupId; outcome = [string] $envelope.Outcome } `
+                    -ReasonCode 'provider-failed' -Detail @{ groupId = $groupId; outcome = $envelopeOutcome } `
                     -Operation 'GroupMember.List' -ApiVersion 'v1.0')) | Out-Null
             continue
         }
 
-        if ([bool] $envelope.Truncated -or [string]::Equals([string] $envelope.Certainty, 'Indeterminate', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $envelopeTruncated = [bool] (Get-PulseGraphSignal -InputObject $envelope -Name 'Truncated')
+        $envelopeCertainty = [string] (Get-PulseGraphSignal -InputObject $envelope -Name 'Certainty')
+        if ($envelopeTruncated -or [string]::Equals($envelopeCertainty, 'Indeterminate', [System.StringComparison]::OrdinalIgnoreCase)) {
             $walkState.Sampled = $true
             [void] $truncatedGroups.Add($groupId)
             $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass 'Indeterminate' `
@@ -351,7 +341,7 @@ function Invoke-PulseGroupClosurePlan {
         }
 
         $memberCountForGroup = 0
-        foreach ($member in @($envelope.Data)) {
+        foreach ($member in @(Get-PulseGraphObjectRows -Envelope $envelope)) {
             if ($null -eq $member) { continue }
             $memberId = [string] (Get-PulseSettingsCatalogValueProperty -Node $member -PropertyName 'id')
             if ([string]::IsNullOrWhiteSpace($memberId)) { continue }

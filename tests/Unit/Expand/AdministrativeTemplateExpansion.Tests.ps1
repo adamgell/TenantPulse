@@ -1,11 +1,17 @@
 BeforeAll {
     $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).ProviderPath
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
     $built = Get-ChildItem (Join-Path $script:repoRoot 'output/module/TenantPulse') -Directory |
         Sort-Object Name -Descending | Select-Object -First 1
     if (-not $built) {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
+    }
 }
 
 Describe 'Invoke-PulseAdministrativeTemplateExpansion' {
@@ -63,17 +69,17 @@ Describe 'Invoke-PulseAdministrativeTemplateExpansion' {
                     DefId     = if ($null -ne $Parameters) { [string] $Parameters.definitionValueId } else { $null }
                 })
                 if ($Type -eq 'GroupPolicyConfiguration') {
-                    return @([pscustomobject]@{ id = 'gp-1'; displayName = 'Admin Template One' })
+                    return New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'gp-1'; displayName = 'Admin Template One' })
                 }
                 if ($Type -eq 'GroupPolicyDefinitionValue') {
-                    return @([pscustomobject]@{
+                    return New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                         id = 'dv-1'
                         enabled = $true
                         definition = [pscustomobject]@{ id = 'def-1'; displayName = 'Allow telemetry'; categoryPath = 'Windows' }
                     })
                 }
                 if ($Type -eq 'GroupPolicyPresentationValue') {
-                    return @([pscustomobject]@{
+                    return New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                         id = 'pv-1'
                         value = '2'
                         '@odata.type' = '#microsoft.graph.groupPolicyPresentationValueDecimal'
@@ -114,7 +120,7 @@ Describe 'Invoke-PulseAdministrativeTemplateExpansion' {
             Mock Get-GraphObject -ModuleName TenantPulse {
                 param($Context, $Type, $Operation, $Parameters)
                 if ($Type -eq 'GroupPolicyConfiguration') {
-                    return @(
+                    return New-PulseTestGraphEnvelope -Data @(
                         [pscustomobject]@{ id = 'gp-ok'; displayName = 'OK' }
                         [pscustomobject]@{ id = 'gp-partial'; displayName = 'Partial' }
                         [pscustomobject]@{ id = 'gp-fail'; displayName = 'Fail' }
@@ -125,7 +131,7 @@ Describe 'Invoke-PulseAdministrativeTemplateExpansion' {
                     if ($id -eq 'gp-fail') {
                         throw [System.InvalidOperationException]::new('definition values failed')
                     }
-                    return @([pscustomobject]@{
+                    return New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                         id = "dv-$id"
                         enabled = $true
                         definition = [pscustomobject]@{ id = "def-$id"; displayName = 'Setting'; categoryPath = 'Windows' }
@@ -136,7 +142,7 @@ Describe 'Invoke-PulseAdministrativeTemplateExpansion' {
                     if ($id -eq 'gp-partial') {
                         throw [System.InvalidOperationException]::new('presentation values failed')
                     }
-                    return @([pscustomobject]@{
+                    return New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                         id = 'pv-ok'
                         value = '1'
                         presentation = [pscustomobject]@{ id = 'pres-ok'; label = 'Value' }
@@ -157,5 +163,24 @@ Describe 'Invoke-PulseAdministrativeTemplateExpansion' {
         ($result.ExpandedCount + $result.PartialCount + $result.NotExpandedCount) | Should -Be $result.PolicyCount
         $result.Gaps.Count | Should -BeGreaterThan 0
         @($result.Gaps | ForEach-Object { $_.reason }) | Should -Match 'GroupPolicy'
+    }
+
+    It 'fails closed when the configuration list is returned as rows without a GraphKit envelope' {
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse { }
+            Mock Get-GraphObject -ModuleName TenantPulse {
+                return [pscustomobject]@{ id = 'gp-rows-only'; displayName = 'Unsafe rows-only result' }
+            }
+
+            Invoke-PulseAdministrativeTemplateExpansion -Store $store `
+                -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
+                -Requested -ProfileId 'fixture' -Pseudonym 'tp-test' -TenantId 'tenant'
+        }
+
+        $result.Status | Should -Be 'NotExpanded'
+        $result.PolicyCount | Should -Be 0
+        $result.RowCount | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $script:store.ExpandedPath 'administrativeTemplates.jsonl') | Should -BeFalse
     }
 }

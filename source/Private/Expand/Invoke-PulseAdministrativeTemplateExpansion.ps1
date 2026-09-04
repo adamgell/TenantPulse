@@ -143,7 +143,7 @@ function Invoke-PulseAdministrativeTemplateExpansion {
 
     $configurations = @()
     try {
-        $configurations = @(Get-GraphObject -Context $Context -Type 'GroupPolicyConfiguration' -Operation 'ListBeta' -ErrorAction Stop)
+        $configurations = @(Invoke-PulseGraphRead -Context $Context -Type 'GroupPolicyConfiguration' -Operation 'ListBeta')
     } catch {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
         if ($failure.AbortCollection) {
@@ -195,8 +195,8 @@ function Invoke-PulseAdministrativeTemplateExpansion {
 
         $definitionValues = @()
         try {
-            $definitionValues = @(Get-GraphObject -Context $Context -Type 'GroupPolicyDefinitionValue' -Operation 'ListBeta' `
-                    -Parameters @{ id = $policyId } -ErrorAction Stop)
+            $definitionValues = @(Invoke-PulseGraphRead -Context $Context -Type 'GroupPolicyDefinitionValue' -Operation 'ListBeta' `
+                    -Parameters @{ id = $policyId })
         } catch {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
             if ($failure.AbortCollection) {
@@ -254,8 +254,8 @@ function Invoke-PulseAdministrativeTemplateExpansion {
             }
 
             try {
-                $presentationValues = @(Get-GraphObject -Context $Context -Type 'GroupPolicyPresentationValue' -Operation 'ListBeta' `
-                        -Parameters @{ id = $policyId; definitionValueId = $definitionValueId } -ErrorAction Stop)
+                $presentationValues = @(Invoke-PulseGraphRead -Context $Context -Type 'GroupPolicyPresentationValue' -Operation 'ListBeta' `
+                        -Parameters @{ id = $policyId; definitionValueId = $definitionValueId })
             } catch {
                 $failure = Resolve-PulseGraphFailure -ErrorRecord $_
                 if ($failure.AbortCollection) {

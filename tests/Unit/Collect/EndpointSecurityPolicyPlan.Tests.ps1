@@ -56,7 +56,9 @@ BeforeAll {
             [Parameter(Mandatory)] [string] $Dataset,
             [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Policies,
             [Parameter(Mandatory)] [hashtable] $SettingsByPolicy,
-            [Parameter()] [hashtable] $SettingErrors = @{}
+            [Parameter()] [hashtable] $SettingErrors = @{},
+            [Parameter()] [AllowNull()] $AssignmentResult,
+            [Parameter()] [switch] $UseAssignmentResult
         )
 
         $fixture = @{
@@ -64,6 +66,8 @@ BeforeAll {
             Policies         = @($Policies)
             SettingsByPolicy = $SettingsByPolicy
             SettingErrors    = $SettingErrors
+            AssignmentResult = $AssignmentResult
+            UseAssignmentResult = [bool] $UseAssignmentResult
         }
 
         InModuleScope TenantPulse -ArgumentList $fixture {
@@ -102,7 +106,10 @@ BeforeAll {
                     return New-PulseTestGraphEnvelope -Data @($script:EndpointFixture.SettingsByPolicy[$policyId])
                 }
                 if ($Type -eq 'ConfigurationPolicyAssignment') {
-                    return @(
+                    if ($script:EndpointFixture.UseAssignmentResult) {
+                        return $script:EndpointFixture.AssignmentResult
+                    }
+                    return New-PulseTestGraphEnvelope -Data @(
                         @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'grp-assigned' } }
                     )
                 }
@@ -418,6 +425,23 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $result.Outcome.Gaps[0].Scope | Should -Be 'policy:laps-bad'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'ProviderFailed'
         $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicySetting.ListBeta'
+    }
+
+    It 'fails closed when an assignment read returns rows without a GraphKit envelope' {
+        $policy = New-EndpointPolicy -Id 'bitlocker-rows-only' -Name 'Rows only' -Family 'endpointSecurityDiskEncryption'
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies @($policy) `
+            -SettingsByPolicy @{ 'bitlocker-rows-only' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1')) } `
+            -UseAssignmentResult `
+            -AssignmentResult ([pscustomobject]@{ target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'grp-unsafe' } })
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:bitlocker-rows-only'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicyAssignment.ListBeta'
     }
 
     It 'fails rather than returning an authoritative empty result when the only selected policy is missing a LAPS criterion' {

@@ -159,8 +159,8 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
         }
         $assignmentIntent = 'Unknown'
         try {
-            $assignmentRows = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' `
-                    -Parameters @{ id = $policyId } -ErrorAction Stop)
+            $assignmentRows = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' `
+                    -Parameters @{ id = $policyId })
             $assignmentIntent = [string] (ConvertTo-PulseAssignmentIntent -Assignments $assignmentRows).State
         } catch {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_

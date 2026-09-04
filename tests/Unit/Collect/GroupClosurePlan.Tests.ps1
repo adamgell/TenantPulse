@@ -1,11 +1,17 @@
 BeforeAll {
     $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).ProviderPath
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
     $built = Get-ChildItem (Join-Path $script:repoRoot 'output/module/TenantPulse') -Directory |
         Sort-Object Name -Descending | Select-Object -First 1
     if (-not $built) {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
+    }
 
     function script:New-PulseDirectoryMember {
         param([string] $Id, [string] $Type)
@@ -17,12 +23,7 @@ BeforeAll {
 
     function script:New-PulseTruncatedEnvelope {
         param([object[]] $Data)
-        [pscustomobject]@{
-            Outcome   = 'Succeeded'
-            Certainty = 'Indeterminate'
-            Truncated = $true
-            Data      = @($Data)
-        }
+        New-PulseTestGraphEnvelope -Data $Data -Certainty Indeterminate -Truncated $true
     }
 
     function script:Invoke-GroupClosureFixture {
@@ -82,9 +83,9 @@ BeforeAll {
                     return $script:ClosureFixture.EnvelopesByGroup[$groupId]
                 }
                 if ($script:ClosureFixture.MembersByGroup.ContainsKey($groupId)) {
-                    return @($script:ClosureFixture.MembersByGroup[$groupId])
+                    return New-PulseTestGraphEnvelope -Data @($script:ClosureFixture.MembersByGroup[$groupId])
                 }
-                return @()
+                return New-PulseTestGraphEnvelope
             }
 
             $manifest = [pscustomobject]@{
@@ -223,6 +224,21 @@ Describe 'Invoke-PulseGroupClosurePlan' {
         $result.Outcome.Rows[0].complete | Should -BeFalse
     }
 
+    It 'marks a group incomplete when its bounded member read returns rows without an envelope' {
+        $result = Invoke-GroupClosureFixture `
+            -SeedGroupIds @('grp-a') `
+            -MembersByGroup @{} `
+            -EnvelopesByGroup @{
+                'grp-a' = (New-PulseDirectoryMember -Id 'user-unsafe' -Type 'user')
+            }
+
+        $result.Outcome.Status | Should -Be 'Partial'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'group:grp-a'
+        $result.Outcome.Rows[0].complete | Should -BeFalse
+        @($result.Outcome.Rows[0].memberIds).Count | Should -Be 0
+    }
+
     It 'keeps usable rows and a scoped gap when one nested group page is unavailable' {
         $denied = [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new('Graph provider response contained permission denied'),
@@ -274,5 +290,44 @@ Describe 'Invoke-PulseGroupClosurePlan' {
         $result.Calls[0].Type | Should -Be 'GroupMember'
         $result.Calls[0].Operation | Should -Be 'List'
         $result.Calls[1].Kind | Should -Be 'Graph'
+    }
+
+    It 'fails before walking members when CA seed discovery returns rows without an envelope' {
+        $result = InModuleScope TenantPulse {
+            $script:SeedDiscoveryCalls = [System.Collections.Generic.List[string]]::new()
+            Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse { }
+            Mock Get-GraphObject -ModuleName TenantPulse {
+                param($Context, $Type, $Operation, $Parameters)
+                $script:SeedDiscoveryCalls.Add("$Type.$Operation") | Out-Null
+                if ($Type -eq 'ConditionalAccessPolicy') {
+                    return [pscustomobject]@{
+                        id = 'ca-rows-only'
+                        conditions = [pscustomobject]@{
+                            users = [pscustomobject]@{ includeGroups = @('grp-unsafe'); excludeGroups = @() }
+                        }
+                    }
+                }
+                if ($Type -eq 'DirectoryRoleAssignment') {
+                    return New-PulseTestGraphEnvelope
+                }
+                if ($Type -eq 'GroupMember') {
+                    return New-PulseTestGraphEnvelope
+                }
+                throw "Unexpected Graph call '$Type/$Operation'."
+            }
+
+            $outcome = Invoke-PulseGroupClosurePlan `
+                -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
+                -Dataset 'groupClosure' `
+                -ManifestEntry ([pscustomobject]@{ Dataset = 'groupClosure'; ApiVersion = 'v1.0'; Type = 'GroupClosureWalk'; Operation = 'Walk' }) `
+                -ProfileId 'fixture' `
+                -TenantPseudonym 'tp-fixture'
+
+            [pscustomobject]@{ Outcome = $outcome; Calls = @($script:SeedDiscoveryCalls) }
+        }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        $result.Outcome.Detail.operation | Should -Be 'ConditionalAccessPolicy.List'
+        @($result.Calls | Where-Object { $_ -eq 'GroupMember.List' }).Count | Should -Be 0
     }
 }
