@@ -145,6 +145,17 @@ Describe 'TP.ENT.0019 - service principal credential hygiene' {
         $finding.reason | Should -Match 'unparseable'
     }
 
+    It 'NotApplicable: an entirely unparseable population is not reported as compliant' {
+        $sp = New-PulseServicePrincipal -UnparseablePassword
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0019' -Datasets @(
+            @{ Name = 'servicePrincipals'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($sp) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match '0 of 1 credential\(s\) could be evaluated'
+        $finding.reason | Should -Match 'unparseable'
+    }
+
     It 'evidence is capped to 50 rows and the reason states the total offending count' {
         $servicePrincipals = @(1..60 | ForEach-Object { New-PulseServicePrincipal -Id "sp-$_" -PasswordLifetimeDays (200 + $_) })
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0019' -Datasets @(
