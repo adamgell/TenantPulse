@@ -23,9 +23,10 @@
     (No -> blocking enabled -> property is `$false`; live-verified against the
     windows10EnrollmentCompletionPageConfiguration resource's own documented property set).
 
-    FIELD-ABSENCE LENS: `assignments` absent is treated as zero assignments, same
-    documented narrow exception as TP.INT.0026 (a relationship-shaped property, not an
-    ambiguous scalar). `allowDeviceUseOnInstallFailure` absent is handled by the
+    FIELD-ABSENCE LENS: `assignments` absent is unknown, not zero assignments; object
+    existence cannot prove that an ESP profile is deployed. A known assigned blocking
+    witness still produces Pass, while unresolved assignments with no such witness are
+    NotApplicable. `allowDeviceUseOnInstallFailure` absent is handled by the
     RESOLVED-LIVE rule immediately below - a scalar the rule needs a concrete boolean for,
     but its absence has a known, benign live cause that gets its own explicit outcome
     rather than a bare throw.
@@ -100,15 +101,20 @@ function Test-PulseEnrollmentStatusPageBlocking {
 
     $rows = [System.Collections.Generic.List[object]]::new()
     $hasBlockingAssigned = $false
+    $hasUnknownAssignment = $false
 
     for ($index = 0; $index -lt $espRows.Count; $index++) {
         $esp = $espRows[$index]
 
-        $assignments = @()
+        $assignments = $null
+        $assignmentIntent = $null
         if ((Test-PulseRowPropertyPresent -Row $esp -PropertyName 'assignments') -and $null -ne $esp.assignments) {
             $assignments = @($esp.assignments)
+            $assignmentIntent = ConvertTo-PulseAssignmentIntent -Assignments $assignments
         }
-        $isAssigned = $assignments.Count -gt 0
+        $assignmentUnknown = $null -eq $assignmentIntent -or $assignmentIntent.State -in @('Unknown', 'Malformed')
+        if ($assignmentUnknown) { $hasUnknownAssignment = $true }
+        $isAssigned = -not $assignmentUnknown -and $assignmentIntent.IsAssigned
         $isBlocking = -not [bool] $esp.allowDeviceUseOnInstallFailure
 
         if ($isAssigned -and $isBlocking) { $hasBlockingAssigned = $true }
@@ -124,7 +130,7 @@ function Test-PulseEnrollmentStatusPageBlocking {
             Identity = $identity
             Detail   = @{
                 displayName                    = $esp.displayName
-                assignmentCount                = $assignments.Count
+                assignmentCount                = if ($assignmentUnknown) { $null } else { $assignments.Count }
                 allowDeviceUseOnInstallFailure = [bool] $esp.allowDeviceUseOnInstallFailure
             }
             SortKey  = $identity
@@ -137,6 +143,10 @@ function Test-PulseEnrollmentStatusPageBlocking {
         # never leaving a Pass evidence-empty when real per-row data already exists to
         # corroborate it with.
         return New-PulseFinding -Status Pass -Reason "At least one assigned Enrollment Status Page (ESP) profile blocks device use until all required apps and profiles are installed." -Evidence $rows.ToArray()
+    }
+
+    if ($hasUnknownAssignment) {
+        return New-PulseFinding -Status NotApplicable -Reason 'No known assigned blocking Enrollment Status Page profile was found, but one or more ESP profiles lack authoritative assignment evidence; profile existence alone cannot prove whether blocking is deployed.' -Evidence $rows.ToArray()
     }
 
     $reason = "None of the $($espRows.Count) Enrollment Status Page (ESP) profile(s) configured for this tenant are BOTH assigned AND set to block device use on install failure - users can bypass an incomplete or failed provisioning run and start working on an under-configured, potentially noncompliant device."

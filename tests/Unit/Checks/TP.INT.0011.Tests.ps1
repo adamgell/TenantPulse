@@ -90,11 +90,13 @@ Describe 'TP.INT.0011 - Default branding profile customized' {
         $finding.status | Should -Be 'Pass'
     }
 
-    It 'Pass: default profile is blank but more than one profile exists' {
+    It 'Pass: default profile is blank but an additional custom profile is assigned' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
             @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
                 [pscustomobject]@{ id = 'default'; isDefaultProfile = $true; displayName = ''; privacyUrl = '' }
-                [pscustomobject]@{ id = 'custom-1'; isDefaultProfile = $false; displayName = 'Sales team'; privacyUrl = '' }
+                [pscustomobject]@{ id = 'custom-1'; isDefaultProfile = $false; displayName = 'Sales team'; privacyUrl = ''; assignments = @(
+                    @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'sales-group' } }
+                ) }
             ) }
         )
 
@@ -145,7 +147,7 @@ Describe 'TP.INT.0011 - Default branding profile customized' {
         $finding.status | Should -Be 'Fail'
     }
 
-    It 'Pass (documented verbatim Maester port, pinned): no row has isDefaultProfile at all, Count>1 falls back to Pass' {
+    It 'Error: no row identifies the required default profile' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
             @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
                 [pscustomobject]@{ id = 'p1'; displayName = ''; privacyUrl = '' }
@@ -153,8 +155,44 @@ Describe 'TP.INT.0011 - Default branding profile customized' {
             ) }
         )
 
-        $finding.status | Should -Be 'Pass'
-        $finding.reason | Should -Match 'at least one custom'
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'default branding profile'
+    }
+
+    It 'NotApplicable: a blank default plus a custom profile without assignment evidence is not treated as in use' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
+            @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'default'; isDefaultProfile = $true; displayName = ''; privacyUrl = '' }
+                [pscustomobject]@{ id = 'custom-1'; isDefaultProfile = $false; displayName = 'Sales team'; privacyUrl = '' }
+            ) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'assignment evidence'
+    }
+
+    It 'Fail: a blank default plus only explicitly unassigned custom profiles is not customized for any population' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
+            @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'default'; isDefaultProfile = $true; displayName = ''; privacyUrl = '' }
+                [pscustomobject]@{ id = 'custom-1'; isDefaultProfile = $false; displayName = 'Sales team'; privacyUrl = ''; assignments = @() }
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: an exclusion-only custom profile is not effective branding coverage' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
+            @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'default'; isDefaultProfile = $true; displayName = ''; privacyUrl = '' }
+                [pscustomobject]@{ id = 'custom-1'; isDefaultProfile = $false; displayName = 'Sales team'; privacyUrl = ''; assignments = @(
+                    @{ target = @{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'excluded-group' } }
+                ) }
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
     }
 
     It 'gate-degraded: NotApplicable when the dataset is Pending on a live tenant' {

@@ -78,7 +78,7 @@ Describe 'TP.INT.0028 - Enrollment Status Page configured with blocking failure 
     It 'Pass: an assigned ESP profile has blocking enabled' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
             @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
-                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP'; allowDeviceUseOnInstallFailure = $false; assignments = @([pscustomobject]@{ id = 'a1'; target = [pscustomobject]@{ groupId = 'g1' } }) }
+                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP'; allowDeviceUseOnInstallFailure = $false; assignments = @([pscustomobject]@{ id = 'a1'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'g1' } }) }
             ) }
         )
         $finding.status | Should -Be 'Pass'
@@ -90,7 +90,7 @@ Describe 'TP.INT.0028 - Enrollment Status Page configured with blocking failure 
     It 'Fail: assigned but blocking disabled' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
             @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
-                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP'; allowDeviceUseOnInstallFailure = $true; assignments = @([pscustomobject]@{ id = 'a1'; target = [pscustomobject]@{ groupId = 'g1' } }) }
+                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP'; allowDeviceUseOnInstallFailure = $true; assignments = @([pscustomobject]@{ id = 'a1'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'g1' } }) }
             ) }
         )
         $finding.status | Should -Be 'Fail'
@@ -109,7 +109,7 @@ Describe 'TP.INT.0028 - Enrollment Status Page configured with blocking failure 
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
             @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
                 [pscustomobject]@{ id = 'cfg1'; '@odata.type' = '#microsoft.graph.deviceEnrollmentPlatformRestrictionsConfiguration'; priority = 0 }
-                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP'; allowDeviceUseOnInstallFailure = $false; assignments = @([pscustomobject]@{ id = 'a1' }) }
+                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP'; allowDeviceUseOnInstallFailure = $false; assignments = @([pscustomobject]@{ id = 'a1'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'g1' } }) }
             ) }
         )
         $finding.status | Should -Be 'Pass'
@@ -120,6 +120,40 @@ Describe 'TP.INT.0028 - Enrollment Status Page configured with blocking failure 
             @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
         )
         $finding.status | Should -Be 'NotApplicable'
+    }
+
+    It 'NotApplicable: blocking state without assignment evidence cannot prove deployment' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
+            @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP'; allowDeviceUseOnInstallFailure = $false }
+            ) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'assignment evidence'
+    }
+
+    It 'Pass: a known assigned blocking ESP remains decisive when another profile has unknown assignments' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
+            @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP'; allowDeviceUseOnInstallFailure = $false; assignments = @([pscustomobject]@{ target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'g1' } }) }
+                [pscustomobject]@{ id = 'esp2'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Unknown ESP'; allowDeviceUseOnInstallFailure = $true }
+            ) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+    }
+
+    It 'Fail: an exclusion-only blocking ESP is not treated as deployed' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
+            @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Excluded ESP'; allowDeviceUseOnInstallFailure = $false; assignments = @(
+                    [pscustomobject]@{ target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'excluded-group' } }
+                ) }
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
     }
 
     # RESOLVED-LIVE (2026-08-17): the live DeviceEnrollmentConfiguration/List endpoint
@@ -157,7 +191,7 @@ Describe 'TP.INT.0028 - Enrollment Status Page configured with blocking failure 
     It 'Error: allowDeviceUseOnInstallFailure is absent on SOME but not all ESP rows (mixed - genuine anomaly, not the projection limitation)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0028' -Datasets @(
             @{ Name = 'deviceEnrollmentConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
-                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP One'; allowDeviceUseOnInstallFailure = $false; assignments = @([pscustomobject]@{ id = 'a1' }) }
+                [pscustomobject]@{ id = 'esp1'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP One'; allowDeviceUseOnInstallFailure = $false; assignments = @([pscustomobject]@{ id = 'a1'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'g1' } }) }
                 [pscustomobject]@{ id = 'esp2'; '@odata.type' = '#microsoft.graph.windows10EnrollmentCompletionPageConfiguration'; displayName = 'Corp ESP Two' }
             ) }
         )

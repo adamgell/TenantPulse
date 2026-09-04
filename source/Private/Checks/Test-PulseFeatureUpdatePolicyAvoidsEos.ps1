@@ -20,8 +20,12 @@
     https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education,
     fetched for this check, which confirms real historical endOfSupportDate values exist
     per Windows 11 feature-update version, e.g. version 22H2 -> 2025-10-15): Fail when any
-    profile's endOfSupportDate is on/before the cutoff. Pass when every profile's
-    endOfSupportDate is after the cutoff (or absent - see below). NotApplicable
+    effectively assigned profile's endOfSupportDate is on/before the cutoff. Pass when
+    every profile with authoritative assignment evidence has an endOfSupportDate after
+    the cutoff (or absent - see below) and no other profile has unknown assignment state.
+    A known assigned expired profile is a monotonic Fail even when another profile's
+    assignments are unknown; otherwise unresolved assignment evidence is NotApplicable.
+    NotApplicable
     (skip-if-none-configured, MIRRORING Maester's own ItemNotFoundException ->
     SkippedBecause Custom behavior - the research entry's own Notes call this out
     explicitly) when zero profiles are configured at all, which is a legitimately empty
@@ -55,13 +59,16 @@ function Test-PulseFeatureUpdatePolicyAvoidsEos {
             $profiles.Add($profile) | Out-Null
         }
     }
-    if ($unknownAssignment) {
-        return New-PulseFinding -Status Fail -Reason 'One or more Windows Feature Update profiles have unknown or malformed assignment data; existence-only coverage is not accepted.'
-    }
     $profiles = @($profiles)
 
-    if ($profiles.Count -eq 0) {
+    if ($rawProfiles.Count -eq 0) {
         return New-PulseFinding -Status NotApplicable -Reason 'No Windows Feature Update deployment profiles are configured for this tenant - there is nothing for this check to evaluate (mirrors Maester''s own skip-if-none-configured behavior for this check, not a Pass).'
+    }
+    if ($profiles.Count -eq 0 -and $unknownAssignment) {
+        return New-PulseFinding -Status NotApplicable -Reason 'Windows Feature Update profiles exist, but none has authoritative assignment evidence; profile existence alone cannot prove that any target population receives the configured feature update.'
+    }
+    if ($profiles.Count -eq 0) {
+        return New-PulseFinding -Status NotApplicable -Reason 'Windows Feature Update profiles exist, but none has an effective include assignment; there is no deployed profile for this check to evaluate.'
     }
     $cutoffBaseText = $null
     if ($Context -and $Context.ContainsKey('EvaluationCutoffBase') -and $Context.EvaluationCutoffBase) {
@@ -91,6 +98,10 @@ function Test-PulseFeatureUpdatePolicyAvoidsEos {
         if ($eosDate -le $cutoff) {
             $offending.Add($profile)
         }
+    }
+
+    if ($offending.Count -eq 0 -and $unknownAssignment) {
+        return New-PulseFinding -Status NotApplicable -Reason "The $($profiles.Count) profile(s) with authoritative assignments do not show an expired target, but one or more other profiles lack authoritative assignment evidence; the known subset cannot prove tenant-wide feature-update posture."
     }
 
     if ($offending.Count -eq 0) {

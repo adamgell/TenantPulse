@@ -131,6 +131,45 @@ Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support buil
         $finding.status | Should -Be 'Pass'
     }
 
+    It 'NotApplicable: missing assignment evidence cannot prove an otherwise-current profile is deployed' {
+        $profile = New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 25H2' -EndOfSupportDate '2028-10-11T06:59:59Z'
+        $profile.PSObject.Properties.Remove('assignments')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($profile) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'assignment evidence'
+    }
+
+    It 'Fail: a known assigned expired profile remains decisive when another profile has unknown assignments' {
+        $unknown = New-PulseFeatureUpdateProfile -Id 'p2' -DisplayName 'Unknown ring' -FeatureUpdateVersion 'Windows 11, version 25H2' -EndOfSupportDate '2028-10-11T06:59:59Z'
+        $unknown.PSObject.Properties.Remove('assignments')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                (New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Expired ring' -FeatureUpdateVersion 'Windows 11, version 22H2' -EndOfSupportDate '2025-10-15T06:59:59Z')
+                $unknown
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'p1'
+    }
+
+    It 'NotApplicable: an exclusion-only profile is not treated as deployed' {
+        $profile = New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Excluded ring' -FeatureUpdateVersion 'Windows 11, version 22H2' -EndOfSupportDate '2025-10-15T06:59:59Z'
+        $profile.assignments = @(
+            @{ target = @{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'excluded-group' } }
+        )
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($profile) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'effective include assignment'
+    }
+
     It 'NotApplicable: zero Feature Update profiles configured (skip-if-none-configured, mirrors Maester, never a Pass)' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
             @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @() }

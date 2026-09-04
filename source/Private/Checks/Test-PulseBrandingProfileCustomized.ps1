@@ -6,14 +6,17 @@
     this dataset as live. Type `IntuneBrandingProfile`, Operation `List`, ApiVersion
     `beta`; this check evaluates live tenant data.
 
-    RULE (ported verbatim from Maester's own OR condition - live-verified against
+    RULE (ported from Maester's own OR condition, then tightened so mere object existence
+    is not confused with deployment - live-verified against
     https://learn.microsoft.com/en-us/intune/app-management/configuration/configure-company-portal,
     fetched for this check; the research entry's own Authority URL,
     intune-service/apps/company-portal-app-branding, was live-fetched and returned 404 -
     NOT used in this descriptor's References.Authorities): Pass when EITHER the default
-    profile (isDefaultProfile = $true) has a non-empty displayName OR privacyUrl, OR more
-    than one branding profile exists at all. Fail only when exactly one (still-default,
-    still-blank) profile exists.
+    profile (isDefaultProfile = $true) has a non-empty displayName OR privacyUrl, OR at
+    least one non-default profile has an effective include assignment. A blank default
+    plus custom profiles whose assignments are unavailable is NotApplicable; an explicit
+    absence of effective custom assignments is Fail. Profile count alone is never proof
+    that customized branding reaches a population.
 
     LOW-CONFIDENCE FINDING (research entry's own Notes, honored in Consulting text): a
     fully kiosk/Autopilot-only fleet with a still-blank default profile can legitimately
@@ -40,6 +43,10 @@ function Test-PulseBrandingProfileCustomized {
 
     $defaultProfile = @($profiles | Where-Object { $_.isDefaultProfile -eq $true }) | Select-Object -First 1
 
+    if ($null -eq $defaultProfile) {
+        throw 'Test-PulseBrandingProfileCustomized: no row identifies the required default branding profile; profile-count alone cannot prove that a custom profile is deployed.'
+    }
+
     $defaultDisplayName = $null
     $defaultPrivacyUrl = $null
     if ($defaultProfile) {
@@ -60,17 +67,37 @@ function Test-PulseBrandingProfileCustomized {
     }
     $defaultIsCustomized = -not ([string]::IsNullOrEmpty($defaultDisplayName)) -or -not ([string]::IsNullOrEmpty($defaultPrivacyUrl))
 
+    $hasAssignedCustomProfile = $false
+    $hasUnknownCustomAssignment = $false
+    foreach ($profile in @($profiles | Where-Object { $_ -ne $defaultProfile })) {
+        if (-not (Test-PulseRowPropertyPresent -Row $profile -PropertyName 'assignments') -or $null -eq $profile.assignments) {
+            $hasUnknownCustomAssignment = $true
+            continue
+        }
+
+        $intent = ConvertTo-PulseAssignmentIntent -Assignments $profile.assignments
+        if ($intent.State -in @('Unknown', 'Malformed')) {
+            $hasUnknownCustomAssignment = $true
+            continue
+        }
+        if ($intent.IsAssigned) { $hasAssignedCustomProfile = $true }
+    }
+
     $evidence = ConvertTo-PulseMaesterEvidence -Rows $profiles -IdentityProperty 'id' -SortKeyProperty 'displayName' -DetailProperties @('displayName', 'privacyUrl', 'isDefaultProfile')
 
-    if ($defaultIsCustomized -or $profiles.Count -gt 1) {
+    if ($defaultIsCustomized -or $hasAssignedCustomProfile) {
         $reason = if ($defaultIsCustomized) {
             'The default Intune branding profile is customized (organization name and/or privacy URL is set) - enrollment and Company Portal screens are distinguishable from a generic/spoofed prompt.'
         } else {
-            "The default branding profile is still blank, but $($profiles.Count) branding profiles exist in total - at least one custom, non-default profile is in use for some population."
+            "The default branding profile is still blank, but at least one custom, non-default profile has an effective include assignment and is in use for some population."
         }
         return New-PulseFinding -Status Pass -Reason $reason -Evidence $evidence
     }
 
-    $reason = 'The default Intune branding profile is unmodified (no organization name or privacy URL set) and no additional branding profiles exist - enrollment and Company Portal screens show Microsoft''s generic blank defaults, which are harder for end users to distinguish from a spoofed enrollment prompt. This is a hygiene/anti-phishing signal, not a technical control - a fleet that is entirely kiosk/Autopilot-provisioned with no interactive Company Portal use may reasonably accept this.'
+    if ($hasUnknownCustomAssignment) {
+        return New-PulseFinding -Status NotApplicable -Reason 'The default branding profile is blank and one or more custom profiles lack authoritative assignment evidence; profile existence alone cannot prove that customized branding is deployed to any population.'
+    }
+
+    $reason = 'The default Intune branding profile is unmodified (no organization name or privacy URL set) and no custom profile has an effective include assignment - enrollment and Company Portal screens show Microsoft''s generic blank defaults, which are harder for end users to distinguish from a spoofed enrollment prompt. This is a hygiene/anti-phishing signal, not a technical control - a fleet that is entirely kiosk/Autopilot-provisioned with no interactive Company Portal use may reasonably accept this.'
     return New-PulseFinding -Status Fail -Reason $reason -Evidence $evidence
 }
