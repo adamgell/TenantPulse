@@ -115,8 +115,29 @@ PrivateData = @{
         ReleaseNotes = @'
 ## [0.3.0] - Unreleased
 
+### Added
+
+- Neutral `-ReportData Applications` collection on `Get-PulseTenantSnapshot` and
+  `Invoke-PulseAssessment`, producing schema-v1, hash-verified application-assignment and
+  app-install-error JSONL artifacts. The contract preserves raw report columns, assignment
+  targets/settings, group resolution and member-count certainty, and explicit partial/failure
+  gaps without adding Office rendering, branding, approval workflow, or derived severity.
+- Self-contained HTML findings reports through `Export-PulseReport -Format Html` and
+  `Invoke-PulseAssessment -Format Html`. JSON remains canonical and is always written by the
+  assessment path; HTML is a second findings-only renderer with inline CSS, no scripts, no
+  network-loading URLs, and no Graph or snapshot access.
+- TenantPulse 1.0 privacy-classification constructors for `Identity`, `SecretSensitive`,
+  `SafeTechnical`, `SafeOperatorLabel`, and `BoundedReviewedText`, plus fail-closed
+  `ConvertTo-PulseSafeShareDocument` conversion and privacy mutation canaries.
+
 ### Fixed
 
+- Application report collection now request-body pages the Intune install summary through
+  `TotalRowCount`, records incomplete totals and partial group metadata as gaps, stops every
+  later report read on authentication failure, recursively scrubs tenant identifiers before
+  persistence, rejects semantically unknown report matrices, and uses a canonical total-order
+  tie-breaker for content-addressed rows.
+- Graph collection now fails closed unless `Get-GraphObject -PassThruResult` returns exactly one complete `GraphKit.OperationResult`; null, rows-only, multiple, type-spoofed, and malformed results can no longer be persisted as `Collected`, while bounded partial rows retain indeterminate, truncation, and page-cap detail.
 - Review finding 6 is implemented: Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta` and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count; child gaps name the setting primitive explicitly.
 - Direct, composite, and expansion collection paths now use one canonical Graph failure mapper. A request-time `403` is recorded as `Failed` / `PermissionDenied`; only `AuthenticationFailed` aborts subsequent network collection, while deadline expiration, cancellation, indeterminate certainty, permission denial, and provider failure remain explicit and isolated.
 
@@ -127,6 +148,10 @@ PrivateData = @{
 - The other 49 checks remain `NotApplicable` when their dataset status is `Partial`. For the four opt-ins, a structurally valid non-decisive Partial result is also `NotApplicable`; without decisive proof, zero usable rows or malformed outcomes, gaps, or rows are `Error`.
 - Findings schema `1.0`, snapshot schema `2.0.0`, and scoring model `1.0` are unchanged. This deterministic source/package tranche makes no new live-service or publication claim.
 - Review finding 14 remains rejected/obsolete on first-party schema evidence: supported schema 1.0.0/1.1.0 writers could not emit `Partial`, so migration rejects that later state without rewriting the manifest.
+- Classified JSON export now requires complete field classification before it emits a
+  `privacy.boundary = "classified"` document. `-Redact`, `RedactDetailKeys`, and
+  `Protect-PulseReason` remain the local-only compatibility layer; C0 D6 still leaves the public
+  safe-share workflow undecided, and no public operator-key rotate cmdlet was added.
 '@
 
         # Prerelease string of this module
