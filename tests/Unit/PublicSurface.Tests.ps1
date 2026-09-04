@@ -116,7 +116,9 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
 
     It 'returns a summary object whose paths exist on disk with the expected content' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
         Mock Get-GraphObject -ModuleName TenantPulse {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
@@ -175,7 +177,9 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
 
     It '-Redact replaces every evidence identity with its pseudonym, deterministically' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
         Mock Get-GraphObject -ModuleName TenantPulse {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
@@ -205,7 +209,9 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
 
     It 'never leaks the RedactionMap wrapper, and never leaks a raw identity when -Redact was passed' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
         Mock Get-GraphObject -ModuleName TenantPulse {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
@@ -220,7 +226,9 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
 
     It 'never leaks a tp- pseudonym into evidence identity when -Redact was NOT passed' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
         Mock Get-GraphObject -ModuleName TenantPulse {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
@@ -393,7 +401,9 @@ Describe 'Export-PulseReport - render-only' {
 
     It 're-rendering an existing findings file is byte-identical to the original' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
         Mock Get-GraphObject -ModuleName TenantPulse {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })

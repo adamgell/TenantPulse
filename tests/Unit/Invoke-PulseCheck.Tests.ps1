@@ -168,7 +168,9 @@ Describe 'Invoke-PulseCheck' {
 
     It '-AssessmentProfile is forwarded to Invoke-PulseAssessment, so BreakGlassAccounts context reaches a rule' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestInvokeCheckContextCatalog }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
         Mock Get-GraphObject -ModuleName TenantPulse {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
@@ -185,7 +187,9 @@ Describe 'Invoke-PulseCheck' {
 
     It 'scopes collection and evaluation to just the named -Id' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestInvokeCheckCatalog }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
         Mock Get-GraphObject -ModuleName TenantPulse {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
@@ -203,7 +207,9 @@ Describe 'Invoke-PulseCheck' {
 
     It 'scopes collection and evaluation to just the named -Category' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestInvokeCheckCatalog }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
         Mock Get-GraphObject -ModuleName TenantPulse {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
@@ -218,7 +224,9 @@ Describe 'Invoke-PulseCheck' {
 
     It 'returns the same summary shape as Invoke-PulseAssessment' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestInvokeCheckCatalog }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
         Mock Get-GraphObject -ModuleName TenantPulse {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })

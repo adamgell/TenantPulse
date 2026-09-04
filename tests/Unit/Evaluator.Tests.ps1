@@ -1500,7 +1500,10 @@ Describe 'Invoke-PulseEvaluation partial input isolation and serialization' {
         $result.Rows[0].nested.marker | Should -Be 'row-nested-original'
         $result.Manifest.datasets.partialA.provider | Should -Be 'GraphKit'
         $result.Manifest.datasets.partialA.operations[0] | Should -Be 'Parent.List'
-        $result.Manifest.datasets.partialA.gaps[0].detail.marker | Should -Be 'gap-original'
+        # Collection gaps are persisted from the provider-neutral DTO with its canonical
+        # PascalCase member names. Get-PulseSnapshotManifest now returns the native,
+        # case-sensitive OrderedHashtable tree, so assert the exact stored key casing.
+        $result.Manifest.datasets.partialA.gaps[0].Detail.marker | Should -Be 'gap-original'
     }
 
     It 'does not serialize DatasetOutcomes or Partial manifest privacy canaries into findings or scoring documents' {

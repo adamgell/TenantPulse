@@ -42,7 +42,7 @@ Describe 'Task 1 snapshot outcome schema' {
         $entry.provider | Should -Be 'GraphKit'
         $entry.operations | Should -Be @('List')
         $entry.gaps.Count | Should -Be 1
-        $entry.gaps[0].failureClass | Should -Be 'PermissionDenied'
+        $entry.gaps[0].FailureClass | Should -Be 'PermissionDenied'
 
         $rows = InModuleScope TenantPulse -ArgumentList $store {
             param($store)
@@ -259,8 +259,8 @@ Describe 'GraphKit envelope certainty (AC-26)' {
         $entry.failureClass | Should -BeNullOrEmpty
         $entry.reasonCode | Should -Be $ReasonCode
         $entry.gaps.Count | Should -Be 1
-        $entry.gaps[0].failureClass | Should -Be 'Indeterminate'
-        $entry.gaps[0].reasonCode | Should -Be $ReasonCode
+        $entry.gaps[0].FailureClass | Should -Be 'Indeterminate'
+        $entry.gaps[0].ReasonCode | Should -Be $ReasonCode
         $entry.detail.truncated | Should -Be $Truncated
         $entry.detail.certainty | Should -Be 'Indeterminate'
         $entry.detail.pageCount | Should -Be $PageCount

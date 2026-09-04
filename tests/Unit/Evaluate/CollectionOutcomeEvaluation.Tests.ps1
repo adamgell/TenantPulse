@@ -22,7 +22,7 @@ Describe 'Evaluator collection-outcome boundary' {
         $entry.status | Should -Be 'Partial'
         $entry.status | Should -Not -Be 'Collected'
         $entry.gaps.Count | Should -Be 1
-        $entry.gaps[0].failureClass | Should -Be 'DependencyUnavailable'
+        $entry.gaps[0].FailureClass | Should -Be 'DependencyUnavailable'
         $entry.reasonCode | Should -Be 'partial-child'
     }
 

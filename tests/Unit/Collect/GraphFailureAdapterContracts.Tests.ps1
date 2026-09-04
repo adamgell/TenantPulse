@@ -21,6 +21,7 @@ BeforeAll {
     . $script:graphEnvelopeHelperPath
     InModuleScope TenantPulse {
         function Test-GraphPermission { param() }
+        function Get-GraphOperation { param($Type, $Operation, $ErrorAction) }
     }
     InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
         param($helperPath)
@@ -34,6 +35,16 @@ BeforeAll {
             [pscustomobject]@{ Finding = 'ExcessGranted'; Value = 'None' }
             [pscustomobject]@{ Finding = 'AuthenticationCompatible'; Value = 'Yes' }
         )
+    }
+    Mock Get-GraphOperation -ModuleName TenantPulse {
+        [pscustomobject]@{
+            Type                = $Type
+            Operation           = $Operation
+            ApiVersion          = 'v1.0'
+            ThrottleClass       = 'Read'
+            ReplayPolicy        = 'Safe'
+            RequiredPermissions = @(@{ Type = 'Application'; Value = 'Fixture.Read.All' })
+        }
     }
 
 
@@ -71,7 +82,10 @@ Describe 'Graph failure adapter contract' {
                 [pscustomobject]@{ Dataset = 'firstDataset'; Type = 'FirstType'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
                 [pscustomobject]@{ Dataset = 'secondDataset'; Type = 'SecondType'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
             )
-            $context = [pscustomobject]@{ ProfileId = 'fixture' }
+            $context = [pscustomobject]@{
+                ProfileId = 'fixture'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
             InModuleScope TenantPulse -ArgumentList $fixture.Store, $manifest, $context, $record {
                 param($store, $manifest, $context, $record)
                 $script:AdapterRecord = $record
@@ -111,7 +125,10 @@ Describe 'Graph failure adapter contract' {
             $manifest = @([pscustomobject]@{
                 Dataset = 'privateFailure'; Type = 'Synthetic'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null
             })
-            $context = [pscustomobject]@{ ProfileId = 'fixture' }
+            $context = [pscustomobject]@{
+                ProfileId = 'fixture'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
             InModuleScope TenantPulse -ArgumentList $fixture.Store, $manifest, $context, $record {
                 param($store, $manifest, $context, $record)
                 $script:AdapterRecord = $record
@@ -370,9 +387,19 @@ Describe 'Graph failure adapter contract' {
                         ) -ReasonCode 'partial' -Detail @{ gapCount = 1 } -Provider 'GraphKit' `
                         -ApiVersion 'beta' -Operations @('Get')
                 }
+                $planRegistry = @{
+                    partialParent = @{
+                        Command                   = $plan
+                        Operations                = @(@{ Type = 'Composite'; Operation = 'Walk'; ApiVersion = 'beta' })
+                        RequiresNetwork           = $true
+                        SupportsNetworkAbortState = $false
+                    }
+                }
                 Invoke-PulseCollection -Store $store -Manifest $manifest `
-                    -Context ([pscustomobject]@{ ProfileId = 'fixture' }) -ProfileId 'fixture' `
-                    -TenantPseudonym 'tp-fixture' -ProviderPlanRegistry @{ partialParent = $plan }
+                    -Context ([pscustomobject]@{
+                        ProfileId = 'fixture'
+                        ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+                    }) -ProfileId 'fixture' -TenantPseudonym 'tp-fixture' -ProviderPlanRegistry $planRegistry
 
                 Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
             }

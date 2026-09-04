@@ -65,7 +65,11 @@ Describe 'Conflict detection end-to-end: redacted value crosses the T2.2/T2.3 ex
             param($storeRoot)
             New-PulseSnapshotStore -Path $storeRoot
         }
-        $script:context = [pscustomobject]@{ TenantId = 'tenant-guid-e2e'; ProfileId = 'contoso-lab' }
+        $script:context = [pscustomobject]@{
+            TenantId = 'tenant-guid-e2e'
+            ProfileId = 'contoso-lab'
+            ClientId = [guid]'22222222-2222-2222-2222-222222222222'
+        }
         $script:plantedSecret = 'PLANTED-E2E-CROSS-BOUNDARY-SECRET-qq777'
     }
 

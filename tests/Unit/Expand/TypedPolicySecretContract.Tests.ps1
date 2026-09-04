@@ -78,7 +78,11 @@ Describe 'SECRET CONTRACT capstone - planted PSK never reaches any file under th
             param($storeRoot)
             New-PulseSnapshotStore -Path $storeRoot
         }
-        $script:context = [pscustomobject]@{ TenantId = 'tenant-guid'; ProfileId = 'contoso-lab' }
+        $script:context = [pscustomobject]@{
+            TenantId = 'tenant-guid'
+            ProfileId = 'contoso-lab'
+            ClientId = [guid]'22222222-2222-2222-2222-222222222222'
+        }
         $script:plantedPsk = 'PLANTED-WIFI-PSK-CAPSTONE-zzz999'
     }
 
