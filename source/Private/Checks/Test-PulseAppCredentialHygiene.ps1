@@ -29,7 +29,9 @@
     lifetime exceeds 365 days. A credential missing EITHER startDateTime or endDateTime
     cannot have its lifetime computed - flagged separately as "unparseable", never silently
     skipped and never counted as offending (a genuinely unmeasurable lifetime is not the
-    same claim as "measured and found compliant"). SHOULD-tier severity (High per this
+    same claim as "measured and found compliant"). A known offender remains a monotonic
+    Fail; otherwise any unparseable credential makes the result NotApplicable rather than
+    a partial-population Pass. SHOULD-tier severity (High per this
     check's own descriptor, but explicitly SHOULD not SHALL, per the research entry's own
     Notes) - reflected in Consulting tone, not in a lower Severity, since a leaked long-lived
     app-only secret is a genuinely serious, durable exposure even though ScuBA itself does
@@ -148,10 +150,10 @@ function Test-PulseAppCredentialHygiene {
     }
 
     if ($totalOffenders -eq 0) {
-        $reason = "No service principal credential exceeds ScuBA's lifetime guidance (password <=$passwordMaxDays days, certificate <=$certMaxDays days) across $totalCredentials credential(s) on $($servicePrincipals.Count) service principal(s) evaluated."
         if ($totalUnparseable -gt 0) {
-            $reason += " $totalUnparseable credential(s) had an unparseable start/end date and could not be evaluated."
+            return New-PulseFinding -Status NotApplicable -Reason "$totalEvaluable of $totalCredentials credential(s) were evaluated and none of that evaluable subset exceeds ScuBA's lifetime guidance (password <=$passwordMaxDays days, certificate <=$certMaxDays days). $totalUnparseable credential(s) had an absent or unparseable start/end date; TenantPulse cannot claim compliant credential lifetimes for the full population."
         }
+        $reason = "No service principal credential exceeds ScuBA's lifetime guidance (password <=$passwordMaxDays days, certificate <=$certMaxDays days) across $totalEvaluable credential(s) on $($servicePrincipals.Count) service principal(s) evaluated ($totalEvaluable of $totalCredentials total credential(s) were evaluated)."
         return New-PulseFinding -Status Pass -Reason $reason
     }
 
@@ -167,7 +169,7 @@ function Test-PulseAppCredentialHygiene {
         }
     })
 
-    $reason = "$totalOffenders of $totalCredentials evaluated service principal credential(s) exceed ScuBA's lifetime guidance (password <=$passwordMaxDays days, certificate <=$certMaxDays days)$capNote."
+    $reason = "$totalOffenders of $totalEvaluable evaluable service principal credential(s) exceed ScuBA's lifetime guidance (password <=$passwordMaxDays days, certificate <=$certMaxDays days)$capNote. $totalEvaluable of $totalCredentials total credential(s) were evaluated."
     if ($totalUnparseable -gt 0) {
         $reason += " $totalUnparseable additional credential(s) had an unparseable start/end date and could not be evaluated."
     }

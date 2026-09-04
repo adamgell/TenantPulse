@@ -66,6 +66,24 @@ BeforeAll {
             Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
+
+    function script:New-PulseBrandingAssignment {
+        param(
+            [string] $Id = 'branding-assignment-1',
+            [string] $TargetType = 'user',
+            [string] $EntraObjectId = 'branding-group-1'
+        )
+
+        [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.intuneBrandingProfileAssignment'
+            id            = $Id
+            target        = [pscustomobject]@{
+                '@odata.type' = 'microsoft.graph.scopeTagGroupAssignmentTarget'
+                targetType    = $TargetType
+                entraObjectId = $EntraObjectId
+            }
+        }
+    }
 }
 
 Describe 'TP.INT.0011 - Default branding profile customized' {
@@ -95,7 +113,7 @@ Describe 'TP.INT.0011 - Default branding profile customized' {
             @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
                 [pscustomobject]@{ id = 'default'; isDefaultProfile = $true; displayName = ''; privacyUrl = '' }
                 [pscustomobject]@{ id = 'custom-1'; isDefaultProfile = $false; displayName = 'Sales team'; privacyUrl = ''; assignments = @(
-                    @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'sales-group' } }
+                    (New-PulseBrandingAssignment -EntraObjectId 'sales-group')
                 ) }
             ) }
         )
@@ -182,17 +200,18 @@ Describe 'TP.INT.0011 - Default branding profile customized' {
         $finding.status | Should -Be 'Fail'
     }
 
-    It 'Fail: an exclusion-only custom profile is not effective branding coverage' {
+    It 'NotApplicable: a custom profile with an unsupported scope-tag target remains indeterminate' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0011' -Datasets @(
             @{ Name = 'intuneBrandingProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
                 [pscustomobject]@{ id = 'default'; isDefaultProfile = $true; displayName = ''; privacyUrl = '' }
                 [pscustomobject]@{ id = 'custom-1'; isDefaultProfile = $false; displayName = 'Sales team'; privacyUrl = ''; assignments = @(
-                    @{ target = @{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'excluded-group' } }
+                    (New-PulseBrandingAssignment -TargetType 'unknownFutureValue')
                 ) }
             ) }
         )
 
-        $finding.status | Should -Be 'Fail'
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'assignment evidence'
     }
 
     It 'gate-degraded: NotApplicable when the dataset is Pending on a live tenant' {

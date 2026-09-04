@@ -22,17 +22,17 @@
     per Windows 11 feature-update version, e.g. version 22H2 -> 2025-10-15): Fail when any
     effectively assigned profile's endOfSupportDate is on/before the cutoff. Pass when
     every profile with authoritative assignment evidence has an endOfSupportDate after
-    the cutoff (or absent - see below) and no other profile has unknown assignment state.
+    the cutoff and no other profile has unknown assignment or lifecycle evidence.
     A known assigned expired profile is a monotonic Fail even when another profile's
-    assignments are unknown; otherwise unresolved assignment evidence is NotApplicable.
+    assignments or endOfSupportDate are unknown; otherwise unresolved evidence is
+    NotApplicable.
     NotApplicable
     (skip-if-none-configured, MIRRORING Maester's own ItemNotFoundException ->
     SkippedBecause Custom behavior - the research entry's own Notes call this out
     explicitly) when zero profiles are configured at all, which is a legitimately empty
     List result, distinct from an unparseable/absent endOfSupportDate on an EXISTING
-    profile (which this rule treats as "cannot prove this profile is a problem" and
-    excludes from the offending set, rather than guessing either way - field-absence
-    lens).
+    profile (which prevents Pass because the rule cannot prove that profile is currently
+    supported - field-absence lens).
 #>
 
 function Test-PulseFeatureUpdatePolicyAvoidsEos {
@@ -84,14 +84,19 @@ function Test-PulseFeatureUpdatePolicyAvoidsEos {
     $cutoff = [datetime]::Parse($cutoffBaseText, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal)
 
     $offending = [System.Collections.Generic.List[object]]::new()
+    $unknownLifecycle = [System.Collections.Generic.List[object]]::new()
     foreach ($profile in $profiles) {
         $eosText = [string] $profile.endOfSupportDate
-        if ([string]::IsNullOrWhiteSpace($eosText)) { continue }
+        if ([string]::IsNullOrWhiteSpace($eosText)) {
+            $unknownLifecycle.Add($profile) | Out-Null
+            continue
+        }
 
         $eosDate = $null
         try {
             $eosDate = [datetime]::Parse($eosText, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal)
         } catch {
+            $unknownLifecycle.Add($profile) | Out-Null
             continue
         }
 
@@ -100,8 +105,15 @@ function Test-PulseFeatureUpdatePolicyAvoidsEos {
         }
     }
 
-    if ($offending.Count -eq 0 -and $unknownAssignment) {
-        return New-PulseFinding -Status NotApplicable -Reason "The $($profiles.Count) profile(s) with authoritative assignments do not show an expired target, but one or more other profiles lack authoritative assignment evidence; the known subset cannot prove tenant-wide feature-update posture."
+    if ($offending.Count -eq 0 -and ($unknownAssignment -or $unknownLifecycle.Count -gt 0)) {
+        $gapReasons = [System.Collections.Generic.List[string]]::new()
+        if ($unknownLifecycle.Count -gt 0) {
+            $gapReasons.Add("$($unknownLifecycle.Count) effectively assigned profile(s) have an absent or unparseable endOfSupportDate") | Out-Null
+        }
+        if ($unknownAssignment) {
+            $gapReasons.Add('one or more other profiles lack authoritative assignment evidence') | Out-Null
+        }
+        return New-PulseFinding -Status NotApplicable -Reason "No known assigned Windows Feature Update profile is proven expired, but $(($gapReasons.ToArray()) -join '; '); the available subset cannot prove tenant-wide feature-update posture."
     }
 
     if ($offending.Count -eq 0) {
@@ -110,6 +122,13 @@ function Test-PulseFeatureUpdatePolicyAvoidsEos {
 
     $evidence = ConvertTo-PulseMaesterEvidence -Rows $offending.ToArray() -IdentityProperty 'id' -SortKeyProperty 'displayName' -DetailProperties @('displayName', 'featureUpdateVersion', 'endOfSupportDate')
 
-    $reason = "$($offending.Count) of $($profiles.Count) Windows Feature Update profile(s) target a Windows version/build whose end-of-support date has already passed - devices targeted by these profiles receive no further security updates for that OS version until the profile is updated to a currently-supported feature update version."
+    $gapNote = ''
+    if ($unknownLifecycle.Count -gt 0) {
+        $gapNote += " $($unknownLifecycle.Count) additional effectively assigned profile(s) had an absent or unparseable endOfSupportDate and could not be classified."
+    }
+    if ($unknownAssignment) {
+        $gapNote += ' One or more other profiles lacked authoritative assignment evidence and could not be classified.'
+    }
+    $reason = "$($offending.Count) of $($profiles.Count) effectively assigned Windows Feature Update profile(s) are proven to target a Windows version/build whose end-of-support date has already passed - devices targeted by these profiles receive no further security updates for that OS version until the profile is updated to a currently-supported feature update version.$gapNote"
     return New-PulseFinding -Status Fail -Reason $reason -Evidence $evidence
 }

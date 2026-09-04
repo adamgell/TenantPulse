@@ -83,6 +83,60 @@ Describe 'ConvertTo-PulseAssignmentIntent' {
         $result.IncludeKinds | Should -Be @('AllDevices', 'AllUsers')
     }
 
+    It 'classifies documented branding and enrollment scope-tag group targets as includes' {
+        $assignments = @(
+            @{
+                '@odata.type' = '#microsoft.graph.intuneBrandingProfileAssignment'
+                id            = 'branding-assignment-1'
+                target        = @{
+                    '@odata.type' = 'microsoft.graph.scopeTagGroupAssignmentTarget'
+                    targetType    = 'user'
+                    entraObjectId = 'branding-group-id'
+                }
+            }
+            @{
+                '@odata.type' = '#microsoft.graph.enrollmentConfigurationAssignment'
+                id            = 'enrollment-assignment-1'
+                target        = @{
+                    '@odata.type' = '#microsoft.graph.scopeTagGroupAssignmentTarget'
+                    targetType    = 'device'
+                    entraObjectId = 'enrollment-group-id'
+                }
+            }
+        )
+
+        $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+
+        $result.State | Should -Be 'Include'
+        $result.IsAssigned | Should -BeTrue
+        $result.Complete | Should -BeTrue
+        $result.IncludeKinds | Should -Contain 'Group'
+        $result.IncludeGroupIds | Should -Be @('branding-group-id', 'enrollment-group-id')
+    }
+
+    It 'keeps malformed documented scope-tag group targets indeterminate' {
+        $assignments = @(
+            @{ target = @{ '@odata.type' = 'microsoft.graph.scopeTagGroupAssignmentTarget'; entraObjectId = 'missing-type-id' } }
+            @{ target = @{ '@odata.type' = '#microsoft.graph.scopeTagGroupAssignmentTarget'; targetType = 'unknownFutureValue'; entraObjectId = 'future-id' } }
+            @{ target = @{ '@odata.type' = '#microsoft.graph.scopeTagGroupAssignmentTarget'; targetType = 'device'; entraObjectId = ' ' } }
+        )
+
+        $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+
+        $result.State | Should -Be 'Malformed'
+        $result.IsAssigned | Should -BeFalse
+        $result.Complete | Should -BeFalse
+        $result.MalformedReasons | Should -Contain 'missing-scope-tag-target-type'
+        $result.MalformedReasons | Should -Contain 'unsupported-scope-tag-target-type:unknownFutureValue'
+        $result.MalformedReasons | Should -Contain 'missing-entra-object-id'
+    }
+
     It 'classifies a missing target type as Malformed' {
         $assignments = @(
             @{ target = @{ groupId = 'grp-1' } }

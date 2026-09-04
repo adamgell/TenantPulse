@@ -13,6 +13,11 @@
         Malformed    - a target is missing @odata.type, uses an unknown type, or a group
                        target has no groupId. Cannot prove targeting.
 
+    Branding-profile and enrollment-configuration assignment responses use the documented
+    scopeTagGroupAssignmentTarget shape. Only targetType=user/device with a nonblank
+    entraObjectId is an authoritative include; missing, none, and future/unknown target
+    types remain Malformed so an unfamiliar service shape cannot become coverage.
+
     IsAssigned is true only for Include. Empty, ExcludeOnly, Unknown, and Malformed never
     count as assigned. HasFilter is additive disclosure; a filter does not by itself assign.
 #>
@@ -87,6 +92,15 @@ function ConvertTo-PulseAssignmentIntent {
             continue
         }
 
+        # Reset all per-row values so one malformed item cannot inherit a prior target's
+        # shape while PowerShell reuses variables in this function scope.
+        $typeName = $null
+        $groupId = $null
+        $filterId = $null
+        $filterType = $null
+        $scopeTagTargetType = $null
+        $entraObjectId = $null
+
         # Extract intent - both shapes carry it at the top level.
         $intent = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'intent')
         $normalizedTargetType = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'targetType')
@@ -110,6 +124,8 @@ function ConvertTo-PulseAssignmentIntent {
             $groupId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'groupId')
             $filterId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId')
             $filterType = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType')
+            $scopeTagTargetType = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'targetType')
+            $entraObjectId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'entraObjectId')
         }
         if (-not [string]::IsNullOrWhiteSpace($filterId)) {
             $result.HasFilter = $true
@@ -135,6 +151,22 @@ function ConvertTo-PulseAssignmentIntent {
             $kind = 'AllDevices'
         } elseif ([string]::Equals($typeName, 'configurationManagerCollectionAssignmentTarget', [System.StringComparison]::OrdinalIgnoreCase)) {
             $kind = 'ConfigMgr'
+        } elseif ([string]::Equals($typeName, 'scopeTagGroupAssignmentTarget', [System.StringComparison]::OrdinalIgnoreCase)) {
+            if ([string]::IsNullOrWhiteSpace($scopeTagTargetType)) {
+                $hasMalformed = $true
+                $malformedReasons.Add('missing-scope-tag-target-type') | Out-Null
+            } elseif ($scopeTagTargetType -notin @('user', 'device')) {
+                $hasMalformed = $true
+                $malformedReasons.Add("unsupported-scope-tag-target-type:$scopeTagTargetType") | Out-Null
+            } elseif ([string]::IsNullOrWhiteSpace($entraObjectId)) {
+                $hasMalformed = $true
+                $malformedReasons.Add('missing-entra-object-id') | Out-Null
+            } else {
+                # The service names this a group assignment target; targetType identifies
+                # whether the referenced Entra group targets users or devices.
+                $kind = 'Group'
+                $groupId = $entraObjectId
+            }
         } else {
             $hasMalformed = $true
             $malformedReasons.Add("unknown-target-type:$typeName") | Out-Null

@@ -156,6 +156,28 @@ Describe 'TP.ENT.0019 - service principal credential hygiene' {
         $finding.reason | Should -Match 'unparseable'
     }
 
+    It 'NotApplicable: a mixed compliant and unparseable population is not reported as compliant' {
+        $sp = New-PulseServicePrincipal -UnparseablePassword -CertLifetimeDays 300
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0019' -Datasets @(
+            @{ Name = 'servicePrincipals'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($sp) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match '1 of 2 credential\(s\) (could be|were) evaluated'
+        $finding.reason | Should -Match '1 credential\(s\).*unparseable'
+    }
+
+    It 'Fail remains monotonic for a known offender beside an unparseable credential and states evaluable/total counts' {
+        $sp = New-PulseServicePrincipal -UnparseablePassword -CertLifetimeDays 400
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0019' -Datasets @(
+            @{ Name = 'servicePrincipals'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($sp) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match '1 of 1 evaluable service principal credential\(s\) exceed'
+        $finding.reason | Should -Match '1 of 2 total credential\(s\) (could be|were) evaluated'
+    }
+
     It 'evidence is capped to 50 rows and the reason states the total offending count' {
         $servicePrincipals = @(1..60 | ForEach-Object { New-PulseServicePrincipal -Id "sp-$_" -PasswordLifetimeDays (200 + $_) })
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0019' -Datasets @(

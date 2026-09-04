@@ -123,12 +123,35 @@ Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support buil
         $finding.evidence[0].identity | Should -Be 'p1'
     }
 
-    It 'Pass: a profile with an absent endOfSupportDate is not treated as offending (field-absence, never assumed expired)' {
+    It 'NotApplicable: an assigned profile with an absent endOfSupportDate cannot prove current support' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
             @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 25H2')) }
         )
 
-        $finding.status | Should -Be 'Pass'
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'endOfSupportDate'
+    }
+
+    It 'NotApplicable: an assigned profile with an invalid endOfSupportDate cannot prove current support' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 25H2' -EndOfSupportDate 'not-a-date')) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'endOfSupportDate'
+    }
+
+    It 'Fail remains monotonic for a known expired assigned profile beside an assigned profile with unknown lifecycle evidence' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                (New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Expired ring' -FeatureUpdateVersion 'Windows 11, version 22H2' -EndOfSupportDate '2025-10-15T06:59:59Z')
+                (New-PulseFeatureUpdateProfile -Id 'p2' -DisplayName 'Unknown lifecycle ring' -FeatureUpdateVersion 'Windows 11, version 25H2')
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'p1'
     }
 
     It 'NotApplicable: missing assignment evidence cannot prove an otherwise-current profile is deployed' {
