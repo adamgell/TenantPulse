@@ -119,6 +119,14 @@
     configurationPolicySettings = @{ Type = 'ConfigurationPolicySetting'; Operation = 'ListBeta'; ApiVersion = 'beta' }
     configurationPolicyAssignments = @{ Type = 'ConfigurationPolicyAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
 
+    # Administrative Template expansion is another opt-in, per-policy walk. These rows
+    # keep its released GraphKit primitives inside the same static Read/Safe catalog gate
+    # as every other Graph request, but no ordinary check-driven collection loop invokes
+    # them directly. Get-PulseTenantSnapshot wires the walk only under -ExpandSettings.
+    groupPolicyConfigurations = @{ Type = 'GroupPolicyConfiguration'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+    groupPolicyDefinitionValues = @{ Type = 'GroupPolicyDefinitionValue'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+    groupPolicyPresentationValues = @{ Type = 'GroupPolicyPresentationValue'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+
     # Task 2.3 (compliance + legacy typed-policy expansion, -ExpandSettings): declared here
     # for the exact same reason as the two Task 2.2 entries directly above - so the STATIC
     # read-only gate proves both are Read/Safe - and consumed the exact same way: NOT
@@ -222,6 +230,14 @@
     # descriptor-pending fallback. ExpectedThrottleClass/ExpectedReplayPolicy declare the
     # Read/Safe shape enforced for every such placeholder.
     securityBaselinesAssignedAndCurrent = @{ Type = 'SecurityBaselineAssignedAndCurrentWalk'; Operation = 'Walk'; ApiVersion = 'beta'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+
+    # Bounded, cycle-safe group membership closure. This is a TenantPulse-owned composite
+    # over released GraphKit read primitives, so the synthetic Walk remains Pending in the
+    # Graph descriptor map while Resolve-PulseProviderPlanRegistry supplies the runtime
+    # plan. `groupMembers` is the stable consumer name used by checks; `groupClosure` is the
+    # explicit composite name. Both route to the same plan and caps.
+    groupMembers = @{ Type = 'GroupClosureWalk'; Operation = 'Walk'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
+    groupClosure = @{ Type = 'GroupClosureWalk'; Operation = 'Walk'; ApiVersion = 'v1.0'; Pending = $true; ExpectedThrottleClass = 'Read'; ExpectedReplayPolicy = 'Safe' }
 
     # Task 4.2 (EIDSCA port, wave 1): GraphKit 0.2.2 shipped the official
     # AuthorizationPolicy/Get descriptor. Pending dropped. GraphKit's descriptor is

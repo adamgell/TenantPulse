@@ -160,6 +160,16 @@ function Resolve-PulseProviderPlanRegistry {
                     @{ Type = 'GroupMember'; Operation = 'List'; ApiVersion = 'v1.0' }
                 ))
         }
+        groupMembers                                      = @{
+            Command = $groupClosurePlan
+            RequiresNetwork = $true
+            SupportsNetworkAbortState = $true
+            Operations = @(ConvertTo-PulseProviderPlanOperations -Dataset 'groupMembers' -Operations @(
+                    @{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' }
+                    @{ Type = 'DirectoryRoleAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+                    @{ Type = 'GroupMember'; Operation = 'List'; ApiVersion = 'v1.0' }
+                ))
+        }
     }
 
     if ($null -ne $Overrides) {

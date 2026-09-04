@@ -104,7 +104,7 @@ function Test-PulseCheckDescriptor {
     # $Context.ArtifactReader.GetSettingPresenceIndex() - see New-PulseArtifactReader.ps1's
     # own docstring). Growing this further means adding its name here, nowhere else - see
     # this file's own top-level docstring.
-    $knownExpansionArtifacts = @('conflicts', 'settingPresenceIndex')
+    $knownExpansionArtifacts = @('administrativeTemplates', 'conflicts', 'expansionSummary', 'settingPresenceIndex')
 
     function Test-PulseScalarStringField {
         param(

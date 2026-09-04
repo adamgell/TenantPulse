@@ -367,6 +367,22 @@ function Get-PulseTenantSnapshot {
         # jsonl artifacts' own two derived-artifact consumers grouped together at the end
         # of this block, matching the order they were added in.
         $null = Invoke-PulseSettingPresenceIndexBuild -Store $store -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
+
+        # Administrative Templates are a released, opt-in expansion family. They share
+        # this switch but not the Settings Catalog walker. A preflight/authentication block
+        # records an honest NotExpanded entry without allowing the family to send.
+        if ($skipExpansionGraph) {
+            Set-PulseExpansionEntry -Store $store -Name 'administrativeTemplates' -Status 'NotExpanded' -Reason $expansionSuppressedReason
+        } else {
+            $null = Invoke-PulseAdministrativeTemplateExpansion -Store $store -Context $context -Requested `
+                -SelectedChecks $checks -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId `
+                -NetworkAbortState $networkAbortState
+        }
+
+        # Summary is derived only after every requested family has reached a terminal
+        # state, including blocked/partial families. It performs no Graph requests.
+        $null = Invoke-PulseExpansionSummary -Store $store -Requested -SelectedChecks $checks `
+            -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
     }
 
     return $store

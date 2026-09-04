@@ -6,7 +6,7 @@
     Effort     = 'Medium'
     Impact     = 'High'
     Data       = @{
-        Datasets = @('roleAssignmentScheduleInstances', 'directoryRoleDefinitions')
+        Datasets = @('roleAssignmentScheduleInstances', 'directoryRoleDefinitions', 'groupMembers')
         Gates    = @('EntraP2')
     }
     Rule       = @{

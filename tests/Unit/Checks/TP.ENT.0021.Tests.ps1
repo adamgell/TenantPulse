@@ -20,6 +20,12 @@ BeforeAll {
             [Parameter(Mandatory)] [hashtable[]] $Datasets
         )
 
+        if (@($Datasets | Where-Object Name -eq 'groupMembers').Count -eq 0) {
+            $Datasets = @($Datasets) + @{
+                Name = 'groupMembers'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @()
+            }
+        }
+
         $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $keyPath = Join-Path $storeRoot '.opkey/operator.key'
 

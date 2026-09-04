@@ -190,6 +190,56 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings' {
         Remove-Item -LiteralPath $script:outputRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
+    It 'runs Administrative Templates and then publishes the expansion summary under the opt-in switch' {
+        InModuleScope TenantPulse {
+            function Get-GraphContext { param() }
+            function Get-GraphOperation { param() }
+            function Get-GraphObject { param() }
+        }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{
+                TenantId = '11111111-1111-1111-1111-111111111111'
+                ProfileId = 'contoso-controller'
+                ClientId = [guid]'22222222-2222-2222-2222-222222222222'
+            }
+        }
+        Mock Get-GraphOperation -ModuleName TenantPulse {
+            @{
+                Type = $Type
+                Operation = $Operation
+                ApiVersion = if ($Type -in @('Organization', 'SubscribedSku')) { 'v1.0' } else { 'beta' }
+                ThrottleClass = 'Read'
+                ReplayPolicy = 'Safe'
+                RequiredPermissions = @()
+            }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse { @() }
+        $script:ExpansionControllerCalls = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-PulseAdministrativeTemplateExpansion -ModuleName TenantPulse {
+            $script:ExpansionControllerCalls.Add('administrativeTemplates') | Out-Null
+            [pscustomobject]@{ Status = 'Expanded' }
+        }
+        Mock Invoke-PulseExpansionSummary -ModuleName TenantPulse {
+            $script:ExpansionControllerCalls.Add('expansionSummary') | Out-Null
+            [pscustomobject]@{ Status = 'Expanded' }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:outputRoot {
+            param($outputRoot)
+            Get-PulseTenantSnapshot -ProfileId 'contoso-controller' -OutputPath $outputRoot `
+                -IncludeCheck 'TP.ENT.0001' -ExpandSettings
+        }
+
+        $result.Root | Should -Not -BeNullOrEmpty
+        @($script:ExpansionControllerCalls) | Should -Be @('administrativeTemplates', 'expansionSummary')
+        Should-Invoke Invoke-PulseAdministrativeTemplateExpansion -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Requested -and $ProfileId -eq 'contoso-controller'
+        }
+        Should-Invoke Invoke-PulseExpansionSummary -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Requested -and $ProfileId -eq 'contoso-controller'
+        }
+    }
+
     It 'is OFF by default: no configurationPolicies dataset and no settingsCatalog expansion entry are written' {
         InModuleScope TenantPulse {
             function Get-GraphContext { param() }
@@ -221,7 +271,11 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings' {
             -PrivateMarker $privateMarker
         $script:rootFailureRecord = $record
         Mock Get-GraphContext -ModuleName TenantPulse {
-            [pscustomobject]@{ TenantId = 'tenant-guid-auth-suppression'; ProfileId = 'contoso-auth-suppression' }
+            [pscustomobject]@{
+                TenantId = '11111111-1111-1111-1111-111111111111'
+                ProfileId = 'contoso-auth-suppression'
+                ClientId = [guid]'22222222-2222-2222-2222-222222222222'
+            }
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } {
             throw $script:rootFailureRecord

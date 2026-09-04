@@ -638,6 +638,19 @@ Describe 'Test-PulseCheckDescriptor' {
             @($errors).Count | Should -Be 0
         }
 
+        It 'accepts the released administrativeTemplates and expansionSummary artifact families' {
+            foreach ($artifact in @('administrativeTemplates', 'expansionSummary')) {
+                $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData, $artifact {
+                    param($base, $name)
+                    function Test-PulseFixtureRule { $true }
+                    $descriptor = $base.Clone()
+                    $descriptor.Data = @{ Expansions = @($name); Gates = @() }
+                    Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id
+                }
+                @($errors).Count | Should -Be 0 -Because "$artifact is a shipped expansion artifact"
+            }
+        }
+
         It 'accepts a descriptor with BOTH Data.Datasets and Data.Expansions populated' {
             $errors = InModuleScope TenantPulse -ArgumentList $script:baseDescriptorNoData {
                 param($base)
@@ -1226,6 +1239,39 @@ Describe 'Shipping check research path and heading anchors' {
         }
 
         @($failures) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Integrated administrative-template and group-closure controller contracts' {
+    It 'declares every administrative-template Graph primitive in the shared dataset map' {
+        $map = Import-PowerShellDataFile -LiteralPath (Join-Path $script:repoRoot 'source/Data/DatasetMap.psd1')
+
+        $map.groupPolicyConfigurations.Type | Should -Be 'GroupPolicyConfiguration'
+        $map.groupPolicyConfigurations.Operation | Should -Be 'ListBeta'
+        $map.groupPolicyConfigurations.ApiVersion | Should -Be 'beta'
+        $map.groupPolicyDefinitionValues.Type | Should -Be 'GroupPolicyDefinitionValue'
+        $map.groupPolicyDefinitionValues.Operation | Should -Be 'ListBeta'
+        $map.groupPolicyPresentationValues.Type | Should -Be 'GroupPolicyPresentationValue'
+        $map.groupPolicyPresentationValues.Operation | Should -Be 'ListBeta'
+    }
+
+    It 'maps groupMembers and groupClosure to the bounded TenantPulse walk' {
+        $map = Import-PowerShellDataFile -LiteralPath (Join-Path $script:repoRoot 'source/Data/DatasetMap.psd1')
+
+        foreach ($name in @('groupMembers', 'groupClosure')) {
+            $map.ContainsKey($name) | Should -BeTrue
+            $map[$name].Type | Should -Be 'GroupClosureWalk'
+            $map[$name].Operation | Should -Be 'Walk'
+            $map[$name].ApiVersion | Should -Be 'v1.0'
+            $map[$name].Pending | Should -BeTrue
+        }
+    }
+
+    It 'makes every group-closure consumer request groupMembers from the collection controller' {
+        foreach ($id in @('TP.ENT.0003', 'TP.ENT.0021', 'TP.ENT.0022')) {
+            $descriptor = Import-PowerShellDataFile -LiteralPath (Join-Path $script:repoRoot "source/Data/Checks/$id.psd1")
+            @($descriptor.Data.Datasets) | Should -Contain 'groupMembers' -Because "$id consumes effective membership"
+        }
     }
 }
 

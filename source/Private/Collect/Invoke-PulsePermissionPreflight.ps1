@@ -42,6 +42,9 @@ $script:PulseExpansionOperations = @(
     @{ Type = 'ConfigurationSettingDefinition'; Operation = 'ListBeta'; ApiVersion = 'beta' }
     @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
     @{ Type = 'DeviceConfigurationAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+    @{ Type = 'GroupPolicyConfiguration'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+    @{ Type = 'GroupPolicyDefinitionValue'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+    @{ Type = 'GroupPolicyPresentationValue'; Operation = 'ListBeta'; ApiVersion = 'beta' }
 )
 
 function Get-PulsePermissionOperationKey {

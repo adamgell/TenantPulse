@@ -259,7 +259,7 @@ function Get-PulseCaExclusionContext {
     $groupExclusionsComplete = $false
     $resolvedGroupExclusions = @()
     $reportOnlyExclusions = @()
-    $groupExclusionNote = 'Group-based exclusion (excludeGroups membership) cannot be resolved: no group-membership dataset is collected yet. Only excludeUsers-based exclusion is verifiable today.'
+    $groupExclusionNote = 'Group-based exclusion (excludeGroups membership) cannot be resolved because this snapshot has no group-membership closure artifact. Only excludeUsers-based exclusion is verifiable from this snapshot.'
     $groupExclusionCaps = $null
     $groupExclusionSampled = $false
 

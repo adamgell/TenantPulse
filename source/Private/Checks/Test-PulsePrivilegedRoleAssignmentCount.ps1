@@ -13,16 +13,10 @@
     properties, isPrivileged genuinely IS optional/defaultable on this dataset's real Graph
     shape, not a regressed/unrecognized one.
 
-    HONEST LIMITATION, CARRIED FORWARD FROM THE RESEARCH ENTRY'S OWN NOTES (not silently
-    dropped): this counts DIRECT roleAssignments only. A role assigned to a GROUP (Entra
-    role-assignable groups) with many members is a single directoryRoleAssignments row by
-    principalId (the group's own object id) - this check counts that as ONE assignment, not
-    N (one per group member), because no group-membership-expansion dataset exists yet
-    (same gap Get-PulseCaExclusionContext's own docstring already names for CA exclusion
-    resolution - groupMembers is not a real DatasetMap.psd1 entry). This can UNDERCOUNT the
-    true blast radius on a tenant that assigns privileged roles to groups rather than
-    individual principals - stated here and in this check's own Consulting text, not hidden
-    behind an apparently-precise count.
+    GROUP CLOSURE: current snapshots collect the bounded `groupMembers` composite and the
+    check counts effective members of role-assignable groups. Imported historical snapshots
+    can legitimately lack that dataset; those remain direct-assignment-only and say so in
+    the result. A present but sampled/capped closure is incomplete and cannot produce Pass.
 #>
 
 function Test-PulsePrivilegedRoleAssignmentCount {
@@ -52,7 +46,7 @@ function Test-PulsePrivilegedRoleAssignmentCount {
         $limitNote = if ($closure.GroupMembersPresent) {
             'Effective count expands role-assignable-group membership.'
         } else {
-            'Note: direct assignments only, does not expand role-assignable-group membership (see this check''s own Consulting text for that known limitation).'
+            'Historical snapshot note: direct assignments only because no group-membership closure artifact is present.'
         }
         return New-PulseFinding -Status Pass -Reason "$count active privileged-role assignment(s) across $($closure.PrivilegedRoleCount) privileged role(s) - below Microsoft's fewer-than-$threshold guidance. $limitNote"
     }

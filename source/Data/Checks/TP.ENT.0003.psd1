@@ -6,7 +6,7 @@
     Effort     = 'Low'
     Impact     = 'High'
     Data       = @{
-        Datasets = @('conditionalAccessPolicies', 'directoryRoleAssignments')
+        Datasets = @('conditionalAccessPolicies', 'directoryRoleAssignments', 'groupMembers')
         Gates    = @('EntraP1')
     }
     Rule       = @{

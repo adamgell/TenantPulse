@@ -104,6 +104,22 @@ Describe 'Invoke-PulseCollection provider plans' {
         }
     }
 
+    It 'registers groupMembers and groupClosure as the same bounded Graph-backed plan contract' {
+        $registry = InModuleScope TenantPulse { Resolve-PulseProviderPlanRegistry }
+
+        foreach ($name in @('groupMembers', 'groupClosure')) {
+            $registry.ContainsKey($name) | Should -BeTrue
+            $registry[$name].RequiresNetwork | Should -BeTrue
+            @($registry[$name].Operations | ForEach-Object { "$($_.Type)/$($_.Operation)/$($_.ApiVersion)" }) | Should -Be @(
+                'ConditionalAccessPolicy/List/beta'
+                'DirectoryRoleAssignment/List/v1.0'
+                'GroupMember/List/v1.0'
+            )
+        }
+
+        $registry.groupMembers.Command.ToString() | Should -Be $registry.groupClosure.Command.ToString()
+    }
+
     It 'dispatches a dataset-keyed plan and preserves successful rows plus a failed child gap' {
         $planRegistry = InModuleScope TenantPulse {
             @{
