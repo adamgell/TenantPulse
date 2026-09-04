@@ -7,9 +7,15 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
 
     InModuleScope TenantPulse {
         function Get-GraphObject { param() }
+    }
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
 }
@@ -45,7 +51,7 @@ Describe 'Invoke-PulseTypedPolicyExpansionPipeline' {
 
     It 'a Collected deviceCompliancePolicies dataset expands compliance independently of a missing deviceConfigurations dataset' {
         $policy = [pscustomobject]@{ id = 'p1'; displayName = 'Win'; '@odata.type' = '#microsoft.graph.windows10CompliancePolicy'; bitLockerEnabled = $true }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' } { New-PulseTestGraphEnvelope }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $policy {
             param($store, $policy)

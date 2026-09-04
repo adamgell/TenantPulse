@@ -17,8 +17,14 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
     InModuleScope TenantPulse {
         function Test-GraphPermission { param() }
+    }
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
     }
     Mock Test-GraphPermission -ModuleName TenantPulse {
         @(
@@ -71,7 +77,9 @@ Describe 'Graph failure adapter contract' {
                 $script:AdapterRecord = $record
                 Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
                 Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'FirstType' } { throw $script:AdapterRecord }
-                Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'SecondType' } { @([pscustomobject]@{ id = 'row-2' }) }
+                Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'SecondType' } {
+                    New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'row-2' })
+                }
                 Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                     -ProfileId 'fixture' -TenantPseudonym 'tp-fixture'
             }
@@ -148,7 +156,7 @@ Describe 'Graph failure adapter contract' {
             $script:AdapterRecord = $record
             Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementUnifiedRoleAssignment' } {
-                @([pscustomobject]@{
+                New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                     id = 'assignment-1'
                     roleDefinition = [pscustomobject]@{ displayName = 'Role' }
                     principals = @(
@@ -194,7 +202,7 @@ Describe 'Graph failure adapter contract' {
             $script:AdapterRecord = $record
             Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } {
-                @([pscustomobject]@{
+                New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                     id = 'policy-1'; name = 'Disk policy'
                     templateReference = [pscustomobject]@{ templateFamily = 'endpointSecurityDiskEncryption'; templateId = 'template-1' }
                 })
@@ -235,14 +243,14 @@ Describe 'Graph failure adapter contract' {
             param($record)
             $script:AdapterRecord = $record
             Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
-            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementTemplate' } { @() }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementTemplate' } { New-PulseTestGraphEnvelope }
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementConfigurationPolicyTemplate' } {
-                @([pscustomobject]@{ id = 'template-1'; lifecycleState = 'active'; templateFamily = 'baseline' })
+                New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'template-1'; lifecycleState = 'active'; templateFamily = 'baseline' })
             }
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } {
-                @([pscustomobject]@{ id = 'policy-1'; name = 'Baseline'; templateReference = [pscustomobject]@{ templateId = 'template-1'; templateFamily = 'baseline' } })
+                New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'policy-1'; name = 'Baseline'; templateReference = [pscustomobject]@{ templateId = 'template-1'; templateFamily = 'baseline' } })
             }
-            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementIntent' } { @() }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementIntent' } { New-PulseTestGraphEnvelope }
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { throw $script:AdapterRecord }
             Invoke-PulseSecurityBaselinePlan `
                 -Context ([pscustomobject]@{ ProfileId = 'fixture' }) -Dataset 'securityBaselinesAssignedAndCurrent' `
@@ -282,7 +290,7 @@ Describe 'Graph failure adapter contract' {
                 $script:AdapterRecord = $record
                 Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
                 Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { throw $script:AdapterRecord }
-                Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { @() }
+                Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { New-PulseTestGraphEnvelope }
                 Invoke-PulseSettingsCatalogPolicy -Store $store `
                     -Policy ([pscustomobject]@{ id = 'policy-1'; name = 'Policy'; templateReference = [pscustomobject]@{ templateFamily = 'none'; templateId = '' } }) `
                     -Context ([pscustomobject]@{ ProfileId = 'fixture' }) -DefinitionIndex ([ordered]@{}) `
@@ -304,7 +312,7 @@ Describe 'Graph failure adapter contract' {
                 param($store, $record)
                 $script:AdapterRecord = $record
                 Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
-                Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { @() }
+                Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { New-PulseTestGraphEnvelope }
                 Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { throw $script:AdapterRecord }
                 Invoke-PulseSettingsCatalogPolicy -Store $store `
                     -Policy ([pscustomobject]@{ id = 'policy-1'; name = 'Policy'; templateReference = [pscustomobject]@{ templateFamily = 'none'; templateId = '' } }) `
@@ -394,7 +402,7 @@ Describe 'Graph failure adapter contract' {
             $script:RbacFanoutFailId = $failId
             Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementUnifiedRoleAssignment' } {
-                @([pscustomobject]@{
+                New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                     id = 'assignment'; roleDefinition = [pscustomobject]@{ displayName = 'Role' }
                     principals = @('group-a', 'group-b', 'group-c' | ForEach-Object {
                         [pscustomobject]@{ id = $_; '@odata.type' = '#microsoft.graph.group' }
@@ -403,7 +411,7 @@ Describe 'Graph failure adapter contract' {
             }
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'Group' } {
                 if ($Parameters.id -eq $script:RbacFanoutFailId) { throw $script:RbacFanoutRecord }
-                [pscustomobject]@{ id = $Parameters.id; displayName = $Parameters.id; isManagementRestricted = $false; isAssignableToRole = $false }
+                New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = $Parameters.id; displayName = $Parameters.id; isManagementRestricted = $false; isAssignableToRole = $false })
             }
             $null = Invoke-PulseIntuneRbacGroupProtectionPlan -Context ([pscustomobject]@{}) `
                 -Dataset 'intuneRbacGroupProtection' -ManifestEntry ([pscustomobject]@{ ApiVersion = 'beta' }) `
@@ -428,13 +436,13 @@ Describe 'Graph failure adapter contract' {
             $script:EndpointFanoutFailId = $failId
             Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } {
-                @('policy-a', 'policy-b', 'policy-c' | ForEach-Object {
+                New-PulseTestGraphEnvelope -Data @('policy-a', 'policy-b', 'policy-c' | ForEach-Object {
                     [pscustomobject]@{ id = $_; name = $_; templateReference = [pscustomobject]@{ templateFamily = 'endpointSecurityDiskEncryption'; templateId = 'fixture' } }
                 })
             }
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
                 if ($Parameters.id -eq $script:EndpointFanoutFailId) { throw $script:EndpointFanoutRecord }
-                @()
+                New-PulseTestGraphEnvelope
             }
             $null = Invoke-PulseEndpointSecurityPolicyPlan -Context ([pscustomobject]@{}) `
                 -Dataset 'endpointSecurityDiskEncryptionPolicies' -ManifestEntry ([pscustomobject]@{ ApiVersion = 'beta' }) `
@@ -458,17 +466,17 @@ Describe 'Graph failure adapter contract' {
             $script:BaselineFanoutRecord = $record
             $script:BaselineFanoutFailId = $failId
             Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {}
-            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementTemplate' } { @() }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementTemplate' } { New-PulseTestGraphEnvelope }
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementConfigurationPolicyTemplate' } {
-                @('a', 'b', 'c' | ForEach-Object { [pscustomobject]@{ id = "template-$_"; lifecycleState = 'active'; templateFamily = 'baseline' } })
+                New-PulseTestGraphEnvelope -Data @('a', 'b', 'c' | ForEach-Object { [pscustomobject]@{ id = "template-$_"; lifecycleState = 'active'; templateFamily = 'baseline' } })
             }
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } {
-                @('a', 'b', 'c' | ForEach-Object { [pscustomobject]@{ id = "policy-$_"; name = $_; templateReference = [pscustomobject]@{ templateId = "template-$_"; templateFamily = 'baseline' } } })
+                New-PulseTestGraphEnvelope -Data @('a', 'b', 'c' | ForEach-Object { [pscustomobject]@{ id = "policy-$_"; name = $_; templateReference = [pscustomobject]@{ templateId = "template-$_"; templateFamily = 'baseline' } } })
             }
-            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementIntent' } { @() }
+            Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceManagementIntent' } { New-PulseTestGraphEnvelope }
             Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } {
                 if ($Parameters.id -eq $script:BaselineFanoutFailId) { throw $script:BaselineFanoutRecord }
-                @()
+                New-PulseTestGraphEnvelope
             }
             $null = Invoke-PulseSecurityBaselinePlan -Context ([pscustomobject]@{}) `
                 -Dataset 'securityBaselinesAssignedAndCurrent' -ManifestEntry ([pscustomobject]@{ ApiVersion = 'beta' }) `

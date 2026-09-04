@@ -25,10 +25,16 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
 
     InModuleScope TenantPulse {
         function Get-GraphObject { param() }
         function Test-GraphPermission { param() }
+    }
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
     Mock Test-GraphPermission -ModuleName TenantPulse {
@@ -80,10 +86,10 @@ Describe 'Conflict detection end-to-end: redacted value crosses the T2.2/T2.3 ex
                 }
             })
 
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' -and $Operation -eq 'ListBeta' } { $catalogPolicies }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $catalogDefinitions }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $catalogSettingsResponse }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' -and $Operation -eq 'ListBeta' } { New-PulseTestGraphEnvelope -Data $catalogPolicies }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope -Data $catalogDefinitions }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { New-PulseTestGraphEnvelope -Data $catalogSettingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { New-PulseTestGraphEnvelope }
 
         # --- T2.3: typed-policy side - a REDACTED (Sensitive) omaSettings[0].value ---
         $plantedPolicy = [pscustomobject]@{
@@ -94,8 +100,8 @@ Describe 'Conflict detection end-to-end: redacted value crosses the T2.2/T2.3 ex
                 [pscustomobject]@{ '@odata.type' = '#microsoft.graph.omaSettingString'; omaUri = './Wifi/PSK'; value = $script:plantedSecret }
             )
         }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfiguration' -and $Operation -eq 'List' } { @($plantedPolicy) }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfigurationAssignment' -and $Operation -eq 'List' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfiguration' -and $Operation -eq 'List' } { New-PulseTestGraphEnvelope -Data @($plantedPolicy) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfigurationAssignment' -and $Operation -eq 'List' } { New-PulseTestGraphEnvelope }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)

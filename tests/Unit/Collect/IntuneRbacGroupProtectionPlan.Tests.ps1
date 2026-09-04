@@ -6,6 +6,12 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
+    }
     function script:Invoke-RbacPlanFixture {
         param(
             [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $RoleAssignments,
@@ -41,14 +47,14 @@ BeforeAll {
                 })
 
                 if ($Type -eq 'DeviceManagementUnifiedRoleAssignment' -and $Operation -eq 'ListBeta') {
-                    return @($script:RbacFixture.RoleAssignments)
+                    return New-PulseTestGraphEnvelope -Data @($script:RbacFixture.RoleAssignments)
                 }
                 if ($Type -eq 'Group') {
                     $groupId = [string] $Parameters.id
                     if ($script:RbacFixture.GroupErrors.ContainsKey($groupId)) {
                         throw $script:RbacFixture.GroupErrors[$groupId]
                     }
-                    return $script:RbacFixture.Groups[$groupId]
+                    return New-PulseTestGraphEnvelope -Data @($script:RbacFixture.Groups[$groupId])
                 }
                 throw "Unexpected Graph call '$Type/$Operation'."
             }

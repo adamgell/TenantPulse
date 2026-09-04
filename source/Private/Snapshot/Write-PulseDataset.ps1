@@ -13,12 +13,15 @@
     and records status/apiVersion/sha256/itemCount/collectedUtc in the manifest. For
     -Status Failed or -Status Skipped, no dataset file is written - only the manifest
     entry, via Set-PulseManifestEntry, which is the sole function allowed to touch
-    manifest.json. -Envelope (AC-26) maps a GraphKit.OperationResult onto that same
-    status contract: Collected is persisted only for Succeeded/Known/not-truncated
-    envelopes. Truncated, Indeterminate, page-cap, or otherwise incomplete 2xx envelopes
-    become Partial (usable rows) or Failed/Indeterminate (no safe rows). A missing or
-    malformed envelope becomes Failed/InvalidProviderData. A discarded envelope passed as
-    -Data is detected by GraphKit.OperationResult identity and mapped the same way.
+    manifest.json. -Envelope (AC-26) accepts exactly one genuine GraphKit.OperationResult
+    with required non-null Data, Outcome, Certainty, and native-Boolean Truncated members, then maps
+    it onto that same status contract. Collected is persisted only for
+    Succeeded/Known/not-truncated envelopes; their Data may be authoritatively empty.
+    Truncated, Indeterminate, page-cap, or otherwise incomplete successful envelopes become
+    Partial (usable rows) or Failed/Indeterminate (no safe rows). Missing, multiple,
+    rows-only, type-spoofed, or malformed envelopes become Failed/InvalidProviderData. A
+    single genuine envelope accidentally passed as -Data is detected by
+    GraphKit.OperationResult identity and mapped the same way.
 
 
     -TenantId/-Pseudonym are optional (both must be supplied together to take effect;

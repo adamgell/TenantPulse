@@ -7,9 +7,15 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
 
     InModuleScope TenantPulse {
         function Get-GraphObject { param() }
+    }
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
 
@@ -51,7 +57,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
     It 'expands one mapped compliance policy end to end: Expanded status, real assignment fan-out attached to every row, generation-named jsonl' {
         $policy = New-TestCompliancePolicy -Id 'p1'
         $assignmentResponse = New-TestAssignmentResponse -GroupId 'g1'
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' -and $Parameters.id -eq 'p1' } { $assignmentResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' -and $Parameters.id -eq 'p1' } { New-PulseTestGraphEnvelope -Data $assignmentResponse }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
             param($store, $context, $policy, $typeMap)
@@ -103,7 +109,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
                 }
             }
         )
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'p-intent' } { $assignments }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'p-intent' } { New-PulseTestGraphEnvelope -Data $assignments }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
             param($store, $context, $policy, $typeMap)
@@ -163,7 +169,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         )
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'DeviceConfigurationAssignment' -and $Parameters.id -eq 'device-config-intent'
-        } { $assignments }
+        } { New-PulseTestGraphEnvelope -Data $assignments }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.deviceConfiguration {
             param($store, $context, $policy, $typeMap)
@@ -186,7 +192,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
     It 'gaps a typed policy whose assignment target is missing instead of publishing a false unassigned row' {
         $policy = New-TestCompliancePolicy -Id 'p-invalid-target'
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'p-invalid-target' } {
-            @([pscustomobject]@{ id = 'bad-assignment'; target = $null })
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'bad-assignment'; target = $null })
         }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
@@ -223,7 +229,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
                 'target-exclusion-object-id' { [pscustomobject]@{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = [ordered]@{ value = 'group-object' } } }
                 'target-unsupported' { [pscustomobject]@{ '@odata.type' = '#microsoft.graph.scopeTagGroupAssignmentTarget' } }
             }
-            @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
         }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance {
@@ -272,7 +278,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
                     [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allLicensedUsersAssignmentTarget'; groupId = [ordered]@{ value = 'stray-group' } }
                 }
             }
-            @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
         }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance {
@@ -305,7 +311,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
             } else {
                 $target.deviceAndAppManagementAssignmentFilterType = [ordered]@{ value = 'include' }
             }
-            @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
         }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance {
@@ -378,7 +384,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
                     $target | Add-Member -NotePropertyName deviceAndAppManagementAssignmentFilterType -NotePropertyValue $null
                 }
             }
-            @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = "assignment-$($Parameters.id)"; target = $target })
         }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance {
@@ -442,7 +448,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         )
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'DeviceCompliancePolicyAssignment' -and $Parameters.id -eq 'filter-valid-shapes'
-        } { $assignments }
+        } { New-PulseTestGraphEnvelope -Data $assignments }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
             param($store, $context, $policy, $typeMap)
@@ -479,7 +485,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         $pseudonym = 'tp-deadbeefdeadbeef'
         $policy = New-TestCompliancePolicy -Id 'policy-tenant-id-value'
         Add-Member -InputObject $policy -NotePropertyName 'osMinimumVersion' -NotePropertyValue $tenantId -Force
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'policy-tenant-id-value' } { New-TestAssignmentResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'policy-tenant-id-value' } { New-PulseTestGraphEnvelope -Data (New-TestAssignmentResponse) }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance, $tenantId, $pseudonym {
             param($store, $context, $policy, $typeMap, $tenantId, $pseudonym)
@@ -498,7 +504,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         $mapped = New-TestCompliancePolicy -Id 'mapped-1'
         $unmapped = [pscustomobject]@{ id = 'unmapped-1'; displayName = 'Legacy'; version = 1 }
         $assignmentResponse = New-TestAssignmentResponse
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'mapped-1' } { $assignmentResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'mapped-1' } { New-PulseTestGraphEnvelope -Data $assignmentResponse }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'unmapped-1' } { throw 'must never be called for an unmapped type' }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $mapped, $unmapped, $script:typedPolicyMaps.compliance {
@@ -582,7 +588,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' } {
             $script:typedFanoutCalls++
             if ($Parameters.id -eq $script:typedFanoutFailId) { throw $script:typedFanoutRecord }
-            @()
+            New-PulseTestGraphEnvelope
         }
 
         $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
@@ -614,7 +620,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
             displayName   = 'Custom'
             omaSettings   = @([pscustomobject]@{ '@odata.type' = '#microsoft.graph.omaSettingString'; omaUri = './x'; value = $plantedSecret })
         }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'c1' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Parameters.id -eq 'c1' } { New-PulseTestGraphEnvelope }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.deviceConfiguration {
             param($store, $context, $policy, $typeMap)
@@ -646,7 +652,7 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
     It 'persists the raw fetched assignment payload as its own hash-verified dataset (complianceAssignments-<policyId>)' {
         $policy = New-TestCompliancePolicy -Id 'p1'
         $assignmentResponse = New-TestAssignmentResponse -GroupId 'g1'
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' -and $Parameters.id -eq 'p1' } { $assignmentResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' -and $Parameters.id -eq 'p1' } { New-PulseTestGraphEnvelope -Data $assignmentResponse }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
             param($store, $context, $policy, $typeMap)

@@ -6,6 +6,12 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
+    }
 
     function script:Invoke-SecurityBaselinePlanFixture {
         param(
@@ -61,32 +67,32 @@ BeforeAll {
                     if ($null -ne $script:SecurityBaselineFixture.TemplateError) {
                         throw $script:SecurityBaselineFixture.TemplateError
                     }
-                    return @($script:SecurityBaselineFixture.Templates)
+                    return New-PulseTestGraphEnvelope -Data @($script:SecurityBaselineFixture.Templates)
                 }
                 if ($Type -eq 'DeviceManagementConfigurationPolicyTemplate') {
                     if ($null -ne $script:SecurityBaselineFixture.CurrentTemplateError) {
                         throw $script:SecurityBaselineFixture.CurrentTemplateError
                     }
-                    return @($script:SecurityBaselineFixture.CurrentTemplates)
+                    return New-PulseTestGraphEnvelope -Data @($script:SecurityBaselineFixture.CurrentTemplates)
                 }
                 if ($Type -eq 'DeviceManagementIntent') {
                     if ($null -ne $script:SecurityBaselineFixture.IntentError) {
                         throw $script:SecurityBaselineFixture.IntentError
                     }
-                    return @($script:SecurityBaselineFixture.Intents)
+                    return New-PulseTestGraphEnvelope -Data @($script:SecurityBaselineFixture.Intents)
                 }
                 if ($Type -eq 'ConfigurationPolicy') {
                     if ($null -ne $script:SecurityBaselineFixture.PolicyError) {
                         throw $script:SecurityBaselineFixture.PolicyError
                     }
-                    return @($script:SecurityBaselineFixture.Policies)
+                    return New-PulseTestGraphEnvelope -Data @($script:SecurityBaselineFixture.Policies)
                 }
                 if ($Type -eq 'ConfigurationPolicyAssignment') {
                     $id = [string] $Parameters.id
                     if ($script:SecurityBaselineFixture.AssignmentErrors.ContainsKey($id)) {
                         throw $script:SecurityBaselineFixture.AssignmentErrors[$id]
                     }
-                    return @($script:SecurityBaselineFixture.Assignments[$id])
+                    return New-PulseTestGraphEnvelope -Data @($script:SecurityBaselineFixture.Assignments[$id])
                 }
                 throw "Unexpected Graph call '$Type/$Operation'."
             }

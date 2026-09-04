@@ -6,6 +6,12 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
+    }
 }
 
 Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
@@ -16,7 +22,7 @@ Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
 
     It 'persists independent Intune, Entra P1, and Entra P2 decisions from successful service plans' {
         Mock Get-GraphObject -ModuleName TenantPulse {
-            @([pscustomobject]@{
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                     capabilityStatus = 'Enabled'
                     servicePlans = @(
                         [pscustomobject]@{ servicePlanId = 'c1ec4a95-1f05-45b3-a911-aa3fa01094f5'; provisioningStatus = 'Success' }
@@ -49,7 +55,7 @@ Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
 
     It 'keeps a fully provisioned qualifying plan available while its SKU is in the warning grace state' {
         Mock Get-GraphObject -ModuleName TenantPulse {
-            @([pscustomobject]@{
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                     capabilityStatus = 'Warning'
                     servicePlans = @(
                         [pscustomobject]@{ servicePlanId = 'c1ec4a95-1f05-45b3-a911-aa3fa01094f5'; provisioningStatus = 'Success' }
@@ -73,7 +79,7 @@ Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
 
     It 'treats disabled plans as unavailable and keeps the three gate decisions independent' {
         Mock Get-GraphObject -ModuleName TenantPulse {
-            @([pscustomobject]@{
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                     capabilityStatus = 'Enabled'
                     servicePlans = @(
                         [pscustomobject]@{ servicePlanId = 'c1ec4a95-1f05-45b3-a911-aa3fa01094f5'; provisioningStatus = 'Disabled' }
@@ -99,7 +105,7 @@ Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
 
     It 'does not let a qualifying plan on a non-enabled SKU prove availability' {
         Mock Get-GraphObject -ModuleName TenantPulse {
-            @([pscustomobject]@{
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                     capabilityStatus = 'Suspended'
                     servicePlans = @(
                         [pscustomobject]@{ servicePlanId = 'c1ec4a95-1f05-45b3-a911-aa3fa01094f5'; provisioningStatus = 'Success' }
@@ -235,7 +241,7 @@ Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
                 })
         }
     ) {
-        Mock Get-GraphObject -ModuleName TenantPulse { @($Rows) }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope -Data @($Rows) }
 
         $outcome = InModuleScope TenantPulse {
             Invoke-PulseSubscribedSkuLicensePlan `
@@ -262,7 +268,7 @@ Describe 'Invoke-PulseSubscribedSkuLicensePlan' {
 
     It 'keeps an independently proven gate available when another SKU is malformed' {
         Mock Get-GraphObject -ModuleName TenantPulse {
-            @(
+            New-PulseTestGraphEnvelope -Data @(
                 [pscustomobject]@{
                     capabilityStatus = 'Enabled'
                     servicePlans = @(

@@ -9,7 +9,11 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
-    InModuleScope TenantPulse {
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
         function Get-GraphContext { param() }
         function Get-GraphObject { param() }
         function Invoke-GraphOperation { param() }
@@ -114,7 +118,9 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $summary = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot }
 
@@ -171,7 +177,9 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $firstRun = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot; Redact = $true }
 
@@ -199,7 +207,9 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $summary = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot; Redact = $true }
 
@@ -212,7 +222,9 @@ Describe 'Invoke-PulseAssessment - pipeline plumbing' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $summary = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot }
 
@@ -383,7 +395,9 @@ Describe 'Export-PulseReport - render-only' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { New-TestFixtureCatalog }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $original = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot }
 

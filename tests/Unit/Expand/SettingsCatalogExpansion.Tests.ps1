@@ -8,13 +8,17 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
-    InModuleScope TenantPulse {
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
         function Get-GraphObject { param() }
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
     Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
         $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
-    } { @() }
+    } { New-PulseTestGraphEnvelope }
 
     function New-TestPolicy {
         param([string] $Id, [string] $Name = 'Test Policy', [string] $TemplateFamily = 'none', [string] $TemplateId = '')
@@ -92,7 +96,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse -Value 'hello-world'
 
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
@@ -141,11 +147,11 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta' -and $Parameters.id -eq 'policy-assigned'
         } {
-            @(
+            New-PulseTestGraphEnvelope -Data @(
                 [ordered]@{
                     id     = 'assignment-include'
                     intent = 'include'
@@ -221,15 +227,16 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
-            switch ($Parameters.id) {
+            $assignmentRows = switch ($Parameters.id) {
                 'policy-target-missing' { @([ordered]@{ id = 'assignment-missing' }) }
                 'policy-target-null' { @([ordered]@{ id = 'assignment-null'; target = $null }) }
                 'policy-target-scalar' { @([ordered]@{ id = 'assignment-scalar'; target = 'not-an-object' }) }
             }
+            New-PulseTestGraphEnvelope -Data @($assignmentRows)
         }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $index {
@@ -259,7 +266,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
@@ -272,7 +279,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                 'target-exclusion-object-id' { [ordered]@{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = [ordered]@{ value = 'group-object' } } }
                 'target-unsupported' { [ordered]@{ '@odata.type' = '#microsoft.graph.scopeTagGroupAssignmentTarget' } }
             }
-            @([ordered]@{ id = "assignment-$($Parameters.id)"; target = $target })
+            New-PulseTestGraphEnvelope -Data @([ordered]@{ id = "assignment-$($Parameters.id)"; target = $target })
         }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $index {
@@ -309,7 +316,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
@@ -327,7 +334,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                     [ordered]@{ '@odata.type' = '#microsoft.graph.allLicensedUsersAssignmentTarget'; groupId = [ordered]@{ value = 'stray-group' } }
                 }
             }
-            @([ordered]@{ id = "assignment-$($Parameters.id)"; target = $target })
+            New-PulseTestGraphEnvelope -Data @([ordered]@{ id = "assignment-$($Parameters.id)"; target = $target })
         }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $index {
@@ -357,7 +364,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
@@ -373,7 +380,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
             } else {
                 '#microsoft.graph.groupAssignmentTarget'
             }
-            @([ordered]@{
+            New-PulseTestGraphEnvelope -Data @([ordered]@{
                     id = "assignment-$($Parameters.id)"
                     intent = $intent
                     target = [ordered]@{
@@ -403,11 +410,11 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
-            @([ordered]@{
+            New-PulseTestGraphEnvelope -Data @([ordered]@{
                     id = 'assignment-filter-id-invalid'
                     target = [ordered]@{
                         '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
@@ -438,11 +445,11 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
-            @([ordered]@{
+            New-PulseTestGraphEnvelope -Data @([ordered]@{
                     id = 'assignment-filter-type-invalid'
                     target = [ordered]@{
                         '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
@@ -484,7 +491,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
@@ -529,7 +536,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                     $target.deviceAndAppManagementAssignmentFilterType = $null
                 }
             }
-            @([ordered]@{ id = "assignment-$($Parameters.id)"; target = $target })
+            New-PulseTestGraphEnvelope -Data @([ordered]@{ id = "assignment-$($Parameters.id)"; target = $target })
         }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $index {
@@ -552,11 +559,11 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
-            @(
+            New-PulseTestGraphEnvelope -Data @(
                 [ordered]@{
                     id = 'assignment-fields-omitted'
                     target = [ordered]@{
@@ -617,12 +624,12 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
             if ($Parameters.id -eq 'policy-valid-assignment') {
-                return @([ordered]@{
+                return New-PulseTestGraphEnvelope -Data @([ordered]@{
                         id = 'assignment-valid'
                         target = [ordered]@{
                             '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
@@ -630,7 +637,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                         }
                     })
             }
-            return @([ordered]@{
+            return New-PulseTestGraphEnvelope -Data @([ordered]@{
                     id = 'assignment-invalid'
                     target = [ordered]@{
                         '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
@@ -682,7 +689,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $plantedSecretInException = 'PLANTED-EXCEPTION-SECRET-abc123'
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'policy-good'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'policy-bad'
         } { throw "simulated Graph failure carrying $plantedSecretInException" }
@@ -747,12 +754,12 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
             $script:settingsCalls++
             if ($script:fanoutFailType -eq $Type -and $Parameters.id -eq $script:fanoutFailId) { throw $script:fanoutRecord }
-            $settingsResponse
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } {
             $script:assignmentCalls++
             if ($script:fanoutFailType -eq $Type -and $Parameters.id -eq $script:fanoutFailId) { throw $script:fanoutRecord }
-            @()
+            New-PulseTestGraphEnvelope
         }
 
         $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
@@ -793,7 +800,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                 }
             }
         )
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
@@ -831,7 +840,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                 }
             }
         )
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index, $tenantId, $pseudonym {
             param($store, $context, $policy, $index, $tenantId, $pseudonym)
@@ -860,7 +871,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                 }
             }
         )
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
@@ -886,7 +899,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $settingsResponse = New-TestSettingsResponse -Value 'owner-value'
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'shared-id'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policyA, $policyB, $index {
             param($store, $context, $policyA, $policyB, $index)
@@ -913,7 +926,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $settingsResponse = New-TestSettingsResponse
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'policy-good'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $goodPolicy, $emptyPolicy, $index {
             param($store, $context, $goodPolicy, $emptyPolicy, $index)
@@ -932,7 +945,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $settingsResponse = New-TestSettingsResponse
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq 'policy-good'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $goodPolicy, $whitespacePolicy, $index {
             param($store, $context, $goodPolicy, $whitespacePolicy, $index)
@@ -959,7 +972,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
                 }
             }
         )
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
@@ -981,10 +996,10 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq $policyA.id
-        } { $responseA }
+        } { New-PulseTestGraphEnvelope -Data @($responseA) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Parameters.id -eq $policyB.id
-        } { $responseB }
+        } { New-PulseTestGraphEnvelope -Data @($responseB) }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policyA, $policyB, $index {
             param($store, $context, $policyA, $policyB, $index)
@@ -1044,13 +1059,15 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicySetting' -and $Operation -eq 'ListBeta'
-        } { $settingsResponse }
+        } { New-PulseTestGraphEnvelope -Data @($settingsResponse) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
             $Type -eq 'ConfigurationPolicyAssignment' -and $Operation -eq 'ListBeta'
         } {
             $script:assignmentFetchCount++
-            if ($script:assignmentFetchCount -eq 1) { return $assignments }
-            return @($assignments[2], $assignments[1], $assignments[0])
+            if ($script:assignmentFetchCount -eq 1) {
+                return New-PulseTestGraphEnvelope -Data @($assignments)
+            }
+            return New-PulseTestGraphEnvelope -Data @($assignments[2], $assignments[1], $assignments[0])
         }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
@@ -1079,7 +1096,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse -Value 'captured-value'
 
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
@@ -1140,7 +1159,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         $policy = New-TestPolicy -Id 'policy-fault'
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse -Value 'x'
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         # Fault injection: the expanded/ directory itself is removed right before the
         # driver runs, so [System.IO.File]::Open for the staging temp file fails partway
@@ -1246,7 +1267,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - sequential-only (Part D, T3.4: 
     It 'a legitimately empty policy (walks cleanly, zero settings, zero gaps) stays Expanded with a valid empty artifact - not misclassified as ALL-POLICIES-FAILED' {
         $index = New-TestDefinitionIndex
         $policy = New-TestPolicy -Id 'policy-empty-1'
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope
+        }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
@@ -1332,7 +1355,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - sequential-only (Part D, T3.4: 
 
         $index = New-TestDefinitionIndex
         $policy = New-TestPolicy -Id 'policy-deep-1'
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
@@ -1375,7 +1400,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
         $policy = New-TestPolicy -Id 'policy-baseline' -TemplateFamily 'baseline' -TemplateId 'tpl-baseline-1'
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
@@ -1397,7 +1424,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
         $fixture.Policy.templateReference.templateFamily | Should -Be 'endpointSecurityAccountProtection'
 
         $index = New-TestDefinitionIndex
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { @($fixture.Settings) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($fixture.Settings)
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $fixture.Policy, $index {
             param($store, $context, $policy, $index)
@@ -1419,7 +1448,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
         $fixture.Policy.templateReference.templateFamily | Should -Be 'endpointSecurityAttackSurfaceReduction'
 
         $index = New-TestDefinitionIndex
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { @($fixture.Settings) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($fixture.Settings)
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $fixture.Policy, $index {
             param($store, $context, $policy, $index)
@@ -1439,7 +1470,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
         $policy = New-TestPolicy -Id 'policy-plain'
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)
@@ -1458,7 +1491,9 @@ Describe 'Invoke-PulseSettingsCatalogExpansion - Task 2.5 endpoint security / ba
         $policy = New-TestPolicy -Id 'policy-baseline-variant' -TemplateFamily 'baselineWindows10MdmSecurity' -TemplateId 'tpl-baseline-2'
         $index = New-TestDefinitionIndex
         $settingsResponse = New-TestSettingsResponse
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
             param($store, $context, $policy, $index)

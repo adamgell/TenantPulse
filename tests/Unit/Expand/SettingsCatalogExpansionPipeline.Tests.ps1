@@ -18,10 +18,16 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
 
     InModuleScope TenantPulse {
         function Get-GraphObject { param() }
         function Test-GraphPermission { param() }
+    }
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
     Mock Test-GraphPermission -ModuleName TenantPulse {
@@ -77,10 +83,10 @@ Describe 'Invoke-PulseSettingsCatalogExpansionPipeline' {
                 }
             })
 
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' -and $Operation -eq 'ListBeta' } { $policies }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $definitions }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { $settingsResponse }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' -and $Operation -eq 'ListBeta' } { New-PulseTestGraphEnvelope -Data $policies }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope -Data $definitions }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } { New-PulseTestGraphEnvelope -Data $settingsResponse }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicyAssignment' } { New-PulseTestGraphEnvelope }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)
@@ -131,7 +137,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansionPipeline' {
 
     It 'a definitions-corpus capture failure still reaches Invoke-PulseSettingsCatalogExpansion, which writes NotExpanded itself' {
         $policies = @([pscustomobject]@{ id = 'policy-1'; name = 'P1' })
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { $policies }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { New-PulseTestGraphEnvelope -Data $policies }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { throw 'corpus fetch failed' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
@@ -156,8 +162,8 @@ Describe 'Invoke-PulseSettingsCatalogExpansionPipeline' {
         $definitions = @([pscustomobject]@{ id = 'setting-a'; name = 'a'; displayName = 'A' })
         $privateMarker = 'PRIVATE' + '-POST-AUTH-SETTINGS-THROW'
         $script:settingsPostAuthThrowMarker = $privateMarker
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { $policies }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $definitions }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { New-PulseTestGraphEnvelope -Data $policies }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope -Data $definitions }
         Mock Invoke-PulseSettingsCatalogExpansion -ModuleName TenantPulse {
             $NetworkAbortState.AuthenticationAborted = $true
             $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
@@ -246,7 +252,7 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings' {
             function Get-GraphObject { param() }
         }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ TenantId = 'tenant-guid-default-off'; ProfileId = 'contoso-default' } }
-        Mock Get-GraphObject -ModuleName TenantPulse { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope }
 
         $store = InModuleScope TenantPulse -ArgumentList $script:outputRoot {
             param($outputRoot)
@@ -280,7 +286,7 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings' {
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } {
             throw $script:rootFailureRecord
         }
-        Mock Get-GraphObject -ModuleName TenantPulse { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope }
 
         $store = InModuleScope TenantPulse -ArgumentList $script:outputRoot {
             param($outputRoot)
@@ -312,9 +318,9 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings' {
             function Get-GraphObject { param() }
         }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ TenantId = 'tenant-guid-p0-1'; ProfileId = 'contoso-p0-1' } }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { @() }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { @() }
-        Mock Get-GraphObject -ModuleName TenantPulse { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { New-PulseTestGraphEnvelope }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope }
 
         $results = @(InModuleScope TenantPulse -ArgumentList $script:outputRoot {
                 param($outputRoot)

@@ -9,7 +9,11 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
-    InModuleScope TenantPulse {
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
         function Get-GraphContext { param() }
         function Get-GraphObject { param() }
         function Invoke-GraphOperation { param() }
@@ -134,7 +138,9 @@ Describe 'Invoke-PulseAssessment' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($inScope, $outOfScope) }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $summary = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot; IncludeCategory = @('Entra.ConditionalAccess') }
 
@@ -153,7 +159,9 @@ Describe 'Invoke-PulseAssessment' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { $checks }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $summary = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot; IncludeCheck = @('TP.NOPE.0000') }
 

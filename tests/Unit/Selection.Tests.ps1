@@ -9,7 +9,11 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
-    InModuleScope TenantPulse {
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
         function Get-GraphContext { param() }
         function Get-GraphObject { param() }
         function Invoke-GraphOperation { param() }
@@ -242,7 +246,9 @@ Describe 'Get-PulseTenantSnapshot -AssessmentProfile precedence' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($inScope, $outOfScope) }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $profilePath = Join-Path ([System.IO.Path]::GetTempPath()) "$([Guid]::NewGuid().ToString()).psd1"
         Set-Content -LiteralPath $profilePath -Value "@{ Include = @('Intune'); Exclude = @() }" -NoNewline
@@ -268,7 +274,9 @@ Describe 'Get-PulseTenantSnapshot -AssessmentProfile precedence' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($inScope, $outOfScope) }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $profilePath = Join-Path ([System.IO.Path]::GetTempPath()) "$([Guid]::NewGuid().ToString()).psd1"
         Set-Content -LiteralPath $profilePath -Value "@{ Include = @('Entra.ConditionalAccess'); Exclude = @() }" -NoNewline

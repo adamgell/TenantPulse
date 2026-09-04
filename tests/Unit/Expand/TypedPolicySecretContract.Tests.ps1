@@ -25,11 +25,17 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
 
     InModuleScope TenantPulse {
         function Get-GraphObject { param() }
         function Get-GraphOperation { param() }
         function Test-GraphPermission { param() }
+    }
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
     Mock Test-GraphPermission -ModuleName TenantPulse {
@@ -90,8 +96,8 @@ Describe 'SECRET CONTRACT capstone - planted PSK never reaches any file under th
             )
         }
 
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfiguration' -and $Operation -eq 'List' } { @($plantedPolicy) }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfigurationAssignment' -and $Operation -eq 'List' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfiguration' -and $Operation -eq 'List' } { New-PulseTestGraphEnvelope -Data @($plantedPolicy) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfigurationAssignment' -and $Operation -eq 'List' } { New-PulseTestGraphEnvelope }
 
         # STEP 1 - raw collection (the C1 fix's own call site): writes datasets/
         # deviceConfigurations.json. Manifest matches Get-PulseCollectionManifest's own

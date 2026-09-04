@@ -18,10 +18,17 @@
         target-data request. A missing grant or incompatible application produces a Denied
         decision and no target-data request. Each blocked dataset receives a structured,
         bounded Failed outcome whose failure class distinguishes PermissionDenied from
-        GateUnknown. A clean read is written Collected; a later 403 after a granted
-        preflight is Failed/PermissionDenied, and other provider failures retain only the
-        canonical failure class, reason code, and status signal rather than raw exception
-        text. A dataset flagged Pending in DatasetMap.psd1 is first resolved through
+        GateUnknown. A dataset is written Collected only when GraphKit returns exactly one
+        genuine GraphKit.OperationResult with the required non-null Data, Outcome, Certainty, and
+        Truncated members and it reports Succeeded/Known/not-truncated. An empty Data array
+        in that complete envelope is authoritative. Missing output, rows-only output,
+        multiple results, a type-spoofed object, or a malformed envelope is rejected before
+        its contents can be treated as collected data. A Succeeded envelope that is
+        truncated or indeterminate becomes Partial when it contains usable rows and
+        Failed/Indeterminate otherwise. A later 403 after a granted preflight is
+        Failed/PermissionDenied, and other provider failures retain only the canonical
+        failure class, reason code, and status signal rather than raw exception text. A
+        dataset flagged Pending in DatasetMap.psd1 is first resolved through
         TenantPulse's built-in provider-plan registry. Shipped composites run there; an
         entry with no registered plan is written Skipped with reason
         'descriptor-pending: awaiting GraphKit release' and never attempted at all.

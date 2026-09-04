@@ -17,6 +17,12 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
+    }
 
     function script:New-PulseFixtureRow {
         param(
@@ -746,9 +752,9 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings wiring' {
 
     It 'the setting-presence index is published (manifest.expansions.settingPresenceIndex exists) alongside conflicts when -ExpandSettings runs the full family pipeline end to end' {
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ TenantId = 'tenant-guid-presence-index-e2e'; ProfileId = 'contoso-presence-index' } }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { @() }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { @() }
-        Mock Get-GraphObject -ModuleName TenantPulse { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicy' } { New-PulseTestGraphEnvelope }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope }
 
         $store = InModuleScope TenantPulse -ArgumentList $script:outputRoot {
             param($outputRoot)
@@ -757,7 +763,7 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings wiring' {
 
         $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
         # Same shape as the sibling 'conflicts' expansion: with every underlying Graph call
-        # mocked to return an empty array, every family expands to zero policies/rows, so
+        # mocked to return a complete empty envelope, every family expands to zero policies/rows, so
         # this artifact's own driver sees zero verified families and correctly writes
         # NotExpanded - the point of this test is that the ENTRY EXISTS AT ALL (the call
         # site wiring fired), not any particular status.
@@ -767,7 +773,7 @@ Describe 'Get-PulseTenantSnapshot -ExpandSettings wiring' {
 
     It 'is OFF by default (no -ExpandSettings): no settingPresenceIndex expansion entry is written, mirroring the conflicts sibling' {
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ TenantId = 'tenant-guid-presence-index-off'; ProfileId = 'contoso-presence-index-off' } }
-        Mock Get-GraphObject -ModuleName TenantPulse { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope }
 
         $store = InModuleScope TenantPulse -ArgumentList $script:outputRoot {
             param($outputRoot)

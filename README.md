@@ -132,6 +132,15 @@ second stale permission list in this README. Only `AuthenticationFailed` stops l
 collection. A check whose required dataset Failed degrades honestly to `NotApplicable`, never a
 silently wrong Pass or Fail.
 
+Every completeness-producing Graph read requests GraphKit's result envelope. TenantPulse records a
+dataset as `Collected` only when exactly one genuine `GraphKit.OperationResult` carries the required
+non-null `Data`, `Outcome`, `Certainty`, and native-Boolean `Truncated` members and reports
+`Succeeded` / `Known` / not truncated. A complete envelope with an empty `Data` array is an
+authoritative empty collection. Missing output, rows-only output, multiple results, type-spoofed
+objects, and malformed envelopes are rejected rather than converted into empty success. A successful
+but truncated or indeterminate envelope is `Partial` when it contains usable rows and
+`Failed` / `Indeterminate` otherwise.
+
 ## Snapshot data is sensitive at rest
 
 A snapshot store (`Get-PulseTenantSnapshot`'s output, or the `snapshot/` subdirectory
@@ -401,9 +410,10 @@ for the exact row/conflict-record schema.
 Settings Catalog assignment collection uses GraphKit 0.3.0's
 `ConfigurationPolicyAssignment.ListBeta` descriptor for each policy. TenantPulse persists
 that raw payload and normalizes include/exclude intent, target type, group id, and assignment
-filter fields onto every expanded setting row. An empty assignment response is authoritative
-and becomes `assignments: []`; an unavailable payload or an assignment with a missing, null,
-or non-object target gaps that policy instead of publishing a false unassigned result.
+filter fields onto every expanded setting row. An exactly-one, complete GraphKit envelope with an
+empty `Data` array is authoritative and becomes `assignments: []`; missing or malformed output is
+not an empty assignment response. An unavailable payload or an assignment with a missing, null, or
+non-object target gaps that policy instead of publishing a false unassigned result.
 Conflict overlap therefore consumes real Settings Catalog targets whenever those policy rows
 are present.
 
@@ -478,7 +488,10 @@ mock that throws registered before any test-specific mock (GraphKit's own test
 convention). GraphKit is still importable in the test environment (it is a
 `RequiredModules` dependency of TenantPulse itself), but the module-scope stubs shadow it
 for every call TenantPulse's own code makes - that shadowing, not the absence of GraphKit,
-is what keeps the tests deterministic and independent of a live tenant.
+is what keeps the tests deterministic and independent of a live tenant. A successful
+`Get-GraphObject -PassThruResult` mock must return exactly one genuine-shaped
+`GraphKit.OperationResult`, including non-null `Data`, `Outcome`, `Certainty`, and a native-Boolean
+`Truncated`; returning rows or `@()` models an invalid provider result, not success.
 
 ## Project layout
 

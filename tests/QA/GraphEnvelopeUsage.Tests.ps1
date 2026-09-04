@@ -5,7 +5,9 @@
     child-operation incompleteness. AC-26 / TPP1 require every completeness-producing
     Graph path - ordinary collection, composite children, expansion, app-health, and
     future Graph-backed plans - to request -PassThruResult (or an equivalent envelope
-    switch) so authorization success cannot silently become Collected.
+    switch) and route its output through strict exactly-one envelope validation. This
+    static gate covers the request side; focused runtime tests cover rejection of null,
+    rows-only, multiple, type-spoofed, and malformed results.
 #>
 
 BeforeAll {

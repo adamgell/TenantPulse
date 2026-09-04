@@ -11,6 +11,8 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
 
     # GraphKit 0.3.0 is a real, importable RequiredModules dependency of TenantPulse
     # itself (published to PSGallery) and IS present in this test environment. These
@@ -29,6 +31,10 @@ BeforeAll {
         function Invoke-GraphOperation { param() }
         function Get-GraphOperation { param() }
         function Test-GraphPermission { param() }
+    }
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
     }
 
     Mock Get-GraphContext -ModuleName TenantPulse { throw 'Get-GraphContext must be mocked in this test.' }
@@ -662,7 +668,7 @@ Describe 'Invoke-PulseCollection' {
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
         $cyclicRow = [pscustomobject] @{ id = 'p1' }
         Add-Member -InputObject $cyclicRow -NotePropertyName 'self' -NotePropertyValue $cyclicRow
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { @($cyclicRow) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-PulseTestGraphEnvelope -Data @($cyclicRow) }
 
         $manifest = @(
             [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
@@ -691,7 +697,7 @@ Describe 'Invoke-PulseCollection' {
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' -RequiredPermissions @(@{ Type = 'Application'; Value = 'Policy.Read.All' }, @{ Type = 'Application'; Value = 'Directory.Read.All' }) }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfiguration' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' }) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { throw "Get-GraphObject failed for 'DeviceCompliancePolicy/List': 403 Forbidden." }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceConfiguration' } { throw "Get-GraphObject failed for 'DeviceConfiguration/List': 500 Internal Server Error." }
 
@@ -775,7 +781,7 @@ Describe 'Invoke-PulseCollection' {
     It 'downgrades an ApiVersion drift to a per-dataset Failed outcome instead of aborting the run' {
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' }) }
 
         # conditionalAccessPolicies' map ApiVersion ('beta') deliberately does not match
         # the mocked resolved descriptor's ApiVersion ('v1.0') above.
@@ -898,8 +904,8 @@ Describe 'Invoke-PulseCollection' {
 
     It 'IdFromDataset: resolves the dependency''s first row id and passes it as -Parameters @{ id = ... }' {
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { @([pscustomobject]@{ id = 'org-1' }) }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { @([pscustomobject]@{ mobileDeviceManagementAuthority = 'intune' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'org-1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ mobileDeviceManagementAuthority = 'intune' }) }
 
         $manifest = @(
             [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
@@ -936,8 +942,8 @@ Describe 'Invoke-PulseCollection' {
     It 'IdFromDataset: the dependency lookup uses the REAL id even when the dependency row''s id equals the context TenantId (redacted only in the written file)' {
         $tenantId = '00000000-1111-2222-3333-444444444444'
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { @([pscustomobject]@{ id = $tenantId }) }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { @([pscustomobject]@{ mobileDeviceManagementAuthority = 'intune' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = $tenantId }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ mobileDeviceManagementAuthority = 'intune' }) }
 
         $manifest = @(
             [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
@@ -968,7 +974,7 @@ Describe 'Invoke-PulseCollection' {
 
     It 'IdFromDataset: writes Failed with a dependency-unavailable reason and never calls Get-GraphObject when the dependency dataset is empty' {
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { @() }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } { New-PulseTestGraphEnvelope }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } { throw 'Get-GraphObject must not be called when the dependency is unavailable.' }
 
         $manifest = @(
@@ -1049,7 +1055,7 @@ Describe 'Get-PulseTenantSnapshot' {
         }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' }) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { throw "Get-GraphObject failed: 403 Forbidden." }
 
         $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot {
@@ -1272,7 +1278,7 @@ Describe 'Get-PulseTenantSnapshot' {
         $checkOne = New-TestCheck -Id 'TP.ENT.0001' -Datasets @('conditionalAccessPolicies')
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne) }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' }) }
 
         # Two distinct ProfileIds ('contoso-prod' and 'contoso-renamed') resolving to the
         # SAME synthetic tenant id - as if the same tenant were reached under a
@@ -1338,13 +1344,13 @@ Describe 'Get-PulseTenantSnapshot' {
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse {
             # Reproduces exactly what Get-GraphObject stamps onto a real returned row.
-            [pscustomobject]@{
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
                 id            = 'p1'
                 _Tenant       = 'contoso-tenant-id'
                 _RetrievedUtc = [datetime]::UtcNow
                 _GraphPath    = '/deviceManagement/deviceCompliancePolicies'
                 _ApiVersion   = 'v1.0'
-            }
+            })
         }
 
         $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot {
@@ -1449,7 +1455,7 @@ Describe 'Get-PulseTenantSnapshot' {
             }
         }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' }) }
 
         $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot {
             param($snapshotRoot)
@@ -1522,7 +1528,7 @@ Describe 'Get-PulseTenantSnapshot' {
             }
         }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' }) }
 
         $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot {
             param($snapshotRoot)

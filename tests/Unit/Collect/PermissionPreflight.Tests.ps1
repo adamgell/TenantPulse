@@ -6,12 +6,18 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
 
     InModuleScope TenantPulse {
         function Get-GraphContext { param() }
         function Get-GraphObject { param() }
         function Get-GraphOperation { param() }
         function Test-GraphPermission { param() }
+    }
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
     }
 
     Mock Get-GraphContext -ModuleName TenantPulse { throw 'Get-GraphContext must be mocked in this test.' }
@@ -486,7 +492,7 @@ Describe 'Invoke-PulseCollection permission preflight' {
             if ($Type -eq 'ConditionalAccessPolicy') {
                 throw 'denied ordinary operation must not be sent'
             }
-            return @([pscustomobject]@{ id = 'device-1' })
+            return New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'device-1' })
         }
 
         $manifest = @(

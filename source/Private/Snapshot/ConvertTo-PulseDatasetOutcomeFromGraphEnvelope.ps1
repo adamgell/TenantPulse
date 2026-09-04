@@ -1,12 +1,16 @@
 <#
-    Private: map one GraphKit.OperationResult envelope to a provider-neutral collection
-    outcome.
+    Private: validate and map exactly one genuine GraphKit.OperationResult envelope to a
+    provider-neutral collection outcome. Genuine means the GraphKit.OperationResult type
+    identity is present and non-null Data, Outcome, Certainty, and native-Boolean Truncated members
+    exist with supported signal values; a plain object carrying similarly named properties
+    is not an envelope.
 
     AC-26: Collected is allowed only when Outcome=Succeeded, Certainty=Known, Truncated is
     not true, and no cap/incompleteness signal is present. Succeeded with usable but
     incomplete rows becomes Partial plus one structured gap. Incomplete envelopes without
-    safe rows become Failed/Indeterminate. Missing or malformed required envelopes become
-    Failed/InvalidProviderData. This function is total: hostile getters degrade only to
+    safe rows become Failed/Indeterminate. Null, rows-only, multiple, type-spoofed, or
+    malformed input becomes Failed/InvalidProviderData; success is never synthesized from
+    the absence of an envelope. This function is total: hostile getters degrade only to
     InvalidProviderData and never throw to a snapshot writer.
 #>
 
@@ -19,19 +23,43 @@ function Test-PulseGraphResultEnvelope {
         $InputObject
     )
 
-    if ($null -eq $InputObject -or $InputObject -is [string]) {
-        return $false
-    }
-
     try {
-        if ($InputObject.PSObject.TypeNames -contains 'GraphKit.OperationResult') {
-            return $true
+        if ($null -eq $InputObject -or $InputObject -is [string] -or
+            $InputObject.PSObject.TypeNames -notcontains 'GraphKit.OperationResult') {
+            return $false
         }
+
+        $values = [ordered]@{}
+        foreach ($name in @('Outcome', 'Certainty', 'Truncated', 'Data')) {
+            if ($InputObject -is [System.Collections.IDictionary]) {
+                $matchingKey = @($InputObject.Keys | Where-Object {
+                        [string]::Equals([string] $_, $name, [System.StringComparison]::OrdinalIgnoreCase)
+                    })
+                if ($matchingKey.Count -ne 1) { return $false }
+                $values[$name] = $InputObject[$matchingKey[0]]
+            }
+            else {
+                $property = $InputObject.PSObject.Properties[$name]
+                if ($null -eq $property) { return $false }
+                $values[$name] = $property.Value
+            }
+        }
+
+        if ($values['Outcome'] -isnot [string] -or
+            $values['Outcome'] -notin @('Succeeded', 'Failed', 'Cancelled', 'DeadlineExpired')) {
+            return $false
+        }
+        if ($values['Certainty'] -isnot [string] -or
+            $values['Certainty'] -notin @('Known', 'Indeterminate')) {
+            return $false
+        }
+        if ($values['Truncated'] -isnot [bool]) { return $false }
+        if ($null -eq $values['Data']) { return $false }
+
+        return $true
     } catch {
         return $false
     }
-
-    return $false
 }
 
 function ConvertTo-PulseDatasetOutcomeFromGraphEnvelope {
@@ -113,7 +141,7 @@ function ConvertTo-PulseDatasetOutcomeFromGraphEnvelope {
     }
 
     try {
-        if ($null -eq $Envelope -or $Envelope -is [string]) {
+        if (-not (Test-PulseGraphResultEnvelope -InputObject $Envelope)) {
             return New-InvalidEnvelopeOutcome
         }
 
@@ -122,33 +150,26 @@ function ConvertTo-PulseDatasetOutcomeFromGraphEnvelope {
         $outcomeText = if ($outcomeRead.Success) { ConvertTo-SafeEnvelopeString -Value $outcomeRead.Value } else { $null }
         $certaintyText = if ($certaintyRead.Success) { ConvertTo-SafeEnvelopeString -Value $certaintyRead.Value } else { $null }
 
-        if ([string]::IsNullOrWhiteSpace($outcomeText) -or [string]::IsNullOrWhiteSpace($certaintyText)) {
-            return New-InvalidEnvelopeOutcome
-        }
-
-        $truncated = $false
+        $truncated = $null
         $truncatedRead = Get-SafeEnvelopeProperty -InputObject $Envelope -Name 'Truncated'
-        if ($truncatedRead.Success -and $null -ne $truncatedRead.Value) {
-            try {
-                $truncated = [bool] $truncatedRead.Value
-            } catch {
-                return New-InvalidEnvelopeOutcome
-            }
-        }
+        if (-not $truncatedRead.Success -or $truncatedRead.Value -isnot [bool]) { return New-InvalidEnvelopeOutcome }
+        $truncated = [bool] $truncatedRead.Value
 
         $pageCount = $null
         $pageCountRead = Get-SafeEnvelopeProperty -InputObject $Envelope -Name 'PageCount'
         if ($pageCountRead.Success -and $null -ne $pageCountRead.Value) {
             try {
                 $pageCount = [int] $pageCountRead.Value
+                if ($pageCount -lt 0) { return New-InvalidEnvelopeOutcome }
             } catch {
-                $pageCount = $null
+                return New-InvalidEnvelopeOutcome
             }
         }
 
         $rows = [System.Collections.Generic.List[object]]::new()
         $dataRead = Get-SafeEnvelopeProperty -InputObject $Envelope -Name 'Data'
-        if ($dataRead.Success -and $null -ne $dataRead.Value) {
+        if (-not $dataRead.Success) { return New-InvalidEnvelopeOutcome }
+        if ($null -ne $dataRead.Value) {
             foreach ($item in @($dataRead.Value)) {
                 if ($null -ne $item) {
                     $rows.Add($item) | Out-Null

@@ -8,9 +8,15 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
 
     InModuleScope TenantPulse {
         function Get-GraphObject { param() }
+    }
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
     }
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
 
@@ -215,7 +221,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
             [pscustomobject]@{ id = 'def-a'; name = 'a'; displayName = 'A' }
             [pscustomobject]@{ id = 'def-b'; name = 'b'; displayName = 'B' }
         )
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' -and $Operation -eq 'ListBeta' } { $rows }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' -and $Operation -eq 'ListBeta' } { New-PulseTestGraphEnvelope -Data $rows }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)
@@ -244,7 +250,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
     # only this ParameterFilter does).
     It 'calls Get-GraphObject exactly once with the exact type/operation/-Context forwarded' {
         $rows = @([pscustomobject]@{ id = 'def-a'; name = 'a'; displayName = 'A' })
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' -and $Operation -eq 'ListBeta' } { $rows }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' -and $Operation -eq 'ListBeta' } { New-PulseTestGraphEnvelope -Data $rows }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)
@@ -259,7 +265,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
     It 'forwards a DISTINCT caller-supplied -Context through to Get-GraphObject unchanged' {
         $rows = @([pscustomobject]@{ id = 'def-a'; name = 'a' })
         $distinctContext = [pscustomobject]@{ TenantId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'; ProfileId = 'a-distinct-profile' }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $rows }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope -Data $rows }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $distinctContext {
             param($store, $context)
@@ -273,7 +279,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
 
     It 'no orphan temp file is left behind under reference/ after a successful capture' {
         $rows = @([pscustomobject]@{ id = 'def-a'; name = 'a' })
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $rows }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope -Data $rows }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)
@@ -286,7 +292,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
 
     It 'the sha256 recorded in the manifest matches the actual bytes written to disk' {
         $rows = @([pscustomobject]@{ id = 'def-a'; name = 'a'; displayName = 'A' })
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $rows }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope -Data $rows }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)
@@ -308,7 +314,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
         $rows = @(
             [pscustomobject]@{ id = 'def-a'; name = 'a'; displayName = 'A'; description = 'a long raw field' }
         )
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $rows }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope -Data $rows }
 
         $result = InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)
@@ -324,7 +330,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
         $rows = @(
             [pscustomobject]@{ id = 'def-a'; name = 'a'; _Tenant = 'ivy24'; _RetrievedUtc = '2026-01-01T00:00:00.000Z'; _GraphPath = '/x'; _ApiVersion = 'beta' }
         )
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $rows }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { New-PulseTestGraphEnvelope -Data $rows }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $script:context {
             param($store, $context)

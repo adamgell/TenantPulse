@@ -6,6 +6,12 @@ BeforeAll {
         throw 'No built TenantPulse module found under output/module/TenantPulse; run ./build.ps1 -Tasks build first.'
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
+    $script:graphEnvelopeHelperPath = Join-Path $script:repoRoot 'tests/Helpers/New-PulseTestGraphEnvelope.ps1'
+    . $script:graphEnvelopeHelperPath
+    InModuleScope TenantPulse -ArgumentList $script:graphEnvelopeHelperPath {
+        param($helperPath)
+        . $helperPath
+    }
 
     function script:New-EndpointPolicy {
         param(
@@ -84,16 +90,16 @@ BeforeAll {
                     PolicyId   = $policyId
                 })
                 if ($Type -eq 'ConfigurationPolicy') {
-                    return @($script:EndpointFixture.Policies)
+                    return New-PulseTestGraphEnvelope -Data @($script:EndpointFixture.Policies)
                 }
                 if ($Type -eq 'ConfigurationPolicySetting') {
                     if ($script:EndpointFixture.SettingErrors.ContainsKey($policyId)) {
                         throw $script:EndpointFixture.SettingErrors[$policyId]
                     }
                     if (-not $script:EndpointFixture.SettingsByPolicy.ContainsKey($policyId)) {
-                        return @()
+                        return New-PulseTestGraphEnvelope -Data @()
                     }
-                    return @($script:EndpointFixture.SettingsByPolicy[$policyId])
+                    return New-PulseTestGraphEnvelope -Data @($script:EndpointFixture.SettingsByPolicy[$policyId])
                 }
                 if ($Type -eq 'ConfigurationPolicyAssignment') {
                     return @(

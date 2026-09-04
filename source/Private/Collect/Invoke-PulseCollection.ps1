@@ -19,10 +19,17 @@
           'descriptor-version-drift:'-prefixed message) is NOT fatal: it is caught here
           and downgraded to a per-dataset Failed outcome, then collection continues with
           the next dataset.
-        - Otherwise: attempts Get-GraphObject. A clean read writes Collected. A caught
-          request error is resolved once through Resolve-PulseGraphFailure and writes
-          Failed with its canonical FailureClass and ReasonCode. A request-time 403 is
-          Failed/PermissionDenied; Skipped is reserved for paths where no request was sent.
+        - Otherwise: attempts Get-GraphObject with PassThruResult. Collected requires
+          exactly one genuine GraphKit.OperationResult carrying non-null Data, Outcome, Certainty,
+          and Truncated and reporting Succeeded/Known/not-truncated. A complete envelope
+          may authoritatively contain zero Data rows. Null/empty success-stream output,
+          rows-only output, multiple results, type-spoofed objects, and malformed envelopes
+          are InvalidProviderData, never an inferred empty success. A Succeeded but
+          truncated or indeterminate envelope is Partial when it contains usable rows and
+          Failed/Indeterminate otherwise. A caught request error is resolved once through
+          Resolve-PulseGraphFailure and writes Failed with its canonical FailureClass and
+          ReasonCode. A request-time 403 is Failed/PermissionDenied; Skipped is reserved
+          for paths where no request was sent.
             * AuthenticationFailed means no further network-backed read in this run can possibly
               succeed -
               GraphKit's Get-GraphContext performs zero network calls and never acquires a
@@ -384,7 +391,9 @@ function Invoke-PulseCollection {
             }
             $rawGraphResult = @(Get-GraphObject @graphObjectParams)
             $envelope = Convert-PulseGraphObjectResult -Result $rawGraphResult
-            $rows = @(Get-PulseGraphObjectRows -Envelope $envelope)
+            $outcome = ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelope `
+                -Dataset $entry.Dataset -ApiVersion $entry.ApiVersion -Provider 'GraphKit' `
+                -Operations @($entry.Operation)
             # SECRET CONTRACT (C1 fix): Sensitive-flagged properties (per TypedPolicyMaps.psd1
             # - e.g. windows10CustomConfiguration's omaSettings[].value) are redacted
             # BEFORE this row set ever reaches Write-PulseDataset - the raw dataset file
@@ -393,34 +402,19 @@ function Invoke-PulseCollection {
             # PASS-THROUGH for every dataset other than deviceCompliancePolicies/
             # deviceConfigurations - see that function's own DATASET SCOPE docstring
             # section for the honest boundary this implies.
-            $rows = Protect-PulseTypedPolicySensitivePayload -Data $rows -DatasetName $entry.Dataset -TypedPolicyMaps $typedPolicyMaps
             # -TenantId/-Pseudonym (Task 1.11 GraphKit 0.1.1 live-gate surprise): some Graph
             # payloads carry the raw tenant id as a genuine response field (Organization.id,
             # DirectoryRoleAssignment.principalOrganizationId) - see
             # Protect-PulseGraphRowTenantId's own docstring for the full story. Every
             # Collected write goes through this so no dataset content ever ships the raw
             # tenant id unredacted, not just the two datasets that happened to surface it.
-            if (Test-PulseGraphEnvelopeIncomplete -Envelope $envelope) {
-                $gap = New-PulseCollectionGap -Scope $entry.Dataset -FailureClass 'Indeterminate' `
-                    -ReasonCode 'truncated' -Detail @{
-                        certainty = [string] (Get-PulseGraphEnvelopeProperty -Envelope $envelope -Name 'certainty')
-                        truncated = [bool] (Get-PulseGraphEnvelopeProperty -Envelope $envelope -Name 'truncated')
-                    } `
-                    -Operation $entry.Operation -ApiVersion $entry.ApiVersion
-                if (@($rows).Count -eq 0) {
-                    Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
-                        -ReasonCode 'indeterminate' -Detail @{ truncated = $true } -FailureClass 'Indeterminate' `
-                        -Provider 'GraphKit' -Operations @($entry.Operation) -Gaps @($gap) `
-                        -TenantId $contextTenantId -Pseudonym $TenantPseudonym
-                }
-                else {
-                    Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Partial' `
-                        -ReasonCode 'truncated' -Detail @{ truncated = $true } -Provider 'GraphKit' `
-                        -Operations @($entry.Operation) -Gaps @($gap) -TenantId $contextTenantId -Pseudonym $TenantPseudonym
-                }
-            }
-            else {
-                Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows -ApiVersion $entry.ApiVersion -Status 'Collected' -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+            $rows = Protect-PulseTypedPolicySensitivePayload -Data @($outcome.Rows) -DatasetName $entry.Dataset -TypedPolicyMaps $typedPolicyMaps
+            Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows `
+                -ApiVersion $outcome.ApiVersion -Status $outcome.Status -ReasonCode $outcome.ReasonCode `
+                -Detail $outcome.Detail -FailureClass $outcome.FailureClass -Provider $outcome.Provider `
+                -Operations $outcome.Operations -Gaps $outcome.Gaps `
+                -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+            if ($outcome.Status -eq 'Collected') {
                 $collectedRows[$entry.Dataset] = $rows
             }
 
