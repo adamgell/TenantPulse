@@ -242,6 +242,92 @@ Describe 'TP10A: fragment-and-merge expansion' {
             }
         } | Should -Throw -ExpectedMessage '*missing*'
     }
+
+    It 'flushes 65 policies as three non-overlapping 32-policy fragments' {
+        $policies = 0..64 | ForEach-Object {
+            [pscustomobject]@{ id = ('policy-{0:D3}' -f $_) }
+        }
+        $policyIds = [string[]] @($policies.id)
+        $expectedFragmentIds = @(
+            foreach ($bounds in @(@(0, 31), @(32, 63), @(64, 64))) {
+                $ids = [string[]] @($policyIds[$bounds[0]..$bounds[1]])
+                $joined = $ids -join ','
+                $hash = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($joined))
+                $hash12 = (([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()).Substring(0, 12)
+                '{0:D6}-{1:D6}-{2}' -f $bounds[0], $bounds[1], $hash12
+            }
+        )
+        $index = [ordered]@{
+            'setting-a' = [ordered]@{
+                Name            = 'setting-a'
+                DisplayName     = 'Setting A'
+                RootDefinitionId = $null
+                OptionLabels    = [ordered]@{}
+                Applicability   = $null
+                IsSecretCapable = $false
+            }
+        }
+
+        Mock Invoke-PulseSettingsCatalogPolicy -ModuleName TenantPulse {
+            [pscustomobject]@{
+                PolicyId = [string] $Policy.id
+                Rows     = @(
+                    [pscustomobject]@{
+                        policyId     = [string] $Policy.id
+                        settingPath  = 'setting-a'
+                        instanceId   = '0'
+                        nameResolved = $true
+                        redacted     = $false
+                    }
+                )
+                Gap      = $null
+            }
+        }
+        Mock Write-PulseExpansionFragment -ModuleName TenantPulse {
+            [pscustomobject]@{ FragmentId = $FragmentId; RowCount = @($Rows).Count }
+        }
+        Mock Merge-PulseExpansionFragments -ModuleName TenantPulse {
+            [pscustomobject]@{
+                Status              = 'Expanded'
+                PolicyCount         = $PolicyCount
+                RowCount            = 65
+                UnresolvedNameCount = 0
+                RedactedSecretCount = 0
+                Gaps                = @()
+            }
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $index {
+            param($store, $policies, $index)
+            Invoke-PulseSettingsCatalogExpansion -Store $store -Policies $policies -DefinitionIndex $index -FromCapturedPayloads
+        }
+
+        $summary.RowCount | Should -Be 65
+        Should-Invoke Write-PulseExpansionFragment -ModuleName TenantPulse -Times 3 -Exactly
+        Should-Invoke Write-PulseExpansionFragment -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $FragmentId -eq $expectedFragmentIds[0] -and
+            @($Rows).Count -eq 32 -and
+            $Rows[0].policyId -eq 'policy-000' -and
+            $Rows[31].policyId -eq 'policy-031'
+        }
+        Should-Invoke Write-PulseExpansionFragment -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $FragmentId -eq $expectedFragmentIds[1] -and
+            @($Rows).Count -eq 32 -and
+            $Rows[0].policyId -eq 'policy-032' -and
+            $Rows[31].policyId -eq 'policy-063'
+        }
+        Should-Invoke Write-PulseExpansionFragment -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $FragmentId -eq $expectedFragmentIds[2] -and
+            @($Rows).Count -eq 1 -and
+            $Rows[0].policyId -eq 'policy-064'
+        }
+        Should-Invoke Merge-PulseExpansionFragments -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            @($FragmentIds).Count -eq 3 -and
+            $FragmentIds[0] -eq $expectedFragmentIds[0] -and
+            $FragmentIds[1] -eq $expectedFragmentIds[1] -and
+            $FragmentIds[2] -eq $expectedFragmentIds[2]
+        }
+    }
 }
 
 Describe 'TP10A: evaluator projection without deep clones' {

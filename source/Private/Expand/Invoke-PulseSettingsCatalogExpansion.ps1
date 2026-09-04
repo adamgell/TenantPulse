@@ -366,7 +366,7 @@ function Invoke-PulseSettingsCatalogExpansion {
     $fragmentIds = [System.Collections.Generic.List[string]]::new()
     $manifestBatch = [System.Collections.Generic.List[object]]::new()
     $gapEntries = [System.Collections.Generic.List[object]]::new()
-    $script:PulseExpansionFragmentPolicyCount = 32
+    $fragmentPolicyCount = 32
 
     # READ-ONLY ENFORCEMENT (P0/task-review Critical) - TWO ASSERTION POINTS, BY DESIGN, NOT
     # A CONTRADICTION (re-review round 2 fix - a prior revision of this comment claimed the
@@ -459,21 +459,25 @@ function Invoke-PulseSettingsCatalogExpansion {
     # $batch fan-out (GraphKit's server-side batching) is the sanctioned future scale lever
     # if fan-out speed is ever needed again (Phase 2b) - it shares one connection/token and
     # one throttle coordinator by construction, unlike a client-side RunspacePool.
-    $chunkStart = 0
+    # The flush scriptblock runs in a child scope. Keep the mutable cursor in an object so
+    # advancing it survives that scope boundary; assigning a scalar here would leave the
+    # parent's value at zero and make every policy after the first chunk trigger another
+    # ever-growing 0..N fragment-id calculation (quadratic work).
+    $fragmentState = [pscustomobject]@{ ChunkStart = 0 }
     $flushExpansionFragment = {
         param([int] $EndInclusive)
-        if ($EndInclusive -lt $chunkStart) { return }
+        if ($EndInclusive -lt $fragmentState.ChunkStart) { return }
         $chunkIds = [string[]] @(
-            for ($chunkIndex = $chunkStart; $chunkIndex -le $EndInclusive; $chunkIndex++) {
+            for ($chunkIndex = $fragmentState.ChunkStart; $chunkIndex -le $EndInclusive; $chunkIndex++) {
                 $eligiblePolicies[$chunkIndex].PolicyId
             }
         )
-        $fragmentId = New-PulseExpansionFragmentId -StartOrdinal $chunkStart -EndOrdinal $EndInclusive -PolicyIds $chunkIds
+        $fragmentId = New-PulseExpansionFragmentId -StartOrdinal $fragmentState.ChunkStart -EndOrdinal $EndInclusive -PolicyIds $chunkIds
         $redactedChunk = Protect-PulseGraphRowTenantId -Data $fragmentRows.ToArray() -TenantId $TenantId -Pseudonym $Pseudonym
         $null = Write-PulseExpansionFragment -Store $Store -Name $Name -FragmentId $fragmentId -Rows $redactedChunk
         $fragmentIds.Add($fragmentId) | Out-Null
         $fragmentRows.Clear()
-        $chunkStart = $EndInclusive + 1
+        $fragmentState.ChunkStart = $EndInclusive + 1
     }
 
     for ($eligibleIndex = 0; $eligibleIndex -lt $eligiblePolicies.Count; $eligibleIndex++) {
@@ -499,7 +503,7 @@ function Invoke-PulseSettingsCatalogExpansion {
                 $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
             }
         }
-        $isChunkEnd = (($eligibleIndex - $chunkStart + 1) -ge $script:PulseExpansionFragmentPolicyCount) -or ($eligibleIndex -eq ($eligiblePolicies.Count - 1))
+        $isChunkEnd = (($eligibleIndex - $fragmentState.ChunkStart + 1) -ge $fragmentPolicyCount) -or ($eligibleIndex -eq ($eligiblePolicies.Count - 1))
         if ($isChunkEnd) {
             & $flushExpansionFragment $eligibleIndex
         }
