@@ -315,7 +315,9 @@ Describe 'Permission preflight operation union is Read/Safe' -Tag 'QA', 'ReadOnl
 
         $operations = InModuleScope TenantPulse -ArgumentList $manifest, $appHealth {
             param($manifest, $appHealth)
-            Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings -AdditionalOperations $appHealth
+            $registry = Resolve-PulseProviderPlanRegistry
+            Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings `
+                -AdditionalOperations $appHealth -ProviderPlanRegistry $registry
         }
 
         $operations | Should -Not -BeNullOrEmpty

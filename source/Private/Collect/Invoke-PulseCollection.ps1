@@ -91,8 +91,9 @@ function Invoke-PulseCollection {
         [string] $TenantPseudonym,
 
         # A deliberately narrow extension seam for TenantPulse-owned composite plans.
-        # Keys are dataset names; values are plan commands/scriptblocks. GraphKit remains
-        # responsible only for the single-operation calls made by those plans.
+        # Keys are dataset names; values are registrations carrying Command, Operations,
+        # and network metadata. The declared operation set is preflighted before Command
+        # can dispatch.
         [Parameter()]
         [AllowNull()]
         [hashtable] $ProviderPlanRegistry = @{},
@@ -150,7 +151,8 @@ function Invoke-PulseCollection {
     }
 
     if ($null -eq $AuthorizationDecision) {
-        $preflightOperations = @(Get-PulsePermissionPreflightOperations -Manifest $Manifest)
+        $preflightOperations = @(Get-PulsePermissionPreflightOperations -Manifest $Manifest `
+                -ProviderPlanRegistry $ProviderPlanRegistry)
         $AuthorizationDecision = Invoke-PulsePermissionPreflight -Context $Context -Operations $preflightOperations
     }
 
@@ -162,6 +164,7 @@ function Invoke-PulseCollection {
         # registered plan takes precedence over Pending because Pending is a temporary
         # catalog state, not a runtime implementation for a capability with a plan.
         $planCommand = $null
+        $planRegistration = $null
         $planRequiresNetwork = $true
         $planSupportsNetworkAbortState = $false
         if ($null -ne $ProviderPlanRegistry -and $ProviderPlanRegistry.ContainsKey($entry.Dataset)) {
@@ -191,7 +194,8 @@ function Invoke-PulseCollection {
                 -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations @($entry.Operation)
             continue
         }
-        $datasetAuthorization = Get-PulseDatasetAuthorization -AuthorizationDecision $AuthorizationDecision -ManifestEntry $entry
+        $datasetAuthorization = Get-PulseDatasetAuthorization -AuthorizationDecision $AuthorizationDecision `
+            -ManifestEntry $entry -ProviderPlanRegistration $planRegistration
         if ($datasetAuthorization.Decision -ne 'Granted') {
             $failureClass = if ($datasetAuthorization.Decision -eq 'Denied') { 'PermissionDenied' } else { 'GateUnknown' }
             $reason = Protect-PulseReason -Message ("permission-preflight: {0}" -f $datasetAuthorization.ReasonCode) `

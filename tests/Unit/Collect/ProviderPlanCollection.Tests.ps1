@@ -11,6 +11,29 @@ BeforeAll {
         function Get-GraphObject { param() }
         function Get-GraphOperation { param() }
         function Test-GraphPermission { param() }
+
+        function global:ConvertTo-TestDeclaredProviderRegistry {
+            param([hashtable] $Registry)
+
+            $declared = @{}
+            foreach ($dataset in $Registry.Keys) {
+                $registration = $Registry[$dataset]
+                if ($registration -is [System.Collections.IDictionary] -and $registration.Contains('Operations')) {
+                    $declared[$dataset] = $registration
+                    continue
+                }
+
+                $declared[$dataset] = @{
+                    Command = $registration
+                    RequiresNetwork = $true
+                    SupportsNetworkAbortState = $false
+                    Operations = @(
+                        @{ Type = 'TestProviderPlan'; Operation = [string] $dataset; ApiVersion = 'beta' }
+                    )
+                }
+            }
+            return $declared
+        }
     }
 
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
@@ -52,6 +75,12 @@ BeforeAll {
     }
 }
 
+AfterAll {
+    InModuleScope TenantPulse {
+        Remove-Item -LiteralPath 'Function:\global:ConvertTo-TestDeclaredProviderRegistry' -ErrorAction SilentlyContinue
+    }
+}
+
 Describe 'Invoke-PulseCollection provider plans' {
     BeforeEach {
         $script:storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
@@ -59,7 +88,14 @@ Describe 'Invoke-PulseCollection provider plans' {
             param($path)
             New-PulseSnapshotStore -Path $path -Tenant 'tp-test'
         }
-        $script:context = [pscustomobject]@{ TenantId = 'tenant-1'; ProfileId = 'profile-1' }
+        $script:context = [pscustomobject]@{
+            TenantId = 'tenant-1'
+            ProfileId = 'profile-1'
+            ClientId = [guid]'22222222-2222-2222-2222-222222222222'
+        }
+        Mock Get-GraphOperation -ModuleName TenantPulse {
+            @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @() }
+        }
     }
 
     AfterEach {
@@ -87,6 +123,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
 
@@ -145,6 +182,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
 
@@ -180,6 +218,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -223,6 +262,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -262,6 +302,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -298,6 +339,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -338,6 +380,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -379,6 +422,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -421,6 +465,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -463,6 +508,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -512,6 +558,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -542,6 +589,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -569,6 +617,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -584,7 +633,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 
-    It 'treats a caller override for the built-in no-network dataset as networked after auth abort' {
+    It 'treats a caller registration for the built-in no-network dataset as networked after auth abort' {
         Mock Get-GraphOperation -ModuleName TenantPulse {
             @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @() }
         }
@@ -594,8 +643,13 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         $planRegistry = InModuleScope TenantPulse {
             Resolve-PulseProviderPlanRegistry -Overrides @{
-                dataProcessorServiceForWindowsFeaturesOnboarding = {
-                    throw 'caller override must not run after authentication has failed'
+                dataProcessorServiceForWindowsFeaturesOnboarding = @{
+                    Command = {
+                        throw 'caller override must not run after authentication has failed'
+                    }
+                    Operations = @(
+                        @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                    )
                 }
             }
         }
@@ -606,6 +660,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -632,6 +687,9 @@ Describe 'Invoke-PulseCollection provider plans' {
                         throw 'caller override claiming no network must not run after authentication has failed'
                     }
                     RequiresNetwork = $false
+                    Operations = @(
+                        @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                    )
                 }
             }
         }
@@ -642,6 +700,7 @@ Describe 'Invoke-PulseCollection provider plans' {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
             param($store, $manifest, $context, $registry)
+            $registry = ConvertTo-TestDeclaredProviderRegistry -Registry $registry
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
                 -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
         }
@@ -664,6 +723,73 @@ Describe 'Invoke-PulseCollection provider plans' {
                 }
             }
         } | Should -Throw -ExpectedMessage "ProviderPlanRegistry override for 'dataProcessorServiceForWindowsFeaturesOnboarding' command cannot be null."
+    }
+
+    It 'rejects a raw caller override because its Graph operation set is undeclared' {
+        {
+            InModuleScope TenantPulse {
+                Resolve-PulseProviderPlanRegistry -Overrides @{
+                    dataProcessorServiceForWindowsFeaturesOnboarding = {
+                        throw 'an undeclared override must never be accepted'
+                    }
+                }
+            }
+        } | Should -Throw -ExpectedMessage "ProviderPlanRegistry override for 'dataProcessorServiceForWindowsFeaturesOnboarding' must be a registration containing Command and Operations."
+    }
+
+    It 'rejects a network-backed caller override without declared operations' {
+        {
+            InModuleScope TenantPulse {
+                Resolve-PulseProviderPlanRegistry -Overrides @{
+                    dataProcessorServiceForWindowsFeaturesOnboarding = @{
+                        Command = { throw 'an undeclared override must never be accepted' }
+                    }
+                }
+            }
+        } | Should -Throw -ExpectedMessage "ProviderPlanRegistry override for 'dataProcessorServiceForWindowsFeaturesOnboarding' must declare at least one Graph operation."
+    }
+
+    It 'rejects an empty caller operation declaration' {
+        {
+            InModuleScope TenantPulse {
+                Resolve-PulseProviderPlanRegistry -Overrides @{
+                    dataProcessorServiceForWindowsFeaturesOnboarding = @{
+                        Command = { throw 'an empty declaration must never be accepted' }
+                        Operations = @()
+                    }
+                }
+            }
+        } | Should -Throw -ExpectedMessage "ProviderPlanRegistry override for 'dataProcessorServiceForWindowsFeaturesOnboarding' must declare at least one Graph operation."
+    }
+
+    It 'rejects a non-command caller registration' {
+        {
+            InModuleScope TenantPulse {
+                Resolve-PulseProviderPlanRegistry -Overrides @{
+                    dataProcessorServiceForWindowsFeaturesOnboarding = @{
+                        Command = 42
+                        Operations = @(
+                            @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                        )
+                    }
+                }
+            }
+        } | Should -Throw -ExpectedMessage "ProviderPlanRegistry override for 'dataProcessorServiceForWindowsFeaturesOnboarding' command must be a scriptblock or command."
+    }
+
+    It 'rejects a malformed caller operation declaration' {
+        {
+            InModuleScope TenantPulse {
+                Resolve-PulseProviderPlanRegistry -Overrides @{
+                    dataProcessorServiceForWindowsFeaturesOnboarding = @{
+                        Command = { throw 'a malformed declaration must never be accepted' }
+                        Operations = @(
+                            @{ Type = 'MobileApp'; Operation = ''; ApiVersion = 'beta' }
+                        )
+                    }
+                }
+            }
+        } | Should -Throw -ExpectedMessage "ProviderPlanRegistry override for 'dataProcessorServiceForWindowsFeaturesOnboarding' has a malformed Graph operation declaration."
     }
 
 

@@ -121,10 +121,13 @@
         assignment targets; an unavailable assignment payload gaps that policy.
 
     .PARAMETER ProviderPlanRegistry
-        Optional dataset-name keyed overrides for TenantPulse-owned provider plan commands.
-        TenantPulse wires its five shipped plans by default. A supplied entry replaces the
-        matching built-in plan and runs sequentially with the same resolved Graph context;
-        other built-in plans remain active.
+        Optional dataset-name keyed overrides for TenantPulse-owned provider plans.
+        TenantPulse wires its shipped plans by default. Each override must be a
+        registration containing a Command and the exact non-empty Operations array it may
+        call ({ Type; Operation; ApiVersion }). Those operations join the catalog-wide
+        permission preflight before the command can dispatch. Overrides are always treated
+        as network-backed even if they claim RequiresNetwork = false. A supplied entry
+        replaces only the matching built-in plan; other built-in plans remain active.
 #>
 function Get-PulseTenantSnapshot {
     [CmdletBinding()]
@@ -178,8 +181,8 @@ function Get-PulseTenantSnapshot {
         # released ConfigurationPolicyAssignment.ListBeta read for every eligible policy.
         [Parameter()]
         [switch] $ExpandSettings,
-        # Optional overrides for TenantPulse-owned composite plans, keyed only by dataset
-        # name. Shipped plans are wired by default below.
+        # Optional declared-operation overrides for TenantPulse-owned composite plans,
+        # keyed only by dataset name. Shipped plans are wired by default below.
         [Parameter()]
         [AllowNull()]
         [hashtable] $ProviderPlanRegistry = @{}
@@ -280,7 +283,8 @@ function Get-PulseTenantSnapshot {
         Reason                = $null
     }
 
-    $preflightOperations = @(Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings:$ExpandSettings)
+    $preflightOperations = @(Get-PulsePermissionPreflightOperations -Manifest $manifest `
+            -ExpandSettings:$ExpandSettings -ProviderPlanRegistry $resolvedProviderPlanRegistry)
     $authorizationDecision = Invoke-PulsePermissionPreflight -Context $context -Operations $preflightOperations
 
     Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId `

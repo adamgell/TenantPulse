@@ -1086,19 +1086,31 @@ Describe 'Get-PulseTenantSnapshot' {
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
         $planRegistry = InModuleScope TenantPulse {
             @{
-                intuneRbacGroupProtection = {
-                    param($Context, $Dataset)
-                    $Context.PlanCalls.Add($Dataset)
-                    $Context.PlanContexts.Add($Context)
-                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected -Rows @([pscustomobject]@{ id = 'rbac-1' }) `
-                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' -Operations @('ListBeta')
+                intuneRbacGroupProtection = @{
+                    Command = {
+                        param($Context, $Dataset)
+                        $Context.PlanCalls.Add($Dataset)
+                        $Context.PlanContexts.Add($Context)
+                        New-PulseCollectionOutcome -Dataset $Dataset -Status Collected -Rows @([pscustomobject]@{ id = 'rbac-1' }) `
+                            -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' -Operations @('ListBeta')
+                    }
+                    Operations = @(
+                        @{ Type = 'DeviceManagementUnifiedRoleAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                        @{ Type = 'Group'; Operation = 'Get'; ApiVersion = 'v1.0' }
+                    )
                 }
-                endpointSecurityDiskEncryptionPolicies = {
-                    param($Context, $Dataset)
-                    $Context.PlanCalls.Add($Dataset)
-                    $Context.PlanContexts.Add($Context)
-                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected -Rows @([pscustomobject]@{ id = 'disk-1' }) `
-                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' -Operations @('ListBeta')
+                endpointSecurityDiskEncryptionPolicies = @{
+                    Command = {
+                        param($Context, $Dataset)
+                        $Context.PlanCalls.Add($Dataset)
+                        $Context.PlanContexts.Add($Context)
+                        New-PulseCollectionOutcome -Dataset $Dataset -Status Collected -Rows @([pscustomobject]@{ id = 'disk-1' }) `
+                            -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' -Operations @('ListBeta')
+                    }
+                    Operations = @(
+                        @{ Type = 'ConfigurationPolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                        @{ Type = 'ConfigurationPolicySetting'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                    )
                 }
             }
         }
@@ -1189,6 +1201,67 @@ Describe 'Get-PulseTenantSnapshot' {
         $manifest.datasets.endpointSecurityDiskEncryptionPolicies.status | Should -Be 'Collected'
         $manifest.datasets.endpointSecurityLapsPolicies.status | Should -Be 'Collected'
         $manifest.datasets.securityBaselinesAssignedAndCurrent.status | Should -Be 'Collected'
+    }
+
+    It 'does not dispatch a public provider override when one of its declared operations is denied' {
+        $check = New-TestCheck -Id 'TP.INT.OVERRIDE-PREFLIGHT' -Datasets @('dataProcessorServiceForWindowsFeaturesOnboarding')
+
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($check) }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{
+                ProfileId = 'contoso-tenant-id'
+                TenantId  = 'tenant-1'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
+        }
+        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'MobileApp' -and $Operation -eq 'ListBeta'
+        } {
+            $descriptor = New-TestReadDescriptor -ApiVersion 'beta' -RequiredPermissions @(
+                @{ Type = 'Application'; Value = 'DeviceManagementApps.Read.All' }
+            )
+            $descriptor.Type = $Type
+            $descriptor.Operation = $Operation
+            $descriptor
+        }
+        Mock Test-GraphPermission -ModuleName TenantPulse {
+            @(
+                [pscustomobject]@{ Finding = 'Configured'; Value = 'Unknown' }
+                [pscustomobject]@{ Finding = 'Granted'; Value = 'No' }
+                [pscustomobject]@{ Finding = 'MissingGrant'; Value = 'DeviceManagementApps.Read.All' }
+                [pscustomobject]@{ Finding = 'ExcessGranted'; Value = 'None' }
+                [pscustomobject]@{ Finding = 'AuthenticationCompatible'; Value = 'Yes' }
+            )
+        }
+        $planRegistry = InModuleScope TenantPulse {
+            $script:deniedOverridePlanCalls = 0
+            @{
+                dataProcessorServiceForWindowsFeaturesOnboarding = @{
+                    Command = {
+                        $script:deniedOverridePlanCalls++
+                        throw 'a denied provider plan must never dispatch'
+                    }
+                    Operations = @(
+                        @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                    )
+                }
+            }
+        }
+
+        $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot, $planRegistry {
+            param($snapshotRoot, $planRegistry)
+            Get-PulseTenantSnapshot -ProfileId 'contoso-tenant-id' -OutputPath $snapshotRoot `
+                -ProviderPlanRegistry $planRegistry
+        }
+
+        InModuleScope TenantPulse { $script:deniedOverridePlanCalls } | Should -Be 0
+        Should-Invoke Test-GraphPermission -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            @($Baseline).Count -eq 1 -and $Baseline[0].Type -eq 'MobileApp' -and $Baseline[0].Operation -eq 'ListBeta'
+        }
+        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Failed'
+        $manifest.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'PermissionDenied'
+        $manifest.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'missing-grant'
     }
 
 

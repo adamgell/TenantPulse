@@ -87,9 +87,10 @@ BeforeAll {
 
         InModuleScope TenantPulse -ArgumentList $script:store, $Manifest, $script:context, $ProviderPlanRegistry, $ExpandSettings.IsPresent {
             param($store, $manifest, $context, $registry, $expandSettings)
-            $operations = @(Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings:$expandSettings)
-            $authorization = Invoke-PulsePermissionPreflight -Context $context -Operations $operations
             $resolvedRegistry = Resolve-PulseProviderPlanRegistry -Overrides $registry
+            $operations = @(Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings:$expandSettings `
+                    -ProviderPlanRegistry $resolvedRegistry)
+            $authorization = Invoke-PulsePermissionPreflight -Context $context -Operations $operations
             Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId 'contoso' `
                 -TenantPseudonym 'tp-abc123' -ProviderPlanRegistry $resolvedRegistry -AuthorizationDecision $authorization
         }
@@ -105,12 +106,14 @@ Describe 'Get-PulsePermissionPreflightOperations' {
             [pscustomobject]@{ Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'; Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'; Operation = 'Get'; ApiVersion = 'beta'; Pending = $true }
         )
         $appHealth = @(
-            @{ Type = 'MobileApp'; Operation = 'List'; ApiVersion = 'beta' }
+            @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         )
 
         $operations = InModuleScope TenantPulse -ArgumentList $manifest, $appHealth {
             param($manifest, $appHealth)
-            Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings -AdditionalOperations $appHealth
+            $registry = Resolve-PulseProviderPlanRegistry
+            Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings `
+                -AdditionalOperations $appHealth -ProviderPlanRegistry $registry
         }
 
         $keys = @($operations | ForEach-Object { '{0}/{1}' -f $_.Type, $_.Operation } | Sort-Object)
@@ -121,10 +124,41 @@ Describe 'Get-PulsePermissionPreflightOperations' {
         $keys | Should -Contain 'ConfigurationPolicySetting/ListBeta'
         $keys | Should -Contain 'ConfigurationSettingDefinition/ListBeta'
         $keys | Should -Contain 'DeviceCompliancePolicyAssignment/List'
-        $keys | Should -Contain 'MobileApp/List'
+        $keys | Should -Contain 'MobileApp/ListBeta'
         $keys | Should -Not -Contain 'IntuneRbacGroupProtectionWalk/Walk'
         $keys | Should -Not -Contain 'DataProcessorServiceForWindowsFeaturesOnboarding/Get'
         @($operations | Where-Object { $_.Type -eq 'ConfigurationPolicy' -and $_.Operation -eq 'ListBeta' }).Count | Should -Be 1
+    }
+
+    It 'unions the exact operations declared by the selected provider registration' {
+        $manifest = @(
+            [pscustomobject]@{
+                Dataset = 'dataProcessorServiceForWindowsFeaturesOnboarding'
+                Type = 'DataProcessorServiceForWindowsFeaturesOnboarding'
+                Operation = 'Get'
+                ApiVersion = 'beta'
+                Pending = $true
+            }
+        )
+        $registry = @{
+            dataProcessorServiceForWindowsFeaturesOnboarding = @{
+                Command = { throw 'the plan must not run while constructing the preflight union' }
+                RequiresNetwork = $true
+                Operations = @(
+                    @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                )
+            }
+        }
+
+        $operations = InModuleScope TenantPulse -ArgumentList $manifest, $registry {
+            param($manifest, $registry)
+            Get-PulsePermissionPreflightOperations -Manifest $manifest -ProviderPlanRegistry $registry
+        }
+
+        @($operations).Count | Should -Be 1
+        $operations[0].Type | Should -Be 'MobileApp'
+        $operations[0].Operation | Should -Be 'ListBeta'
+        $operations[0].ApiVersion | Should -Be 'beta'
     }
 }
 
@@ -510,17 +544,23 @@ Describe 'Invoke-PulseCollection permission preflight' {
         }
         $planRegistry = InModuleScope TenantPulse {
             @{
-                endpointSecurityDiskEncryptionPolicies = {
-                    param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
-                    $null = $Context; $null = $ManifestEntry; $null = $ProfileId; $null = $TenantPseudonym
+                endpointSecurityDiskEncryptionPolicies = @{
+                    Command = {
+                        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
+                        $null = $Context; $null = $ManifestEntry; $null = $ProfileId; $null = $TenantPseudonym
 
-                    $gap = New-PulseCollectionGap -Scope 'policy-2/settings' -FailureClass 'ProviderFailed' `
-                        -ReasonCode 'child-failed' -Detail @{ child = 'policy-2' } `
-                        -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta'
-                    New-PulseCollectionOutcome -Dataset $Dataset -Status Partial `
-                        -Rows @([pscustomobject]@{ policyId = 'policy-1'; isFullDiskEncryption = $true }) -Gaps @($gap) `
-                        -ReasonCode 'partial' -Detail @{ childCount = 2 } -Provider 'GraphKit' -ApiVersion 'beta' `
-                        -Operations @('ConfigurationPolicy.ListBeta', 'ConfigurationPolicySetting.ListBeta')
+                        $gap = New-PulseCollectionGap -Scope 'policy-2/settings' -FailureClass 'ProviderFailed' `
+                            -ReasonCode 'child-failed' -Detail @{ child = 'policy-2' } `
+                            -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta'
+                        New-PulseCollectionOutcome -Dataset $Dataset -Status Partial `
+                            -Rows @([pscustomobject]@{ policyId = 'policy-1'; isFullDiskEncryption = $true }) -Gaps @($gap) `
+                            -ReasonCode 'partial' -Detail @{ childCount = 2 } -Provider 'GraphKit' -ApiVersion 'beta' `
+                            -Operations @('ConfigurationPolicy.ListBeta', 'ConfigurationPolicySetting.ListBeta')
+                    }
+                    Operations = @(
+                        @{ Type = 'ConfigurationPolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                        @{ Type = 'ConfigurationPolicySetting'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                    )
                 }
             }
         }
@@ -580,7 +620,7 @@ Describe 'Invoke-PulseCollection permission preflight' {
 
         $operations = InModuleScope TenantPulse {
             Get-PulsePermissionPreflightOperations -Manifest @() -AdditionalOperations @(
-                @{ Type = 'MobileApp'; Operation = 'List'; ApiVersion = 'beta' }
+                @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
             )
         }
         $authorization = InModuleScope TenantPulse -ArgumentList $script:context, $operations {
@@ -588,7 +628,7 @@ Describe 'Invoke-PulseCollection permission preflight' {
             Invoke-PulsePermissionPreflight -Context $context -Operations $operations
         }
 
-        $authorization.Decisions['MobileApp/List'].Decision | Should -Be 'Denied'
+        $authorization.Decisions['MobileApp/ListBeta'].Decision | Should -Be 'Denied'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
 

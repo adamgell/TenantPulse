@@ -13,10 +13,6 @@
     and malformed finding sets are fail-closed no-send.
 #>
 
-$script:PulseNoNetworkPreflightDatasets = [System.Collections.Generic.HashSet[string]]::new(
-    [System.StringComparer]::OrdinalIgnoreCase)
-[void] $script:PulseNoNetworkPreflightDatasets.Add('dataProcessorServiceForWindowsFeaturesOnboarding')
-
 $script:PulseCompositeChildOperations = [ordered]@{
     intuneRbacGroupProtection = @(
         @{ Type = 'DeviceManagementUnifiedRoleAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
@@ -106,18 +102,23 @@ function Get-PulsePermissionPreflightOperations {
         [Parameter()]
         [AllowNull()]
         [AllowEmptyCollection()]
-        [object[]] $AdditionalOperations = @()
+        [object[]] $AdditionalOperations = @(),
+
+        [Parameter()]
+        [AllowNull()]
+        [hashtable] $ProviderPlanRegistry = @{}
     )
 
     $operations = [ordered]@{}
     foreach ($entry in @($Manifest)) {
         if ($null -eq $entry) { continue }
         $dataset = [string] $entry.Dataset
-        if ($script:PulseNoNetworkPreflightDatasets.Contains($dataset)) { continue }
-
-        if ($script:PulseCompositeChildOperations.Contains($dataset)) {
-            foreach ($child in @($script:PulseCompositeChildOperations[$dataset])) {
-                Add-PulsePermissionPreflightOperation -Operations $operations -Candidate $child
+        if ($null -ne $ProviderPlanRegistry -and $ProviderPlanRegistry.ContainsKey($dataset)) {
+            $registration = $ProviderPlanRegistry[$dataset]
+            if ($registration -is [System.Collections.IDictionary] -and $registration.Contains('Operations')) {
+                foreach ($declaredOperation in @($registration['Operations'])) {
+                    Add-PulsePermissionPreflightOperation -Operations $operations -Candidate $declaredOperation
+                }
             }
             continue
         }
@@ -572,17 +573,29 @@ function Get-PulseDatasetAuthorization {
     [CmdletBinding()]
     param(
         [AllowNull()] $AuthorizationDecision,
-        [Parameter(Mandatory)] $ManifestEntry
+        [Parameter(Mandatory)] $ManifestEntry,
+        [AllowNull()] $ProviderPlanRegistration = $null
     )
 
-    $dataset = [string] $ManifestEntry.Dataset
-    if ($script:PulseNoNetworkPreflightDatasets.Contains($dataset)) {
-        return [pscustomobject]@{ Decision = 'Granted'; ReasonCode = 'no-network'; Operations = @() }
-    }
-
     $candidates = @()
-    if ($script:PulseCompositeChildOperations.Contains($dataset)) {
-        $candidates = @($script:PulseCompositeChildOperations[$dataset])
+    if ($null -ne $ProviderPlanRegistration) {
+        if ($ProviderPlanRegistration -isnot [System.Collections.IDictionary] -or
+            -not $ProviderPlanRegistration.Contains('Operations')) {
+            return [pscustomobject]@{ Decision = 'Unknown'; ReasonCode = 'plan-operations-undeclared'; Operations = @() }
+        }
+
+        $candidates = @($ProviderPlanRegistration['Operations'])
+        $requiresNetwork = $true
+        if ($ProviderPlanRegistration.Contains('RequiresNetwork') -and
+            $ProviderPlanRegistration['RequiresNetwork'] -is [bool]) {
+            $requiresNetwork = [bool] $ProviderPlanRegistration['RequiresNetwork']
+        }
+        if ($candidates.Count -eq 0) {
+            if (-not $requiresNetwork) {
+                return [pscustomobject]@{ Decision = 'Granted'; ReasonCode = 'no-network'; Operations = @() }
+            }
+            return [pscustomobject]@{ Decision = 'Unknown'; ReasonCode = 'plan-operations-undeclared'; Operations = @() }
+        }
     }
     else {
         $isPending = $false
