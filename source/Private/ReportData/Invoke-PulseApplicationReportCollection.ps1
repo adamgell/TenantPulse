@@ -353,7 +353,7 @@ function Publish-PulseReportDataRows {
         [Array]::Sort($sortedGaps, $gapComparison)
     }
     $unresolved = if ($Name -eq 'application-assignments') {
-        @($safeRows | Where-Object { $_.groupResolutionState -eq 'Failed' -or $_.assignmentResolutionState -in @('Failed', 'Malformed', 'Partial') }).Count
+        @($safeRows | Where-Object { $_.groupResolutionState -in @('Failed', 'Partial') -or $_.assignmentResolutionState -in @('Failed', 'Malformed', 'Partial') }).Count
     } else { 0 }
 
     $notExpandedReason = if ($sortedGaps.Count -gt 0) { [string] $sortedGaps[0].reason } else { $null }
@@ -666,6 +666,12 @@ function Invoke-PulseApplicationReportCollection {
                                     -GroupResolution $groupResolution)) | Out-Null
                         continue
                     }
+
+                    $assignmentId = [string] (Get-PulseReportValue -InputObject $assignment -Name @('id'))
+                    if ([string]::IsNullOrWhiteSpace($assignmentId)) {
+                        $assignmentState = 'Malformed'
+                        $gaps.Add((New-PulseReportGap -Scope $appId -ReasonCode 'invalid-provider-data' -Operation 'MobileAppAssignment.List')) | Out-Null
+                    }
                     if ([string]::IsNullOrWhiteSpace($targetType)) {
                         $assignmentState = 'Malformed'
                         $gaps.Add((New-PulseReportGap -Scope $appId -ReasonCode 'invalid-provider-data' -Operation 'MobileAppAssignment.List')) | Out-Null
@@ -697,10 +703,20 @@ function Invoke-PulseApplicationReportCollection {
                             }
                             if ($groupOutcome.Status -in @('Collected', 'Partial') -and @($groupOutcome.Rows).Count -eq 1) {
                                 $group = @($groupOutcome.Rows)[0]
-                                $groupName = Get-PulseReportValue -InputObject $group -Name @('displayName')
-                                $groupDescription = Get-PulseReportValue -InputObject $group -Name @('description')
-                                $groupState = if ($groupOutcome.Status -eq 'Partial') { 'Partial' } else { 'Resolved' }
-                                if ($groupOutcome.Status -eq 'Partial') {
+                                $returnedGroupId = [string] (Get-PulseReportValue -InputObject $group -Name @('id'))
+                                if (-not [string]::Equals($returnedGroupId, $groupId, [System.StringComparison]::OrdinalIgnoreCase)) {
+                                    $gaps.Add((New-PulseReportGap -Scope $groupId -ReasonCode 'invalid-provider-data' -Operation 'Group.Get')) | Out-Null
+                                } else {
+                                    $groupName = Get-PulseReportValue -InputObject $group -Name @('displayName')
+                                    $groupDescription = Get-PulseReportValue -InputObject $group -Name @('description')
+                                    $groupState = if ($groupOutcome.Status -eq 'Partial') { 'Partial' } else { 'Resolved' }
+                                }
+                                if ([string]::Equals($returnedGroupId, $groupId, [System.StringComparison]::OrdinalIgnoreCase) -and
+                                    [string]::IsNullOrWhiteSpace([string] $groupName)) {
+                                    $groupState = 'Partial'
+                                    $gaps.Add((New-PulseReportGap -Scope $groupId -ReasonCode 'invalid-provider-data' -Operation 'Group.Get')) | Out-Null
+                                } elseif ([string]::Equals($returnedGroupId, $groupId, [System.StringComparison]::OrdinalIgnoreCase) -and
+                                    $groupOutcome.Status -eq 'Partial') {
                                     $gaps.Add((New-PulseReportGap -Scope $groupId -ReasonCode $groupOutcome.ReasonCode -Operation 'Group.Get')) | Out-Null
                                 }
                             } else {
