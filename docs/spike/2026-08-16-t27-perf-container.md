@@ -1,188 +1,149 @@
-# Task 2.7 perf/scale/memory container - measured baseline
+# TenantPulse scale/performance container - measured baselines
 
-Hardware/method for every budget asserted in `tests/Perf/ScaleAndMemory.Tests.ps1`
-(`./build.ps1 -Tasks build,perftest`, not part of the default test workflow). Every budget
-in that file is `[a number measured here] x 1.5` headroom, per the plan's own instruction -
-never a guessed round number.
+This document is the evidence source for every numeric limit in
+`tests/Perf/ScaleAndMemory.Tests.ps1`. The active limits are regression budgets for one
+recorded machine and workload, not service-level objectives or guarantees for arbitrary
+tenant sizes. Each limit is the largest of three quiescent samples multiplied by `1.5` and
+rounded upward.
 
-## Hardware / environment
+Run the serial container with:
 
-- Apple Silicon Mac, 18 logical CPUs, 128 GB RAM, macOS 26.4 (build 25E246), arm64.
+```powershell
+./build.ps1 -Tasks build,perftest
+```
+
+It is intentionally excluded from the default `test` task. If the runner hardware or the
+fixture contract changes materially, take three new quiet samples, record the exact source
+revision and environment here, and derive the limits from those measurements. Do not
+silently loosen a failing limit.
+
+## Active rebaseline - 2026-09-04
+
+### Source and environment
+
+- Source revision: `115b299` (`fix: bound captured expansion manifest work`).
+- Apple Silicon Mac, arm64, 18 logical CPUs, 128 GB RAM.
+- macOS 26.6.2 (build 25G83).
 - PowerShell 7.6.5.
-- TenantPulse module built from this task's own source tree (`./build.ps1 -Tasks build`).
-- Method: `-FromCapturedPayloads` (mocked Graph - no network call) for the 5,000-policy
-  compute test; a bulk-seeded raw-dataset fixture (writing dataset files + one manifest
-  update directly, bypassing `Write-PulseDataset`'s own per-call cost - see below for why
-  that per-call cost is measured SEPARATELY, not folded into this number) stands in for
-  "the fetch already happened." Memory metric: `[System.GC]::GetTotalMemory($true)` delta
-  (forced full collection before/after) - the managed-heap cost directly attributable to
-  the operation. `[System.Diagnostics.Process]::PeakWorkingSet64` was also captured but
-  consistently returned 0 on this measurement host (unsupported/unreliable in this
-  sandboxed environment) - not used as a budget metric for that reason.
+- Three complete, consecutive `perftest` executions with no other heavy test suite running.
+- Graph was mocked by using `-FromCapturedPayloads`; fixture seeding occurred before each
+  measured window.
+- Managed-memory metric: forced full collection before the baseline, then
+  `[System.GC]::GetTotalMemory($false)` after the measured operation.
+- `PeakWorkingSet64` is not a budget metric because it returned zero on the original
+  measurement host and was therefore not a reliable cross-run signal.
 
-## 1. 5,000-policy Settings Catalog expansion + conflict detection (mocked Graph, real compute)
+### Fixture correctness contract
 
-**Budget methodology (T2.7 review round)**: a single-sample `x1.5` budget (from an earlier
-202.05s/170MB baseline) flaked live in CI at 171.6MB against a 170MB budget - one sample's
-`x1.5` headroom did not cover this host's own real run-to-run variance. Re-derived from the
-**MAX of 3 fresh, independent, back-to-back runs, `x1.5`** - the same methodology section 2's
-write-memory budget already used (that one also needed the max of two runs, not one, for the
-identical reason). Three full runs, same host, same build, run consecutively with no other
-change in between:
+The Settings Catalog fixture contains 5,000 policies and 50 distinct setting definition
+IDs. Every policy has both mandatory captured inputs:
 
-| Run | `Invoke-PulseSettingsCatalogExpansion` elapsed | `Invoke-PulseConflictDetection` elapsed | Managed-heap delta (expand start -> conflict end) | Conflicts found |
-|---|---|---|---|---|
-| 1 | 460.59 s | 4.16 s | 136.68 MB | 50 |
-| 2 | 265.34 s | 4.44 s | 204.17 MB | 50 |
-| 3 | 202.29 s | 3.45 s | 162.42 MB | 50 |
-| **MAX** | **460.59 s** | **4.44 s** | **204.17 MB** | - |
-| **Budget (`MAX x1.5`)** | **691 s** | **6.7 s** | **306.3 MB** | - |
+- `configurationPolicySettings-<policyId>`
+- `configurationPolicyAssignments-<policyId>`
 
-All three runs are 5,000 policies, 1 setting each, 50 distinct `settingDefinitionId`s
-cycling 3 values each (guarantees real conflicts, and all three runs found the identical 50
-- correctness is stable even though timing is not). The wide expand-time spread across runs
-on the exact same host and code (202s-461s, a >2x range) is real machine-load variance
-during measurement (this host was running other concurrent work at the time), not a code
-regression - see the memory-delta column, which is the metric this budget actually governs
-and which varies far less, relatively, than wall time does across the same three runs.
+That means the manifest contains exactly 10,000 governed datasets. Each run must produce
+5,000 expanded rows, 50 conflicts, a 50-definition presence index, and zero expansion,
+conflict, or index gaps. A fast run with missing inputs is a failed correctness run, not a
+performance sample.
 
-**5,000 x ~300ms-fetch-if-it-were-real would be ~25 minutes (T2.0 spike math) - that time is
-entirely the mocked-away network fetch.** The number that matters here is the
-EXPANSION+MERGE+CONFLICTS compute alone, no network at all.
+### Recorded samples
 
-**Real finding, NOT folded into the above**: this measurement deliberately bulk-seeds the
-5,000 raw per-policy captured-payload files directly (bypassing `Write-PulseDataset`'s own
-manifest read-modify-write) because that per-write cost is itself a separate, real,
-O(n)-per-write characteristic - see section 3.
+| Run | Expand seconds | Conflict seconds | Expand + conflict heap delta | Index max seconds | Index max heap delta |
+|---|---:|---:|---:|---:|---:|
+| 1 | 19.2793692 | 8.5926654 | 132.3634262 MB | 6.1008933 | 139.2332306 MB |
+| 2 | 16.5498380 | 8.0327255 | 135.0012817 MB | 6.8465455 | 140.3563614 MB |
+| 3 | 16.5622394 | 7.2613224 | 130.4871292 MB | 5.9603543 | 138.9642029 MB |
+| **MAX** | **19.2793692** | **8.5926654** | **135.0012817 MB** | **6.8465455** | **140.3563614 MB** |
 
-## 2. 50,000-row `managedDevices` dataset write+read memory ceiling
+Each `Index max` cell is itself the maximum of three back-to-back index builds over the
+already-produced expansion family in that full run.
 
-**Characterization (T2.7 review clarification)**: this is a CAPACITY BASELINE at one
-tested scale (50,000 rows), not a peak-footprint GUARANTEE for arbitrary dataset sizes.
-The numbers below describe what this specific, representative synthetic dataset costs on
-this specific host, with headroom applied on top of that one measurement (widened to two
-measurements for the write side after observing real run-to-run variance - see below); they
-do not establish a validated linear (or any other) scaling law all the way from 0 to 50,000
-rows, and they must not be read as "this module never exceeds ~600 MB no matter how large a
-`managedDevices` dataset gets." A materially larger real tenant's `managedDevices` dataset
-(more rows, and/or more/larger properties per row than this test's 18 synthetic ones) should
-be expected to cost proportionally more, not to be capped by this budget - re-measure at the
-actual scale in question before relying on a number from this table for capacity planning
-beyond the ~50,000-row/~35 MB regime it was measured at.
+The 50,000-row synthetic `managedDevices` dataset serialized to exactly 36,716,672 bytes:
 
-| Stage | Elapsed | Managed-heap delta | File size |
-|---|---|---|---|
-| `Write-PulseDataset` (50,000 synthetic device rows, 18 properties each) | 35.10 s (standalone script) / 39.57-40.39 s (in-Pester) | **195.0 MB** (standalone script) / **415.1 MB** (in-Pester, same code, same host, back-to-back) | 35.02 MB |
-| `Read-PulseDataset` | 1.00 s | **572.7 MB** | (same file) |
+| Run | Write seconds | Write heap delta | Read seconds | Read heap delta | Rows returned |
+|---|---:|---:|---:|---:|---:|
+| 1 | 44.5210701 | 220.0756989 MB | 2.2988119 | 511.7446976 MB | 50,000 |
+| 2 | 50.0731926 | 220.1258163 MB | 2.7434971 | 511.7775497 MB | 50,000 |
+| 3 | 45.0939744 | 154.9232712 MB | 2.4049486 | 506.4495010 MB | 50,000 |
+| **MAX** | **50.0731926** | **220.1258163 MB** | **2.7434971** | **511.7775497 MB** | **50,000** |
 
-**Real, non-trivial run-to-run variance on the write side** (195 MB vs 415 MB for the exact
-same operation) - plausible contributors are GC generation-boundary timing and Pester's own
-harness overhead; the committed budget uses the HIGHER of the two measurements x1.5
-(625 MB), not the first sample alone, specifically because a single-sample x1.5 would not
-have covered the second run.
+The compatibility-path characterization that performs 200 sequential dataset writes
+without `-ManifestBatch` measured 11.4581116, 13.7353299, and 12.4438527 seconds. Its
+maximum is 13.7353299 seconds.
 
-**MEASURED FINDING - the plan's own informal "<=2x serialized size" streaming target is NOT
-met by the current implementation, on EITHER path**: write costs ~5.6-11.9x the serialized
-file size, read costs ~16x. Neither `Write-PulseDataset` nor `Read-PulseDataset` streams -
-both materialize the full object graph (`ConvertTo-PulseCanonicalJson`'s `StringBuilder` +
-UTF8 byte array on write; `ConvertFrom-Json`'s full `PSCustomObject` graph on read, which is
-the dominant cost). This is a genuine, documented scale gap for a future task, not
-something T2.7 redesigns - the perf container's own budgets are the HONEST measured
-ceiling (with headroom), not the aspirational 2x, so a future regression is still caught
-even though the underlying "make this actually stream" work remains open.
+### Active budgets
 
-## 3. Raw per-policy dataset write scaling (manifest growth characteristic)
+| Metric | Recorded maximum | `MAX x 1.5`, rounded upward |
+|---|---:|---:|
+| Settings expansion | 19.2793692 s | 29.0 s |
+| Conflict detection | 8.5926654 s | 13.0 s |
+| Expansion + conflict heap delta | 135.0012817 MB | 203.0 MB |
+| Presence-index build | 6.8465455 s | 10.3 s |
+| Presence-index heap delta | 140.3563614 MB | 211.0 MB |
+| 50,000-row write | 50.0731926 s | 75.2 s |
+| 50,000-row write heap delta | 220.1258163 MB | 331.0 MB |
+| 50,000-row read | 2.7434971 s | 4.2 s |
+| 50,000-row read heap delta | 511.7775497 MB | 768.0 MB |
+| 200 unbatched writes | 13.7353299 s | 21.0 s |
 
-Measured by timing successive `Write-PulseDataset` calls into a store whose `manifest.json`
-already holds N prior dataset entries (each call re-reads, mutates, and re-serializes the
-WHOLE manifest - `Set-PulseManifestEntry`'s own `Get-PulseSnapshotManifest` -> mutate ->
-`ConvertTo-PulseCanonicalJson` -> atomic rewrite, unconditionally, every call - there is no
-incremental/append path):
+### Interpretation
 
-| Existing manifest entries at call time | Elapsed for that write | Elapsed / write across the run |
-|---|---|---|
-| ~0 -> 200 | 18.04 s for 200 writes | 90.19 ms/write average |
-| 200 -> 400 | 16.78 s for 200 writes | 174.07 ms/write average |
-| 400 -> 600 | 21.61 s for 200 writes | 282.14 ms/write average |
+The expansion improvement is structural. Captured expansion now pins one validated,
+call-scoped manifest snapshot and reuses it for settings and assignment reads instead of
+reparsing and adapting the same 2.67 MB manifest for every dataset. Native dictionary
+access also replaced the former property-accessor shim whose repeated adaptation became
+quadratic at this scale.
 
-Roughly linear per-write growth (~0.42-0.47 ms per existing manifest entry), i.e. **O(n) per
-write / O(n^2) total** as a snapshot's own manifest grows. `perftest`'s own committed
-regression (`tests/Perf/ScaleAndMemory.Tests.ps1`) is bounded to 200 writes from an empty
-store (18.04 s baseline, 27.5 s budget) rather than re-running the full curve up to 5,000 -
-at the ~0.42-0.47 ms/entry growth rate measured above, extrapolating this O(n^2) curve out
-to a 5,000-dataset store would run the perf container itself for many minutes on every
-`perftest` invocation, which is not a workable regression-test cost for a characteristic
-this section already establishes analytically.
+The corrected fixture is intentionally more expensive for conflict and index work than
+the earlier fixture: proven-empty assignment payloads are now present for every policy, so
+the pipeline performs the real assignment-aware fold rather than treating half the inputs
+as absent. The stricter 10,000-entry fixture is the one the active budgets govern.
 
-**This is a real, production-relevant characteristic, not just a test-harness artifact**:
-`Invoke-PulseSettingsCatalogPolicy` calls `Write-PulseDataset` once per LIVE-fetched policy
-(the redacted raw `configurationPolicySettings-<id>` write), so a real tenant run pays this
-cost on every policy, growing as the run progresses. See `docs/STATUS.md`'s own Phase 2
-live-gate section for the real-tenant numbers this produced against Ivy24 (781 policies).
+`Write-PulseDataset` publishes canonical JSON directly to an atomic file stream and hashes
+the bytes written. It still receives a materialized PowerShell object collection, so the
+write number is a capacity measurement at this specific row/property shape, not proof of
+constant-memory behavior.
 
-## 4. Bounded-worker measurement: confirming `-MaxParallel 4`'s default
+`Read-PulseDataset` first hashes the literal file bytes, then parses from a file stream.
+Array elements are converted from JSON in bounded 128-row text batches, avoiding a single
+whole-document UTF-16 string and the former 50,000 individual cmdlet invocations. The
+public contract still returns all 50,000 objects as one materialized array, which is why
+the read heap delta remains much larger than the serialized file. The 768 MB limit is an
+honest regression ceiling at this exact ~35 MB scale, not a claim that larger datasets are
+bounded by 768 MB.
 
-No live-network unit test can honestly reproduce GraphKit's own real per-call latency and
-throttling inside `perftest` (perf tests must stay network-free per this file's own MOCKED
-GRAPH docstring) - the default is instead justified analytically, from two already-measured
-sources plus one live-gate finding that changes the recommendation:
+The 200-write test describes the unbatched compatibility path. It is not the production
+Settings Catalog expansion path: that path passes a `ManifestBatch` through each policy
+write and publishes one manifest update per expansion chunk. The historical claim that
+Settings Catalog necessarily paid one full manifest rewrite per policy is no longer true.
 
-- GraphKit's own `GraphThrottleCoordinator` (`source/Private/GraphThrottleCoordinator.ps1`)
-  starts each throttle scope (tenant+app+ThrottleClass) at `InitialConcurrency = 2`, floors
-  at 1, and caps at 8 (`Cap = 8`) - `-MaxParallel 4` sits comfortably inside that adaptive
-  range, above the initial 2 and with headroom under the 8 cap for the coordinator's own
-  additive-increase-on-success behavior.
-- T2.0's own spike measured Ivy24's real per-policy `/settings` latency at mean 298 ms / p99
-  430 ms - network-latency-bound, not CPU-bound - so parallelism's theoretical benefit is
-  hiding that latency, up to the coordinator's own concurrency ceiling.
+## Superseded 2026-08-16 baseline
 
-**T2.7 live-gate finding, supersedes the theoretical case above**: `-MaxParallel 4` against
-the REAL Ivy24 tenant did not complete even a 20-policy slice within 9m35s (killed) - the
-RunspacePool's own worker isolation means each worker re-imports GraphKit into its own
-runspace (`$sessionState.ImportPSModule`), which almost certainly means GraphKit's
-token-cache and `GraphThrottleCoordinator` state are NOT shared across workers (each is a
-fresh, per-runspace module instance) - four independently-unaware workers hammering the
-same tenant with no shared adaptive backoff is a plausible root cause for severe real
-throttling/backoff, though this was not fully root-caused within this task (see the T2.7
-report's own Findings section). The SAME 20-policy slice completed via `-Sequential` in
-2.30 s (0.12 s/policy - even better than the T2.0 spike's own mean). **Recommendation,
-pending a proper fix**: prefer `-Sequential` for any live-tenant Settings Catalog expansion
-until the RunspacePool/shared-state issue is understood and fixed; this task does not
-change `-MaxParallel`'s own default (still 4, and still correct/fast against
-`-FromCapturedPayloads` mocked data, which is what `perftest` and most of the existing unit
-suite exercise) but does NOT recommend relying on it for a live run today.
+The original baseline remains summarized here for provenance but does not set current
+limits. It was measured on macOS 26.4 (build 25E246), PowerShell 7.6.5, and an older source
+revision. Most importantly, its 5,000-policy fixture recorded only the settings payload,
+not the now-mandatory assignment payload, so it exercised 5,000 manifest entries rather
+than the current 10,000-entry contract.
 
-(Historical record - left as originally written per Task 3.4 Part D's own decision:
-`-MaxParallel`/`-Sequential` were deleted entirely in that task, closing this section's own
-open recommendation by removing the RunspacePool path rather than fixing its shared-state
-issue - see `Invoke-PulseSettingsCatalogExpansion.ps1`'s own docstring for the measured
-deletion rationale. This section is a dated record of what was true when T2.7 measured it,
-not rewritten to match.)
+| Historical metric | Recorded value | Former budget |
+|---|---:|---:|
+| Expansion max of three | 460.59 s | 691 s |
+| Conflict max of three | 4.44 s | 6.7 s |
+| Expansion + conflict heap max | 204.17 MB | 306.3 MB |
+| Presence-index max | 3.244 s / 116.23 MB | 4.9 s / 174.5 MB |
+| 50,000-row write | 35.10 s / 195.0 MB standalone; 415.1 MB in Pester | 53 s / 625 MB |
+| 50,000-row read | 1.00 s / 572.7 MB | 2 s / 862 MB |
+| 200 unbatched writes | 18.04 s | 27.5 s |
 
-## 5. Task 3.4 Part A: setting-presence index build, over the SAME 5,000-row corpus
+Those values are not comparable to the active measurements as performance deltas because
+the source, operating system, parser, manifest access strategy, and fixture correctness
+contract all changed. They are retained only to explain why the test previously carried
+much wider and, in several places, stale limits.
 
-**Method**: `Invoke-PulseSettingPresenceIndexBuild` called 3 times back-to-back, immediately
-after the SAME section 1 run's `Invoke-PulseSettingsCatalogExpansion`/
-`Invoke-PulseConflictDetection` calls, over the identical already-published
-settingsCatalog/conflicts family artifacts (50 distinct `settingDefinitionId`s across 5,000
-policies, cycling 3 values each) - no re-seed needed between samples, since the build is a
-pure read-and-fold pass with no side effect on its own inputs. Each sample gets its own
-forced-GC-before/measured-after memory delta and its own stopwatch, matching section 1's own
-"MAX of >=3 runs x1.5" methodology (isolating THIS step's own run-to-run variance from
-section 1's unrelated expand/conflict steps).
+## Historical live-worker note
 
-Measured on this session's host - same hardware/PowerShell version as section 1's own
-baseline (Apple Silicon, 18 logical CPUs, 128 GB RAM, macOS 26.4, PowerShell 7.6.5):
-
-| Sample | Elapsed | Managed-heap delta | Definitions in the published index |
-|---|---|---|---|
-| MAX of 3 | 3.244 s | 116.23 MB | 50 |
-| **Budget (`MAX x1.5`)** | **4.9 s** | **174.5 MB** | - |
-
-For context, the SAME run's own section-1 steps measured 199.70 s (expand) / 4.13 s
-(conflict) / 159.73 MB (expand+conflict combined memory delta) - both comfortably inside
-their own existing, already-recorded budgets (691 s / 6.7 s / 306.3 MB), confirming Part A
-introduced no regression to the pre-existing expand/conflict steps. The index build itself
-is fast and low-memory relative to the walk that produces its OWN inputs (a single grouping
-pass over already-parsed rows, no Graph, no re-parsing of the raw jsonl) - well inside every
-budget on the first measured run, no optimization needed.
+An early live Ivy24 experiment found that the then-available `-MaxParallel 4` Settings
+Catalog path did not complete a 20-policy slice within 9m35s, while `-Sequential` completed
+the slice in 2.30s. The runspace implementation and both switches were later removed, so
+this result is historical context rather than a current runner recommendation. No live
+tenant was accessed for the 2026-09-04 rebaseline.

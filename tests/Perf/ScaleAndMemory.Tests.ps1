@@ -6,15 +6,11 @@
 
     METHOD (recorded here, once, for every Describe below - see each It's own comment for
     per-assertion detail): every wall-time/memory number this file asserts against was
-    measured on the SAME machine that later runs the assertion (a developer machine or a
-    CI runner - whichever actually executes `perftest`), not imported from some other
-    author's hardware. The BUDGET each It asserts is [a real number measured once, on the
-    hardware and PowerShell version recorded in docs/spike/2026-08-16-t27-perf-container.md]
-    x 1.5 - never a round, guessed number - per the plan's own instruction. A budget FAILURE
-    here means a genuine regression against that recorded baseline, not an arbitrary
-    external SLA; if hardware changes (a new dev machine, a different CI runner tier), the
-    baseline in docs/spike must be re-measured and the budgets in this file re-derived from
-    it, not silently loosened.
+    measured on the hardware and PowerShell version recorded in
+    docs/spike/2026-08-16-t27-perf-container.md. The BUDGET each It asserts is the MAX of
+    three quiescent samples x 1.5 - never a guessed number. A budget FAILURE means a
+    regression against that recorded baseline, not an external SLA; materially different
+    runner hardware must be measured and recorded before changing these limits.
 
     MOCKED GRAPH, REAL COMPUTE (the plan's own instruction for the 5k-policy pipeline): a
     5,000-policy corpus fetch is meaningless to structurally re-time here - GraphKit's own
@@ -58,61 +54,30 @@ BeforeAll {
     # full method, in docs/spike/2026-08-16-t27-perf-container.md - do not adjust a budget
     # here without re-measuring and updating that file's own table in the same change.
     #
-    # Baseline (measured on this session's host: Apple Silicon, 18 logical CPUs, 128GB RAM,
-    # macOS 26.4, PowerShell 7.6.5 - see docs/spike for the full record):
-    #   5,000-policy Sequential Settings Catalog expansion + conflict detection
-    #     (FromCapturedPayloads), MAX of 3 fresh back-to-back runs (T2.7 review round -
-    #     an earlier single-sample x1.5 budget (170MB) flaked live at 171.6MB; re-derived
-    #     from the MAX of >=3 runs x1.5, the SAME methodology the write-memory budget
-    #     below already used, rather than a single sample):
-    #       run 1: expand 460.59s, conflict 4.16s, memory delta 136.68MB
-    #       run 2: expand 265.34s, conflict 4.44s, memory delta 204.17MB
-    #       run 3: expand 202.29s, conflict 3.45s, memory delta 162.42MB
-    #       MAX:   expand 460.59s, conflict 4.44s, memory delta 204.17MB
-    #     (all 3 runs found the same 50 real conflicts; the wide expand-time spread across
-    #     runs - 202s to 461s on the SAME host, SAME code - reflects real machine-load
-    #     variance during measurement, not a code regression; the memory delta is the
-    #     metric this budget governs and varies far less relatively than wall time does)
-    #   50,000-row managedDevices Write-PulseDataset: 35.10s, managed-heap delta 195.0MB in
-    #     an isolated standalone-script measurement, but 415.1MB when re-measured running
-    #     INSIDE this file's own Pester It block (same code, same host, back-to-back run) -
-    #     a real, non-trivial run-to-run variance (GC timing/generation boundaries and
-    #     Pester's own harness overhead both plausible contributors) that a naive x1.5 off
-    #     a single sample would not have covered; the budget below is the HIGHER of the two
-    #     measurements x1.5, not the first sample alone. serialized file 35.02MB either way
-    #     (delta ~5.6-11.9x file size - NOT the plan's informal "<=2x" streaming target;
-    #     Write-PulseDataset materializes the full object graph, it does not stream - see
-    #     this file's own docstring)
-    #   50,000-row managedDevices Read-PulseDataset: 1.00s, managed-heap delta 572.7MB
-    #     (~16x file size - ConvertFrom-Json's PSCustomObject materialization cost, the
-    #     dominant term; also not the "<=2x" target, same documented gap)
-    #   200 sequential raw per-policy Write-PulseDataset calls (fresh store, 0 existing
-    #     manifest entries at the start): 18.04s (~90ms/write average, growing with existing
-    #     manifest size - see Set-PulseManifestEntry's own full-manifest-rewrite-per-call
-    #     shape, an O(n)-per-write/O(n^2)-total characteristic documented in
-    #     docs/spike/2026-08-16-t27-perf-container.md section 3, with real-tenant numbers
-    #     from the Ivy24 781-policy live-gate run)
-    $script:PulsePerfExpandBudgetSeconds = 691.0         # max(460.59, 265.34, 202.29) x 1.5, rounded up
-    $script:PulsePerfConflictBudgetSeconds = 6.7          # max(4.16, 4.44, 3.45) x 1.5, rounded up
-    $script:PulsePerfComputeMemoryBudgetMB = 306.3        # max(136.68, 204.17, 162.42) x 1.5
-    $script:PulsePerfWriteMemoryBudgetMB = 625.0         # max(195.0, 415.1) x 1.5, rounded up
-    $script:PulsePerfReadMemoryBudgetMB = 862.0          # 572.7 x 1.5
-    $script:PulsePerfWriteSecondsBudget = 53.0           # 35.10 x 1.5
-    $script:PulsePerfReadSecondsBudget = 2.0             # 1.00 x 1.5 (rounded up)
-    $script:PulsePerfManifestWriteBudgetSeconds = 27.5   # 18.04 x 1.5
+    # Rebaseline source: commit 115b299, measured quiescently on Apple Silicon, 18 logical
+    # CPUs, 128GB RAM, macOS 26.6.2, PowerShell 7.6.5. The corrected fixture proves both
+    # required captured datasets per policy (settings + assignments), so the manifest has
+    # exactly 10,000 entries rather than the historical invalid 5,000-entry fixture.
+    # Samples (full precision is recorded in the spike document):
+    #   pipeline MAX: expand 19.2793692s; conflict 8.5926654s; 135.0012817MB
+    #   index MAX: 6.8465455s; 140.3563614MB
+    #   50k dataset MAX: write 50.0731926s/220.1258163MB;
+    #                    read 2.7434971s/511.7775497MB
+    #   200 unbatched writes MAX: 13.7353299s
+    $script:PulsePerfExpandBudgetSeconds = 29.0          # 19.2793692 x 1.5, rounded up
+    $script:PulsePerfConflictBudgetSeconds = 13.0        # 8.5926654 x 1.5, rounded up
+    $script:PulsePerfComputeMemoryBudgetMB = 203.0       # 135.0012817 x 1.5, rounded up
+    $script:PulsePerfWriteMemoryBudgetMB = 331.0         # 220.1258163 x 1.5, rounded up
+    $script:PulsePerfReadMemoryBudgetMB = 768.0          # 511.7775497 x 1.5, rounded up
+    $script:PulsePerfWriteSecondsBudget = 75.2           # 50.0731926 x 1.5, rounded up
+    $script:PulsePerfReadSecondsBudget = 4.2             # 2.7434971 x 1.5, rounded up
+    $script:PulsePerfManifestWriteBudgetSeconds = 21.0   # 13.7353299 x 1.5, rounded up
 
-    # Part A, T3.4: setting-presence index build over the SAME 5,000-row corpus (50 distinct
-    # settingDefinitionIds), MAX of 3 back-to-back calls (see this Describe's own It for the
-    # exact methodology - isolated per-step measurement, not a fresh full-pipeline re-run
-    # per sample). Measured on this session's host (same hardware/PowerShell version as
-    # section 1's own baseline - see docs/spike/2026-08-16-t27-perf-container.md section 4
-    # for the full recorded table):
-    #   sample 1-3 MAX: 3.244 s, 116.23 MB managed-heap delta
-    #   (for comparison: the SAME run's own expand/conflict steps measured 199.70 s / 4.13 s
-    #   / 159.73 MB - both well inside their own existing, unchanged budgets, confirming
-    #   Part A introduced no regression to the expand/conflict steps themselves)
-    $script:PulsePerfIndexBudgetSeconds = 4.9    # 3.244 x 1.5, rounded up
-    $script:PulsePerfIndexMemoryBudgetMB = 174.5 # 116.23 x 1.5, rounded up
+    # Setting-presence index over that same corrected 5,000-policy/10,000-dataset corpus.
+    # Each full pipeline run records the MAX of three back-to-back index builds; the budget
+    # uses the largest such value across the three independent full runs.
+    $script:PulsePerfIndexBudgetSeconds = 10.3    # 6.8465455 x 1.5, rounded up
+    $script:PulsePerfIndexMemoryBudgetMB = 211.0  # 140.3563614 x 1.5, rounded up
 }
 
 Describe 'Perf: 5,000-policy Settings Catalog expansion + conflict-detection compute (mocked Graph)' {
@@ -356,16 +321,11 @@ Describe 'Perf: 50,000-row managedDevices dataset write+read memory ceiling' {
 
             $result.ReadBackCount | Should -Be 50000
 
-            # MEASURED FINDING (see docs/spike/2026-08-16-t27-perf-container.md's own
-            # recorded table): neither Write-PulseDataset nor Read-PulseDataset streams -
-            # both materialize the full object graph. The plan's own informal "<= 2x
-            # serialized size" framing is NOT met by the current implementation on either
-            # path (measured baseline: write ~5.6x, read ~16x the ~35MB serialized file) -
-            # this is a genuine, documented scale gap, not something this task redesigns.
-            # The budgets below are the HONEST [measured] x 1.5 ceiling,
-            # not the aspirational 2x - a regression beyond THIS still catches a real
-            # worsening even though the underlying "streaming" target itself remains open
-            # follow-up work.
+            # Write-PulseDataset serializes directly to the atomic output stream. The read
+            # path hashes the literal bytes and parses bounded 128-row JSON text batches,
+            # avoiding one whole-document UTF-16 string, but its public contract still
+            # returns a materialized object array. These are honest measured x1.5 capacity
+            # ceilings at this exact 50,000-row/~35MB scale, not arbitrary-size guarantees.
             $result.WriteDeltaMB | Should -BeLessThan $script:PulsePerfWriteMemoryBudgetMB
             $result.ReadDeltaMB | Should -BeLessThan $script:PulsePerfReadMemoryBudgetMB
             $result.WriteSeconds | Should -BeLessThan $script:PulsePerfWriteSecondsBudget
@@ -376,22 +336,11 @@ Describe 'Perf: 50,000-row managedDevices dataset write+read memory ceiling' {
     }
 }
 
-Describe 'Perf: raw per-policy dataset write scaling (manifest growth characteristic)' {
-    # MEASURED FINDING: Set-PulseManifestEntry re-reads and re-serializes the WHOLE
-    # manifest.json on every single call (Get-PulseSnapshotManifest -> mutate -> full
-    # canonical-JSON rewrite) - there is no incremental/append path. Write-PulseDataset
-    # (the real per-policy raw-payload writer Invoke-PulseSettingsCatalogPolicy calls once
-    # per LIVE-fetched policy) pays this cost on every call, so it scales O(n) PER WRITE /
-    # O(n^2) TOTAL in the number of datasets already in the store - confirmed empirically
-    # (docs/spike's own table: ~90ms/write at 200 existing entries, ~282ms/write at 600).
-    # This Describe is deliberately bounded to a SMALL n (not 5,000 - see this file's own
-    # docstring above for why re-measuring the full quadratic curve up to 5,000 here would
-    # make `perftest` itself impractically slow) - it exists to catch a REGRESSION in the
-    # per-write cost at a fixed, small scale, and to keep this characteristic visible in
-    # the test suite rather than only in a point-in-time doc. See
-    # docs/spike/2026-08-16-t27-perf-container.md section 3 for the full accounting,
-    # including real-tenant numbers from the Ivy24 781-policy live-gate run; the Phase
-    # 2b/3 follow-up (an incremental/append manifest write path) remains open.
+Describe 'Perf: unbatched dataset write characterization' {
+    # Each raw Write-PulseDataset call without -ManifestBatch still performs an atomic
+    # full-manifest update. This is a fixed-size regression characterization for that
+    # compatibility path. It is not the Settings Catalog production path: that collector
+    # batches its per-policy entries and flushes one manifest update per expansion chunk.
     It 'writes 200 raw per-policy datasets sequentially within the recorded budget' {
         $storeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         try {
