@@ -392,6 +392,7 @@ Describe 'Save-PulseSettingDefinitionCorpus' {
             $reason | Should -Not -Match ([regex]::Escape($plantedProfileId))
             $reason | Should -Not -Match ([regex]::Escape($plantedTenantId))
             $reason | Should -Be 'graph-request-failed: failureClass=AuthenticationFailed; reasonCode=authentication-failed; statusCode=unknown'
+            $manifest.collectionFailure | Should -BeExactly 'graph-request-failed: failureClass=AuthenticationFailed; reasonCode=authentication-failed; statusCode=unknown'
         } finally {
             Remove-Item -LiteralPath $taintedStoreRoot -Recurse -Force -ErrorAction SilentlyContinue
         }

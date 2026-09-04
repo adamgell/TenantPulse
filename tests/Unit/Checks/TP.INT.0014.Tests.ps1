@@ -337,6 +337,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
             $datasets = @{ endpointSecurityDiskEncryptionPolicies = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Full'; isFullDiskEncryption = $true }) }
             $statusCanary = 'unsupported-status-canary'
             $cases = @(
+                @{ Name = 'missing declared key'; Outcomes = @{} }
                 @{ Name = 'null root'; Outcomes = $null }
                 @{ Name = 'null entry'; Outcomes = @{ endpointSecurityDiskEncryptionPolicies = $null } }
                 @{ Name = 'non-dictionary entry'; Outcomes = @{ endpointSecurityDiskEncryptionPolicies = 'not-a-dictionary' } }
@@ -354,7 +355,7 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
             })
         }
 
-        $observed.Count | Should -Be 5
+        $observed.Count | Should -Be 6
         foreach ($case in $observed) {
             $case.Threw | Should -BeTrue -Because $case.Name
             $case.Message | Should -BeExactly 'Test-PulseBitLockerFullDiskEncryption: the dataset outcome projection is invalid.' -Because $case.Name

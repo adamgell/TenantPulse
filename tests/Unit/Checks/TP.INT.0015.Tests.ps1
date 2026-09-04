@@ -356,6 +356,7 @@ Describe 'TP.INT.0015 - LAPS configuration policy meets minimum security bar' {
             $datasets = @{ endpointSecurityLapsPolicies = @([pscustomobject]@{ policyId = 'p1'; policyName = 'Compliant'; backsUpToEntra = $true; hasSufficientComplexity = $true; hasSufficientLength = $true; hasPostAuthAction = $true }) }
             $statusCanary = 'unsupported-status-canary'
             $cases = @(
+                @{ Name = 'missing declared key'; Outcomes = @{} }
                 @{ Name = 'null root'; Outcomes = $null }
                 @{ Name = 'null entry'; Outcomes = @{ endpointSecurityLapsPolicies = $null } }
                 @{ Name = 'non-dictionary entry'; Outcomes = @{ endpointSecurityLapsPolicies = 'not-a-dictionary' } }
@@ -373,7 +374,7 @@ Describe 'TP.INT.0015 - LAPS configuration policy meets minimum security bar' {
             })
         }
 
-        $observed.Count | Should -Be 5
+        $observed.Count | Should -Be 6
         foreach ($case in $observed) {
             $case.Threw | Should -BeTrue -Because $case.Name
             $case.Message | Should -BeExactly 'Test-PulseLapsConfigurationMeetsBar: the dataset outcome projection is invalid.' -Because $case.Name

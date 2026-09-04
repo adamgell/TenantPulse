@@ -61,7 +61,7 @@ function Publish-PulseConflictArtifact {
         $notExpandedReason = if ([string]::IsNullOrEmpty($Reason)) {
             'no expansion families available for conflict detection'
         } else { $Reason }
-        Set-PulseExpansionEntry -Store $Store -Name 'conflicts' -Status 'NotExpanded' -Reason $notExpandedReason
+        Set-PulseExpansionEntry -Store $Store -Name 'conflicts' -Status 'NotExpanded' -Reason $notExpandedReason -Gaps $sortedGaps
         return [pscustomobject]@{ Status = 'NotExpanded'; ConflictCount = 0; FamilyCount = 0; Gaps = $sortedGaps }
     }
 

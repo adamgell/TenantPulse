@@ -21,10 +21,7 @@ function Resolve-PulseDatasetOutcomeState {
     }
 
     if (-not $DatasetOutcomes.Contains($DatasetName)) {
-        return [pscustomobject]@{
-            IsPartial         = $false
-            UnresolvedGapCount = 0
-        }
+        throw $invalidMessage
     }
 
     $outcome = $DatasetOutcomes[$DatasetName]

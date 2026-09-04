@@ -306,6 +306,7 @@ Describe 'TP.INT.0013 - Intune RBAC groups protected via RMAU or role-assignable
             $datasets = @{ intuneRbacGroupProtection = @([pscustomobject]@{ roleDefinitionName = 'Safe'; groupId = 'g1'; groupDisplayName = 'Safe'; isManagementRestricted = $true; isAssignableToRole = $false }) }
             $statusCanary = 'unsupported-status-canary'
             $cases = @(
+                @{ Name = 'missing declared key'; Outcomes = @{} }
                 @{ Name = 'null root'; Outcomes = $null }
                 @{ Name = 'null entry'; Outcomes = @{ intuneRbacGroupProtection = $null } }
                 @{ Name = 'non-dictionary entry'; Outcomes = @{ intuneRbacGroupProtection = 'not-a-dictionary' } }
@@ -323,7 +324,7 @@ Describe 'TP.INT.0013 - Intune RBAC groups protected via RMAU or role-assignable
             })
         }
 
-        $observed.Count | Should -Be 5
+        $observed.Count | Should -Be 6
         foreach ($case in $observed) {
             $case.Threw | Should -BeTrue -Because $case.Name
             $case.Message | Should -BeExactly 'Test-PulseRbacGroupsProtected: the dataset outcome projection is invalid.' -Because $case.Name

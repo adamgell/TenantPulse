@@ -120,7 +120,9 @@ function Test-PulseConflictingPolicySettings {
     $gaps = @($artifact.Gaps)
 
     $gapFamilyNames = [System.Collections.Generic.List[string]]::new()
+    $gapReasons = [System.Collections.Generic.List[string]]::new()
     $seenFamilyNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $seenGapReasons = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     foreach ($gap in $gaps) {
         $gapReasonText = [string] $gap.reason
         $familyMatch = [regex]::Match($gapReasonText, 'family:([^;]+)')
@@ -129,24 +131,25 @@ function Test-PulseConflictingPolicySettings {
             if ($seenFamilyNames.Add($familyName)) {
                 $gapFamilyNames.Add($familyName) | Out-Null
             }
+        } elseif (-not [string]::IsNullOrEmpty($gapReasonText) -and $seenGapReasons.Add($gapReasonText)) {
+            $gapReasons.Add($gapReasonText) | Out-Null
         }
     }
-    if ($gapFamilyNames.Count -eq 0) {
-        foreach ($gap in $gaps) {
-            $gapReasonText = [string] $gap.reason
-            if (-not [string]::IsNullOrEmpty($gapReasonText) -and $seenFamilyNames.Add($gapReasonText)) {
-                $gapFamilyNames.Add($gapReasonText) | Out-Null
-            }
-        }
+    $gapDisclosureParts = [System.Collections.Generic.List[string]]::new()
+    if ($gapFamilyNames.Count -gt 0) {
+        $gapDisclosureParts.Add("$($gapFamilyNames.Count) family(ies) excluded ($([string]::Join(', ', $gapFamilyNames)))") | Out-Null
+    }
+    if ($gapReasons.Count -gt 0) {
+        $gapDisclosureParts.Add("$($gapReasons.Count) gap reason(s) ($([string]::Join(', ', $gapReasons)))") | Out-Null
     }
     # PREFIX, not suffix (post-review fix): a finding Reason is capped at 500 characters
     # further down this call chain (Protect-PulseReason, called from
     # Invoke-PulseEvaluation) - the Fail/Warn sentences below already run close to that
     # cap on their own, so an appended gap disclosure risked being silently truncated
     # away exactly where a reader needed it most. Putting it FIRST guarantees the
-    # unscanned family names always survive the cap.
-    $gapDisclosure = if ($gapFamilyNames.Count -gt 0) {
-        "PARTIAL SCAN - $($gapFamilyNames.Count) family(ies) excluded ($([string]::Join(', ', $gapFamilyNames))), so a lower/zero conflict count here does not mean those families are conflict-free. "
+    # unscanned family names and other gap reasons always survive the cap.
+    $gapDisclosure = if ($gapDisclosureParts.Count -gt 0) {
+        "PARTIAL SCAN - $([string]::Join('; ', $gapDisclosureParts)), so a lower/zero conflict count here does not mean the unscanned scope is conflict-free. "
     } else { '' }
 
     if ($conflicts.Count -eq 0) {

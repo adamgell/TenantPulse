@@ -116,7 +116,9 @@ BeforeAll {
         InModuleScope TenantPulse -ArgumentList (,$rowsArgument) {
             param($Rows)
             $datasetRows = if ($null -eq $Rows) { [object[]]@() } else { [object[]]@($Rows) }
-            Test-PulseSecurityBaselinesAssignedAndCurrent -Datasets @{ securityBaselinesAssignedAndCurrent = $datasetRows }
+            Test-PulseSecurityBaselinesAssignedAndCurrent `
+                -Datasets @{ securityBaselinesAssignedAndCurrent = $datasetRows } `
+                -DatasetOutcomes @{ securityBaselinesAssignedAndCurrent = @{ Status = 'Collected' } }
         }
     }
 }

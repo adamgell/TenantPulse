@@ -311,6 +311,7 @@ Describe 'TP.INT.0029 - Security baselines assigned and not on a deprecated vers
             $datasets = @{ securityBaselinesAssignedAndCurrent = @([pscustomobject]@{ id = 'b1'; name = 'Current'; templateFamily = 'baseline'; hasAssignment = $true; isDeprecated = $false }) }
             $statusCanary = 'unsupported-status-canary'
             $cases = @(
+                @{ Name = 'missing declared key'; Outcomes = @{} }
                 @{ Name = 'null root'; Outcomes = $null }
                 @{ Name = 'null entry'; Outcomes = @{ securityBaselinesAssignedAndCurrent = $null } }
                 @{ Name = 'non-dictionary entry'; Outcomes = @{ securityBaselinesAssignedAndCurrent = 'not-a-dictionary' } }
@@ -328,7 +329,7 @@ Describe 'TP.INT.0029 - Security baselines assigned and not on a deprecated vers
             })
         }
 
-        $observed.Count | Should -Be 5
+        $observed.Count | Should -Be 6
         foreach ($case in $observed) {
             $case.Threw | Should -BeTrue -Because $case.Name
             $case.Message | Should -BeExactly 'Test-PulseSecurityBaselinesAssignedAndCurrent: the dataset outcome projection is invalid.' -Because $case.Name

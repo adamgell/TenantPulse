@@ -164,11 +164,13 @@ function Save-PulseSettingDefinitionCorpus {
         $canonicalReason = "graph-request-failed: failureClass=$($failure.FailureClass); reasonCode=$($failure.ReasonCode); statusCode=$statusCodeText"
         $reason = Protect-PulseReason -Message $canonicalReason -ProfileId $profileId -Pseudonym $pseudonym -TenantId $tenantId
         Set-PulseReferenceEntry -Store $Store -Name $referenceName -Status 'Failed' -Reason $reason
-        if ($failure.AbortCollection -and $null -ne $NetworkAbortState) {
+        if ($failure.AbortCollection) {
             Set-PulseManifestEntry -Store $Store -CollectionFailure $reason
-            $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
-                -ProfileId $profileId -Pseudonym $pseudonym -TenantId $tenantId
+            if ($null -ne $NetworkAbortState) {
+                $NetworkAbortState.AuthenticationAborted = $true
+                $NetworkAbortState.Reason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
+                    -ProfileId $profileId -Pseudonym $pseudonym -TenantId $tenantId
+            }
         }
         return $null
     }
