@@ -90,6 +90,9 @@ Register-GraphTenant -ProfileId 'contoso' -TenantId '<tenant-id>' -ClientId '<ap
 
 # 3. Run a full assessment
 Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out'
+
+# Also capture neutral inputs for a future customer workbook/document pipeline
+Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out' -ReportData Applications
 ```
 
 This collects a snapshot, evaluates every check in the catalog, scores the result, and
@@ -102,9 +105,9 @@ self-contained `./out/tenantpulse-report.html` renderer.
 
 | Command | What it does |
 |---|---|
-| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
+| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. `-ReportData Applications` independently captures versioned application-assignment and install-error artifacts for downstream report builders. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
 | `Get-PulseCheckCatalog` | Lists every check descriptor in the catalog (id, title, category, severity, authorities) as a lightweight, read-only view - useful for discovering what `-IncludeCategory`/`-IncludeCheck` values exist before running an assessment. |
-| `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render canonical JSON. `-Format Html` also writes a self-contained HTML report; `-Redact` remains the local-only compatibility pseudonymization path. |
+| `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render canonical JSON. `-ReportData Applications` passes the neutral application-report profile to fresh collection; `-Format Html` also writes a self-contained HTML report; `-Redact` remains the local-only compatibility pseudonymization path. |
 | `Invoke-PulseCheck` | Runs a scoped subset of checks (by id or category) against a fresh or existing snapshot - the same pipeline as `Invoke-PulseAssessment`, narrowed to exactly the checks you name. |
 | `Export-PulseReport` | Re-renders an already-scored findings JSON file as canonical JSON or self-contained HTML. Render-only - no Graph, snapshot read, re-evaluation, or re-scoring, and (deliberately) no `-Redact`: see its own help for why. |
 
@@ -406,6 +409,32 @@ network-loading URLs. It consumes findings JSON only and never calls Graph, open
 re-evaluates checks, or recalculates scores. Tenant-derived and reviewed text is HTML-encoded,
 and the renderer preserves the findings document's existing notices rather than inventing or
 recomputing them.
+
+## Neutral application report data
+
+`Get-PulseTenantSnapshot -ReportData Applications` and the equivalent
+`Invoke-PulseAssessment ... -ReportData Applications` collect two report-oriented artifacts
+independently of check selection:
+
+- `application-assignments` inventories every mobile app, preserves apps with no assignments,
+  resolves group names/descriptions and bounded member counts, retains assignment intent,
+  include/exclude target type, filters, settings, ids, and explicit resolution states.
+- `app-install-errors` reads GraphKit's safe `AppInstallSummaryReport.Get` report action,
+  accepts both Graph's schema/values matrix and named-record shapes, preserves every source
+  column, and provides stable normalized columns without inventing severity or a failure rate.
+
+Both are schema-v1 canonical JSONL files recorded under `manifest.expansions`, with content
+hashes and `Expanded`, `Partial`, or `NotExpanded` truth. A partial page, per-app 403,
+unresolved group, malformed report row, permission-preflight block, and authentication abort
+remain visible rather than becoming an empty-success claim. Collection uses one permission
+preflight and GraphKit's read/safe descriptors; the report POST is a non-mutating Graph report
+operation, not a TenantPulse write.
+
+These artifacts are neutral local snapshot data. TenantPulse does not create DOCX/XLSX files,
+does not carry CDW or customer branding, and does not interpret approval fields. A later
+harness-independent Office builder can consume the versioned rows and preserve customer-owned
+workbook/document regions. The exact row and failure contract is documented in
+[`docs/contracts/application-report-data-v1.md`](docs/contracts/application-report-data-v1.md).
 
 ## Settings expansion (Phase 2)
 

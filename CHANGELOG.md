@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Neutral `-ReportData Applications` collection on `Get-PulseTenantSnapshot` and
+  `Invoke-PulseAssessment`, producing schema-v1, hash-verified application-assignment and
+  app-install-error JSONL artifacts. The contract preserves raw report columns, assignment
+  targets/settings, group resolution and member-count certainty, and explicit partial/failure
+  gaps without adding Office rendering, branding, approval workflow, or derived severity.
 - Self-contained HTML findings reports through `Export-PulseReport -Format Html` and
   `Invoke-PulseAssessment -Format Html`. JSON remains canonical and is always written by the
   assessment path; HTML is a second findings-only renderer with inline CSS, no scripts, no
