@@ -17,8 +17,9 @@
     SettingsCatalogExpansion.Tests.ps1's fault-injection coverage still applies unchanged,
     now exercising this shared code path instead of a duplicated inline one.
 
-    Sorts -Rows deterministically on (policyId, settingPath, instanceId) via
-    [string]::CompareOrdinal (never trusts caller ordering / worker completion order),
+    Sorts -Rows deterministically on -SortProperties (defaulting to the original
+    policyId/settingPath/instanceId tuple) via [string]::CompareOrdinal (never trusts
+    caller ordering / worker completion order),
     serializes through ConvertTo-PulseCanonicalJsonLine, hashes incrementally, renames to an
     IMMUTABLE, content-addressed generation file BEFORE the manifest mutex is ever touched,
     then calls Set-PulseExpansionEntry with -Path already pointing at that durable file -
@@ -54,6 +55,25 @@ function Publish-PulseExpansionRows {
         [Parameter(Mandatory)]
         [int] $PolicyCount,
 
+        # The original expansion families sort on policyId/settingPath/instanceId. Report-
+        # data artifacts reuse the same crash-consistent writer but have their own stable
+        # row identities, so callers may supply a different ordered property tuple. This
+        # changes ordering only; the serialized row shape is never decorated with helper
+        # fields.
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [string[]] $SortProperties = @('policyId', 'settingPath', 'instanceId'),
+
+        # Optional explicit counts for non-setting artifacts. When omitted, retain the
+        # original row-schema-v1 derivation from nameResolved/redacted.
+        [Parameter()]
+        [AllowNull()]
+        [System.Nullable[int]] $UnresolvedNameCount,
+
+        [Parameter()]
+        [AllowNull()]
+        [System.Nullable[int]] $RedactedSecretCount,
+
         [Parameter()]
         [AllowNull()]
         [AllowEmptyString()]
@@ -73,20 +93,45 @@ function Publish-PulseExpansionRows {
     $sortedRows = @($Rows)
     $rowComparison = [System.Comparison[object]] {
         param($a, $b)
-        $c = [string]::CompareOrdinal([string] $a.policyId, [string] $b.policyId)
-        if ($c -ne 0) { return $c }
-        $c = [string]::CompareOrdinal([string] $a.settingPath, [string] $b.settingPath)
-        if ($c -ne 0) { return $c }
-        return [string]::CompareOrdinal([string] $a.instanceId, [string] $b.instanceId)
+        foreach ($propertyName in $SortProperties) {
+            $aValue = if ($a -is [System.Collections.IDictionary]) {
+                $a[$propertyName]
+            } else {
+                $aProperty = $a.PSObject.Properties[$propertyName]
+                if ($null -ne $aProperty) { $aProperty.Value } else { $null }
+            }
+            $bValue = if ($b -is [System.Collections.IDictionary]) {
+                $b[$propertyName]
+            } else {
+                $bProperty = $b.PSObject.Properties[$propertyName]
+                if ($null -ne $bProperty) { $bProperty.Value } else { $null }
+            }
+            $c = [string]::CompareOrdinal([string] $aValue, [string] $bValue)
+            if ($c -ne 0) { return $c }
+        }
+        return 0
     }
     [System.Array]::Sort($sortedRows, $rowComparison)
 
     $sortedGaps = @($Gaps)
-    $unresolvedNameCount = @($sortedRows | Where-Object { -not $_.nameResolved }).Count
-    $redactedSecretCount = @($sortedRows | Where-Object { $_.redacted }).Count
+    $resolvedUnresolvedNameCount = if ($null -ne $UnresolvedNameCount) {
+        [int] $UnresolvedNameCount
+    } else {
+        @($sortedRows | Where-Object { -not $_.nameResolved }).Count
+    }
+    $resolvedRedactedSecretCount = if ($null -ne $RedactedSecretCount) {
+        [int] $RedactedSecretCount
+    } else {
+        @($sortedRows | Where-Object { $_.redacted }).Count
+    }
 
     if ($PolicyCount -gt 0 -and $sortedRows.Count -eq 0 -and $sortedGaps.Count -gt 0) {
-        $notExpandedReason = Protect-PulseReason -Message "all $PolicyCount policy(ies) failed: $($sortedGaps.Count) gap(s), zero usable rows" `
+        $notExpandedMessage = if ([string]::IsNullOrWhiteSpace($Reason)) {
+            "all $PolicyCount policy(ies) failed: $($sortedGaps.Count) gap(s), zero usable rows"
+        } else {
+            $Reason
+        }
+        $notExpandedReason = Protect-PulseReason -Message $notExpandedMessage `
             -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
         Set-PulseExpansionEntry -Store $Store -Name $Name -Status 'NotExpanded' -Reason $notExpandedReason -Gaps $sortedGaps `
             -PolicyCount $PolicyCount -RowCount 0 -UnresolvedNameCount 0 -RedactedSecretCount 0
@@ -138,8 +183,8 @@ function Publish-PulseExpansionRows {
             Sha256              = $sha256
             PolicyCount         = $PolicyCount
             RowCount            = $sortedRows.Count
-            UnresolvedNameCount = $unresolvedNameCount
-            RedactedSecretCount = $redactedSecretCount
+            UnresolvedNameCount = $resolvedUnresolvedNameCount
+            RedactedSecretCount = $resolvedRedactedSecretCount
         }
         if (-not [string]::IsNullOrEmpty($Reason)) { $setParams.Reason = $Reason }
         if ($sortedGaps.Count -gt 0) { $setParams.Gaps = $sortedGaps }
@@ -150,8 +195,8 @@ function Publish-PulseExpansionRows {
             Status              = $status
             PolicyCount         = $PolicyCount
             RowCount            = $sortedRows.Count
-            UnresolvedNameCount = $unresolvedNameCount
-            RedactedSecretCount = $redactedSecretCount
+            UnresolvedNameCount = $resolvedUnresolvedNameCount
+            RedactedSecretCount = $resolvedRedactedSecretCount
             Gaps                = $sortedGaps
         }
     } finally {

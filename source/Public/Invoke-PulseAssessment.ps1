@@ -157,6 +157,11 @@
         Phase 2 (T2.2): pass-through to Get-PulseTenantSnapshot's own -ExpandSettings.
         Default OFF this task - runs the Settings Catalog per-policy fan-out/walk after
         collection when set. Only accepted on the 'Collect' parameter set.
+
+    .PARAMETER ReportData
+        Optional neutral report-data profiles passed through to Get-PulseTenantSnapshot.
+        'Applications' captures application assignments and app-install errors as
+        versioned JSONL snapshot artifacts. Only accepted on the 'Collect' parameter set.
 #>
 function Invoke-PulseAssessment {
     [CmdletBinding(DefaultParameterSetName = 'Collect')]
@@ -203,7 +208,11 @@ function Invoke-PulseAssessment {
         # existing snapshot never collects anything, so there is nothing here to expand
         # fresh.
         [Parameter(ParameterSetName = 'Collect')]
-        [switch] $ExpandSettings
+        [switch] $ExpandSettings,
+
+        [Parameter(ParameterSetName = 'Collect')]
+        [ValidateSet('Applications')]
+        [string[]] $ReportData
     )
 
     if (-not (Test-Path -LiteralPath $OutputPath -PathType Container)) {
@@ -279,6 +288,9 @@ function Invoke-PulseAssessment {
         # other. Forwarding .IsPresent unconditionally keeps that latent trap closed no
         # matter what either default is.
         $collectParams.ExpandSettings = $ExpandSettings.IsPresent
+        if ($null -ne $ReportData -and @($ReportData).Count -gt 0) {
+            $collectParams.ReportData = @($ReportData)
+        }
 
         $store = Get-PulseTenantSnapshot @collectParams
     }

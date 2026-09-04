@@ -127,6 +127,12 @@
         ConfigurationPolicyAssignment.ListBeta descriptor supplies each policy's real
         assignment targets; an unavailable assignment payload gaps that policy.
 
+    .PARAMETER ReportData
+        Optional neutral report-data profiles collected independently of check selection.
+        'Applications' writes versioned, hash-verified application-assignment and app-
+        install-error JSONL artifacts into the snapshot. It does not render DOCX/XLSX,
+        apply branding, or evaluate approval state.
+
     .PARAMETER ProviderPlanRegistry
         Optional dataset-name keyed overrides for TenantPulse-owned provider plans.
         TenantPulse wires its shipped plans by default. Each override must be a
@@ -188,6 +194,11 @@ function Get-PulseTenantSnapshot {
         # released ConfigurationPolicyAssignment.ListBeta read for every eligible policy.
         [Parameter()]
         [switch] $ExpandSettings,
+
+        [Parameter()]
+        [ValidateSet('Applications')]
+        [string[]] $ReportData,
+
         # Optional declared-operation overrides for TenantPulse-owned composite plans,
         # keyed only by dataset name. Shipped plans are wired by default below.
         [Parameter()]
@@ -263,6 +274,12 @@ function Get-PulseTenantSnapshot {
                 -Provider 'GraphKit' -Operations @($entry.Operation)
         }
 
+        if (@($ReportData) -contains 'Applications') {
+            foreach ($reportArtifact in @('application-assignments', 'app-install-errors')) {
+                Set-PulseExpansionEntry -Store $store -Name $reportArtifact -Status NotExpanded -Reason $failureReason
+            }
+        }
+
         Set-PulseManifestEntry -Store $store -CollectionFailure $failureReason
 
         return $store
@@ -290,14 +307,25 @@ function Get-PulseTenantSnapshot {
         Reason                = $null
     }
 
+    $reportOperations = if (@($ReportData) -contains 'Applications') {
+        @(Get-PulseApplicationReportOperations)
+    } else {
+        @()
+    }
     $preflightOperations = @(Get-PulsePermissionPreflightOperations -Manifest $manifest `
-            -ExpandSettings:$ExpandSettings -ProviderPlanRegistry $resolvedProviderPlanRegistry)
+            -ExpandSettings:$ExpandSettings -AdditionalOperations $reportOperations `
+            -ProviderPlanRegistry $resolvedProviderPlanRegistry)
     $authorizationDecision = Invoke-PulsePermissionPreflight -Context $context -Operations $preflightOperations
 
     Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId `
         -TenantPseudonym $tenantPseudonym -ProviderPlanRegistry $resolvedProviderPlanRegistry `
         -NetworkAbortState $networkAbortState -AuthorizationDecision $authorizationDecision
 
+    if (@($ReportData) -contains 'Applications') {
+        $null = Invoke-PulseApplicationReportCollection -Store $store -Context $context `
+            -AuthorizationDecision $authorizationDecision -NetworkAbortState $networkAbortState `
+            -ProfileId $ProfileId -Pseudonym $tenantPseudonym
+    }
 
     if ($ExpandSettings) {
         $expansionSuppressedReason = Protect-PulseReason -Message 'authentication-failed: network expansion suppressed' `
