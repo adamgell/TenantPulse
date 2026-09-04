@@ -422,7 +422,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         InModuleScope TenantPulse { $script:secondPlanCalls } | Should -Be 1
     }
 
-    It 'maps a thrown GraphKit authentication record and aborts every later network-backed plan' {
+    It 'maps a thrown GraphKit authentication record and gives every later network-backed plan the canonical authentication-failed reason' {
         $privateMarker = 'PRIVATE' + '-PLAN-AUTH-BODY'
         $record = New-ProviderPlanGraphErrorRecord -StatusCode 401 `
             -Category ([System.Management.Automation.ErrorCategory]::AuthenticationError) `
@@ -465,7 +465,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         $saved.datasets.secondPlan.status | Should -Be 'Failed'
         $saved.datasets.secondPlan.failureClass | Should -Be 'AuthenticationFailed'
         $saved.datasets.secondPlan.reasonCode | Should -Be 'authentication-failed'
-        $saved.datasets.secondPlan.reason | Should -Be 'auth-failure: collection aborted'
+        $saved.datasets.secondPlan.reason | Should -Be 'authentication-failed: collection aborted'
         $saved.collectionFailure | Should -Be 'authentication-failed'
         InModuleScope TenantPulse { $script:secondPlanCalls } | Should -Be 0
         $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))

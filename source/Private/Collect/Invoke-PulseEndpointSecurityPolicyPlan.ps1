@@ -73,7 +73,7 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
         if ($failure.AbortCollection) {
             $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
         }
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass $failure.FailureClass -ReasonCode $failure.ReasonCode `
@@ -143,7 +143,7 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
                     -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta')) | Out-Null
             if ($failure.AbortCollection) {
                 $NetworkAbortState.AuthenticationAborted = $true
-                $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
                 break
             }
             continue

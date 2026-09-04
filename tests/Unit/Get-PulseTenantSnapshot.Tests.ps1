@@ -817,9 +817,9 @@ Describe 'Invoke-PulseCollection' {
         $result.datasets.conditionalAccessPolicies.reason | Should -Be $result.collectionFailure
 
         $result.datasets.deviceCompliancePolicies.status | Should -Be 'Failed'
-        $result.datasets.deviceCompliancePolicies.reason | Should -Be 'auth-failure: collection aborted'
+        $result.datasets.deviceCompliancePolicies.reason | Should -Be 'authentication-failed: collection aborted'
         $result.datasets.deviceConfigurations.status | Should -Be 'Failed'
-        $result.datasets.deviceConfigurations.reason | Should -Be 'auth-failure: collection aborted'
+        $result.datasets.deviceConfigurations.reason | Should -Be 'authentication-failed: collection aborted'
 
         # Only the first dataset's Get-GraphObject call happened; the two remaining
         # datasets must never have been attempted against Graph.
@@ -852,7 +852,7 @@ Describe 'Invoke-PulseCollection' {
         $result.datasets.entraDevices.reason | Should -Match '^descriptor-pending:'
 
         $result.datasets.deviceConfigurations.status | Should -Be 'Failed'
-        $result.datasets.deviceConfigurations.reason | Should -Be 'auth-failure: collection aborted'
+        $result.datasets.deviceConfigurations.reason | Should -Be 'authentication-failed: collection aborted'
     }
 
     It 'replaces arbitrary provider text instead of persisting a redacted variant' {

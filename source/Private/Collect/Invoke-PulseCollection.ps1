@@ -26,7 +26,7 @@
               not at context-acquisition time. This dataset is written Failed with the
               redacted failure reason, the snapshot's top-level collectionFailure is set
               to that same reason, every REMAINING (not yet attempted) dataset in the
-              manifest is written Failed with reason 'auth-failure: collection aborted'
+              manifest is written Failed with reason 'authentication-failed: collection aborted'
               with NO further Graph calls (they would all fail identically). Remaining
               Pending entries keep their normal descriptor-pending Skipped outcome, and a
               built-in provider plan explicitly marked RequiresNetwork = false still runs
@@ -228,7 +228,7 @@ function Invoke-PulseCollection {
                         -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                     Set-PulseManifestEntry -Store $Store -CollectionFailure $collectionFailureReason
                     $NetworkAbortState.AuthenticationAborted = $true
-                    $NetworkAbortState.Reason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
+                    $NetworkAbortState.Reason = Protect-PulseReason -Message 'authentication-failed: collection aborted' `
                         -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                 }
                 if ($outcome.Status -eq 'Collected') {
@@ -256,7 +256,7 @@ function Invoke-PulseCollection {
                             -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                         Set-PulseManifestEntry -Store $Store -CollectionFailure $collectionFailureReason
                         $NetworkAbortState.AuthenticationAborted = $true
-                        $NetworkAbortState.Reason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
+                        $NetworkAbortState.Reason = Protect-PulseReason -Message 'authentication-failed: collection aborted' `
                             -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                     }
                 } else {
@@ -391,7 +391,7 @@ function Invoke-PulseCollection {
                 if ($failure.AbortCollection) {
                     Set-PulseManifestEntry -Store $Store -CollectionFailure $reason
                     $NetworkAbortState.AuthenticationAborted = $true
-                    $NetworkAbortState.Reason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
+                    $NetworkAbortState.Reason = Protect-PulseReason -Message 'authentication-failed: collection aborted' `
                         -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                     continue
                 }

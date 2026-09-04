@@ -204,7 +204,7 @@ function Invoke-PulseSettingsCatalogPolicy {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
             if ($failure.AbortCollection -and $null -ne $NetworkAbortState) {
                 $NetworkAbortState.AuthenticationAborted = $true
-                $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
             }
             $category = switch ($failure.FailureClass) {
                 'PermissionDenied' { 'PermissionDenied' }
@@ -227,7 +227,7 @@ function Invoke-PulseSettingsCatalogPolicy {
                 $failure = Resolve-PulseGraphFailure -ErrorRecord $_
                 if ($failure.AbortCollection -and $null -ne $NetworkAbortState) {
                     $NetworkAbortState.AuthenticationAborted = $true
-                    $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                    $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
                 }
                 $category = switch ($failure.FailureClass) {
                     'PermissionDenied' { 'AssignmentPermissionDenied' }

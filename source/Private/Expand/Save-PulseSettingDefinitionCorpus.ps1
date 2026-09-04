@@ -168,7 +168,7 @@ function Save-PulseSettingDefinitionCorpus {
             Set-PulseManifestEntry -Store $Store -CollectionFailure $reason
             if ($null -ne $NetworkAbortState) {
                 $NetworkAbortState.AuthenticationAborted = $true
-                $NetworkAbortState.Reason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
+                $NetworkAbortState.Reason = Protect-PulseReason -Message 'authentication-failed: collection aborted' `
                     -ProfileId $profileId -Pseudonym $pseudonym -TenantId $tenantId
             }
         }

@@ -210,7 +210,7 @@ function Invoke-PulseTypedPolicyExpansion {
                 $failure = Resolve-PulseGraphFailure -ErrorRecord $_
                 if ($failure.AbortCollection) {
                     $NetworkAbortState.AuthenticationAborted = $true
-                    $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                    $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
                 }
                 $category = switch ($failure.FailureClass) {
                     'PermissionDenied' { 'AssignmentPermissionDenied' }

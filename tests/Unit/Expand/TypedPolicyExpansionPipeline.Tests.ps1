@@ -78,7 +78,7 @@ Describe 'Invoke-PulseTypedPolicyExpansionPipeline' {
         $script:typedPostAuthThrowMarker = $privateMarker
         Mock Invoke-PulseTypedPolicyExpansion -ModuleName TenantPulse {
             $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
             throw $script:typedPostAuthThrowMarker
         }
         $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }

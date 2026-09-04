@@ -84,7 +84,7 @@ function Invoke-PulseSubscribedSkuLicensePlan {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
         if ($failure.AbortCollection) {
             $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
         }
 
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `

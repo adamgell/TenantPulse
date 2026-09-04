@@ -30,7 +30,7 @@
         attempt is the one that actually discovers the auth failure (an expired
         certificate, a revoked app registration - an AADSTS-shaped error), that dataset is
         written Failed, collectionFailure is set from that same reason, and every
-        remaining dataset is written Failed with reason 'auth-failure: collection aborted'
+        remaining dataset is written Failed with reason 'authentication-failed: collection aborted'
         with no further Graph calls - they would all fail identically. Either way,
         collection never silently produces an empty, unexplained snapshot.
 

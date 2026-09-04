@@ -135,7 +135,7 @@ function Invoke-PulseSecurityBaselinePlan {
         $metadata = Get-BaselineFailureMetadata -ErrorRecord $ErrorRecord
         if ($metadata.AbortCollection) {
             $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
         }
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass $metadata.FailureClass -ReasonCode $metadata.ReasonCode `
@@ -152,7 +152,7 @@ function Invoke-PulseSecurityBaselinePlan {
         $metadata = Get-BaselineFailureMetadata -ErrorRecord $ErrorRecord
         if ($metadata.AbortCollection) {
             $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
         }
         return New-PulseCollectionGap -Scope $Scope -FailureClass $metadata.FailureClass `
             -ReasonCode $metadata.ReasonCode -Detail @{ operation = $Operation } `

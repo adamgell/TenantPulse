@@ -149,7 +149,7 @@ Describe 'Invoke-PulseSettingsCatalogExpansionPipeline' {
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationSettingDefinition' } { $definitions }
         Mock Invoke-PulseSettingsCatalogExpansion -ModuleName TenantPulse {
             $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
             throw $script:settingsPostAuthThrowMarker
         }
         $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }

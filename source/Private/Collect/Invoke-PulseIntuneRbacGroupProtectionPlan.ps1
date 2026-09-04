@@ -76,7 +76,7 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $ErrorRecord
         if ($failure.AbortCollection) {
             $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
         }
 
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
@@ -211,7 +211,7 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
                     -ReasonCode $failure.ReasonCode -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
             if ($failure.AbortCollection) {
                 $NetworkAbortState.AuthenticationAborted = $true
-                $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
                 break
             }
             continue

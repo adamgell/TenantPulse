@@ -124,7 +124,7 @@ function Invoke-PulseSettingsCatalogExpansionPipeline {
         if ($failure.AbortCollection) {
             Set-PulseManifestEntry -Store $Store -CollectionFailure $reason
             $NetworkAbortState.AuthenticationAborted = $true
-            $NetworkAbortState.Reason = Protect-PulseReason -Message 'auth-failure: collection aborted' `
+            $NetworkAbortState.Reason = Protect-PulseReason -Message 'authentication-failed: collection aborted' `
                 -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
         }
         Set-PulseExpansionEntry -Store $Store -Name 'settingsCatalog' -Status 'NotExpanded' `
