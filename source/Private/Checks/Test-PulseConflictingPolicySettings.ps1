@@ -34,11 +34,13 @@
     fully Expanded one (empirically reproduced by review) - a reader had no way to know
     part of the tenant's configuration surface was never scanned. Now: whenever Gaps is
     non-empty, this rule NEVER emits a bare Pass - a zero-conflict Partial artifact
-    degrades Pass -> Warn, naming the unscanned families in the Reason. A conflict-bearing
-    Partial artifact keeps its normal Fail/Warn status (Gaps do not change WHICH status
-    applies) but its Reason is likewise annotated with the same gap disclosure, so a
-    reader always knows the scan was incomplete regardless of which status they are
-    looking at.
+    degrades Pass -> Warn, naming the unscanned families in the Reason. That includes
+    NotExpanded/Failed source families whose recorded gaps Invoke-PulseConflictDetection
+    now forwards: a 1-of-3 family scan after authentication abort cannot Pass as a clean
+    zero-conflict result. A conflict-bearing Partial artifact keeps its normal Fail/Warn
+    status (Gaps do not change WHICH status applies) but its Reason is likewise annotated
+    with the same gap disclosure, so a reader always knows the scan was incomplete
+    regardless of which status they are looking at.
 
     RULE SEMANTICS (verbatim from this task's brief, never collapsing 'possible'/'unknown'
     into a false positive or a false negative):
@@ -118,23 +120,36 @@ function Test-PulseConflictingPolicySettings {
     $gaps = @($artifact.Gaps)
 
     $gapFamilyNames = [System.Collections.Generic.List[string]]::new()
+    $gapReasons = [System.Collections.Generic.List[string]]::new()
+    $seenFamilyNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $seenGapReasons = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     foreach ($gap in $gaps) {
         $gapReasonText = [string] $gap.reason
         $familyMatch = [regex]::Match($gapReasonText, 'family:([^;]+)')
         if ($familyMatch.Success) {
-            $gapFamilyNames.Add($familyMatch.Groups[1].Value) | Out-Null
-        } elseif (-not [string]::IsNullOrEmpty($gapReasonText)) {
-            $gapFamilyNames.Add($gapReasonText) | Out-Null
+            $familyName = $familyMatch.Groups[1].Value
+            if ($seenFamilyNames.Add($familyName)) {
+                $gapFamilyNames.Add($familyName) | Out-Null
+            }
+        } elseif (-not [string]::IsNullOrEmpty($gapReasonText) -and $seenGapReasons.Add($gapReasonText)) {
+            $gapReasons.Add($gapReasonText) | Out-Null
         }
+    }
+    $gapDisclosureParts = [System.Collections.Generic.List[string]]::new()
+    if ($gapFamilyNames.Count -gt 0) {
+        $gapDisclosureParts.Add("$($gapFamilyNames.Count) family(ies) excluded ($([string]::Join(', ', $gapFamilyNames)))") | Out-Null
+    }
+    if ($gapReasons.Count -gt 0) {
+        $gapDisclosureParts.Add("$($gapReasons.Count) gap reason(s) ($([string]::Join(', ', $gapReasons)))") | Out-Null
     }
     # PREFIX, not suffix (post-review fix): a finding Reason is capped at 500 characters
     # further down this call chain (Protect-PulseReason, called from
     # Invoke-PulseEvaluation) - the Fail/Warn sentences below already run close to that
     # cap on their own, so an appended gap disclosure risked being silently truncated
     # away exactly where a reader needed it most. Putting it FIRST guarantees the
-    # unscanned family names always survive the cap.
-    $gapDisclosure = if ($gapFamilyNames.Count -gt 0) {
-        "PARTIAL SCAN - $($gapFamilyNames.Count) family(ies) excluded ($([string]::Join(', ', $gapFamilyNames))), so a lower/zero conflict count here does not mean those families are conflict-free. "
+    # unscanned family names and other gap reasons always survive the cap.
+    $gapDisclosure = if ($gapDisclosureParts.Count -gt 0) {
+        "PARTIAL SCAN - $([string]::Join('; ', $gapDisclosureParts)), so a lower/zero conflict count here does not mean the unscanned scope is conflict-free. "
     } else { '' }
 
     if ($conflicts.Count -eq 0) {

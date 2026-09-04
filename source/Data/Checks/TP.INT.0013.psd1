@@ -6,8 +6,9 @@
     Effort     = 'High'
     Impact     = 'High'
     Data       = @{
-        Datasets = @('intuneRbacGroupProtection')
-        Gates    = @('Intune')
+        Datasets        = @('intuneRbacGroupProtection')
+        PartialDatasets = @('intuneRbacGroupProtection')
+        Gates           = @('Intune')
     }
     Rule       = @{
         Type     = 'Function'

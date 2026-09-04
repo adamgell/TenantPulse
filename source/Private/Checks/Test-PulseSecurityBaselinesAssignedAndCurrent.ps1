@@ -87,8 +87,17 @@ function Test-PulseSecurityBaselinesAssignedAndCurrent {
         [hashtable] $Datasets,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [AllowNull()]
+        [hashtable] $DatasetOutcomes = @{}
     )
+
+    $datasetName = 'securityBaselinesAssignedAndCurrent'
+    $outcomeState = Resolve-PulseDatasetOutcomeState -DatasetOutcomes $DatasetOutcomes -DatasetName $datasetName -Caller $MyInvocation.MyCommand.Name
+    $isPartial = $outcomeState.IsPartial
+    $unresolvedGapCount = $outcomeState.UnresolvedGapCount
 
     $rows = @($Datasets.securityBaselinesAssignedAndCurrent)
     if ($rows.Count -eq 0) {
@@ -96,27 +105,68 @@ function Test-PulseSecurityBaselinesAssignedAndCurrent {
     }
 
     $offending = [System.Collections.Generic.List[object]]::new()
+    $malformedReason = $null
     foreach ($row in $rows) {
+        $id = if (Test-PulseRowPropertyPresent -Row $row -PropertyName 'id') { [string] $row.id } else { $null }
+        $name = if (Test-PulseRowPropertyPresent -Row $row -PropertyName 'name') { [string] $row.name } else { $null }
+        $identity = if (-not [string]::IsNullOrWhiteSpace($id)) {
+            $id
+        } elseif (-not [string]::IsNullOrWhiteSpace($name)) {
+            $name
+        } else {
+            $null
+        }
+        if ($null -eq $identity) {
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseSecurityBaselinesAssignedAndCurrent: a row has no usable identity in id or name - every row must have a stable identity.'
+            }
+            continue
+        }
+
+        $rowMalformed = $false
         foreach ($prop in @('hasAssignment', 'isDeprecated')) {
             if (-not (Test-PulseRowPropertyPresent -Row $row -PropertyName $prop) -or $null -eq $row.$prop) {
-                throw "Test-PulseSecurityBaselinesAssignedAndCurrent: a securityBaselinesAssignedAndCurrent row is missing '$prop'."
+                if ($null -eq $malformedReason) {
+                    $malformedReason = "Test-PulseSecurityBaselinesAssignedAndCurrent: a securityBaselinesAssignedAndCurrent row is missing '$prop'."
+                }
+                $rowMalformed = $true
+                break
             }
             if ($row.$prop -isnot [bool]) {
-                throw "Test-PulseSecurityBaselinesAssignedAndCurrent: a securityBaselinesAssignedAndCurrent row's '$prop' is present but not a native boolean (got '$($row.$prop.GetType().Name)') - refusing to [bool]-coerce a non-boolean value (e.g. the STRING 'false' coerces to `$true under PowerShell's own [bool] cast, which would silently invert the meaning)."
+                if ($null -eq $malformedReason) {
+                    $malformedReason = "Test-PulseSecurityBaselinesAssignedAndCurrent: a securityBaselinesAssignedAndCurrent row's '$prop' is present but not a native boolean - refusing to coerce it."
+                }
+                $rowMalformed = $true
+                break
             }
         }
+        if ($rowMalformed) { continue }
 
         $hasAssignment = [bool] $row.hasAssignment
         $isDeprecated = [bool] $row.isDeprecated
 
         if (-not $hasAssignment -or $isDeprecated) {
-            $identity = if (Test-PulseRowPropertyPresent -Row $row -PropertyName 'id') { [string] $row.id } else { [string] $row.name }
             $offending.Add(@{
                 Identity = $identity
                 Detail   = @{ name = $row.name; templateFamily = $row.templateFamily; hasAssignment = $hasAssignment; isDeprecated = $isDeprecated }
                 SortKey  = $identity
             })
         }
+    }
+
+    if (-not $isPartial -and $null -ne $malformedReason) {
+        throw $malformedReason
+    }
+
+    if ($isPartial -and $offending.Count -gt 0) {
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status Fail -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; $($offending.Count) known unassigned or deprecated baseline instance(s) prove this universal baseline posture check fails despite unresolved scope." -Evidence $offending.ToArray()
+    }
+
+    if ($isPartial) {
+        if ($null -ne $malformedReason) { throw $malformedReason }
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status NotApplicable -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; known rows are assigned and current, but unresolved scope means they cannot prove universal baseline posture."
     }
 
     if ($offending.Count -eq 0) {

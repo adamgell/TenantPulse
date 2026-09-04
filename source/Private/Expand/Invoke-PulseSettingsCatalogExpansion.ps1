@@ -334,8 +334,16 @@ function Invoke-PulseSettingsCatalogExpansion {
 
         [Parameter()]
         [AllowNull()]
-        [string] $TenantId
+        [string] $TenantId,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     if ($null -eq $DefinitionIndex -or $DefinitionIndex.Count -eq 0) {
         $reason = Protect-PulseReason -Message 'definitions corpus unavailable' -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
@@ -448,27 +456,39 @@ function Invoke-PulseSettingsCatalogExpansion {
     # $batch fan-out (GraphKit's server-side batching) is the sanctioned future scale lever
     # if fan-out speed is ever needed again (Phase 2b) - it shares one connection/token and
     # one throttle coordinator by construction, unlike a client-side RunspacePool.
-    foreach ($eligible in $eligiblePolicies) {
+    for ($eligibleIndex = 0; $eligibleIndex -lt $eligiblePolicies.Count; $eligibleIndex++) {
+        $eligible = $eligiblePolicies[$eligibleIndex]
         $policy = $eligible.Policy
         $rawDatasetName = "$rawDatasetPrefix$($eligible.PolicyId)"
         $rawAssignmentDatasetName = "$rawAssignmentDatasetPrefix$($eligible.PolicyId)"
+        $result = $null
         try {
             $result = Invoke-PulseSettingsCatalogPolicy -Store $Store -Policy $policy -Context $Context -DefinitionIndex $DefinitionIndex `
                 -FromCapturedPayloads $FromCapturedPayloads.IsPresent -RawDatasetName $rawDatasetName `
                 -RawAssignmentDatasetName $rawAssignmentDatasetName `
-                -TenantId $TenantId -Pseudonym $Pseudonym
+                -TenantId $TenantId -Pseudonym $Pseudonym -NetworkAbortState $NetworkAbortState
         } catch {
             # WORKER DRAIN applies here too (P0-5's own spirit, preserved from the deleted
             # parallel path): an unexpected exception from one policy must not skip
             # publication of every policy already collected.
             Write-Verbose "Invoke-PulseSettingsCatalogExpansion: unexpected exception processing policy '$($eligible.PolicyId)': $($_.Exception.Message)"
             $gapEntries.Add([pscustomobject]@{ policyId = $eligible.PolicyId; reason = 'category:WorkerException' }) | Out-Null
-            continue
         }
-        foreach ($row in $result.Rows) { $allRows.Add($row) | Out-Null }
-        if ($result.Gap) {
-            $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
-            $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
+        if ($null -ne $result) {
+            foreach ($row in $result.Rows) { $allRows.Add($row) | Out-Null }
+            if ($result.Gap) {
+                $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+                $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
+            }
+        }
+        if ($NetworkAbortState.AuthenticationAborted) {
+            for ($remainingIndex = $eligibleIndex + 1; $remainingIndex -lt $eligiblePolicies.Count; $remainingIndex++) {
+                $gapEntries.Add([pscustomobject]@{
+                        policyId = $eligiblePolicies[$remainingIndex].PolicyId
+                        reason   = 'category:NotAttemptedAfterAuthenticationFailure'
+                    }) | Out-Null
+            }
+            break
         }
     }
 

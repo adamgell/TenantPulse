@@ -18,10 +18,11 @@
     not a special case.
 
     ATTEMPT-AND-CLASSIFY, one more failure surface than the check-driven loop: a failed
-    `configurationPolicies` fetch here does NOT abort the run (Get-PulseTenantSnapshot has
-    already returned everything else it collected) - it writes that ONE dataset Failed and
-    then Invoke-PulseSettingsCatalogExpansion is never called at all: there is no policy
-    list to fan out over. A -DefinitionIndex capture failure (Save-PulseSettingDefinitionCorpus
+    `configurationPolicies` fetch is classified by Resolve-PulseGraphFailure, writes that
+    ONE dataset Failed, and never calls Invoke-PulseSettingsCatalogExpansion because there
+    is no policy list to fan out over. AuthenticationFailed also updates the same shared
+    network-abort state used by ordinary collection so later typed-policy network expansion
+    is suppressed; all other classes remain isolated. A -DefinitionIndex capture failure (Save-PulseSettingDefinitionCorpus
     returning $null) still reaches Invoke-PulseSettingsCatalogExpansion - that function's
     own $null-index branch is what actually writes the NotExpanded 'definitions corpus
     unavailable' expansion entry (see its own docstring), so this function does not
@@ -75,12 +76,22 @@ function Invoke-PulseSettingsCatalogExpansionPipeline {
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
-        [string] $TenantPseudonym
+        [string] $TenantPseudonym,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
 
     $contextTenantId = $null
     if ($null -ne $Context -and $Context.PSObject.Properties['TenantId'] -and $null -ne $Context.TenantId) {
         $contextTenantId = [string] $Context.TenantId
+    }
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{
+            AuthenticationAborted = $false
+            Reason                = $null
+        }
     }
 
     try {
@@ -102,8 +113,20 @@ function Invoke-PulseSettingsCatalogExpansionPipeline {
     try {
         $policies = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta' -ErrorAction Stop)
     } catch {
-        $reason = Protect-PulseReason -Message "fetch-failed: $($_.Exception.Message)" -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
-        Write-PulseDataset -Store $Store -Name 'configurationPolicies' -ApiVersion 'beta' -Status 'Failed' -Reason $reason
+        $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+        $statusCodeText = if ($null -eq $failure.StatusCode) { 'unknown' } else { [string] $failure.StatusCode }
+        $canonicalReason = "graph-request-failed: failureClass=$($failure.FailureClass); reasonCode=$($failure.ReasonCode); statusCode=$statusCodeText"
+        $reason = Protect-PulseReason -Message $canonicalReason -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+        Write-PulseDataset -Store $Store -Name 'configurationPolicies' -ApiVersion 'beta' -Status 'Failed' `
+            -Reason $reason -ReasonCode $failure.ReasonCode `
+            -Detail @{ statusCode = $failure.StatusCode; hasStructuredSignal = $failure.HasStructuredSignal } `
+            -FailureClass $failure.FailureClass -Provider 'GraphKit' -Operations @('ListBeta')
+        if ($failure.AbortCollection) {
+            Set-PulseManifestEntry -Store $Store -CollectionFailure $reason
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = Protect-PulseReason -Message 'authentication-failed: collection aborted' `
+                -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+        }
         Set-PulseExpansionEntry -Store $Store -Name 'settingsCatalog' -Status 'NotExpanded' `
             -Reason (Protect-PulseReason -Message 'configurationPolicies unavailable' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId)
         return
@@ -112,7 +135,13 @@ function Invoke-PulseSettingsCatalogExpansionPipeline {
     try {
         Write-PulseDataset -Store $Store -Name 'configurationPolicies' -Data $policies -ApiVersion 'beta' -Status 'Collected' -TenantId $contextTenantId -Pseudonym $TenantPseudonym
 
-        $definitionIndex = Save-PulseSettingDefinitionCorpus -Store $Store -Context $Context
+        $definitionIndex = Save-PulseSettingDefinitionCorpus -Store $Store -Context $Context -NetworkAbortState $NetworkAbortState
+        if ($NetworkAbortState.AuthenticationAborted) {
+            Set-PulseExpansionEntry -Store $Store -Name 'settingsCatalog' -Status 'NotExpanded' `
+                -Reason (Protect-PulseReason -Message 'authentication-failed: network expansion suppressed' `
+                    -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId)
+            return
+        }
 
         # SEQUENTIAL, UNCONDITIONALLY (Part D, T3.4 - historical note, was "-Sequential
         # FORCED here" against a -MaxParallel-capable driver): this caller used to force
@@ -129,12 +158,23 @@ function Invoke-PulseSettingsCatalogExpansionPipeline {
         # force here, and this call site is unchanged in behavior, only in that the choice
         # is no longer expressible any other way.
         $null = Invoke-PulseSettingsCatalogExpansion -Store $Store -Context $Context -Policies $policies -DefinitionIndex $definitionIndex `
-            -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+            -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId `
+            -NetworkAbortState $NetworkAbortState
+        if ($NetworkAbortState.AuthenticationAborted) {
+            $collectionFailure = Protect-PulseReason -Message 'authentication-failed' -ProfileId $ProfileId `
+                -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+            Set-PulseManifestEntry -Store $Store -CollectionFailure $collectionFailure
+        }
     } catch {
         # OUTER FAILURE BOUNDARY - see this file's own docstring: never let an unexpected
         # exception here escape and abort a snapshot that is otherwise already complete.
         Write-Verbose "Invoke-PulseSettingsCatalogExpansionPipeline: unexpected exception after configurationPolicies fetch: $($_.Exception.Message)"
         $reason = Protect-PulseReason -Message 'unexpected-pipeline-failure' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
         Set-PulseExpansionEntry -Store $Store -Name 'settingsCatalog' -Status 'Failed' -Reason $reason
+        if ($NetworkAbortState.AuthenticationAborted) {
+            $collectionFailure = Protect-PulseReason -Message 'authentication-failed' -ProfileId $ProfileId `
+                -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+            Set-PulseManifestEntry -Store $Store -CollectionFailure $collectionFailure
+        }
     }
 }

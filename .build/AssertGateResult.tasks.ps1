@@ -519,8 +519,22 @@
 # artifact/result-pair authorization regressions and +1 multiline-ratchet parser regression.
 # 2255 -> 2288 after publication closeout: 2277 was the exact pre-closeout
 # merged-main baseline; 2288 is the measured post-closeout gate, incorporating +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.
-# 2288 is the real, measured `./build.ps1 -Tasks test` total.
-$script:tenantPulseGateMinimumTests = 2288
+# 2288 -> 2508 for R1a outcome fidelity and partial-aware evaluation: +2 tracked-plan
+# discovery safety cases; +118 canonical Graph-failure mapper and direct/composite/
+# expansion adapter cases; +21 strict PartialDatasets catalog cases; +31 isolated
+# partial-evaluator and review-correction cases; and +48 four-check monotonic-evaluation,
+# scoring, privacy, and review-correction cases. 2508 was the real, measured
+# `./build.ps1 -Tasks test` total before that ratchet changed.
+# 2508 -> 2510 after the whole-branch provider-plan review correction: +2
+# regressions proving that thrown structured Graph failures preserve their canonical
+# provider-plan outcome and that authentication aborts later network-backed plans.
+# 2510 is the real, measured `./build.ps1 -Tasks test` total before this ratchet changed.
+# 2510 -> 2517 after the independent R1a review: +2 message-only provider-failure
+# classifications, +2 post-auth pipeline-failure manifests, and +3 Endpoint Security
+# missing-policy-id fail-closed regressions. Existing first/middle-auth expansion cases
+# also gained exact gap-ledger assertions without increasing the discovered test count.
+# 2517 is the real, measured `./build.ps1 -Tasks test` discovery total before this ratchet changed.
+$script:tenantPulseGateMinimumTests = 2517
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)
@@ -787,14 +801,9 @@ task Assert_Gate_Result {
     }
     $resultPair = Get-TenantPulseBoundResultPair -ResultsDirectory $resultsDir
 
-    # AllowNotRun 1 (GraphKit 0.1.1 migration, Task 1.11): tests/QA/ReadOnly.tests.ps1's
-    # "every Pending dataset declares an expected Read/Safe descriptor" block is
-    # legitimately empty now - all six datasets that used to be Pending shipped in
-    # GraphKit 0.1.1 and had Pending dropped from DatasetMap.psd1 (see that file), leaving
-    # zero Pending entries to drive the -ForEach. The mechanism itself stays covered by a
-    # synthetic Pending fixture in Get-PulseTenantSnapshot.Tests.ps1's Invoke-PulseCollection
-    # Describe block; this allowance only covers the QA gate's now-empty live-catalog block,
-    # which will go back to 0 the moment a future descriptor ships Pending again.
+    # AllowNotRun 0: the authoritative R1a measurement executed every discovered block.
+    # The historical Pending-only ReadOnly context is no longer a NotRun block, so retaining
+    # its GraphKit 0.1.1 allowance would hide a newly dropped generated-test container.
     $gate = Join-Path $BuildRoot 'tests/QA/Assert-GateResult.ps1'
     # Platform-aware skips: the two $IsWindows-gated POSIX-permission tests (Identity
     # key file 0600 / key dir 0700) skip by design on Windows; zero-skip everywhere else.
@@ -804,7 +813,7 @@ task Assert_Gate_Result {
         -PesterObjectPath $resultPair.pesterObject.path `
         -MinimumTests $script:tenantPulseGateMinimumTests `
         -AllowedSkips $allowedSkips `
-        -AllowNotRun 1
+        -AllowNotRun 0
     if ($LASTEXITCODE -ne 0) {
         throw "Assert_Gate_Result: the local test run did not pass the whole-result gate (MinimumTests $script:tenantPulseGateMinimumTests) - see the Assert-GateResult.ps1 output above for the specific violation."
     }

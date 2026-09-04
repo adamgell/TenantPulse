@@ -693,4 +693,406 @@ Describe 'Test-PulseCheckDescriptor' {
             (@($errors) -join "`n") | Should -Match ([regex]::Escape('Data.Expansions: must be a string array, got String.'))
         }
     }
+
+    Context 'Data.PartialDatasets (R1a)' {
+        BeforeAll {
+            $script:partialDatasetMap = @{
+                configurationPolicies   = @{ Type = 'ConfigurationPolicy'; Operation = 'List'; ApiVersion = 'beta' }
+                deviceCompliancePolicies = @{ Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'beta' }
+            }
+
+            $script:basePartialDescriptor = @{
+                Id         = 'TP.INT.0098'
+                Title      = 'Partial-aware fixture'
+                Category   = 'Intune.Configuration'
+                Severity   = 'Medium'
+                Effort     = 'Low'
+                Impact     = 'Low'
+                Data       = @{
+                    Datasets        = @('configurationPolicies', 'deviceCompliancePolicies')
+                    PartialDatasets = @('configurationPolicies')
+                    Gates           = @()
+                }
+                Rule       = @{ Type = 'Function'; Function = 'Test-PulsePartialAwareFixtureRule' }
+                Consulting = @{
+                    WhatItMeans  = 'x'
+                    WhyItMatters = 'x'
+                    Remediation  = @('x')
+                    PortalLinks  = @('https://intune.microsoft.com/')
+                }
+                References = @{ Research = 'docs/x.md#a'; Authorities = @('https://learn.microsoft.com/') }
+                Origin     = $null
+            }
+        }
+
+        It 'accepts multiple unique canonical PartialDatasets for a Function that declares DatasetOutcomes' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule {
+                    param($Datasets, $DatasetOutcomes)
+                }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{
+                    Datasets        = @('configurationPolicies', 'deviceCompliancePolicies')
+                    PartialDatasets = @('configurationPolicies', 'deviceCompliancePolicies')
+                    Gates           = @()
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            @($errors).Count | Should -Be 0
+        }
+
+        It 'rejects scalar PartialDatasets instead of iterating a string as a collection' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Data.PartialDatasets = 'configurationPolicies'
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match ([regex]::Escape('Data.PartialDatasets: must be a string array, got String.'))
+        }
+
+        It 'rejects null PartialDatasets when the optional key is present' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Data.PartialDatasets = $null
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match 'Data\.PartialDatasets: must be a string array, got null\.'
+        }
+
+        It 'rejects an empty PartialDatasets array when the optional key is present' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Data.PartialDatasets = @()
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match 'Data\.PartialDatasets: must not be empty\.'
+        }
+
+        It 'rejects a blank PartialDatasets member' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Data.PartialDatasets = @('configurationPolicies', '   ')
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match 'Data\.PartialDatasets: contains a blank element\.'
+        }
+
+        It 'rejects an exact duplicate under OrdinalIgnoreCase uniqueness' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Data.PartialDatasets = @('configurationPolicies', 'configurationPolicies')
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match "Data\.PartialDatasets: duplicate dataset 'configurationPolicies' under OrdinalIgnoreCase"
+        }
+
+        It 'rejects a case-only duplicate under OrdinalIgnoreCase uniqueness' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Data.PartialDatasets = @('configurationPolicies', 'ConfigurationPolicies')
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match "Data\.PartialDatasets: duplicate dataset 'ConfigurationPolicies' under OrdinalIgnoreCase"
+        }
+
+        It 'rejects a case-only alias of the exact Data.Datasets spelling' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Data.PartialDatasets = @('ConfigurationPolicies')
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match "Data\.PartialDatasets: dataset 'ConfigurationPolicies' must use exact Data\.Datasets casing 'configurationPolicies'"
+        }
+
+        It 'rejects Data.Datasets and PartialDatasets that share a case-only alias of the dataset-map key' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{
+                    Datasets        = @('ConfigurationPolicies')
+                    PartialDatasets = @('ConfigurationPolicies')
+                    Gates           = @()
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match "Data\.PartialDatasets: dataset 'ConfigurationPolicies' must use exact dataset-map casing 'configurationPolicies'"
+        }
+
+        It 'rejects an unknown PartialDatasets member even when it is also listed in Data.Datasets' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{
+                    Datasets        = @('configurationPolicies', 'notInTheDatasetMap')
+                    PartialDatasets = @('notInTheDatasetMap')
+                    Gates           = @()
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match "Data\.PartialDatasets: dataset 'notInTheDatasetMap' is not present in the shared dataset map"
+        }
+
+        It 'rejects a known PartialDatasets member that Data.Datasets does not declare' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{
+                    Datasets        = @('configurationPolicies')
+                    PartialDatasets = @('deviceCompliancePolicies')
+                    Gates           = @()
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match "Data\.PartialDatasets: dataset 'deviceCompliancePolicies' must also be listed in Data\.Datasets"
+        }
+
+        It 'rejects PartialDatasets on an Expression rule' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Rule = @{ Type = 'Expression'; Expression = '$true' }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match 'Data\.PartialDatasets: is valid only when Rule\.Type is Function\.'
+        }
+
+        It 'rejects a resolved Function that cannot receive DatasetOutcomes' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+
+            (@($errors) -join "`n") | Should -Match "Rule\.Function: command 'Test-PulsePartialAwareFixtureRule' must declare a DatasetOutcomes parameter when Data\.PartialDatasets is present"
+        }
+
+        It 'reports only unresolved Rule.Function metadata, not a misleading DatasetOutcomes error' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Rule = @{ Type = 'Function'; Function = 'Test-PulseFunctionThatDoesNotExist' }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map
+            }
+            $joined = @($errors) -join "`n"
+
+            $joined | Should -Match "Rule\.Function: command 'Test-PulseFunctionThatDoesNotExist' does not resolve at import time"
+            $joined | Should -Not -Match 'must declare a DatasetOutcomes parameter'
+        }
+
+        It 'rejects a wildcard Rule.Function that ambiguously matches multiple functions without throwing' {
+            $result = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                function Test-PulsePartialWildcardOne { param($Datasets) }
+                function Test-PulsePartialWildcardTwo { param($Datasets) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Rule = @{ Type = 'Function'; Function = 'Test-PulsePartialWildcard*' }
+
+                try {
+                    [pscustomobject]@{
+                        Threw  = $false
+                        Errors = @(Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map)
+                    }
+                } catch {
+                    [pscustomobject]@{ Threw = $true; Errors = @($_.Exception.Message) }
+                }
+            }
+
+            $result.Threw | Should -BeFalse
+            ($result.Errors -join "`n") | Should -Match "Rule\.Function: command 'Test-PulsePartialWildcard\*' must resolve to exactly one exact Function command"
+            ($result.Errors -join "`n") | Should -Not -Match 'must declare a DatasetOutcomes parameter'
+        }
+
+        It 'rejects a native application Rule.Function without dereferencing null parameter metadata' {
+            $result = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor, $script:partialDatasetMap {
+                param($base, $map)
+                # Get-Command reports the executable's real command name. Windows keeps
+                # the .exe suffix while Unix hosts report pwsh, and this validator
+                # intentionally compares names with Ordinal exactness.
+                $nativeCommandName = if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' }
+                $nativeCommands = @(Get-Command -Name $nativeCommandName -CommandType Application -ErrorAction Stop)
+                $descriptor = $base.Clone()
+                $descriptor.Data = $base.Data.Clone()
+                $descriptor.Rule = @{ Type = 'Function'; Function = $nativeCommandName }
+
+                try {
+                    [pscustomobject]@{
+                        Threw               = $false
+                        Errors              = @(Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $map)
+                        NativeCommandName   = $nativeCommandName
+                        NativeCommandCount  = $nativeCommands.Count
+                        NonApplicationCount = @($nativeCommands | Where-Object CommandType -ne 'Application').Count
+                    }
+                } catch {
+                    [pscustomobject]@{
+                        Threw               = $true
+                        Errors              = @($_.Exception.Message)
+                        NativeCommandName   = $nativeCommandName
+                        NativeCommandCount  = $nativeCommands.Count
+                        NonApplicationCount = @($nativeCommands | Where-Object CommandType -ne 'Application').Count
+                    }
+                }
+            }
+
+            $result.Threw | Should -BeFalse
+            $result.NativeCommandCount | Should -BeGreaterThan 0
+            $result.NonApplicationCount | Should -Be 0
+            $expectedMessage = "Rule.Function: command '$($result.NativeCommandName)' must resolve to exactly one exact Function command."
+            ($result.Errors -join "`n") | Should -Match ([regex]::Escape($expectedMessage))
+            ($result.Errors -join "`n") | Should -Not -Match 'must declare a DatasetOutcomes parameter'
+        }
+
+        It 'fails closed when PartialDatasets canonical identity cannot be checked because DatasetMap is null' {
+            $errors = InModuleScope TenantPulse -ArgumentList $script:basePartialDescriptor {
+                param($base)
+                function Test-PulsePartialAwareFixtureRule { param($Datasets, $DatasetOutcomes) }
+                $descriptor = $base.Clone()
+                $descriptor.Data = @{
+                    Datasets        = @('ConfigurationPolicies')
+                    PartialDatasets = @('ConfigurationPolicies')
+                    Gates           = @()
+                }
+                Test-PulseCheckDescriptor -Descriptor $descriptor -Label $descriptor.Id -DatasetMap $null
+            }
+
+            (@($errors) -join "`n") | Should -Match 'Data\.PartialDatasets: canonical dataset identity cannot be verified because the shared dataset map is unavailable\.'
+        }
+    }
+}
+
+Describe 'Data.PartialDatasets catalog projection and collection isolation (R1a)' {
+    BeforeEach {
+        $script:tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        New-Item -Path $script:tempRoot -ItemType Directory -Force | Out-Null
+
+        $descriptorText = @'
+@{
+  Id = 'TP.INT.0097'
+  Title = 'Partial-aware import fixture'
+  Category = 'Intune.Configuration'
+  Severity = 'Medium'
+  Effort = 'Low'
+  Impact = 'Low'
+  Data = @{
+    Datasets = @('configurationPolicies', 'deviceCompliancePolicies')
+    PartialDatasets = @('deviceCompliancePolicies', 'configurationPolicies')
+    Gates = @()
+  }
+  Rule = @{ Type = 'Function'; Function = 'Test-PulsePartialAwareImportRule' }
+  Consulting = @{
+    WhatItMeans = 'x'
+    WhyItMatters = 'x'
+    Remediation = @('x')
+    PortalLinks = @('https://intune.microsoft.com/')
+  }
+  References = @{ Research = 'docs/x.md#a'; Authorities = @('https://learn.microsoft.com/') }
+  Origin = $null
+}
+'@
+        Set-Content -LiteralPath (Join-Path $script:tempRoot 'partial.psd1') -Value $descriptorText -Encoding utf8NoBOM
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'retains PartialDatasets exactly while the collection manifest remains driven only by Data.Datasets' {
+        $map = @{
+            configurationPolicies    = @{ Type = 'ConfigurationPolicy'; Operation = 'List'; ApiVersion = 'beta' }
+            deviceCompliancePolicies = @{ Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'beta' }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:tempRoot, $map {
+            param($path, $datasetMap)
+            function Test-PulsePartialAwareImportRule {
+                param($Datasets, $DatasetOutcomes)
+            }
+
+            $catalog = @(Import-PulseCheckCatalog -Path $path)
+            $manifest = @(Get-PulseCollectionManifest -Checks $catalog -DatasetMap $datasetMap)
+            [pscustomobject]@{
+                PartialDatasets = @($catalog[0].Data.PartialDatasets)
+                ManifestNames   = @($manifest.Dataset)
+                DatasetMapCount = $datasetMap.Count
+            }
+        }
+
+        $result.PartialDatasets | Should -Be @('deviceCompliancePolicies', 'configurationPolicies')
+        $result.ManifestNames | Should -Be @('configurationPolicies', 'deviceCompliancePolicies')
+        $result.DatasetMapCount | Should -Be 2
+    }
+
+    It 'keeps the collection-manifest implementation independent of PartialDatasets' {
+        $manifestSource = Get-Content -LiteralPath (Join-Path $script:repoRoot 'source/Private/Collect/Get-PulseCollectionManifest.ps1') -Raw
+        $manifestSource | Should -Not -Match '\bPartialDatasets\b'
+    }
+
+    It 'aggregates an unresolved literal partial-aware Rule.Function as a catalog validation error' {
+        $descriptorPath = Join-Path $script:tempRoot 'partial.psd1'
+        $descriptorText = (Get-Content -LiteralPath $descriptorPath -Raw) -replace 'Test-PulsePartialAwareImportRule', 'Test-PulseFunctionThatDoesNotExist'
+        Set-Content -LiteralPath $descriptorPath -Value $descriptorText -Encoding utf8NoBOM
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:tempRoot {
+                param($path)
+                Import-PulseCheckCatalog -Path $path
+            }
+        } | Should -Throw -ExpectedMessage "*partial.psd1*Rule.Function*Test-PulseFunctionThatDoesNotExist*does not resolve at import time*"
+    }
+
+    It 'rejects a case-aliased partial-aware descriptor when its DatasetMapPath is missing' {
+        $descriptorPath = Join-Path $script:tempRoot 'partial.psd1'
+        $descriptorText = (Get-Content -LiteralPath $descriptorPath -Raw) -creplace 'configurationPolicies', 'ConfigurationPolicies'
+        Set-Content -LiteralPath $descriptorPath -Value $descriptorText -Encoding utf8NoBOM
+        $missingMapPath = Join-Path $script:tempRoot 'missing-DatasetMap.psd1'
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:tempRoot, $missingMapPath {
+                param($path, $mapPath)
+                function Test-PulsePartialAwareImportRule { param($Datasets, $DatasetOutcomes) }
+                Import-PulseCheckCatalog -Path $path -DatasetMapPath $mapPath
+            }
+        } | Should -Throw -ExpectedMessage '*partial.psd1*Data.PartialDatasets*canonical dataset identity cannot be verified*dataset map is unavailable*'
+    }
 }

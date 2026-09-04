@@ -20,6 +20,50 @@ in released schema 1.0.0/1.1.0 manifests remains rejected: those writers emitted
 `Failed`, and `Skipped`; migration fails closed without modifying the manifest. Schema 2.0.0 is
 the first writer contract that introduced `Partial`.
 
+The current unreleased source also implements the R1a outcome-fidelity tranche. One canonical
+mapper preserves Graph failure outcomes across direct, composite, and expansion collection. A
+request-time `403` is persisted as `Failed` / `PermissionDenied`; only `AuthenticationFailed`
+aborts later network-backed collection. Deadline expiration, cancellation, indeterminate
+certainty, permission denial, and provider failure remain explicit and isolated, and a `Partial`
+provider outcome never satisfies a later collection dependency.
+
+`Data.PartialDatasets` is a strict Function-only opt-in requiring a `DatasetOutcomes` parameter.
+Exactly four checks opt in. Universal checks `TP.INT.0013` and `TP.INT.0029` may Fail when a known
+row proves an offender but cannot Pass while gaps remain. Existential checks `TP.INT.0014` and
+`TP.INT.0015` may Pass on a known witness but cannot Fail while gaps remain; their BitLocker/LAPS
+criteria require native Boolean values. The other 49 checks remain `NotApplicable` on Partial. For
+the four opt-ins, structurally valid non-decisive Partial evidence is also `NotApplicable`; without
+decisive proof, zero rows or malformed outcome, gap, or row data is `Error`. Findings schema `1.0`,
+snapshot schema `2.0.0`, and scoring model `1.0` remain unchanged.
+
+This tranche's evidence is deterministic source/package testing only. It adds no new live-service
+or publication proof. Independent review after the earlier 2,510-test candidate found four
+applicable correctness gaps: message-only provider failures could lose canonical authentication or
+permission classification; authentication-aborted expansion pipelines could omit unattempted
+policies or the top-level `collectionFailure`; and a relevant Endpoint Security policy without a
+usable identifier could be treated as authoritative absence. All four are closed at exact tested
+commit `21f6a1025331aa6d14bfb47b32bec403d2ff994d`, tree
+`b6732cf8734a8020b3470f1c431a848ef81e21c0`. The synchronized minimum is 2,517, the active NotRun
+allowance is zero, and the package-first full gate passed 2,517/2,517 with zero failures, errors,
+skips, NotRun, or failed containers.
+
+Proof run `9ef9712e-bddc-4dc9-82f0-f085ab874656` binds all 59 shipped files and the exact result pair.
+The 418,518-byte local candidate archive SHA-256 is
+`386d79effd65afbf1deaca17d57ab3c08a6b63111144ff6a59fc3ed4726a994f`; the tested-release-proof
+SHA-256 is `54ab272f55b2321f81ff8b793e2612aa13581cdb3be501fb935fca8d73513b9e`. The built manifest
+SHA-256 is `62e746a73e616acf14421ddf2355fb258a4af2fa3cf51d4ee015028c8a0432b3`; the built module SHA-256 is
+`1f65e7a1b98c18207aca01c90d33acf3878e957359c460f7a6bf34468ce204a7`.
+
+Source, built, packaged, and clean child-process import gates all preserve exact GraphKit `0.3.0`.
+The publisher revalidated this exact proof in no-key/no-`-Publish` mode and reported that nothing
+was published. A read-only controller-local freeze records `local-package-first` scope,
+`externalTransferApproved = false`, and that the serialized test object contains synthetic
+credential fixtures. Independent code and proof reviews found no P0-P3 issue in the corrected
+candidate. Push/PR/CodeRabbit, exact-head six-job CI plus gitleaks, merge, and merged-main CI remain
+pending. Local `gitleaks` is not installed, so only the repo-local Secret/PII/control-byte gate is
+locally proven. The immutable TenantPulse `0.2.0` evidence table and exact-package live record below
+are historical release proof, not proof for the unreleased `0.3.0` source.
+
 | Evidence state | Proof |
 |---|---|
 | Deterministic | Reviewed tree `24b3d4ebe522d9bf94d9a75c8625be438fa9b768`; 2,277 tests; zero failures/errors/skips/NotRun; bound archive hash `a0d5ff793b92753ab3efb4db20cf5bcf8b953e3cf81bf1a776c96a3d992417bd`. |
@@ -287,7 +331,7 @@ expected)**:
    immediately before publication. +2 regression tests (one per pipeline). Re-run against
    Ivy24 after the fix: clean (848 files scanned, zero raw-tenant-id or literal-ProfileId
    hits).
-2. **`-MaxParallel 4` (the default) is pathologically slow against a REAL tenant**: did
+2. **The former `-MaxParallel 4` path was pathologically slow against a REAL tenant**: it did
    not complete even a 20-policy real slice within 9m35s (killed); the identical slice
    completed `-Sequential` in 2.30s (0.12s/policy - even better than the T2.0 spike's own
    300ms mean). Root cause not fully established (see
@@ -295,12 +339,11 @@ expected)**:
    RunspacePool's per-worker GraphKit re-import means each worker's token cache and
    `GraphThrottleCoordinator` state are NOT shared, so four workers independently unaware
    of each other's throttle state hammer the tenant with no shared backoff. Fixed
-   pragmatically: `Invoke-PulseSettingsCatalogExpansionPipeline.ps1` (the one caller that
-   ever runs against a real, live tenant) now forces `-Sequential` unconditionally,
-   documented as a deliberate safe default pending the real root-cause fix.
-   `Invoke-PulseSettingsCatalogExpansion`'s own `-MaxParallel 4` default is UNCHANGED and
-   still fast/byte-identical against `-FromCapturedPayloads` data (no live Graph calls to
-   starve of shared state).
+   first by forcing the production caller to `-Sequential`. The later R1a implementation
+   deleted both `-MaxParallel` and `-Sequential`; current production is sequential-only.
+   That is the safe current posture, not proof that the RunspacePool identity/throttle
+   problem was root-caused. Parallel live fan-out remains unavailable until the producer
+   and consumer share and prove one identity/throttle coordination model.
 
 **`-ExpandSettings` default-on flip, evaluated and deliberately deferred**: the parameter's
 own pre-T2.7 docstring said this would flip on by default in T2.7 once the live gate
@@ -327,13 +370,14 @@ total as a snapshot's own manifest grows - a real cost a live 781-policy run pay
 policy). See `docs/spike/2026-08-16-t27-perf-container.md` for the full recorded numbers,
 hardware, and method.
 
-**Ledger: resolved or explicitly descoped Phase 2 data**:
+**Phase 2 task ledger, reconciled with the later governing product program**:
 
-- The orphaned **expansion-summary dataset** is explicitly **descoped**. No report or check
-  consumes it, and the authoritative per-family counts and statuses already live in the
-  snapshot manifest's `expansions` entries. A second derived persisted aggregate would add
-  synchronization risk without adding information. If a future consumer needs a summary,
-  derive it from those manifest entries under that consumer's own contract.
+- The Phase 2 task explicitly **descoped** the orphaned expansion-summary dataset because no report
+  or check consumed it and per-family counts/statuses already existed in the manifest. That was the
+  accurate local-task disposition at the time. The later 2026-08-19 governing product-program R1b
+  contract explicitly requires the deferred expansion-summary dataset, so the current program
+  disposition is **open**; the later requirement supersedes the earlier task-local decision without
+  rewriting its historical rationale.
 - Typed compliance and device-configuration assignment records now populate include/exclude
   `intent` from the assignment target, preserve filter metadata, sort deterministically, and
   gap a policy rather than publishing a false unassigned row when a target is malformed.
@@ -620,10 +664,61 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
 
 ## Not yet done
 
-1. **Evidence-Detail residual**: Reason text is still only capped; unmarked
-   person-identifying Detail keys on checks other than the marked Apple-ID /
-   TP.INT.0005 device-name keys stay unredacted under `-Redact`. Judgment boundary
-   (policy display names, role names) is deliberate, not unfinished code.
-2. **`TP.INT.0010`**, DESCOPED until GraphKit ARM exists. Id reserved.
-3. Phase 2b / scale (not this catalog): admin templates,
-   `-ExpandSettings` default-on, dataset streaming.
+1. **R1a outcome contract and remote integration — partial.** The implemented foundation is
+   package-first proven only in the isolated local worktree. Structured dataset outcomes reach
+   partial-aware evaluation, but they are not serialized through a versioned findings/renderer
+   contract as the governing R1a criterion requires; that product decision remains open. No current
+   verified evidence establishes the candidate's reviewed exact remote head, remote matrix/gitleaks
+   result, merge, or merged-main CI. The docs-only reconciliation after that runtime tree does not
+   alter the frozen candidate's package-producing bytes.
+2. **R1b assignment and expansion completion — partial.** Settings Catalog assignments and typed
+   include/exclude intent exist. Administrative Template expansion, the now-governing
+   expansion-summary dataset, a protected live shape/count proof with populated assignment targets,
+   and stale pre-implementation map/reason text remain open. Existing end-to-end fixtures use
+   authoritative empty assignments and therefore do not prove overlap behavior with populated targets.
+3. **R2 composite-provider representation and certainty — partial.** Four production provider plans
+   already compose official GraphKit Read/Safe primitives, so no generic GraphKit `Walk` operation is
+   required. The dataset map nevertheless publishes invented `Pending` / `Walk` tuples, QA currently
+   blesses them, and outcome provenance is incomplete. Endpoint Security can skip malformed template
+   metadata and publish authoritative empty; unknown BitLocker/LAPS values can become false decisions;
+   and a legacy-baseline read failure suppresses the independent current baseline surface. The
+   protected-live proof of the raw BitLocker value mapping and LAPS template identity remains
+   mandatory before those Pending representations can close; the historical `0.2.0` table does not
+   prove that mapping.
+4. **R3 platform-unavailable representation — partial.** The Windows data-processor runtime correctly
+   performs no network work and evaluates as `Skipped` / `PlatformUnavailable` / `NotApplicable`.
+   Its static map and structured outcome still falsely name GraphKit and `Get`; closure requires a
+   strict disposition, `Provider = TenantPulse`, empty operations, and no descriptor fallback.
+5. **R4 coverage, relationships, and presentation — open.** Required work includes bounded,
+   policy/root-scoped Conditional Access and role group closure; unique effective role counting;
+   GraphKit `Application.List` plus combined app/service-principal credential hygiene; authoritative
+   assignment handling for `TP.INT.0002`, `0004`, `0011`, `0012`, `0014`, `0015`, `0017`, `0018`,
+   and producer-complete `0028`; exclusion-only semantics; deterministic evidence caps with omitted
+   counts; and one supported non-JSON renderer. The all-unparseable `TP.ENT.0019` population must
+   become `NotApplicable`, not Pass. `TP.ENT.0022` keeps one group assignment as one violation;
+   expansion there is blast-radius evidence only.
+6. **R5 privacy contract — open (0 of 53 checks migrated to an enforced field-classification
+   schema).** Current protections are useful precursors, not the R5 contract:
+   `RedactDetailKeys` is optional, tenant-derived reason/error text can remain free-form,
+   render-only cannot reconstruct the in-memory redaction map, and the external gate-artifact
+   scrub intentionally destroys safe values. Manifest-recorded expansion paths are hash-checked
+   after joining but are not yet constrained to the snapshot root. R5 still requires one
+   versioned classification contract across all checks, engine/snapshot projections, and every
+   renderer; path-containment plus mutation tests; and a fresh protected-live artifact review.
+7. **R6 scale/default contract — open (0 of 9 end-to-end criteria closed).** Current perf
+   fixtures are useful baselines but are excluded from normal CI, measure endpoint heap deltas
+   rather than observed process peaks, and do not span collection through rendering. GraphKit
+   currently materializes all paged rows before TenantPulse receives them; TenantPulse then
+   materializes dataset writes/reads, evaluator clones, renderer input, manifest rewrites, and
+   expansion families. R6 requires a cross-repository bounded producer/consumer train before
+   expansion can become the default. Sequential-only remains the safe live posture until shared
+   identity and throttle coordination is root-caused and proven.
+8. **R9 provisioning and adoption — split disposition.** Reusable GraphKit app-registration
+   provisioning and actual-grant verification remain applicable producer work. With no installed
+   users, legacy consumers, customer-tenant consumers, or repoint targets, adopter migration,
+   customer repointing, rollback-window operation, legacy-authentication retirement, and destructive
+   directory cleanup are `NotApplicable` and must not be executed for closeout. Reopen those gates
+   only if an adopter is later identified.
+9. **`TP.INT.0010`**, reserved until a separate GraphKit ARM provider exists and a protected
+   diagnostic-settings read proves its service contract. ARM must not enter the Microsoft Graph
+   descriptor catalog.

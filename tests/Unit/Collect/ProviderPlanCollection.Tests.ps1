@@ -14,6 +14,31 @@ BeforeAll {
 
     Mock Get-GraphObject -ModuleName TenantPulse { throw 'Get-GraphObject must be mocked in this test.' }
     Mock Get-GraphOperation -ModuleName TenantPulse { throw 'Get-GraphOperation must be mocked in this test.' }
+
+    function New-ProviderPlanGraphErrorRecord {
+        param(
+            [Parameter(Mandatory)]
+            [int] $StatusCode,
+
+            [Parameter(Mandatory)]
+            [System.Management.Automation.ErrorCategory] $Category,
+
+            [Parameter(Mandatory)]
+            [string] $PrivateMarker
+        )
+
+        $target = [pscustomobject][ordered]@{
+            PSTypeName = 'GraphKit.OperationResult'
+            Outcome    = 'Failed'
+            Certainty  = 'Known'
+            Telemetry  = @([pscustomobject]@{ Attempt = 1; StatusCode = $StatusCode })
+        }
+        [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new("Graph provider response contained $PrivateMarker"),
+            "GraphKit.OperationFailed.$StatusCode",
+            $Category,
+            $target)
+    }
 }
 
 Describe 'Invoke-PulseCollection provider plans' {
@@ -159,6 +184,363 @@ Describe 'Invoke-PulseCollection provider plans' {
         Test-Path -LiteralPath (Join-Path $script:store.DatasetsPath 'unresolvedPartial.json') | Should -BeFalse
     }
 
+    It 'aborts later network-backed plans when a provider plan returns AuthenticationFailed' {
+        $planRegistry = InModuleScope TenantPulse {
+            $script:secondPlanCalls = 0
+            @{
+                firstPlan = {
+                    param($Context, $Dataset)
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Failed -Rows @() -Gaps @() `
+                        -FailureClass 'AuthenticationFailed' -ReasonCode 'authentication-failed' `
+                        -Detail @{ stage = 'first' } -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('First.ListBeta')
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:secondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'must-not-be-collected' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.ListBeta')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'First.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.firstPlan.status | Should -Be 'Failed'
+        $saved.datasets.firstPlan.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.firstPlan.reasonCode | Should -Be 'authentication-failed'
+        $saved.datasets.secondPlan.status | Should -Be 'Failed'
+        $saved.datasets.secondPlan.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.secondPlan.reasonCode | Should -Be 'authentication-failed'
+        $saved.collectionFailure | Should -Not -BeNullOrEmpty
+        InModuleScope TenantPulse { $script:secondPlanCalls } | Should -Be 0
+    }
+
+    It 'preserves a message-only authentication classification and aborts later network-backed plans' {
+        $planRegistry = InModuleScope TenantPulse {
+            $script:messageOnlySecondPlanCalls = 0
+            @{
+                firstPlan = {
+                    throw 'AADSTS700016: token acquisition failed'
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:messageOnlySecondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'must-not-be-collected' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.ListBeta')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'First.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.firstPlan.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.firstPlan.reasonCode | Should -Be 'authentication-failed'
+        $saved.datasets.secondPlan.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.collectionFailure | Should -Not -BeNullOrEmpty
+        InModuleScope TenantPulse { $script:messageOnlySecondPlanCalls } | Should -Be 0
+    }
+
+    It 'preserves a message-only permission classification without aborting later network-backed plans' {
+        $planRegistry = InModuleScope TenantPulse {
+            $script:messageOnlyPermissionSecondPlanCalls = 0
+            @{
+                firstPlan = {
+                    throw '403 Forbidden'
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:messageOnlyPermissionSecondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'collected-after-permission-denial' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.ListBeta')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'First.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.firstPlan.failureClass | Should -Be 'PermissionDenied'
+        $saved.datasets.firstPlan.reasonCode | Should -Be 'permission-denied'
+        $saved.datasets.secondPlan.status | Should -Be 'Collected'
+        $saved.collectionFailure | Should -BeNullOrEmpty
+        InModuleScope TenantPulse { $script:messageOnlyPermissionSecondPlanCalls } | Should -Be 1
+    }
+
+    It 'does not abort later network-backed plans for a non-authentication provider-plan failure' {
+        $planRegistry = InModuleScope TenantPulse {
+            $script:secondPlanCalls = 0
+            @{
+                firstPlan = {
+                    param($Context, $Dataset)
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Failed -Rows @() -Gaps @() `
+                        -FailureClass 'DeadlineExpired' -ReasonCode 'deadline-expired' `
+                        -Detail @{ stage = 'first' } -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('First.ListBeta')
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:secondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'collected-after-isolated-failure' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.ListBeta')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'First.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.firstPlan.failureClass | Should -Be 'DeadlineExpired'
+        $saved.datasets.secondPlan.status | Should -Be 'Collected'
+        $saved.collectionFailure | Should -BeNullOrEmpty
+        InModuleScope TenantPulse { $script:secondPlanCalls } | Should -Be 1
+    }
+
+    It 'aborts later network-backed plans when a Partial provider outcome contains an AuthenticationFailed gap' {
+        $planRegistry = InModuleScope TenantPulse {
+            $script:secondPlanCalls = 0
+            @{
+                firstPlan = {
+                    param($Context, $Dataset)
+                    $gap = New-PulseCollectionGap -Scope 'child:one' -FailureClass 'AuthenticationFailed' `
+                        -ReasonCode 'authentication-failed' -Detail @{} -Operation 'Child.Get' -ApiVersion 'beta'
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Partial `
+                        -Rows @([pscustomobject]@{ id = 'usable-before-auth-failure' }) -Gaps @($gap) `
+                        -ReasonCode 'partial' -Detail @{ gapCount = 1 } -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Parent.List', 'Child.Get')
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:secondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'must-not-be-collected' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.List')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'Parent.List'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.List'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.firstPlan.status | Should -Be 'Partial'
+        $saved.datasets.firstPlan.gaps[0].failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.secondPlan.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.collectionFailure | Should -Not -BeNullOrEmpty
+        InModuleScope TenantPulse { $script:secondPlanCalls } | Should -Be 0
+    }
+
+    It 'does not abort later network-backed plans for a non-authentication Partial gap' {
+        $planRegistry = InModuleScope TenantPulse {
+            $script:secondPlanCalls = 0
+            @{
+                firstPlan = {
+                    param($Context, $Dataset)
+                    $gap = New-PulseCollectionGap -Scope 'child:one' -FailureClass 'DeadlineExpired' `
+                        -ReasonCode 'deadline-expired' -Detail @{} -Operation 'Child.Get' -ApiVersion 'beta'
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Partial `
+                        -Rows @([pscustomobject]@{ id = 'usable-before-deadline' }) -Gaps @($gap) `
+                        -ReasonCode 'partial' -Detail @{ gapCount = 1 } -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Parent.List', 'Child.Get')
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:secondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'collected-after-isolated-gap' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.List')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'Parent.List'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.List'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $saved.datasets.firstPlan.status | Should -Be 'Partial'
+        $saved.datasets.firstPlan.gaps[0].failureClass | Should -Be 'DeadlineExpired'
+        $saved.datasets.secondPlan.status | Should -Be 'Collected'
+        $saved.collectionFailure | Should -BeNullOrEmpty
+        InModuleScope TenantPulse { $script:secondPlanCalls } | Should -Be 1
+    }
+
+    It 'maps a thrown GraphKit authentication record and gives every later network-backed plan the canonical authentication-failed reason' {
+        $privateMarker = 'PRIVATE' + '-PLAN-AUTH-BODY'
+        $record = New-ProviderPlanGraphErrorRecord -StatusCode 401 `
+            -Category ([System.Management.Automation.ErrorCategory]::AuthenticationError) `
+            -PrivateMarker $privateMarker
+        $planRegistry = InModuleScope TenantPulse -ArgumentList $record {
+            param($record)
+            $script:providerPlanRecord = $record
+            $script:secondPlanCalls = 0
+            @{
+                firstPlan = {
+                    throw $script:providerPlanRecord
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:secondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'must-not-be-collected' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.ListBeta')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'First.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $manifestText = Get-Content -LiteralPath $script:store.ManifestPath -Raw
+        $saved = $manifestText | ConvertFrom-Json
+        $saved.datasets.firstPlan.status | Should -Be 'Failed'
+        $saved.datasets.firstPlan.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.firstPlan.reasonCode | Should -Be 'authentication-failed'
+        $saved.datasets.firstPlan.reason | Should -Be 'graph-request-failed: failureClass=AuthenticationFailed; reasonCode=authentication-failed; statusCode=401'
+        $saved.datasets.secondPlan.status | Should -Be 'Failed'
+        $saved.datasets.secondPlan.failureClass | Should -Be 'AuthenticationFailed'
+        $saved.datasets.secondPlan.reasonCode | Should -Be 'authentication-failed'
+        $saved.datasets.secondPlan.reason | Should -Be 'authentication-failed: collection aborted'
+        $saved.collectionFailure | Should -Be 'authentication-failed'
+        InModuleScope TenantPulse { $script:secondPlanCalls } | Should -Be 0
+        $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))
+    }
+
+    It 'isolates a thrown structured non-authentication provider failure and persists no provider text' {
+        $privateMarker = 'PRIVATE' + '-PLAN-PROVIDER-BODY'
+        $record = New-ProviderPlanGraphErrorRecord -StatusCode 503 `
+            -Category ([System.Management.Automation.ErrorCategory]::ResourceUnavailable) `
+            -PrivateMarker $privateMarker
+        $planRegistry = InModuleScope TenantPulse -ArgumentList $record {
+            param($record)
+            $script:providerPlanRecord = $record
+            $script:secondPlanCalls = 0
+            @{
+                firstPlan = {
+                    throw $script:providerPlanRecord
+                }
+                secondPlan = {
+                    param($Context, $Dataset)
+                    $script:secondPlanCalls++
+                    New-PulseCollectionOutcome -Dataset $Dataset -Status Collected `
+                        -Rows @([pscustomobject]@{ id = 'collected-after-isolated-failure' }) -Gaps @() `
+                        -ReasonCode 'collected' -Detail @{} -Provider 'GraphKit' -ApiVersion 'beta' `
+                        -Operations @('Second.ListBeta')
+                }
+            }
+        }
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'firstPlan'; Type = 'Synthetic'; Operation = 'First.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+            [pscustomobject]@{ Dataset = 'secondPlan'; Type = 'Synthetic'; Operation = 'Second.ListBeta'; ApiVersion = 'beta'; Pending = $true }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $manifestText = Get-Content -LiteralPath $script:store.ManifestPath -Raw
+        $saved = $manifestText | ConvertFrom-Json
+        $saved.datasets.firstPlan.status | Should -Be 'Failed'
+        $saved.datasets.firstPlan.failureClass | Should -Be 'ProviderFailed'
+        $saved.datasets.firstPlan.reasonCode | Should -Be 'provider-failed'
+        $saved.datasets.firstPlan.reason | Should -Be 'graph-request-failed: failureClass=ProviderFailed; reasonCode=provider-failed; statusCode=503'
+        $saved.datasets.secondPlan.status | Should -Be 'Collected'
+        $saved.collectionFailure | Should -BeNullOrEmpty
+        InModuleScope TenantPulse { $script:secondPlanCalls } | Should -Be 1
+        $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))
+    }
+
+    It 'never persists arbitrary exception text when a provider plan throws' {
+        $privateMarker = 'PRIVATE' + '-PLAN-BODY'
+        $planRegistry = InModuleScope TenantPulse -ArgumentList $privateMarker {
+            param($marker)
+            @{
+                throwingPlan = [scriptblock]::Create("throw 'provider plan response contained $marker'")
+            }
+        }
+        $manifest = @([pscustomobject]@{
+            Dataset = 'throwingPlan'; Type = 'Synthetic'; Operation = 'List'; ApiVersion = 'beta'; Pending = $true
+        })
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry {
+            param($store, $manifest, $context, $registry)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' -ProviderPlanRegistry $registry
+        }
+
+        $manifestText = Get-Content -LiteralPath $script:store.ManifestPath -Raw
+        $saved = $manifestText | ConvertFrom-Json
+        $saved.datasets.throwingPlan.reason | Should -Be 'provider-plan-failed: execution or validation error'
+        $manifestText | Should -Not -Match ([regex]::Escape($privateMarker))
+    }
+
     It 'preserves a built-in no-network plan after auth abort while failing network-backed plans without another Graph call' {
         Mock Get-GraphOperation -ModuleName TenantPulse {
             @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @() }
@@ -187,7 +569,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'platform-unavailable'
         $saved.datasets.subscribedSkus.status | Should -Be 'Failed'
         $saved.datasets.subscribedSkus.failureClass | Should -Be 'AuthenticationFailed'
-        $saved.datasets.subscribedSkus.reasonCode | Should -Be 'auth-failure'
+        $saved.datasets.subscribedSkus.reasonCode | Should -Be 'authentication-failed'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 
@@ -220,7 +602,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Failed'
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'AuthenticationFailed'
-        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'auth-failure'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'authentication-failed'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 
@@ -256,7 +638,7 @@ Describe 'Invoke-PulseCollection provider plans' {
         $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Failed'
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'AuthenticationFailed'
-        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'auth-failure'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'authentication-failed'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 

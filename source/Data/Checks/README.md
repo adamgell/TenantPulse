@@ -1,9 +1,10 @@
 # Check descriptors
 
 This directory holds the check descriptor `.psd1` files that `Import-PulseCheckCatalog`
-loads and validates at the start of every assessment run. It is empty except for
-`.gitkeep` until Task 1.9 adds the ten seed checks - `Import-PulseCheckCatalog` treats an
-empty (or missing) directory as a valid, empty catalog rather than an error.
+loads and validates at the start of every assessment run. The shipped catalog contains 53
+descriptors: 30 `TP.INT` checks and 23 `TP.ENT` checks, one file per check. A caller-supplied
+empty (or missing) catalog directory remains valid and returns an empty catalog rather than an
+error.
 
 ## Schema
 
@@ -12,17 +13,22 @@ matching this schema exactly:
 
 ```powershell
 @{
-  Id           = 'TP.ENT.0001'         # ^TP\.(INT|ENT)\.\d{4}$
-  Title        = '...'
-  Category     = 'Entra.ConditionalAccess'   # dotted area path
-  Severity     = 'High'                # Critical|High|Medium|Low|Info
-  Effort       = 'Low'                 # Low|Medium|High  (consulting axis, not scored)
+  Id           = 'TP.INT.0014'         # ^TP\.(INT|ENT)\.\d{4}$
+  Title        = 'BitLocker full-disk encryption enforced via Endpoint Security policy'
+  Category     = 'Intune.EndpointSecurity'   # dotted area path
+  Severity     = 'Critical'            # Critical|High|Medium|Low|Info
+  Effort       = 'Medium'               # Low|Medium|High  (consulting axis, not scored)
   Impact       = 'High'                # Low|Medium|High  (consulting axis, not scored)
-  Data         = @{ Datasets = @('conditionalAccessPolicies'); Gates = @('EntraP1') }
-  Rule         = @{ Type = 'Function'; Function = 'Test-PulseLegacyAuthBlocked' }
+  Data         = @{
+                   Datasets        = @('endpointSecurityDiskEncryptionPolicies')
+                   Expansions      = @() # optional; may replace Datasets for artifact-only checks
+                   PartialDatasets = @('endpointSecurityDiskEncryptionPolicies') # optional Function opt-in
+                   Gates           = @('Intune')
+                 }
+  Rule         = @{ Type = 'Function'; Function = 'Test-PulseBitLockerFullDiskEncryption' }
                  # or Type='Expression'; Expression='<scriptblock text over $Datasets>'
   Consulting   = @{ WhatItMeans='...'; WhyItMatters='...'; Remediation=@('step...');
-                    PortalLinks=@('https://entra.microsoft.com/...') }
+                    PortalLinks=@('https://intune.microsoft.com/...') }
   References   = @{ Research='docs/research/iha-v2/<file>#<anchor>'
                     Authorities=@('https://learn.microsoft.com/...','MS.AAD.1.1v1')
                     Cis=@('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)') }
@@ -69,16 +75,24 @@ Validation failures include:
   descriptor. Scalar `[string]` is required for `Id`, `Title`, `Category`, `Severity`,
   `Effort`, `Impact`, `Rule.Type`, `Rule.Function`, `Rule.Expression`, and
   `References.Research`. A required, non-empty `[string[]]` (no blank elements) is
-  required for `Data.Datasets`, `References.Authorities`, `Consulting.Remediation`, and
-  `Consulting.PortalLinks`. `Data.Gates` must also be a `[string[]]`, but may be empty.
+  required for `References.Authorities`, `Consulting.Remediation`, and
+  `Consulting.PortalLinks`. `Data.Datasets` and `Data.Expansions` are individually
+  optional arrays, but they may not both be absent or empty: an expansion-only check is
+  valid and does not invent an unused dataset dependency. `Data.Gates` must also be a
+  `[string[]]`, but may be empty.
 - `Id`, `Severity`, `Effort`, or `Impact` not matching their allowed pattern/values
 - `Rule.Type` not `Function` or `Expression`
-- `Rule.Function` naming a command that does not resolve (via `Get-Command`) at import
-  time - this is treated as a module-authoring bug and hard-fails catalog import; a
-  runtime throw from a *resolvable* function is a different, later concern (the
-  evaluator's per-check `Error` status, Task 1.6)
-- empty `Data.Datasets` or `References.Authorities`
+- `Rule.Function` not resolving to exactly one ordinal-exact PowerShell Function at
+  import time. Wildcard names, ambiguous matches, aliases, cmdlets, and native
+  applications are not Function rules and are rejected as aggregated catalog errors. A
+  runtime throw from one resolvable Function is a different, later concern (the
+  evaluator's per-check `Error` status, Task 1.6).
+- both `Data.Datasets` and `Data.Expansions` absent/empty, or empty
+  `References.Authorities`
 - a dataset name in `Data.Datasets` not present in the shared dataset map (see below)
+- `Data.PartialDatasets`, when present, not being a non-empty `[string[]]` of unique
+  canonical dataset names, containing a member outside `Data.Datasets`, being attached
+  to an Expression rule, or naming a Function that has no `DatasetOutcomes` parameter
 - missing/empty `References.Research`
 - `References.Cis`, if the key is present at all (it is OPTIONAL and most checks omit it
   entirely), not being a non-empty `[string[]]` (no blank elements) - same "wrong type" and
@@ -93,9 +107,50 @@ Validation failures include:
 names TenantPulse knows how to collect, added by Task 1.5. That file is parsed **exactly
 once per catalog load** (not once per descriptor) and validated to be a hashtable. Until
 the file exists, the `Data.Datasets` membership cross-check above is skipped (with a
-`Write-Verbose` note) - descriptors are not rejected for referencing datasets the map
-does not know about yet. Once Task 1.5 lands `DatasetMap.psd1`, every dataset name
-referenced by a descriptor's `Data.Datasets` must be a top-level key in that map, or
-catalog import fails. A present-but-malformed map file (parse failure, or a root value
-that isn't a hashtable) is reported through the same aggregated-errors mechanism as any
-other catalog problem, not as a raw, unrelated error.
+`Write-Verbose` note) - legacy descriptors without `PartialDatasets` are not rejected for
+referencing datasets the map does not know about yet. Partial awareness depends on
+canonical dataset identity, so a descriptor containing `PartialDatasets` fails closed
+when the map is missing or unavailable. Once Task 1.5 lands `DatasetMap.psd1`, every
+dataset name referenced by a descriptor's `Data.Datasets` must be a top-level key in that
+map, or catalog import fails. A present-but-malformed map file (parse failure, or a root
+value that isn't a hashtable) is reported through the same aggregated-errors mechanism
+as any other catalog problem, not as a raw, unrelated error.
+
+### Partial-aware Function checks
+
+`Data.PartialDatasets` is optional and changes evaluation only. It does not add a dataset
+to `Data.Datasets`, the shared dataset map, the collection manifest, or collection
+dependency ordering. Every member must already appear in `Data.Datasets`, must use the
+exact canonical casing from both that array and `DatasetMap.psd1`, and must be unique
+under `OrdinalIgnoreCase`. The field is legal only for a resolvable Function rule whose
+command metadata declares a `DatasetOutcomes` parameter.
+
+Opting in means the Function has been reviewed for a monotonic decision that remains
+sound despite unresolved gaps:
+
+- A universal check may **Fail** when a known row proves an offender, but it cannot Pass
+  while gaps remain.
+- An existential check may **Pass** when a known row proves a witness, but it cannot Fail
+  while gaps remain.
+
+If the usable rows do not prove that one safe direction, the check remains fail-closed;
+the presence of `PartialDatasets` is never permission to treat incomplete scope as a
+complete assessment.
+
+The built-in catalog has exactly four partial-aware descriptors:
+
+- `TP.INT.0013` / `intuneRbacGroupProtection` is universal: a known unprotected group may
+  prove Fail; it cannot prove Pass with gaps.
+- `TP.INT.0014` / `endpointSecurityDiskEncryptionPolicies` is existential: a known policy
+  whose `isFullDiskEncryption` value is a native `[bool]` `$true` may prove Pass; it cannot
+  prove Fail with gaps.
+- `TP.INT.0015` / `endpointSecurityLapsPolicies` is existential: one known policy whose four
+  criteria are native `[bool]` `$true` values may prove Pass; it cannot prove Fail with gaps.
+- `TP.INT.0029` / `securityBaselinesAssignedAndCurrent` is universal: a known unassigned or
+  obsolete baseline may prove Fail; it cannot prove Pass with gaps.
+
+The other 49 checks remain `NotApplicable` when a required dataset is `Partial`. For these four
+opt-ins, a structurally valid Partial dataset with no decisive proof is also `NotApplicable`.
+Zero usable rows, invalid gaps/outcomes, or a malformed known row without decisive monotonic proof
+is `Error`; a decisive witness/offender remains authoritative even when an unrelated row is
+malformed, regardless of row order.

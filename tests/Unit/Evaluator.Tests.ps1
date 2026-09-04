@@ -22,6 +22,8 @@ BeforeAll {
             [string] $Category = 'Fixture.Category',
             [string] $Severity = 'Medium',
             [string[]] $Datasets = @('datasetA'),
+            [AllowNull()]
+            [string[]] $PartialDatasets = $null,
             [string[]] $Gates = @(),
             [hashtable] $Rule,
             # Cite-only CIS cross-references (Task 4.5) - omitted by default, since
@@ -38,6 +40,11 @@ BeforeAll {
             $references.Cis = $Cis
         }
 
+        $data = @{ Datasets = $Datasets; Gates = $Gates }
+        if ($null -ne $PartialDatasets) {
+            $data.PartialDatasets = $PartialDatasets
+        }
+
         [pscustomobject]@{
             PSTypeName = 'TenantPulse.CheckDescriptor'
             Id         = $Id
@@ -46,7 +53,7 @@ BeforeAll {
             Severity   = $Severity
             Effort     = 'Low'
             Impact     = 'Medium'
-            Data       = @{ Datasets = $Datasets; Gates = $Gates }
+            Data       = $data
             Rule       = $Rule
             Consulting = @{
                 WhatItMeans  = "What $Id means."
@@ -917,9 +924,9 @@ Describe 'Invoke-PulseEvaluation' {
         $evaluation = InModuleScope TenantPulse -ArgumentList $script:store, $script:keyPath, $check {
             param($store, $keyPath, $check)
 
-            # Overrides the real (Phase 1 stub) Get-PulseGateStatus for this scope only, so
-            # the evaluator's 'Unavailable' wiring can be exercised even though the stub
-            # itself never returns it.
+            # Injects a deterministic Unavailable decision for this scope only so the
+            # evaluator's gate-to-NotApplicable wiring is covered independently of the
+            # manifest evidence used by Get-PulseGateStatus in normal evaluation.
             function Get-PulseGateStatus {
                 param($Gate, $Manifest)
                 return [pscustomobject]@{ Status = 'Unavailable'; Detail = 'no EntraP1 license data collected' }
@@ -1418,5 +1425,118 @@ Describe 'Invoke-PulseSandboxedExpression -Context' {
         }
 
         $result.Status | Should -Be 'Pass'
+    }
+}
+
+Describe 'Invoke-PulseEvaluation partial input isolation and serialization' {
+    BeforeEach {
+        $script:partialStoreRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:partialKeyPath = Join-Path $script:partialStoreRoot '.opkey/operator.key'
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $script:partialStoreRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'isolates Partial rows and outcome projections from the cache, manifest, and later checks' {
+        $mutating = New-PulseFixtureCheck -Id 'TP.INT.0001' -Datasets @('partialA') `
+            -PartialDatasets @('partialA') -Rule @{ Type = 'Function'; Function = 'Test-PulseMutatingPartialRule' }
+        $observing = New-PulseFixtureCheck -Id 'TP.INT.0002' -Datasets @('partialA') `
+            -PartialDatasets @('partialA') -Rule @{ Type = 'Function'; Function = 'Test-PulseObservingPartialRule' }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:partialStoreRoot, $script:partialKeyPath, @($mutating, $observing) {
+            param($storeRoot, $keyPath, $checks)
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            $gap = New-PulseCollectionGap -Scope 'scope-original' -FailureClass 'ProviderFailed' `
+                -ReasonCode 'provider-failed' -Detail @{ marker = 'gap-original' } `
+                -Operation 'Child.List' -ApiVersion 'beta'
+            Write-PulseDataset -Store $store -Name 'partialA' -Data @(
+                [pscustomobject]@{ id = 'row-original'; nested = @{ marker = 'row-nested-original' } }
+            ) -ApiVersion 'beta' -Status Partial -Reason 'manifest-reason-canary' -ReasonCode 'partial' `
+                -Detail @{ marker = 'manifest-original' } -Provider 'GraphKit' `
+                -Operations @('Parent.List', 'Child.List') -Gaps @($gap)
+
+            function Test-PulseMutatingPartialRule {
+                param($Datasets, $DatasetOutcomes)
+                $Datasets.partialA[0].id = 'row-mutated'
+                $Datasets.partialA[0].nested.marker = 'row-nested-mutated'
+                $DatasetOutcomes.partialA.Gaps[0].Detail.marker = 'gap-mutated'
+                $DatasetOutcomes.partialA.Operations[0] = 'operation-mutated'
+                $DatasetOutcomes.partialA.Remove('Provider')
+                $DatasetOutcomes['injected'] = @{ Status = 'Partial' }
+                $DatasetOutcomes.Remove('partialA')
+                New-PulseFinding -Status Pass
+            }
+
+            function Test-PulseObservingPartialRule {
+                param($Datasets, $DatasetOutcomes)
+                $pristine = $Datasets.partialA[0].id -eq 'row-original' -and
+                    $Datasets.partialA[0].nested.marker -eq 'row-nested-original' -and
+                    $DatasetOutcomes.Count -eq 1 -and
+                    $DatasetOutcomes.ContainsKey('partialA') -and
+                    -not $DatasetOutcomes.ContainsKey('injected') -and
+                    $DatasetOutcomes.partialA.ContainsKey('Provider') -and
+                    $DatasetOutcomes.partialA.Provider -eq 'GraphKit' -and
+                    $DatasetOutcomes.partialA.Operations[0] -eq 'Parent.List' -and
+                    $DatasetOutcomes.partialA.Gaps[0].Detail.marker -eq 'gap-original'
+                New-PulseFinding -Status $(if ($pristine) { 'Pass' } else { 'Fail' }) `
+                    -Reason $(if ($pristine) { 'pristine' } else { 'mutation leaked' })
+            }
+
+            $evaluation = Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath
+            $manifestAfter = Get-PulseSnapshotManifest -Store $store
+            $rowsAfter = @(Read-PulseDataset -Store $store -Name 'partialA')
+            [pscustomobject]@{
+                Evaluation = $evaluation
+                Manifest   = $manifestAfter
+                Rows       = $rowsAfter
+            }
+        }
+
+        ($result.Evaluation.Document.findings | Where-Object id -eq 'TP.INT.0001').status | Should -Be 'Pass'
+        $observer = $result.Evaluation.Document.findings | Where-Object id -eq 'TP.INT.0002'
+        $observer.status | Should -Be 'Pass' -Because $observer.reason
+        $result.Rows[0].id | Should -Be 'row-original'
+        $result.Rows[0].nested.marker | Should -Be 'row-nested-original'
+        $result.Manifest.datasets.partialA.provider | Should -Be 'GraphKit'
+        $result.Manifest.datasets.partialA.operations[0] | Should -Be 'Parent.List'
+        $result.Manifest.datasets.partialA.gaps[0].detail.marker | Should -Be 'gap-original'
+    }
+
+    It 'does not serialize DatasetOutcomes or Partial manifest privacy canaries into findings or scoring documents' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Datasets @('partialA') `
+            -PartialDatasets @('partialA') -Rule @{ Type = 'Function'; Function = 'Test-PulseProjectionPrivacyRule' }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:partialStoreRoot, $script:partialKeyPath, @($check) {
+            param($storeRoot, $keyPath, $checks)
+            $store = New-PulseSnapshotStore -Path (Join-Path $storeRoot 'snapshot') -Tenant 'tp-fixturetenant'
+            $gap = New-PulseCollectionGap -Scope 'scope-private-canary' -FailureClass 'PermissionDenied' `
+                -ReasonCode 'permission-denied' -Detail @{ marker = 'gap-private-canary' } `
+                -Operation 'Sensitive.Operation' -ApiVersion 'beta'
+            Write-PulseDataset -Store $store -Name 'partialA' -Data @([pscustomobject]@{ id = 'safe-row' }) `
+                -ApiVersion 'beta' -Status Partial -Reason 'manifest-private-canary' -ReasonCode 'partial' `
+                -Detail @{ marker = 'manifest-detail-private-canary' } -Provider 'provider-private-canary' `
+                -Operations @('Sensitive.Operation') -Gaps @($gap)
+
+            function Test-PulseProjectionPrivacyRule {
+                param($Datasets, $DatasetOutcomes)
+                New-PulseFinding -Status NotApplicable -Reason 'valid Partial rows were non-decisive'
+            }
+
+            $evaluation = Invoke-PulseEvaluation -Store $store -Checks $checks -OperatorKeyPath $keyPath
+            $scored = Add-PulseScores -Findings $evaluation.Document
+            [pscustomobject]@{
+                FindingJson    = ConvertTo-PulseCanonicalJson -InputObject $evaluation.Document
+                ScoredJson     = ConvertTo-PulseCanonicalJson -InputObject $scored
+                Status         = $evaluation.Document.findings[0].status
+                SnapshotSchema = (Get-PulseSnapshotManifest -Store $store).schemaVersion
+            }
+        }
+
+        $result.Status | Should -Be 'NotApplicable'
+        $result.FindingJson | Should -Not -Match 'DatasetOutcomes|scope-private-canary|gap-private-canary|manifest-private-canary|manifest-detail-private-canary|provider-private-canary|Sensitive\.Operation'
+        $result.ScoredJson | Should -Not -Match 'DatasetOutcomes|scope-private-canary|gap-private-canary|manifest-private-canary|manifest-detail-private-canary|provider-private-canary|Sensitive\.Operation'
+        ($result.FindingJson | ConvertFrom-Json).schemaVersion | Should -Be '1.0'
+        $result.SnapshotSchema | Should -Be '2.0.0'
     }
 }

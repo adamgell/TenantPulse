@@ -30,7 +30,7 @@
         attempt is the one that actually discovers the auth failure (an expired
         certificate, a revoked app registration - an AADSTS-shaped error), that dataset is
         written Failed, collectionFailure is set from that same reason, and every
-        remaining dataset is written Failed with reason 'auth-failure: collection aborted'
+        remaining dataset is written Failed with reason 'authentication-failed: collection aborted'
         with no further Graph calls - they would all fail identically. Either way,
         collection never silently produces an empty, unexplained snapshot.
 
@@ -236,13 +236,16 @@ function Get-PulseTenantSnapshot {
         $tenantPseudonym = Get-PulsePseudonym -Value $ProfileId -Key $operatorKey
         $store = New-PulseSnapshotStore -Path $OutputPath -Tenant $tenantPseudonym -GraphKitVersion $graphKitVersion
 
-        # The tenant id is never resolved on this path, so Protect-PulseReason has only
-        # -ProfileId to redact out of the caught exception message before it is written to
-        # the snapshot.
-        $failureReason = Protect-PulseReason -Message "auth-failure: $($_.Exception.Message)" -ProfileId $ProfileId -Pseudonym $tenantPseudonym
+        # Context resolution happens before any request. Persist only a closed canonical
+        # reason: exception text can contain provider response bodies, UPNs, or client ids.
+        $failureReason = Protect-PulseReason -Message 'authentication-failed: context unavailable before request' `
+            -ProfileId $ProfileId -Pseudonym $tenantPseudonym
 
         foreach ($entry in $manifest) {
-            Write-PulseDataset -Store $store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' -Reason $failureReason
+            Write-PulseDataset -Store $store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
+                -Reason $failureReason -ReasonCode 'authentication-failed' `
+                -Detail @{ status = 'context unavailable before request' } -FailureClass 'AuthenticationFailed' `
+                -Provider 'GraphKit' -Operations @($entry.Operation)
         }
 
         Set-PulseManifestEntry -Store $store -CollectionFailure $failureReason
@@ -265,25 +268,59 @@ function Get-PulseTenantSnapshot {
 
     $store = New-PulseSnapshotStore -Path $OutputPath -Tenant $tenantPseudonym -GraphKitVersion $graphKitVersion
 
+    # One shared network-abort signal spans ordinary collection and the optional expansion
+    # phase. Only AuthenticationFailed may set it; every other failure remains isolated.
+    $networkAbortState = [pscustomobject]@{
+        AuthenticationAborted = $false
+        Reason                = $null
+    }
+
     Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context -ProfileId $ProfileId `
-        -TenantPseudonym $tenantPseudonym -ProviderPlanRegistry $resolvedProviderPlanRegistry
+        -TenantPseudonym $tenantPseudonym -ProviderPlanRegistry $resolvedProviderPlanRegistry `
+        -NetworkAbortState $networkAbortState
 
     if ($ExpandSettings) {
-        # P0-1 review fix: explicitly discarded - see Invoke-PulseSettingsCatalogExpansionPipeline's
-        # own VOID RETURN docstring section for why an uncaptured call here previously made
-        # this function return TWO objects instead of one.
-        $null = Invoke-PulseSettingsCatalogExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
+        $expansionSuppressedReason = Protect-PulseReason -Message 'authentication-failed: network expansion suppressed' `
+            -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
+
+        if ($networkAbortState.AuthenticationAborted) {
+            # No request was sent for the expansion root, so Skipped is accurate here. Do
+            # not overwrite an ordinary-manifest entry if a future check starts consuming
+            # this dataset directly and collection already recorded its attempted outcome.
+            if (@($manifest | Where-Object { $_.Dataset -eq 'configurationPolicies' }).Count -eq 0) {
+                Write-PulseDataset -Store $store -Name 'configurationPolicies' -ApiVersion 'beta' -Status 'Skipped' `
+                    -Reason $expansionSuppressedReason -ReasonCode 'authentication-failed' `
+                    -Detail @{ status = 'network expansion suppressed' } -FailureClass 'AuthenticationFailed' `
+                    -Provider 'GraphKit' -Operations @('ListBeta')
+            }
+            Set-PulseExpansionEntry -Store $store -Name 'settingsCatalog' -Status 'NotExpanded' -Reason $expansionSuppressedReason
+        } else {
+            # P0-1 review fix: explicitly discarded - see the pipeline's VOID RETURN
+            # contract. The shared state lets a root authentication failure suppress every
+            # later network expansion without emitting another object.
+            $null = Invoke-PulseSettingsCatalogExpansionPipeline -Store $store -Context $context `
+                -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym -NetworkAbortState $networkAbortState
+        }
 
         # Task 2.3: compliance + legacy typed-policy expansion. Reads back
         # deviceCompliancePolicies/deviceConfigurations - already collected by the ordinary
         # check-driven Invoke-PulseCollection call above - and fans out assignments (both
         # descriptors already released, unlike T2.2's own deferred assignments). Same void-
         # return discipline as the call above - see this file's own docstring.
-        $null = Invoke-PulseTypedPolicyExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId -TenantPseudonym $tenantPseudonym
+        if ($networkAbortState.AuthenticationAborted) {
+            foreach ($expansionName in @('compliance', 'deviceConfiguration')) {
+                Set-PulseExpansionEntry -Store $store -Name $expansionName -Status 'NotExpanded' -Reason $expansionSuppressedReason
+            }
+        } else {
+            $null = Invoke-PulseTypedPolicyExpansionPipeline -Store $store -Context $context -ProfileId $ProfileId `
+                -TenantPseudonym $tenantPseudonym -NetworkAbortState $networkAbortState
+        }
 
         # Task 2.6: conflict detection - purely derived from the family expansion jsonl
         # artifacts just produced above, never Graph. Same void-return discipline as the
-        # two calls above - see this file's own docstring.
+        # two calls above - see this file's own docstring. Invoke-PulseConflictDetection
+        # treats NotExpanded/Failed families (including authentication-suppressed typed-
+        # policy walks) as omitted-family gaps, so TP.INT.0006 cannot Pass a 1-of-3 scan.
         $null = Invoke-PulseConflictDetection -Store $store -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
 
         # Part A, T3.4: per-family setting-presence index - purely derived from the SAME

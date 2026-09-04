@@ -33,30 +33,22 @@
     groupId are each read from a live, 4-call Graph fan-out - a failed sub-call in that
     chain is exactly the kind of gap that must never silently read as "verified
     unprotected". An absent (missing or $null) isManagementRestricted or
-    isAssignableToRole now throws (-> engine Error), never coerces to $false. Likewise a
-    row identified as unprotected with no groupId now throws instead of being silently
-    dropped - dropping it would have let a real unprotected group vanish into a false
-    Pass (empirically reproduced by review). Both flags must also be native booleans;
-    PowerShell's [bool] cast treats the non-empty string 'false' as true. Present-and-$false
-    on either native boolean remains fully decidable and participates in the Fail path.
+    isAssignableToRole now throws (-> engine Error), never coerces to $false. Every row,
+    protected or unprotected, must also carry a nonblank groupId; identity is part of the
+    compact row contract, not something checked only when a row becomes evidence. Both
+    flags must be native booleans; PowerShell's [bool] cast treats the non-empty string
+    'false' as true. Present-and-$false on either native boolean remains fully decidable
+    and participates in the Fail path.
 
-    COMPOSITE-SHAPE CAVEAT (Phase 3 whole-phase review, catalog-coherence finding M3,
-    documentation-only): this rule currently cannot distinguish "zero rows because the
-    tenant genuinely has no Intune RBAC role assignments using groups" from "zero rows
-    because the 4-call fan-out itself partially failed before producing any rows" - both
-    read as a real Pass today (see RULE above), by design, because $Datasets is only ever
-    populated with successfully-collected rows or not populated at all; there is no
-    third, partial-failure shape a Function-type rule can currently observe. THIS MATTERS
-    for the composite descriptor whenever it ships: if that descriptor's own fan-out can
-    fail PARTWAY through the 4-call chain (e.g. roleDefinitions succeeds but a downstream
-    groups/{id} lookup for one group fails) and still surface whatever rows it managed to
-    collect, the descriptor's own spec must distinguish "confirmed zero role assignments"
-    from "partial collection, unknown true row count" - collapsing the latter into a
-    silent zero-rows Pass here would be a false-negative-of-omission, not the honest
-    "nothing to protect" Pass this rule currently returns. This rule itself cannot fix
-    that gap (a Function rule only ever sees $Datasets as handed to it) - the composite
-    descriptor's own gap/partial-fetch signaling design is where this must be addressed,
-    not here.
+    COMPOSITE-SHAPE CONTRACT (R1a partial-awareness correction): Function rules can now
+    receive a separately cloned DatasetOutcomes projection for explicitly opted-in
+    datasets. A structurally valid Partial RBAC result with a known unprotected group
+    therefore Fails; valid known rows without an offender return NotApplicable because
+    unresolved scope cannot prove universal protection. A Partial result with zero usable
+    rows or malformed gap metadata fails closed in the evaluator before this rule runs.
+    Complete zero rows retain the Maester-compatible "nothing to protect" Pass. The
+    composite provider must report any failed child lookup as Partial with a structured
+    gap instead of laundering incomplete fan-out into a Complete empty or truncated set.
 #>
 
 function Test-PulseRbacGroupsProtected {
@@ -67,36 +59,78 @@ function Test-PulseRbacGroupsProtected {
         [hashtable] $Datasets,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [AllowNull()]
+        [hashtable] $DatasetOutcomes = @{}
     )
+
+    $datasetName = 'intuneRbacGroupProtection'
+    $outcomeState = Resolve-PulseDatasetOutcomeState -DatasetOutcomes $DatasetOutcomes -DatasetName $datasetName -Caller $MyInvocation.MyCommand.Name
+    $isPartial = $outcomeState.IsPartial
+    $unresolvedGapCount = $outcomeState.UnresolvedGapCount
 
     $rows = @($Datasets.intuneRbacGroupProtection)
 
     $unprotectedByGroupId = [ordered]@{}
+    $malformedReason = $null
     foreach ($row in $rows) {
+        $groupId = [string] $row.groupId
+        if ([string]::IsNullOrWhiteSpace($groupId)) {
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseRbacGroupsProtected: a row has no usable groupId value - every row must have a stable identity.'
+            }
+            continue
+        }
         if ($null -eq $row.isManagementRestricted) {
-            throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has no isManagementRestricted value - this rule's input is a 4-call Graph fan-out and an absent value here means a sub-call failed or returned an unreadable shape, not that the group is unprotected. Refusing to read absence as unprotected."
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseRbacGroupsProtected: a row has no isManagementRestricted value - this rule cannot classify the row safely.'
+            }
+            continue
         }
         if ($null -eq $row.isAssignableToRole) {
-            throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has no isAssignableToRole value - this rule's input is a 4-call Graph fan-out and an absent value here means a sub-call failed or returned an unreadable shape, not that the group is unprotected. Refusing to read absence as unprotected."
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseRbacGroupsProtected: a row has no isAssignableToRole value - this rule cannot classify the row safely.'
+            }
+            continue
         }
+        $rowMalformed = $false
         foreach ($propertyName in @('isManagementRestricted', 'isAssignableToRole')) {
             if ($row.$propertyName -isnot [bool]) {
-                throw "Test-PulseRbacGroupsProtected: a row for group '$($row.groupDisplayName)' has a non-Boolean $propertyName value - expected a native boolean and refusing to coerce it."
+                if ($null -eq $malformedReason) {
+                    $malformedReason = "Test-PulseRbacGroupsProtected: a row has a non-Boolean $propertyName value - expected a native boolean and refusing to coerce it."
+                }
+                $rowMalformed = $true
+                break
             }
         }
+        if ($rowMalformed) { continue }
 
         $isManagementRestricted = ([bool] $row.isManagementRestricted -eq $true)
         $isAssignableToRole = ([bool] $row.isAssignableToRole -eq $true)
         if ($isManagementRestricted -or $isAssignableToRole) { continue }
 
-        $groupId = [string] $row.groupId
-        if ([string]::IsNullOrEmpty($groupId)) {
-            throw "Test-PulseRbacGroupsProtected: an unprotected row (roleDefinitionName '$($row.roleDefinitionName)') has no groupId value - this row cannot be identified or deduplicated, and silently dropping it would let an unprotected group vanish into a false Pass. Refusing to skip it."
-        }
         if (-not $unprotectedByGroupId.Contains($groupId)) {
             $unprotectedByGroupId[$groupId] = $row
         }
+    }
+
+    if (-not $isPartial -and $null -ne $malformedReason) {
+        throw $malformedReason
+    }
+
+    if ($isPartial -and $unprotectedByGroupId.Count -gt 0) {
+        $offendingRows = @($unprotectedByGroupId.Values)
+        $evidence = ConvertTo-PulseMaesterEvidence -Rows $offendingRows -IdentityProperty 'groupId' -SortKeyProperty 'groupDisplayName' -DetailProperties @('groupDisplayName', 'roleDefinitionName', 'isManagementRestricted', 'isAssignableToRole')
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status Fail -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; $($unprotectedByGroupId.Count) known unprotected group(s) prove this universal RBAC protection check fails despite unresolved scope." -Evidence $evidence
+    }
+
+    if ($isPartial) {
+        if ($null -ne $malformedReason) { throw $malformedReason }
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status NotApplicable -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; known rows contain no unprotected group, but unresolved scope means they cannot prove universal protection."
     }
 
     if ($unprotectedByGroupId.Count -eq 0) {

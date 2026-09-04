@@ -125,7 +125,11 @@ function Save-PulseSettingDefinitionCorpus {
         [pscustomobject] $Store,
 
         [Parameter(Mandatory)]
-        [pscustomobject] $Context
+        [pscustomobject] $Context,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
 
     $referenceName = 'settingDefinitions'
@@ -155,8 +159,19 @@ function Save-PulseSettingDefinitionCorpus {
     try {
         $rows = @(Get-GraphObject -Context $Context -Type 'ConfigurationSettingDefinition' -Operation 'ListBeta' -ErrorAction Stop)
     } catch {
-        $reason = Protect-PulseReason -Message "capture-failed: $($_.Exception.Message)" -ProfileId $profileId -Pseudonym $pseudonym -TenantId $tenantId
+        $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+        $statusCodeText = if ($null -eq $failure.StatusCode) { 'unknown' } else { [string] $failure.StatusCode }
+        $canonicalReason = "graph-request-failed: failureClass=$($failure.FailureClass); reasonCode=$($failure.ReasonCode); statusCode=$statusCodeText"
+        $reason = Protect-PulseReason -Message $canonicalReason -ProfileId $profileId -Pseudonym $pseudonym -TenantId $tenantId
         Set-PulseReferenceEntry -Store $Store -Name $referenceName -Status 'Failed' -Reason $reason
+        if ($failure.AbortCollection) {
+            Set-PulseManifestEntry -Store $Store -CollectionFailure $reason
+            if ($null -ne $NetworkAbortState) {
+                $NetworkAbortState.AuthenticationAborted = $true
+                $NetworkAbortState.Reason = Protect-PulseReason -Message 'authentication-failed: collection aborted' `
+                    -ProfileId $profileId -Pseudonym $pseudonym -TenantId $tenantId
+            }
+        }
         return $null
     }
 
@@ -203,7 +218,7 @@ function Save-PulseSettingDefinitionCorpus {
 
         return $index
     } catch {
-        $reason = Protect-PulseReason -Message "capture-failed: $($_.Exception.Message)" -ProfileId $profileId -Pseudonym $pseudonym -TenantId $tenantId
+        $reason = Protect-PulseReason -Message 'capture-failed: processing or persistence error' -ProfileId $profileId -Pseudonym $pseudonym -TenantId $tenantId
         # Best-effort: if this ALSO throws, there is nothing further this function can do -
         # let that second exception propagate rather than silently swallowing the original
         # failure (matches this codebase's general "do not mask the real error" convention).

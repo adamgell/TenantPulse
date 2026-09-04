@@ -31,7 +31,11 @@ function Invoke-PulseWindowsDataProcessorPlan {
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
-        [string] $TenantPseudonym
+        [string] $TenantPseudonym,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
 
     # Required by the common provider-plan contract; this no-network plan needs only Dataset.
@@ -39,6 +43,7 @@ function Invoke-PulseWindowsDataProcessorPlan {
     $null = $ManifestEntry
     $null = $ProfileId
     $null = $TenantPseudonym
+    $null = $NetworkAbortState
 
     $detail = [ordered]@{
         Contract = 'DataProcessorServiceForWindowsFeaturesOnboarding.Get'

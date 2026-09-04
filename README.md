@@ -4,11 +4,11 @@
 [![PSGallery Downloads](https://img.shields.io/powershellgallery/dt/TenantPulse)](https://www.powershellgallery.com/packages/TenantPulse)
 [![PowerShell 7.4+](https://img.shields.io/badge/PowerShell-7.4%2B-blue)](https://github.com/PowerShell/PowerShell)
 
-> Read-only tenant health assessment for Microsoft Intune and Entra — a versioned check catalog, deterministic scoring, and pseudonymized findings reports, built on [GraphKit](https://github.com/AdamGell/GraphKit).
+> Read-only tenant health assessment for Microsoft Intune and Entra — a versioned check catalog, deterministic scoring, and findings reports with opt-in identity pseudonymization, built on [GraphKit](https://github.com/AdamGell/GraphKit).
 
 TenantPulse is a read-only PowerShell module that assesses a Microsoft Intune/Entra
-tenant's health against a versioned set of checks, and produces a deterministic,
-pseudonymized, scored findings report. It never writes to a tenant: every Graph read goes
+tenant's health against a versioned set of checks, and produces a deterministic, scored
+findings report with opt-in identity pseudonymization. It never writes to a tenant: every Graph read goes
 through [GraphKit](https://github.com/AdamGell/GraphKit)'s read-class descriptors
 (`ThrottleClass 'Read'`, `ReplayPolicy 'Safe'`) - TenantPulse never calls `Connect-MgGraph`,
 never uses the Microsoft Graph PowerShell SDK, and never constructs a Graph URI of its own.
@@ -30,6 +30,50 @@ Security composite provenance uses the stable qualified primitives `Configuratio
 and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count. Legacy schema
 1.0.0/1.1.0 manifests remain fail-closed when they contain the later `Partial` state; reads reject
 that unsupported state without rewriting the manifest.
+
+The unreleased line also carries one canonical Graph failure mapping across direct, composite,
+and expansion collectors. A request-time `403` is `Failed` / `PermissionDenied`, and only
+`AuthenticationFailed` stops later network work; deadline expiration, cancellation, indeterminate
+certainty, permission denial, and provider failure remain explicit and isolated. Partial evaluation
+is an exact, reviewed opt-in for only `TP.INT.0013`, `TP.INT.0014`, `TP.INT.0015`, and
+`TP.INT.0029`: the two universal checks may Fail on a known offender but cannot Pass with gaps,
+while the two existential checks may Pass on a known native-Boolean witness but cannot Fail with
+gaps. The other 49 checks remain `NotApplicable` on Partial. For the four opt-ins, malformed input
+without decisive monotonic proof is `Error`, not `NotApplicable`. Findings schema `1.0`, snapshot
+schema `2.0.0`, and scoring model `1.0` are unchanged. These are deterministic current-source and
+package-test claims only; they are not new live-service, merged-release, or publication claims.
+
+The current product-program boundary is narrower than a finished successor release:
+
+- **The implemented R1a foundation is locally package-first proven; R1a acceptance and remote
+  integration remain open.** Structured dataset outcomes are available to the evaluator but do not
+  yet migrate into a versioned findings/renderer contract as the governing R1a text requires. That
+  product contract still needs an explicit decision. No current verified evidence establishes a
+  remote refresh/push, exact remote-head review, merge, or merged-main CI for the runtime tree.
+  Nothing in this paragraph promotes it over the immutable public `0.2.0` package.
+- **R1b is partial.** Settings Catalog assignments and typed include/exclude intent exist, but
+  Administrative Template expansion, the governing program's expansion-summary dataset, protected
+  live proof with populated assignment targets, and stale pre-implementation map/reason text remain
+  open. A local Phase 2 task once descoped that summary; the later governing R1b contract supersedes
+  that task-local decision.
+- **R2 is partial.** Four real Read/Safe provider plans exist, but the static dataset map still
+  publishes synthetic `Pending` / `Walk` tuples and the current composite outcomes do not preserve
+  complete operation provenance. Known certainty defects remain in Endpoint Security template
+  handling, unknown BitLocker/LAPS values, and the independent current-versus-legacy baseline paths.
+  Protected-live proof of the BitLocker raw-value mapping and LAPS template identity is also still
+  required before those Pending representations can close.
+- **R3 is partial.** Runtime correctly performs no network request and returns
+  `PlatformUnavailable`, but the static map and outcome provenance still describe a GraphKit `Get`
+  operation that never occurs.
+- **R4 is open.** Bounded group closure, application-registration credential coverage, complete
+  Intune assignment awareness, exclusion-only assignment semantics, deterministic evidence caps,
+  and a supported renderer beyond JSON remain to be implemented and proven. R5 privacy and R6 scale
+  are separately open in `docs/STATUS.md`.
+- **R9 has a split disposition.** Reusable GraphKit app-registration provisioning and actual-grant
+  verification remain applicable. The owner-confirmed absence of installed users, legacy consumers,
+  customer-tenant consumers, and repoint targets makes adopter migration, customer repointing,
+  rollback-window operation, legacy-runtime retirement, and destructive directory cleanup
+  `NotApplicable` rather than pending gates. They must not be performed to create completion evidence.
 
 ## Quick start
 
@@ -56,7 +100,7 @@ you decide where `-OutputPath` should point).
 
 | Command | What it does |
 |---|---|
-| `Get-PulseTenantSnapshot` | Collects a read-only, pseudonymized snapshot of tenant data through GraphKit and writes it to a snapshot store on disk. The only command that ever talks to Graph. |
+| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
 | `Get-PulseCheckCatalog` | Lists every check descriptor in the catalog (id, title, category, severity, authorities) as a lightweight, read-only view - useful for discovering what `-IncludeCategory`/`-IncludeCheck` values exist before running an assessment. |
 | `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render a findings report. Supports `-Redact` to pseudonymize evidence identities in the rendered report. |
 | `Invoke-PulseCheck` | Runs a scoped subset of checks (by id or category) against a fresh or existing snapshot - the same pipeline as `Invoke-PulseAssessment`, narrowed to exactly the checks you name. |
@@ -80,24 +124,28 @@ example `Policy.Read.All` for Conditional Access and authentication methods poli
 `DeviceManagementApps.Read.All` for the Intune datasets, `Directory.Read.All` /
 `RoleManagement.Read.Directory` for directory role data, `Domain.Read.All` for domains).
 
-A missing permission is never a hard failure: the collector attempts every dataset
-independently and classifies a `403` as `Skipped` with reason
-`permission-denied: <the exact permissions that operation needs>` - read straight out of
-GraphKit's own descriptor, so you always get the precise, current scope name to grant next,
-rather than a guess baked into this README going stale. Every check that needed a Skipped
-dataset degrades honestly to `NotApplicable`, never a silently-wrong Pass or Fail.
+A missing permission is never a process-wide abort: the collector attempts every dataset
+independently and records a request-time `403` as dataset status `Failed`, failure class
+`PermissionDenied`, and reason code `permission-denied`. The bounded reason names the exact
+permissions from GraphKit's own descriptor when available, so the scope guidance does not become a
+second stale permission list in this README. Only `AuthenticationFailed` stops later network
+collection. A check whose required dataset Failed degrades honestly to `NotApplicable`, never a
+silently wrong Pass or Fail.
 
 ## Snapshot data is sensitive at rest
 
 A snapshot store (`Get-PulseTenantSnapshot`'s output, or the `snapshot/` subdirectory
-`Invoke-PulseAssessment` writes alongside its findings report) contains **raw, unredacted
-tenant data** - device names, policy definitions, configuration values, and more, exactly as
-Graph returned them. The manifest's `tenant` field and every collection-failure reason are
-pseudonymized (an HMAC of the tenant id under a local operator key - see
-`about_TenantPulse` for the full pseudonymization contract), but the *dataset contents
-themselves are not*. Treat a snapshot directory the same way you would treat a Graph API
-export: store it somewhere access-controlled, do not commit it to source control, and clean
-it up when you are done with it.
+`Invoke-PulseAssessment` writes alongside its findings report) contains **sensitive
+tenant-derived data** - device names, policy definitions, configuration values, and more.
+It is not a byte-for-byte Graph response: GraphKit provenance is removed, the manifest's
+`tenant` field and collection-failure reasons are pseudonymized, exact tenant-id matches are
+redacted, and typed-policy fields explicitly marked `Sensitive` are replaced before
+persistence. Those narrow protections do **not** make a snapshot de-identified or safe to
+share. Most other collected values remain available to evaluation, while the typed-policy
+and Settings Catalog classifiers also redact some unknown or complex value shapes
+conservatively when they cannot prove the content safe. Treat a snapshot directory the same
+way you would treat a raw Graph API export: store it somewhere access-controlled, do not
+commit it to source control, and clean it up when you are done with it.
 
 **Where files are written:** every command that writes output takes an explicit
 `-OutputPath` (or, for `Get-PulseTenantSnapshot`, a required output directory) - TenantPulse
@@ -116,27 +164,29 @@ a pseudonym is required to reproduce it.
 
 ## Sharing a findings artifact
 
-`-Redact` pseudonymizes evidence *identities* only (the `evidence[].identity`/`sortKey`
-values a finding is keyed on) - it does **not** touch `evidence[].detail`, where most of a
-finding's real, free-text tenant data actually lives (device/policy display names, role
-names, setting values, and similar). A `-Redact` render is safe to share with someone who
-needs to see *which* checks passed or failed and roughly why, but is **not** on its own
-safe to post somewhere public or hand to someone outside the tenant's own trust boundary -
-`detail` can still carry real names.
+`-Redact` always pseudonymizes evidence identities. It replaces a sort key only when that
+key is itself an exact entry in the redaction map (including the usual default where sort key
+equals identity); a custom composite sort key can still retain an identity fragment. It also
+pseudonymizes the small set of `evidence[].detail` keys that their producing rules explicitly
+mark through `RedactDetailKeys`. It does **not** enforce a complete classification over every
+Detail value, reason, error, label, sort key, or future renderer field. A `-Redact` render can
+therefore still contain tenant-derived names or free text and is **not** on its own safe to post
+publicly or hand outside the tenant's trust boundary.
 
 For a findings JSON you actually intend to publish or share outside that boundary (e.g. a
 committed `docs/gates/*.json` reference artifact), run it through
-`scripts/Protect-PulseGateArtifact.ps1` first - an exhaustive scrub that replaces every
+`scripts/Protect-PulseGateArtifact.ps1` first - a required gate-artifact scrub that replaces every
 string leaf inside every finding's `evidence[].detail` with a stable pseudonym, no
 per-field-name allowlist (see that script's own docstring for why a field-name allowlist is
-exactly the failure mode it exists to avoid). That is the actual "safe to share" bar; a
-`-Redact` render alone is not.
+exactly the failure mode it exists to avoid). Then review the resulting artifact under the
+intended sharing boundary. The script is not a general PII classifier and does not prove the
+later R5 privacy contract; a `-Redact` render alone is even narrower.
 
-The raw **snapshot store** (`./out/snapshot/` - see **Snapshot data is sensitive at rest**
-above) is local-only and never safe to share in any form - it is the raw, unredacted Graph
-data itself, not a findings report. Neither `-Redact` nor `Protect-PulseGateArtifact.ps1`
-touch it; there is no supported way to scrub a snapshot store for sharing, only to delete
-it when you are done.
+The **snapshot store** (`./out/snapshot/` - see **Snapshot data is sensitive at rest** above)
+is local-only and never safe to share in any form. It is the sensitive collection/evaluation
+source, not a findings report. Neither report-time `-Redact` nor
+`Protect-PulseGateArtifact.ps1` transforms it into a shareable artifact; there is no
+supported snapshot-sharing scrub, only controlled storage and cleanup when you are done.
 
 ## CIS compliance disclaimer
 
@@ -219,17 +269,19 @@ the ScuBA/CISA-cited Conditional Access, privileged-role, and credential-hygiene
 (`TP.ENT.0017`-`0024`). Not a comprehensive tenant-health product - a deliberately scoped,
 verified-against-a-real-tenant catalog.
 
-"Live" below means the exact packaged TenantPulse `0.2.0` dataset and evaluation path completed
-against a live tenant; it is separate from exact-SHA CI and publication. "Live (partial)" means the path
-completed but the service evidence contained explicit gaps, so evaluation failed closed.
+"Live" below is historical evidence for the exact immutable TenantPulse `0.2.0` package only: its
+dataset and evaluation path completed against a live tenant. It is separate from exact-SHA CI and
+publication, and it does **not** prove current unreleased-source acceptance or closure of R1b-R6.
+"Live (partial)" means the path completed but the service evidence contained explicit gaps, so
+evaluation failed closed.
 "Platform unavailable" means TenantPulse
 returns an explicit non-collecting disposition because the service contract needed for a
 supported read does not exist. A raw `Pending = $true` map placeholder is still never sent to
 Graph directly; a built-in provider plan must resolve it first or it degrades honestly to
-`NotApplicable`. `TP.ENT.0022` additionally requires Entra ID P2 licensing
-once collected; a 400/403 on a non-P2 tenant is itself a rendered finding ("PIM
-posture unassessable - Entra ID P2 required"), per its own research entry - not a collection
-failure hidden from the report.
+`NotApplicable`. `TP.ENT.0022` additionally requires Entra ID P2 licensing, but TenantPulse calls
+that gate unavailable only when successfully collected `subscribedSkus` evidence proves P2 is
+absent. A `400`/`403` from a PIM read is not proof that the tenant lacks P2; it remains an explicit
+provider/permission outcome and the check fails closed rather than inventing a license finding.
 
 | Id | Category | Severity | Evidence | Title |
 |---|---|---|---|---|
@@ -287,24 +339,38 @@ failure hidden from the report.
 | TP.INT.0030 | Intune.Compliance | Medium | Live | Fleet compliance rate below acceptable threshold |
 | TP.INT.0031 | Intune.SettingsCatalog | Critical | Live | BitLocker CSP settings present and correct across all Settings Catalog policies |
 
-The four composite rows retain synthetic `Pending` map placeholders because they do not map
-to a single Graph operation. TenantPulse's default provider registry intercepts those names
-and composes only GraphKit Read/Safe primitives. The Windows data-processor placeholder is
-intercepted by a no-network plan that emits `PlatformUnavailable`. The cleanup rule is no
-longer Pending: GraphKit `0.3.0` ships its direct Read/Safe collection descriptor.
+The four composite rows still retain synthetic `Pending` / `Walk` map tuples because they do not
+map to a single Graph operation. Current runtime dispatch is safe: TenantPulse's default provider
+registry intercepts them and composes only GraphKit Read/Safe primitives. That safety does not make
+the placeholder schema final; removing the invented production tuples and recording every actual
+primitive in structured outcomes is open R2 work. The Windows data-processor runtime similarly
+performs no network request and emits `PlatformUnavailable`, but its static map and outcome
+provenance still claim a GraphKit `Get`; correcting that representation is open R3 work. The cleanup
+rule is no longer Pending: GraphKit `0.3.0` ships its direct Read/Safe collection descriptor.
 
-What the catalog does **not** cover, honestly, as of TenantPulse 0.2.0: group-**membership** expansion for
-Conditional Access exclusions (only direct user/group/role references resolve today - a group
-assigned to a CA exclusion is read as a group reference, not expanded to its members, because no
-group-members dataset exists yet; several checks document this as a known limitation, not a
-silent gap), assignment verification for every Intune policy family (Settings Catalog and the
-security-baseline provider do preserve assignment disposition; other existence checks may not),
-transitive/group-assigned role-assignment expansion
-for `TP.ENT.0021`'s privileged-role count (direct assignments only - documented in that check's
-own evidence text), `TP.ENT.0019`'s scope (only `servicePrincipal` credentials are read - the
-GraphKit `0.3.0` catalog has no `Application` type, so app-**registration** client secrets/certificates are not
-visible to this check at all until a future GraphKit release adds one; evidence is also capped to
-the top 50 worst offenders by design, not exhaustive), and a rendering format other than JSON.
+What the current catalog does **not** cover, honestly:
+
+- **Entra relationship closure.** Conditional Access group references are not expanded with
+  policy/root attribution, bounds, cycle handling, or partial certainty. This can affect
+  `TP.ENT.0003` status and the evidence/certainty of `TP.ENT.0004`, `0005`, `0017`, and `0018`.
+  `TP.ENT.0002`, `0020`, and `0021` count direct principals or a group object rather than unique
+  effective members. `TP.ENT.0022` must continue to count one permanent group assignment as one
+  violation; future expansion is bounded blast-radius evidence, not multiplication of that finding.
+- **Application registrations.** `TP.ENT.0019` reads only `servicePrincipal` credentials because
+  GraphKit `0.3.0` and the current successor tree have no `Application.List` operation. Ordinary app
+  registration secrets/certificates are invisible. An all-unparseable credential population can
+  also currently reach Pass; R4 must make that result `NotApplicable` unless a proven offender
+  already establishes Fail.
+- **Intune assignment awareness.** `TP.INT.0002`, `0004`, `0011`, `0012`, `0014`, `0015`, `0017`,
+  and `0018` can still evaluate policy existence/configuration without authoritative positive
+  assignment proof. `TP.INT.0028` has assignment-aware evaluator logic, but its producer does not
+  yet collect the required authoritative full-object/assignment shape. The shared presence and
+  conflict indexes also treat exclusion-only scope as assigned or possibly overlapping instead of
+  effectively targeting nobody.
+- **Bounded output and presentation.** Many affected findings still lack a deterministic evidence
+  cap with emitted/omitted counts. The governing R4 design requires a supported renderer beyond
+  JSON, but no specific non-JSON format/output contract has been selected and none has been
+  implemented or proven.
 
 ## Settings expansion (Phase 2)
 
@@ -359,11 +425,11 @@ phase surfaced rather than hid:
    Expansion`/`Invoke-PulseTypedPolicyExpansion`) accumulate every row for every policy in
    an in-memory list before merging, sorting, and publishing the family's `.jsonl` file -
    a fragment-then-merge streaming path (writing and merging row fragments incrementally
-   instead of holding the whole family in memory at once) has not been built yet. At the
-   ~27 rows/policy the T2.7 perf container's own 5,000-policy synthetic corpus produces per
-   `settingDefinitionId` cycling, a realistic 5,000-policy tenant's Settings Catalog family
-   alone would hold on the order of 135,000 rows in memory at once during expansion -
-   budget accordingly for very large tenants until this streams.
+   instead of holding the whole family in memory at once) has not been built yet. The T2.7
+   5,000-policy synthetic fixture creates one setting per policy and therefore measures
+   5,000 rows, not 135,000. Real tenants may carry many settings per policy, so that fixture
+   is a regression/capacity baseline rather than an end-to-end peak-memory proof; budget
+   accordingly for large tenants until collection and expansion stream.
 
 Separately, capturing the Settings Catalog definitions corpus (`Save-PulseSettingDefinition
 Corpus`, the per-tenant reference index every Settings Catalog row's `settingName`/

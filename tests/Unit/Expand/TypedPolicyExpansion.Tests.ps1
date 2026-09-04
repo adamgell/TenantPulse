@@ -549,6 +549,62 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         (Get-Content -LiteralPath $script:store.ManifestPath -Raw) | Should -Not -Match ([regex]::Escape($plantedSecretInException))
     }
 
+    It 'stops typed assignment fan-out on first or middle authentication failure, but isolates a non-auth failure' -ForEach @(
+        @{
+            Name = 'first auth'; FailId = 'p1'; Status = 401; ExpectedCalls = 1; ExpectedStatus = 'NotExpanded'
+            ExpectedGapIds = @('p1', 'p2', 'p3'); ExpectedNotAttempted = @('p2', 'p3')
+        }
+        @{
+            Name = 'middle auth'; FailId = 'p2'; Status = 401; ExpectedCalls = 2; ExpectedStatus = 'Partial'
+            ExpectedGapIds = @('p2', 'p3'); ExpectedNotAttempted = @('p3')
+        }
+        @{
+            Name = 'first provider'; FailId = 'p1'; Status = 503; ExpectedCalls = 3; ExpectedStatus = 'Partial'
+            ExpectedGapIds = @('p1'); ExpectedNotAttempted = @()
+        }
+    ) {
+        $policies = 1..3 | ForEach-Object { New-TestCompliancePolicy -Id "p$_" }
+        $target = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Failed'; Certainty = 'Known'
+            Telemetry = @([pscustomobject]@{ Attempt = 1; StatusCode = $Status })
+        }
+        $category = if ($Status -eq 401) {
+            [System.Management.Automation.ErrorCategory]::AuthenticationError
+        } else {
+            [System.Management.Automation.ErrorCategory]::ResourceUnavailable
+        }
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('planted provider response'),
+            "GraphKit.OperationFailed.$Status", $category, $target)
+        $script:typedFanoutCalls = 0
+        $script:typedFanoutFailId = $FailId
+        $script:typedFanoutRecord = $record
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' } {
+            $script:typedFanoutCalls++
+            if ($Parameters.id -eq $script:typedFanoutFailId) { throw $script:typedFanoutRecord }
+            @()
+        }
+
+        $state = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policies, $script:typedPolicyMaps.compliance, $state {
+            param($store, $context, $policies, $typeMap, $state)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies $policies -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance' `
+                -NetworkAbortState $state
+        }
+
+        $script:typedFanoutCalls | Should -Be $ExpectedCalls
+        $state.AuthenticationAborted | Should -Be ($Status -eq 401)
+        $summary.Status | Should -Be $ExpectedStatus
+        @($summary.Gaps.policyId) | Should -Be $ExpectedGapIds
+        @($summary.Gaps | Where-Object reason -eq 'category:NotAttemptedAfterAuthenticationFailure' | ForEach-Object policyId) |
+            Should -Be $ExpectedNotAttempted
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.expansions.compliance.status | Should -Be $ExpectedStatus
+        @($manifest.expansions.compliance.gaps.policyId) | Should -Be $ExpectedGapIds
+    }
+
     It 'planted Sensitive property value never appears in the manifest or the jsonl artifact' {
         $entry = $script:typedPolicyMaps.deviceConfiguration.'#microsoft.graph.windows10CustomConfiguration'
         $plantedSecret = 'PLANTED-TYPED-SECRET-qqq777'

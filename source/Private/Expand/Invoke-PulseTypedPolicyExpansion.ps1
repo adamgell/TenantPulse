@@ -106,8 +106,16 @@ function Invoke-PulseTypedPolicyExpansion {
 
         [Parameter()]
         [AllowNull()]
-        [string] $TenantId
+        [string] $TenantId,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     if ([string]::IsNullOrEmpty($Name)) { $Name = $PolicyType }
     if ([string]::IsNullOrEmpty($RawDatasetPrefix)) { $RawDatasetPrefix = "${PolicyType}Assignments-" }
@@ -135,7 +143,8 @@ function Invoke-PulseTypedPolicyExpansion {
     $allRows = [System.Collections.Generic.List[object]]::new()
     $gapEntries = [System.Collections.Generic.List[object]]::new()
 
-    foreach ($policy in $policyList) {
+    for ($policyIndex = 0; $policyIndex -lt $policyList.Count; $policyIndex++) {
+        $policy = $policyList[$policyIndex]
         $policyIdRaw = Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'id'
         $policyId = if ($null -ne $policyIdRaw) { [string] $policyIdRaw } else { $null }
 
@@ -198,10 +207,17 @@ function Invoke-PulseTypedPolicyExpansion {
                     -TenantId $TenantId -Pseudonym $Pseudonym
             } catch {
                 Write-Verbose "Invoke-PulseTypedPolicyExpansion: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
-                $failureClass = Get-PulseFailureClass -ErrorRecord $_
-                $category = switch ($failureClass) {
+                $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+                if ($failure.AbortCollection) {
+                    $NetworkAbortState.AuthenticationAborted = $true
+                    $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
+                }
+                $category = switch ($failure.FailureClass) {
                     'PermissionDenied' { 'AssignmentPermissionDenied' }
-                    'AuthFailure' { 'AssignmentAuthFailure' }
+                    'AuthenticationFailed' { 'AssignmentAuthFailure' }
+                    'DeadlineExpired' { 'AssignmentDeadlineExpired' }
+                    'Cancelled' { 'AssignmentCancelled' }
+                    'Indeterminate' { 'AssignmentIndeterminate' }
                     default { 'AssignmentFetchFailed' }
                 }
                 $assignmentGap = New-PulseTypedGapReason -Category $category
@@ -210,6 +226,21 @@ function Invoke-PulseTypedPolicyExpansion {
 
         if ($assignmentGap) {
             $gapEntries.Add([pscustomobject]@{ policyId = $policyId; reason = $assignmentGap }) | Out-Null
+            if ($NetworkAbortState.AuthenticationAborted) {
+                for ($remainingIndex = $policyIndex + 1; $remainingIndex -lt $policyList.Count; $remainingIndex++) {
+                    $remainingIdRaw = Get-PulseSettingsCatalogValueProperty -Node $policyList[$remainingIndex] -PropertyName 'id'
+                    $remainingId = if ($null -ne $remainingIdRaw -and -not [string]::IsNullOrWhiteSpace([string] $remainingIdRaw)) {
+                        [string] $remainingIdRaw
+                    } else {
+                        ''
+                    }
+                    $gapEntries.Add([pscustomobject]@{
+                            policyId = $remainingId
+                            reason   = (New-PulseTypedGapReason -Category 'NotAttemptedAfterAuthenticationFailure')
+                        }) | Out-Null
+                }
+                break
+            }
             continue
         }
 

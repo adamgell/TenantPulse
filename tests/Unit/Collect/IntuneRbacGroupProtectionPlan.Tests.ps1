@@ -328,7 +328,9 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         $result.Outcome.Status | Should -Be 'Failed'
         $result.Outcome.FailureClass | Should -Be 'AuthenticationFailed'
         $result.Outcome.ReasonCode | Should -Be 'authentication-failed'
-        @($result.Outcome.Gaps).Count | Should -Be 2
+        # Authentication abort is run-wide: the first child failure is retained and the
+        # second group is never requested or fabricated as another gap.
+        @($result.Outcome.Gaps).Count | Should -Be 1
         @($result.Outcome.Gaps.FailureClass | Sort-Object -Unique) | Should -Be @('AuthenticationFailed')
     }
 

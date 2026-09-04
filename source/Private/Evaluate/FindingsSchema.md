@@ -1,9 +1,11 @@
 # TenantPulse findings document schema
 
-Produced by `Invoke-PulseEvaluation -Store <store> -Checks <descriptors>` (Task 1.6). This
-is the canonical shape every renderer (T1.8's `Export-PulseReport`) and the scoring layer
-(T1.7) consume - it does not change shape after this task except for `coverage`/`scores`
-being filled in by T1.7 (they are already keyed here as `null` placeholders).
+Produced by `Invoke-PulseEvaluation -Store <store> -Checks <descriptors>` (Task 1.6). For
+findings schema `1.0`, this is the canonical shape every renderer (T1.8's
+`Export-PulseReport`) and the scoring layer (T1.7) consume; within that schema version only
+`coverage`/`scores` are filled in by T1.7 (they are already keyed here as `null`
+placeholders). A later product train may introduce an explicit versioned migration rather
+than silently changing schema `1.0`.
 
 `Invoke-PulseEvaluation` itself returns a `[pscustomobject]` with two top-level properties,
 only one of which is ever serialized:
@@ -23,6 +25,13 @@ so a later render step (`-Redact` on `Invoke-PulseAssessment`, T1.8) can substit
 pseudonyms for raw identities without re-running evaluation. A render-only path that only has
 a `Document` (no fresh `RedactionMap`) cannot redact.
 
+> **Current privacy boundary:** schema `1.0` predates the product-program R5 contract. It
+> does not require one of the five privacy classes for every tenant-derived field, and its
+> free-form `reason`/error and optional `RedactDetailKeys` behavior must not be represented as
+> complete de-identification. R5 must version and migrate the schema, loader, checks, snapshot
+> projections, and all renderers together before a findings file is considered protected by
+> classification rather than by the narrower mechanisms documented here.
+
 ## Document shape
 
 ```jsonc
@@ -38,7 +47,7 @@ a `Document` (no fresh `RedactionMap`) cannot redact.
                                                   // snapshot-write time (New-PulseSnapshotStore
                                                   // -Tenant), never the raw tenant id
   "producer": {
-    "tenantPulse": "0.1.0",                      // this module's own version
+    "tenantPulse": "0.3.0",                      // this module's own version
     "graphKit": null,                             // pass-through of manifest.producer.graphKit
     "scoringModelVersion": "1.0"                  // fixed for Phase 1 - T1.7 owns the model
   },
@@ -95,8 +104,8 @@ document as-is.
 | `Pass`         | rule            | The check's condition holds. |
 | `Warn`         | rule (Function only) | The check needs attention but isn't a hard failure. Only a Function rule can produce this - an Expression rule can only resolve to Pass/Fail. |
 | `Fail`         | rule            | The check's condition does not hold. |
-| `NotApplicable`| engine, OR rule (Function only, with mandatory `Reason`) | Engine-assigned: a declared dataset is missing from the manifest, or recorded `Failed`/`Skipped`; or a declared gate is unsatisfied - the rule is never invoked. Rule-assigned (post-review, adjudicated): a Function rule may itself return `NotApplicable` when its own condition genuinely does not apply given what it observed in `$Datasets` (e.g. TP.ENT.0001 once Conditional Access supersedes Security Defaults) - `New-PulseFinding -Status NotApplicable` REQUIRES `-Reason` (throws without it), because unlike the engine's case there is no manifest reason to fall back on. Both paths land in the identical `status: "NotApplicable"` string, so `Add-PulseScores` (which keys off that string alone) excludes both from its scoring denominator identically - "who assigned it" is not a distinction the rest of the pipeline ever needs to make. |
-| `Error`        | engine          | The rule threw, returned a shape the engine could not interpret (a Function rule not returning a `TenantPulse.RuleResult`-shaped object with a valid `Status`, or an Expression rule not resolving to `[bool]`), a Function rule returning `NotApplicable` with no `Reason`, or declared an unrecognized `Rule.Type`. Evaluation of every OTHER check still continues - one bad rule never hides the rest of the run ("no silent gaps"). |
+| `NotApplicable`| engine, OR rule (Function only, with mandatory `Reason`) | Engine-assigned: a declared dataset is missing, `Failed`, `Skipped`, unknown, or `Partial` without an explicit reviewed Function opt-in; or a declared gate is unsatisfied - the rule is never invoked. A non-aware `Partial` reason contains only the canonical dataset name and aggregate gap count. Rule-assigned (post-review, adjudicated): a Function rule may itself return `NotApplicable` when its own condition genuinely does not apply given what it observed in `$Datasets`, including a structurally valid opted-in `Partial` dataset whose usable rows do not prove a monotonic decision. Malformed opted-in Partial input is `Error`, not `NotApplicable`. `New-PulseFinding -Status NotApplicable` REQUIRES `-Reason` (throws without it). Both NotApplicable paths land in the identical `status: "NotApplicable"` string, so `Add-PulseScores` excludes both from its scoring denominator identically. |
+| `Error`        | engine          | The rule threw, returned a shape the engine could not interpret, declared an unrecognized `Rule.Type`, or an opted-in `Partial` entry had zero usable rows, invalid structured gaps, or an input that could not be safely projected/deep-cloned. Evaluation of every OTHER check still continues - one bad rule never hides the rest of the run ("no silent gaps"). |
 
 `Error` is **engine-assigned only** - no rule function or expression can ever produce it
 directly. `NotApplicable` may be engine- or rule-assigned (see above). `New-PulseFinding`
@@ -114,7 +123,10 @@ non-empty `Reason` whenever `Status` is `NotApplicable`.
   `Protect-PulseReason` - the evaluator does not redact it again) when the dataset was
   recorded `Failed`/`Skipped` with a reason. A dataset entirely missing from the manifest,
   or recorded `Failed`/`Skipped` with no reason on file, gets an engine-synthesized reason
-  naming the dataset and its status instead. For a RULE-assigned NotApplicable, `reason` is
+  naming the dataset and its status instead. A non-aware `Partial` entry is different by
+  design: its synthesized reason contains only the canonical dataset name and aggregate
+  gap count, never manifest reason/detail, gap scope/detail, provider, or operation text.
+  For a RULE-assigned NotApplicable, `reason` is
   whatever the rule passed to `New-PulseFinding -Reason` (mandatory for this status) -
   likewise quoted verbatim, never re-capped by `Protect-PulseReason` (the evaluator's
   redaction step is skipped for every NotApplicable finding regardless of who assigned it).
@@ -132,14 +144,42 @@ For each check, in order:
    `FailureClass = GateUnknown`. No unknown gate may evaluate its rule as `Pass`.
    Gate resolution is deliberately fail-closed: a missing dataset is not proof of license
    absence, and permission-denied license evidence remains `PermissionDenied`.
-2. **Datasets** (`Data.Datasets`): each declared dataset name must have a manifest entry with
-   `status: 'Collected'`. Missing, `Failed`, or `Skipped` degrades the check to
-   `NotApplicable` (see Reason semantics above) and the rule is never invoked.
-3. Only once every declared dataset is confirmed `Collected` are the datasets read
-   (`Read-PulseDataset`, cached once per dataset name across the whole evaluation run - many
-   checks commonly share a dataset) and handed to the rule as `$Datasets` (a
-   `dataset-name -> object[]` hashtable) - a `Function` rule receives it via
-   `-Datasets <hashtable>`; an `Expression` rule sees it bound as the `$Datasets` variable.
+2. **Datasets** (`Data.Datasets`): each declared dataset name must have a manifest entry.
+   `Collected` is usable. Missing, `Failed`, `Skipped`, unknown, and non-opted `Partial`
+   degrade to `NotApplicable`, and the rule is never invoked. Only a catalog-validated
+   Function descriptor may name a dataset in `Data.PartialDatasets`; that opted-in
+   `Partial` entry is usable only when it has one or more non-null rows and its gaps satisfy
+   the full `New-PulseCollectionOutcome` structure contract. Accepted gaps are rebuilt into
+   canonical `New-PulseCollectionGap` objects before projection; raw manifest objects and
+   merely string-coercible required fields never cross the rule boundary. Invalid opted-in
+   Partial input is `Error`, not an inapplicable decision.
+3. Once every declared dataset is usable, rows are read (`Read-PulseDataset`, cached once
+   per dataset name across the whole evaluation run) and handed to the rule as an
+   independently deep-cloned `$Datasets` hashtable. A partial-aware Function also receives
+   an independently deep-cloned `-DatasetOutcomes` hashtable for **every** declared dataset.
+   Each outcome exposes exactly `Status`, `FailureClass`, `ReasonCode`, `Detail`, `Provider`,
+   `ApiVersion`, `Operations`, and `Gaps`; manifest-only `reason`, `sha256`, `itemCount`, and
+   `collectedUtc` are absent. `DatasetOutcomes` is an in-memory evaluation input only. It is
+   never copied into a finding, scoring document, snapshot, or report, so findings schema
+   remains `1.0`, snapshot schema remains `2.0.0`, and scoring model remains `1.0`.
+
+### Built-in partial-aware checks
+
+Only four catalog descriptors opt in, each for one dataset:
+
+- Universal `TP.INT.0013` (`intuneRbacGroupProtection`) and `TP.INT.0029`
+  (`securityBaselinesAssignedAndCurrent`) may Fail when a known row proves an offender; neither
+  may Pass with gaps.
+- Existential `TP.INT.0014` (`endpointSecurityDiskEncryptionPolicies`) and `TP.INT.0015`
+  (`endpointSecurityLapsPolicies`) may Pass when a known row proves a witness; neither may Fail
+  with gaps. The qualifying BitLocker value and all four qualifying LAPS criteria must be native
+  Boolean values, not string or numeric lookalikes.
+
+The other 49 checks remain engine-assigned `NotApplicable` when a required dataset is `Partial`.
+For the four opt-ins, a structurally valid Partial dataset whose known rows do not prove the safe
+direction is rule-assigned `NotApplicable`. Without decisive proof, zero usable rows, malformed
+outcome/gap structure, unsupported state, or malformed known rows is `Error`. A decisive monotonic
+witness or offender outranks an unrelated malformed row in either row order.
 
 `$Context` (optional, threaded from `Invoke-PulseEvaluation -Context`) always carries two
 engine-populated keys, unconditionally, regardless of whether the caller supplied its own

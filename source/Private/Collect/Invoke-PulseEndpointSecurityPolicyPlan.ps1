@@ -26,8 +26,16 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
-        [string] $TenantPseudonym
+        [string] $TenantPseudonym,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     # These parameters are part of the common provider-plan contract. The plan deliberately
     # passes the same immutable Context instance to every GraphKit call.
@@ -58,37 +66,23 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
         throw "Invoke-PulseEndpointSecurityPolicyPlan: unsupported dataset '$Dataset'."
     }
 
-    function Convert-EndpointFailureClass {
-        param([System.Management.Automation.ErrorRecord] $ErrorRecord)
-        $classified = Get-PulseFailureClass -ErrorRecord $ErrorRecord
-        switch ($classified) {
-            'PermissionDenied' { return 'PermissionDenied' }
-            'AuthFailure' { return 'AuthenticationFailed' }
-            default { return 'ProviderFailed' }
-        }
-    }
-
-    function Get-EndpointFailureReasonCode {
-        param([string] $FailureClass)
-        switch ($FailureClass) {
-            'PermissionDenied' { return 'permission-denied' }
-            'AuthenticationFailed' { return 'authentication-failed' }
-            default { return 'provider-failed' }
-        }
-    }
-
     $policies = @()
     try {
         $policies = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicy' -Operation 'ListBeta' -ErrorAction Stop)
     } catch {
-        $failureClass = Convert-EndpointFailureClass -ErrorRecord $_
+        $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+        if ($failure.AbortCollection) {
+            $NetworkAbortState.AuthenticationAborted = $true
+            $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
+        }
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
-            -FailureClass $failureClass -ReasonCode (Get-EndpointFailureReasonCode -FailureClass $failureClass) `
+            -FailureClass $failure.FailureClass -ReasonCode $failure.ReasonCode `
             -Detail @{ operation = 'ConfigurationPolicy.ListBeta' } -Provider 'GraphKit' -ApiVersion $apiVersion `
             -Operations $operations
     }
 
     $selectedPolicies = [System.Collections.Generic.List[object]]::new()
+    $gaps = [System.Collections.Generic.List[object]]::new()
     foreach ($policy in $policies) {
         if ($null -eq $policy) { continue }
         $templateReference = Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'templateReference'
@@ -109,6 +103,9 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
 
         $policyId = [string] (Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'id')
         if ([string]::IsNullOrWhiteSpace($policyId)) {
+            $gaps.Add((New-PulseCollectionGap -Scope 'policy:unknown' -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'missing-policy-id' -Detail @{ missing = 'id' } `
+                    -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta')) | Out-Null
             continue
         }
         $policyName = [string] (Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'name')
@@ -132,7 +129,6 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     }
 
     $rows = [System.Collections.Generic.List[object]]::new()
-    $gaps = [System.Collections.Generic.List[object]]::new()
     foreach ($selectedPolicy in $selected) {
         $policyId = [string] $selectedPolicy.PolicyId
         $settings = @()
@@ -140,11 +136,16 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             $settings = @(Get-GraphObject -Context $Context -Type 'ConfigurationPolicySetting' -Operation 'ListBeta' `
                     -Parameters @{ id = $policyId } -ErrorAction Stop)
         } catch {
-            $failureClass = Convert-EndpointFailureClass -ErrorRecord $_
-            $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass $failureClass `
-                    -ReasonCode (Get-EndpointFailureReasonCode -FailureClass $failureClass) `
+            $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+            $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass $failure.FailureClass `
+                    -ReasonCode $failure.ReasonCode `
                     -Detail @{ policyId = $policyId } `
                     -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta')) | Out-Null
+            if ($failure.AbortCollection) {
+                $NetworkAbortState.AuthenticationAborted = $true
+                $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
+                break
+            }
             continue
         }
 
@@ -187,7 +188,17 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
     }
 
+    $topFailureClass = [string] $gapArray[0].FailureClass
+    $topReasonCode = [string] $gapArray[0].ReasonCode
+    foreach ($gap in $gapArray) {
+        if ([string] $gap.FailureClass -ne $topFailureClass -or
+            [string] $gap.ReasonCode -ne $topReasonCode) {
+            $topFailureClass = 'ProviderFailed'
+            $topReasonCode = 'provider-failed'
+            break
+        }
+    }
     return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gapArray `
-        -FailureClass 'ProviderFailed' -ReasonCode 'provider-failed' -Detail @{ gapCount = $gapArray.Count } `
+        -FailureClass $topFailureClass -ReasonCode $topReasonCode -Detail @{ gapCount = $gapArray.Count } `
         -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
 }

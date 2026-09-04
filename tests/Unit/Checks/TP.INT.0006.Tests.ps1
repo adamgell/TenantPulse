@@ -147,13 +147,17 @@ Describe 'TP.INT.0006 - Conflicting security-setting values across policies' {
         @($entry.detail.values).Count | Should -Be 2
     }
 
-    It 'Warn: a Partial artifact with zero conflicts and a non-empty Gaps array must never read as an unqualified Pass' {
-        $gaps = @([pscustomobject]@{ policyId = ''; reason = 'category:FamilyUnavailable;family:compliance' })
+    It 'Warn: a Partial artifact with mixed family and non-family gaps discloses both under accurate labels' {
+        $gaps = @(
+            [pscustomobject]@{ policyId = ''; reason = 'category:FamilyUnavailable;family:compliance' }
+            [pscustomobject]@{ policyId = 'policy-1'; reason = 'category:AssignmentFetchFailed' }
+        )
 
         $finding = Invoke-PulseConflictCheckFixture -Conflicts @() -Gaps $gaps
 
         $finding.status | Should -Be 'Warn'
-        $finding.reason | Should -Match 'compliance'
+        $finding.reason | Should -Match '1 family\(ies\) excluded \(compliance\)'
+        $finding.reason | Should -Match '1 gap reason\(s\) \(category:AssignmentFetchFailed\)'
         $finding.reason | Should -Not -Match 'No conflicting'
     }
 

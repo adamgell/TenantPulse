@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 2288 / -AllowNotRun 1 (see
+    # MinimumTests 2517 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -288,14 +288,24 @@ else {
     # multiline ratchet-parser regression.
     # 2255 -> 2288 after publication closeout: 2277 was the exact pre-closeout
     # merged-main baseline; 2288 is the measured post-closeout gate, incorporating +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.
+    # 2288 -> 2508 for R1a: +2 plan-discovery safety cases, +118 canonical Graph-failure/
+    # adapter cases, +21 PartialDatasets catalog cases, +31 isolated partial-evaluator
+    # cases, and +48 monotonic-check/scoring/privacy cases.
+    # 2508 -> 2510 after the whole-branch provider-plan review correction: +2 thrown
+    # structured Graph-failure regressions preserving the canonical outcome and
+    # authentication abort. The authoritative pre-ratchet run had zero NotRun, so
+    # publication accepts no NotRun block.
+    # 2510 -> 2517 after independent review: +2 provider classification,
+    # +2 pipeline-manifest, and +3 missing-policy-id regressions; existing
+    # expansion-abort cases now also assert complete gap ledgers.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 2288 `
+        -MinimumTests 2517 `
         -AllowedSkips $allowedSkips `
-        -AllowNotRun 1 | Write-Verbose
+        -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {
         throw "The result pair bound by the tested release proof did not pass the whole-result gate, so this package must not be published."
     }

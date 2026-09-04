@@ -25,13 +25,17 @@ Describe 'Publish-PulseConflictArtifact' {
     It 'writes NotExpanded with a reason when zero families are available' {
         InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)
-            $result = Publish-PulseConflictArtifact -Store $store -Conflicts @() -Gaps @() -FamilyCount 0
+            $gaps = @([pscustomobject]@{ policyId = ''; reason = 'category:FamilyUnavailable;family:compliance' })
+            $result = Publish-PulseConflictArtifact -Store $store -Conflicts @() -Gaps $gaps -FamilyCount 0
             $result.Status | Should -Be 'NotExpanded'
+            $result.Gaps.Count | Should -Be 1
         }
 
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         $manifest.expansions.conflicts.status | Should -Be 'NotExpanded'
         $manifest.expansions.conflicts.reason | Should -Match 'no expansion families'
+        $manifest.expansions.conflicts.gaps.Count | Should -Be 1
+        $manifest.expansions.conflicts.gaps[0].reason | Should -Be 'category:FamilyUnavailable;family:compliance'
     }
 
     It 'zero conflicts from >=1 available family is a valid Expanded outcome, format json' {

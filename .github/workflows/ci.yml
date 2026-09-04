@@ -736,7 +736,17 @@ jobs:
           # 2247 -> 2255: +8 release-proof binding and multiline-ratchet regressions.
           # 2255 -> 2288 after publication closeout: 2277 was the exact pre-closeout
           # merged-main baseline; 2288 is the measured post-closeout gate, incorporating +5 current-release truth tests, +2 per-file safety scans for the tracked plan, +3 stable qualified-provenance policy-count cases, and +1 fail-closed legacy-Partial regression.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2288 -AllowedSkips $allowedSkips -AllowNotRun 1
+          # 2288 -> 2508 for R1a: +2 plan-discovery safety cases, +118 canonical
+          # Graph-failure/adapter cases, +21 PartialDatasets catalog cases, +31 isolated
+          # partial-evaluator cases, and +48 monotonic-check/scoring/privacy cases.
+          # 2508 -> 2510 after the whole-branch provider-plan review correction: +2
+          # thrown structured Graph-failure regressions preserving the canonical outcome
+          # and authentication abort. The pre-ratchet authoritative run measured 2510
+          # with zero NotRun, so the stale GraphKit 0.1.1 NotRun allowance remains zero.
+          # 2510 -> 2517 after independent review: +2 provider classification,
+          # +2 pipeline-manifest, and +3 missing-policy-id regressions; existing
+          # expansion-abort cases now also assert complete gap ledgers.
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 2517 -AllowedSkips $allowedSkips -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

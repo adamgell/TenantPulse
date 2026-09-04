@@ -43,8 +43,16 @@ function Invoke-PulseTypedPolicyExpansionPipeline {
         [string] $ProfileId,
 
         [Parameter(Mandatory)]
-        [string] $TenantPseudonym
+        [string] $TenantPseudonym,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
+
+    if ($null -eq $NetworkAbortState) {
+        $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+    }
 
     $contextTenantId = $null
     if ($null -ne $Context -and $Context.PSObject.Properties['TenantId'] -and $null -ne $Context.TenantId) {
@@ -61,6 +69,12 @@ function Invoke-PulseTypedPolicyExpansionPipeline {
     )
 
     foreach ($family in $families) {
+        if ($NetworkAbortState.AuthenticationAborted) {
+            $reason = Protect-PulseReason -Message 'authentication-failed: network expansion suppressed' `
+                -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+            Set-PulseExpansionEntry -Store $Store -Name $family.ExpansionName -Status 'NotExpanded' -Reason $reason
+            continue
+        }
         try {
             $policies = $null
             try {
@@ -74,11 +88,22 @@ function Invoke-PulseTypedPolicyExpansionPipeline {
 
             $null = Invoke-PulseTypedPolicyExpansion -Store $Store -Context $Context -Policies $policies `
                 -PolicyType $family.PolicyType -TypeMap $family.TypeMap -AssignmentType $family.AssignmentType `
-                -Name $family.ExpansionName -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                -Name $family.ExpansionName -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId `
+                -NetworkAbortState $NetworkAbortState
+            if ($NetworkAbortState.AuthenticationAborted) {
+                $collectionFailure = Protect-PulseReason -Message 'authentication-failed' -ProfileId $ProfileId `
+                    -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                Set-PulseManifestEntry -Store $Store -CollectionFailure $collectionFailure
+            }
         } catch {
             Write-Verbose "Invoke-PulseTypedPolicyExpansionPipeline: unexpected exception in '$($family.ExpansionName)': $($_.Exception.Message)"
             $reason = Protect-PulseReason -Message 'unexpected-pipeline-failure' -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
             Set-PulseExpansionEntry -Store $Store -Name $family.ExpansionName -Status 'Failed' -Reason $reason
+            if ($NetworkAbortState.AuthenticationAborted) {
+                $collectionFailure = Protect-PulseReason -Message 'authentication-failed' -ProfileId $ProfileId `
+                    -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+                Set-PulseManifestEntry -Store $Store -CollectionFailure $collectionFailure
+            }
         }
     }
 }

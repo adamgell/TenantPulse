@@ -106,18 +106,66 @@ function Test-PulseBitLockerFullDiskEncryption {
         [hashtable] $Datasets,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [AllowNull()]
+        [hashtable] $DatasetOutcomes = @{}
     )
+
+    $datasetName = 'endpointSecurityDiskEncryptionPolicies'
+    $outcomeState = Resolve-PulseDatasetOutcomeState -DatasetOutcomes $DatasetOutcomes -DatasetName $datasetName -Caller $MyInvocation.MyCommand.Name
+    $isPartial = $outcomeState.IsPartial
+    $unresolvedGapCount = $outcomeState.UnresolvedGapCount
 
     $policies = @($Datasets.endpointSecurityDiskEncryptionPolicies)
 
+    $qualifyingPolicies = [System.Collections.Generic.List[object]]::new()
+    $malformedReason = $null
     foreach ($policy in $policies) {
+        $policyId = [string] $policy.policyId
+        if ([string]::IsNullOrWhiteSpace($policyId)) {
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseBitLockerFullDiskEncryption: a policy has no usable policyId value - every row must have a stable identity.'
+            }
+            continue
+        }
         if ($null -eq $policy.isFullDiskEncryption) {
-            throw "Test-PulseBitLockerFullDiskEncryption: Endpoint Security Disk Encryption policy '$($policy.policyName)' has no isFullDiskEncryption value - an absent value here is not decidable as 'not full-disk encryption', it means this rule cannot tell whether the resolved suffix-matched boolean was ever produced for this policy."
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseBitLockerFullDiskEncryption: a policy has no isFullDiskEncryption value - the row cannot be classified safely.'
+            }
+            continue
+        }
+        if ($policy.isFullDiskEncryption -isnot [bool]) {
+            if ($null -eq $malformedReason) {
+                $malformedReason = 'Test-PulseBitLockerFullDiskEncryption: a policy has a non-Boolean isFullDiskEncryption value - expected a native boolean and refusing to coerce it.'
+            }
+            continue
+        }
+
+        if ([bool] $policy.isFullDiskEncryption) {
+            $qualifyingPolicies.Add($policy)
         }
     }
 
-    $fullyEncrypted = @($policies | Where-Object { $_.isFullDiskEncryption -eq $true })
+    if (-not $isPartial -and $null -ne $malformedReason) {
+        throw $malformedReason
+    }
+
+    if ($isPartial -and $qualifyingPolicies.Count -gt 0) {
+        $witnesses = $qualifyingPolicies.ToArray()
+        $evidence = ConvertTo-PulseMaesterEvidence -Rows $witnesses -IdentityProperty 'policyId' -SortKeyProperty 'policyName' -DetailProperties @('policyName', 'isFullDiskEncryption')
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status Pass -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; $($witnesses.Count) known qualifying full-disk encryption policy witness(es) prove this existential check passes despite unresolved scope." -Evidence $evidence
+    }
+
+    if ($isPartial) {
+        if ($null -ne $malformedReason) { throw $malformedReason }
+        $gapWord = if ($unresolvedGapCount -eq 1) { 'gap' } else { 'gaps' }
+        return New-PulseFinding -Status NotApplicable -Reason "Partial collection has $unresolvedGapCount unresolved $gapWord; no known qualifying full-disk encryption policy witness exists, so the unresolved scope prevents an existential Fail."
+    }
+
+    $fullyEncrypted = $qualifyingPolicies.ToArray()
 
     if ($fullyEncrypted.Count -gt 0) {
         $evidence = ConvertTo-PulseMaesterEvidence -Rows $policies -IdentityProperty 'policyId' -SortKeyProperty 'policyName' -DetailProperties @('policyName', 'isFullDiskEncryption')

@@ -85,39 +85,17 @@ function Invoke-PulseSettingsCatalogPolicy {
         [string] $TenantId,
 
         [Parameter()]
-        [string] $Pseudonym = 'tp-unknown'
+        [string] $Pseudonym = 'tp-unknown',
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState = $null
     )
 
     function New-PulseStructuredGapReason {
         param([string] $Category, [System.Nullable[int]] $StatusCode = $null)
         if ($null -ne $StatusCode) { return "category:$Category;statusCode:$StatusCode" }
         return "category:$Category"
-    }
-
-    function Get-PulseGraphErrorStatusCode {
-        # Small, tolerant status-code reader over GraphKit's own ErrorRecord.TargetObject.
-        # Telemetry envelope (same signal Get-PulseFailureClass reads as its own "signal
-        # 2") - never throws, returns $null when no numeric status is available.
-        param([System.Management.Automation.ErrorRecord] $ErrorRecord)
-        try {
-            if ($null -eq $ErrorRecord) { return $null }
-            $targetObjectProperty = $ErrorRecord.PSObject.Properties['TargetObject']
-            if ($null -eq $targetObjectProperty -or $null -eq $targetObjectProperty.Value) { return $null }
-            $telemetryProperty = $targetObjectProperty.Value.PSObject.Properties['Telemetry']
-            if ($null -eq $telemetryProperty -or $null -eq $telemetryProperty.Value) { return $null }
-            $attempts = @($telemetryProperty.Value)
-            if ($attempts.Count -eq 0) { return $null }
-            $statusProperty = $attempts[$attempts.Count - 1].PSObject.Properties['StatusCode']
-            if ($null -eq $statusProperty -or $null -eq $statusProperty.Value) { return $null }
-            $rawValue = $statusProperty.Value
-            if ($rawValue -is [int]) { return $rawValue }
-            if ($rawValue -is [System.Enum]) { return [int] $rawValue }
-            $parsed = 0
-            if ([int]::TryParse([string] $rawValue, [ref] $parsed)) { return $parsed }
-            return $null
-        } catch {
-            return $null
-        }
     }
 
     $policyIdRaw = Get-PulseSettingsCatalogValueProperty -Node $Policy -PropertyName 'id'
@@ -223,14 +201,20 @@ function Invoke-PulseSettingsCatalogPolicy {
             $settingsPayload = $redacted
         } catch {
             Write-Verbose "Invoke-PulseSettingsCatalogPolicy: fetch failed for policy '$policyId': $($_.Exception.Message)"
-            $failureClass = Get-PulseFailureClass -ErrorRecord $_
-            $statusCode = Get-PulseGraphErrorStatusCode -ErrorRecord $_
-            $category = switch ($failureClass) {
+            $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+            if ($failure.AbortCollection -and $null -ne $NetworkAbortState) {
+                $NetworkAbortState.AuthenticationAborted = $true
+                $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
+            }
+            $category = switch ($failure.FailureClass) {
                 'PermissionDenied' { 'PermissionDenied' }
-                'AuthFailure' { 'AuthFailure' }
+                'AuthenticationFailed' { 'AuthFailure' }
+                'DeadlineExpired' { 'DeadlineExpired' }
+                'Cancelled' { 'Cancelled' }
+                'Indeterminate' { 'Indeterminate' }
                 default { 'FetchFailed' }
             }
-            $fetchGap = New-PulseStructuredGapReason -Category $category -StatusCode $statusCode
+            $fetchGap = New-PulseStructuredGapReason -Category $category -StatusCode $failure.StatusCode
         }
 
         if (-not $fetchGap) {
@@ -240,14 +224,20 @@ function Invoke-PulseSettingsCatalogPolicy {
                     -TenantId $TenantId -Pseudonym $Pseudonym
             } catch {
                 Write-Verbose "Invoke-PulseSettingsCatalogPolicy: assignment fetch failed for policy '$policyId': $($_.Exception.Message)"
-                $failureClass = Get-PulseFailureClass -ErrorRecord $_
-                $statusCode = Get-PulseGraphErrorStatusCode -ErrorRecord $_
-                $category = switch ($failureClass) {
+                $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+                if ($failure.AbortCollection -and $null -ne $NetworkAbortState) {
+                    $NetworkAbortState.AuthenticationAborted = $true
+                    $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
+                }
+                $category = switch ($failure.FailureClass) {
                     'PermissionDenied' { 'AssignmentPermissionDenied' }
-                    'AuthFailure' { 'AssignmentAuthFailure' }
+                    'AuthenticationFailed' { 'AssignmentAuthFailure' }
+                    'DeadlineExpired' { 'AssignmentDeadlineExpired' }
+                    'Cancelled' { 'AssignmentCancelled' }
+                    'Indeterminate' { 'AssignmentIndeterminate' }
                     default { 'AssignmentFetchFailed' }
                 }
-                $fetchGap = New-PulseStructuredGapReason -Category $category -StatusCode $statusCode
+                $fetchGap = New-PulseStructuredGapReason -Category $category -StatusCode $failure.StatusCode
             }
         }
     }
