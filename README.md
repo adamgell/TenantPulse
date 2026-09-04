@@ -417,12 +417,15 @@ recomputing them.
 independently of check selection:
 
 - `application-assignments` inventories every mobile app, preserves apps with no assignments,
-  resolves group names/descriptions and bounded member counts, retains assignment intent,
+  resolves group names and bounded member counts, reserves optional group descriptions for a
+  later verified GraphKit producer, and retains assignment intent,
   include/exclude target type, filters, settings, ids, and explicit resolution states.
 - `app-install-errors` reads GraphKit's safe `AppInstallSummaryReport.Get` report action,
-  request-body pages through the service's `TotalRowCount`, accepts both Graph's schema/values
-  matrix and named-record shapes, preserves every source column, and provides stable normalized
-  columns without inventing severity or a failure rate.
+  request-body pages through the service's `TotalRowCount` with a hard 200-page cap and repeated-page
+  detection, accepts both Graph's schema/values matrix and named-record shapes, preserves every
+  source column, and provides stable normalized columns without inventing severity or a failure
+  rate. Only an explicit valid zero-row report is authoritative empty; a missing payload remains
+  unavailable.
 
 Both are schema-v1 canonical JSONL files recorded under `manifest.expansions`, with content
 hashes and `Expanded`, `Partial`, or `NotExpanded` truth. A partial page, per-app 403,
@@ -438,6 +441,8 @@ does not carry CDW or customer branding, and does not interpret approval fields.
 harness-independent Office builder can consume the versioned rows and preserve customer-owned
 workbook/document regions. The exact row and failure contract is documented in
 [`docs/contracts/application-report-data-v1.md`](docs/contracts/application-report-data-v1.md).
+The stable TenantPulse `0.3.0` dependency remains immutable GraphKit `0.3.0`; it does not treat a
+locally staged GraphKit `0.4.0-r8` prerelease as a distributable customer dependency.
 
 ## Settings expansion (Phase 2)
 

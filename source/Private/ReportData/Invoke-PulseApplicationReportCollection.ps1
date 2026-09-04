@@ -217,9 +217,6 @@ function ConvertTo-PulseAppInstallErrorRow {
 function Test-PulseAppInstallSourceMap {
     param([Parameter(Mandatory)] [System.Collections.IDictionary] $SourceColumns)
 
-    $normalizedKeys = @($SourceColumns.Keys | ForEach-Object {
-            ConvertTo-PulseInstallColumnKey -Name ([string] $_)
-        })
     $identityKeys = @(
         'appname', 'appdisplayname', 'applicationname', 'displayname',
         'appid', 'applicationid', 'mobileappid'
@@ -231,8 +228,19 @@ function Test-PulseAppInstallSourceMap {
         'pendinginstallusercount', 'installedusercount', 'notinstalledusercount'
     )
 
-    $hasIdentity = @($normalizedKeys | Where-Object { $_ -in $identityKeys }).Count -gt 0
-    $hasSignal = @($normalizedKeys | Where-Object { $_ -in $signalKeys }).Count -gt 0
+    $hasIdentity = $false
+    $hasSignal = $false
+    foreach ($name in @($SourceColumns.Keys)) {
+        $normalizedKey = ConvertTo-PulseInstallColumnKey -Name ([string] $name)
+        $value = $SourceColumns[$name]
+        $hasValue = $null -ne $value -and
+            ($value -isnot [string] -or -not [string]::IsNullOrWhiteSpace([string] $value))
+        if (-not $hasValue) { continue }
+
+        if ($normalizedKey -in $identityKeys) { $hasIdentity = $true }
+        if ($normalizedKey -in $signalKeys) { $hasSignal = $true }
+        if ($hasIdentity -and $hasSignal) { return $true }
+    }
     return $hasIdentity -and $hasSignal
 }
 
@@ -455,18 +463,22 @@ function Invoke-PulseAppInstallReportPages {
     param(
         [Parameter(Mandatory)] $Context,
         [Parameter(Mandatory)] $Spec,
-        [ValidateRange(1, 1000)] [int] $PageSize = 200
+        [ValidateRange(1, 1000)] [int] $PageSize = 200,
+        [ValidateRange(1, 10000)] [int] $MaxPages = 200
     )
 
     $payloadRows = [System.Collections.Generic.List[object]]::new()
     $gaps = [System.Collections.Generic.List[object]]::new()
+    $pageFingerprints = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $expectedTotal = $null
     $collectedRowCount = 0
     $skip = 0
+    $pageCount = 0
     $failureClass = $null
     $reasonCode = $null
 
-    while ($true) {
+    while ($pageCount -lt $MaxPages) {
+        $pageCount++
         $outcome = Invoke-PulseReportGraphOperation -Context $Context -Spec $Spec -Dataset 'app-install-errors' `
             -Parameters @{ Body = [ordered]@{ filter = ''; orderBy = @(); select = @(); skip = $skip; top = $PageSize } }
 
@@ -489,9 +501,33 @@ function Invoke-PulseAppInstallReportPages {
 
         $responseRows = @($outcome.Rows)
         if ($responseRows.Count -eq 0) {
+            if ($payloadRows.Count -eq 0) {
+                return [pscustomobject]@{
+                    Status = 'Failed'; PayloadRows = @(); Gaps = @(); FailureClass = 'ProviderFailed'
+                    ReasonCode = 'invalid-provider-data'; ExpectedTotal = $null; CollectedRowCount = 0
+                }
+            }
             if ($null -ne $expectedTotal -and $collectedRowCount -lt [int64] $expectedTotal) {
                 $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'total-row-count-mismatch' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
             }
+            break
+        }
+
+        # Matrix report responses carry Schema/Values and use request-body paging. A complete
+        # GraphKit envelope can also contain direct named records; that legacy-compatible shape
+        # is already the complete row set and must not be rejected merely for containing more
+        # than one object or for lacking a matrix Values wrapper.
+        $matrixShaped = $false
+        foreach ($responseRow in $responseRows) {
+            $rowSchema = Get-PulseReportProperty -InputObject $responseRow -Name @('schema', 'Schema')
+            $rowValues = Get-PulseReportProperty -InputObject $responseRow -Name @('values', 'Values')
+            if ($rowSchema.Success -or $rowValues.Success) {
+                $matrixShaped = $true
+                break
+            }
+        }
+        if (-not $matrixShaped) {
+            foreach ($responseRow in $responseRows) { $payloadRows.Add($responseRow) | Out-Null }
             break
         }
         if ($responseRows.Count -ne 1) {
@@ -501,6 +537,11 @@ function Invoke-PulseAppInstallReportPages {
         }
 
         $payload = $responseRows[0]
+        $pageFingerprint = ConvertTo-PulseCanonicalJsonLine -InputObject $payload
+        if (-not $pageFingerprints.Add($pageFingerprint)) {
+            $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'repeated-page' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
+            break
+        }
         $payloadRows.Add($payload) | Out-Null
         $schemaProperty = Get-PulseReportProperty -InputObject $payload -Name @('schema', 'Schema')
         $valuesProperty = Get-PulseReportProperty -InputObject $payload -Name @('values', 'Values')
@@ -531,6 +572,10 @@ function Invoke-PulseAppInstallReportPages {
         if ($collectedRowCount -eq [int64] $expectedTotal) { break }
         if ($batchCount -eq 0 -or $collectedRowCount -gt [int64] $expectedTotal) {
             $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'total-row-count-mismatch' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
+            break
+        }
+        if ($pageCount -ge $MaxPages) {
+            $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'page-cap' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
             break
         }
 

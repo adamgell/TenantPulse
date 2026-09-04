@@ -25,7 +25,7 @@ One permission preflight includes the exact operation union before any report ta
 |---|---|---|---|
 | `MobileApp` | `ListBeta` | `beta` | Application inventory |
 | `MobileAppAssignment` | `List` | `v1.0` | Per-application assignments |
-| `Group` | `Get` | `v1.0` | Group display name and description |
+| `Group` | `Get` | `v1.0` | Group identity and display name; optional description when producer-selected |
 | `GroupMember` | `List` | `v1.0` | Bounded member evidence/count |
 | `AppInstallSummaryReport` | `Get` | `beta` | Non-mutating install-summary report action |
 
@@ -37,9 +37,12 @@ remain isolated to their artifact or row scope.
 
 `AppInstallSummaryReport.Get` is request-body paged rather than `@odata.nextLink` paged. TenantPulse
 sends `skip`, `top = 200`, `filter`, `orderBy`, and `select`, then continues until the accumulated
-matrix-row count equals `TotalRowCount`. A missing, changing, exceeded, or unreachable total is a
-bounded gap. Rows from completed pages remain available as `Partial`; they are never upgraded to
-complete merely because the GraphKit request envelope itself succeeded.
+matrix-row count equals `TotalRowCount`, subject to a hard 200-page limit. A missing, changing,
+exceeded, unreachable, or repeated page is a bounded gap; a repeated payload is not counted twice
+toward completeness. Rows from completed pages remain available as `Partial`; they are never
+upgraded to complete merely because the GraphKit request envelope itself succeeded. A complete
+direct named-record response is already the complete row set and does not enter matrix paging.
+An empty first GraphKit `Data` array is missing provider data, not an authoritative empty report.
 
 ## Artifact manifest
 
@@ -78,6 +81,13 @@ Every row carries `schemaVersion = "1"` and these stable fields:
 | Target | `targetType`, `targetDisplayName`, `isExclusion`, `filterId`, `filterType` |
 | Group | `groupId`, `groupName`, `groupDescription`, `groupMemberCount`, `groupResolutionState`, `memberResolutionState` |
 
+TenantPulse `0.3.0` keeps its reproducible exact dependency on immutable GraphKit `0.3.0`.
+That producer's `Group.Get` descriptor selects group identity and display name but not
+`description`, so `groupDescription` is normally `null` under the stable dependency. The schema
+reserves and safely preserves the field when a later verified GraphKit release selects it; this
+unreleased source does not claim that a local GraphKit `0.4.0-r8` prerelease is a customer-installable
+dependency.
+
 An application with no assignments still produces one row with
 `assignmentResolutionState = NoAssignments`; it is never silently discarded. Supported target
 types are group, exclusion group, all devices, all licensed users, and device/app-management
@@ -100,13 +110,14 @@ Every row carries `schemaVersion = "1"` and stable normalized fields:
 
 `sourceColumns` preserves the complete source row with its original column names and values. The
 collector accepts both a Graph report `Schema`/`Values` matrix and direct named records. A valid
-schema with zero values is authoritative empty data. A malformed matrix row becomes an explicit
-gap; valid sibling rows remain usable. Duplicate normalized column names are rejected. A populated
-row is usable only when it contains application identity (`ApplicationId`, `DisplayName`, or a
-documented alias) plus at least one report signal such as failed device/user count, install status,
-or error code. The current Intune summary's `ApplicationId`, `DisplayName`, `FailedDeviceCount`, and
-`FailedUserCount` normalize to `appId`, `appName`, `deviceCount`, and `userCount` while all sibling
-summary columns remain unchanged in `sourceColumns`.
+schema with zero values and `TotalRowCount = 0` is authoritative empty data. A malformed matrix row
+becomes an explicit gap; valid sibling rows remain usable. Duplicate normalized column names are
+rejected. A populated row is usable only when it contains a non-empty application identity value
+(`ApplicationId`, `DisplayName`, or a documented alias) plus at least one non-null report signal
+value such as failed device/user count, install status, or error code. Numeric zero is a meaningful
+count, not a missing value. The current Intune summary's `ApplicationId`, `DisplayName`,
+`FailedDeviceCount`, and `FailedUserCount` normalize to `appId`, `appName`, `deviceCount`, and
+`userCount` while all sibling summary columns remain unchanged in `sourceColumns`.
 
 TenantPulse deliberately does not copy IHA's computed `Failure Rate` or hard-coded `Severity`.
 Those were interpretations rather than Graph facts. A downstream Office builder may derive and
