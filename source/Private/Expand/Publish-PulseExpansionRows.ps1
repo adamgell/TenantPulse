@@ -109,7 +109,16 @@ function Publish-PulseExpansionRows {
             $c = [string]::CompareOrdinal([string] $aValue, [string] $bValue)
             if ($c -ne 0) { return $c }
         }
-        return 0
+
+        # A configured identity tuple is intentionally compact, but it is not guaranteed
+        # unique. Array.Sort is not stable, so returning zero here lets tied rows retain
+        # caller/worker order and can change the content-addressed artifact hash. The
+        # canonical serialized row is a complete, deterministic final key without adding
+        # helper properties to the published schema. This relatively expensive comparison
+        # runs only when every caller-supplied primary key tied.
+        $aCanonical = ConvertTo-PulseCanonicalJsonLine -InputObject $a
+        $bCanonical = ConvertTo-PulseCanonicalJsonLine -InputObject $b
+        return [string]::CompareOrdinal($aCanonical, $bCanonical)
     }
     [System.Array]::Sort($sortedRows, $rowComparison)
 
