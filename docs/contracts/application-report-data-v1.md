@@ -32,7 +32,14 @@ One permission preflight includes the exact operation union before any report ta
 Every call requires exactly one genuine, complete or explicitly partial
 `GraphKit.OperationResult`. Raw rows, a lookalike object, multiple envelopes, null `Data`, or a
 missing/non-Boolean `Truncated` signal is invalid provider data. Authentication failure aborts
-later network report work; other failures remain isolated to their artifact or row scope.
+later network report work and sets the snapshot's top-level `collectionFailure`; other failures
+remain isolated to their artifact or row scope.
+
+`AppInstallSummaryReport.Get` is request-body paged rather than `@odata.nextLink` paged. TenantPulse
+sends `skip`, `top = 200`, `filter`, `orderBy`, and `select`, then continues until the accumulated
+matrix-row count equals `TotalRowCount`. A missing, changing, exceeded, or unreachable total is a
+bounded gap. Rows from completed pages remain available as `Partial`; they are never upgraded to
+complete merely because the GraphKit request envelope itself succeeded.
 
 ## Artifact manifest
 
@@ -50,6 +57,11 @@ count, and a content-addressed file under `expanded/`. Status is:
 
 Readers must resolve the file through the manifest and verify its hash. They must not guess a
 filename or treat a missing/`NotExpanded` artifact as an authoritative empty result.
+
+Before either artifact is staged, TenantPulse recursively replaces every case-insensitive
+occurrence of the current tenant ID in every string value—including nested assignment settings,
+group descriptions, application names, and forward-compatible `sourceColumns`. The scrub is
+fail-closed: a row tree that cannot be safely traversed is not persisted.
 
 `policyCount` is retained by the existing expansion-manifest schema. For these non-policy
 artifacts it means root source count (mobile applications for assignments; Graph report payload
@@ -70,7 +82,9 @@ An application with no assignments still produces one row with
 `assignmentResolutionState = NoAssignments`; it is never silently discarded. Supported target
 types are group, exclusion group, all devices, all licensed users, and device/app-management
 filter targets. Unknown or malformed target types preserve the source application/assignment
-identity and add a gap.
+identity and add a gap. A returned assignment without `assignmentId` is malformed. `Group.Get`
+metadata is accepted only when its returned `id` matches the requested group; mismatched identity
+is discarded while independently collected membership evidence can remain usable.
 
 Groups are cached per collection run. Repeated include/exclude assignments to one group cause at
 most one `Group.Get` and one `GroupMember.List`. Group metadata and membership certainty are
@@ -87,7 +101,12 @@ Every row carries `schemaVersion = "1"` and stable normalized fields:
 `sourceColumns` preserves the complete source row with its original column names and values. The
 collector accepts both a Graph report `Schema`/`Values` matrix and direct named records. A valid
 schema with zero values is authoritative empty data. A malformed matrix row becomes an explicit
-gap; valid sibling rows remain usable.
+gap; valid sibling rows remain usable. Duplicate normalized column names are rejected. A populated
+row is usable only when it contains application identity (`ApplicationId`, `DisplayName`, or a
+documented alias) plus at least one report signal such as failed device/user count, install status,
+or error code. The current Intune summary's `ApplicationId`, `DisplayName`, `FailedDeviceCount`, and
+`FailedUserCount` normalize to `appId`, `appName`, `deviceCount`, and `userCount` while all sibling
+summary columns remain unchanged in `sourceColumns`.
 
 TenantPulse deliberately does not copy IHA's computed `Failure Rate` or hard-coded `Severity`.
 Those were interpretations rather than Graph facts. A downstream Office builder may derive and
@@ -96,8 +115,10 @@ without presenting a derived judgment as collected evidence.
 
 ## Determinism and future Office builds
 
-Rows and gaps are sorted ordinally before canonical serialization. Equivalent input in a different
-Graph/page/worker order produces the same artifact bytes and digest. This makes a future Office
-builder able to compare a new collection with a prior accepted document, update only its
-machine-owned tables, and preserve customer-owned response, owner, target-date, prerequisite, and
-approval fields without depending on TenantPulse implementation order.
+Rows and gaps are sorted ordinally before canonical serialization. Compact artifact-specific keys
+sort first; the complete canonical serialized row is the final tie-breaker, so duplicate primary
+keys cannot retain page or worker order. Equivalent input in a different Graph/page/worker order
+therefore produces the same artifact bytes and digest. This makes a future Office builder able to
+compare a new collection with a prior accepted document, update only its machine-owned tables, and
+preserve customer-owned response, owner, target-date, prerequisite, and approval fields without
+depending on TenantPulse implementation order.

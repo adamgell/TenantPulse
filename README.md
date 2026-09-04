@@ -420,15 +420,18 @@ independently of check selection:
   resolves group names/descriptions and bounded member counts, retains assignment intent,
   include/exclude target type, filters, settings, ids, and explicit resolution states.
 - `app-install-errors` reads GraphKit's safe `AppInstallSummaryReport.Get` report action,
-  accepts both Graph's schema/values matrix and named-record shapes, preserves every source
-  column, and provides stable normalized columns without inventing severity or a failure rate.
+  request-body pages through the service's `TotalRowCount`, accepts both Graph's schema/values
+  matrix and named-record shapes, preserves every source column, and provides stable normalized
+  columns without inventing severity or a failure rate.
 
 Both are schema-v1 canonical JSONL files recorded under `manifest.expansions`, with content
 hashes and `Expanded`, `Partial`, or `NotExpanded` truth. A partial page, per-app 403,
 unresolved group, malformed report row, permission-preflight block, and authentication abort
 remain visible rather than becoming an empty-success claim. Collection uses one permission
 preflight and GraphKit's read/safe descriptors; the report POST is a non-mutating Graph report
-operation, not a TenantPulse write.
+operation, not a TenantPulse write. Tenant identifiers are recursively scrubbed from nested report
+rows before persistence, and a report-originated authentication failure sets the snapshot-wide
+collection failure and stops every later network read.
 
 These artifacts are neutral local snapshot data. TenantPulse does not create DOCX/XLSX files,
 does not carry CDW or customer branding, and does not interpret approval fields. A later
