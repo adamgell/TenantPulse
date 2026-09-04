@@ -11,14 +11,19 @@
         through anything but a read-only (ThrottleClass 'Read', ReplayPolicy 'Safe')
         GraphKit descriptor.
 
-        Collection is attempt-and-classify: GraphKit has no per-operation permission
-        pre-flight, so every dataset is actually attempted and the outcome classified
-        afterwards. A clean read is written Collected. A 403 is written Skipped with a
-        reason naming the descriptor's required permissions - "not permitted", not
-        "broken". Any other failure is written Failed with the caught error's message. A
-        A dataset flagged Pending in DatasetMap.psd1 is first resolved through TenantPulse's
-        built-in provider-plan registry. Shipped composites run there; an entry with no
-        registered plan is written Skipped with reason
+        Before any target-data request, TenantPulse resolves the exact selected descriptor
+        union and asks GraphKit for one permission analysis bound to the resolved context's
+        client application. A missing application identity, unresolved descriptor,
+        bootstrap failure, or malformed finding set produces an Unknown decision and no
+        target-data request. A missing grant or incompatible application produces a Denied
+        decision and no target-data request. Each blocked dataset receives a structured,
+        bounded Failed outcome whose failure class distinguishes PermissionDenied from
+        GateUnknown. A clean read is written Collected; a later 403 after a granted
+        preflight is Failed/PermissionDenied, and other provider failures retain only the
+        canonical failure class, reason code, and status signal rather than raw exception
+        text. A dataset flagged Pending in DatasetMap.psd1 is first resolved through
+        TenantPulse's built-in provider-plan registry. Shipped composites run there; an
+        entry with no registered plan is written Skipped with reason
         'descriptor-pending: awaiting GraphKit release' and never attempted at all.
 
         Two distinct paths cover a total authentication failure, because GraphKit's
@@ -287,12 +292,14 @@ function Get-PulseTenantSnapshot {
         $expansionSuppressedReason = Protect-PulseReason -Message 'authentication-failed: network expansion suppressed' `
             -ProfileId $ProfileId -Pseudonym $tenantPseudonym -TenantId $contextTenantId
         $expansionBlocked = $false
+        $expansionBlockDecision = $null
         $expansionBlockReasonCode = $null
         foreach ($expansionOperation in @(Get-PulsePermissionPreflightOperations -Manifest @() -ExpandSettings)) {
             $expansionDecision = Get-PulseOperationAuthorization -AuthorizationDecision $authorizationDecision `
                 -Type $expansionOperation.Type -Operation $expansionOperation.Operation
             if ($expansionDecision.Decision -ne 'Granted') {
                 $expansionBlocked = $true
+                $expansionBlockDecision = $expansionDecision.Decision
                 $expansionBlockReasonCode = $expansionDecision.ReasonCode
                 break
             }
@@ -309,10 +316,7 @@ function Get-PulseTenantSnapshot {
             # this dataset directly and collection already recorded its attempted outcome.
             if (@($manifest | Where-Object { $_.Dataset -eq 'configurationPolicies' }).Count -eq 0) {
                 $expansionFailureClass = if ($expansionBlocked) {
-                    if ($expansionBlockReasonCode -eq 'authentication-unknown' -or $expansionBlockReasonCode -eq 'malformed-finding-set' -or $expansionBlockReasonCode -eq 'bootstrap-trap') {
-                        'GateUnknown'
-                    }
-                    else { 'PermissionDenied' }
+                    if ($expansionBlockDecision -eq 'Unknown') { 'GateUnknown' } else { 'PermissionDenied' }
                 }
                 else { 'AuthenticationFailed' }
                 $expansionReasonCode = if ($expansionBlocked) { $expansionBlockReasonCode } else { 'authentication-failed' }

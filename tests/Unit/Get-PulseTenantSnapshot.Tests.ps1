@@ -631,7 +631,7 @@ Describe 'Invoke-PulseCollection' {
         $manifest = @(
             [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -667,7 +667,11 @@ Describe 'Invoke-PulseCollection' {
         $manifest = @(
             [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso'; TenantId = '00000000-1111-2222-3333-444444444444' }
+        $context = [pscustomobject]@{
+            ProfileId = 'contoso'
+            TenantId  = '00000000-1111-2222-3333-444444444444'
+            ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -696,7 +700,7 @@ Describe 'Invoke-PulseCollection' {
             [pscustomobject]@{ Dataset = 'deviceCompliancePolicies'; Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false }
             [pscustomobject]@{ Dataset = 'deviceConfigurations'; Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -734,7 +738,7 @@ Describe 'Invoke-PulseCollection' {
         $manifest = @(
             [pscustomobject]@{ Dataset = 'deviceConfigurations'; Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -754,7 +758,7 @@ Describe 'Invoke-PulseCollection' {
         $manifest = @(
             [pscustomobject]@{ Dataset = 'mdmAuthority'; Type = 'Organization'; Operation = 'Get'; ApiVersion = 'v1.0'; Pending = $true }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -779,7 +783,7 @@ Describe 'Invoke-PulseCollection' {
             [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
             [pscustomobject]@{ Dataset = 'deviceCompliancePolicies'; Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -812,7 +816,7 @@ Describe 'Invoke-PulseCollection' {
             [pscustomobject]@{ Dataset = 'deviceCompliancePolicies'; Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
             [pscustomobject]@{ Dataset = 'deviceConfigurations'; Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -850,7 +854,7 @@ Describe 'Invoke-PulseCollection' {
             [pscustomobject]@{ Dataset = 'entraDevices'; Type = 'EntraDevice'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true }
             [pscustomobject]@{ Dataset = 'deviceConfigurations'; Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -873,7 +877,7 @@ Describe 'Invoke-PulseCollection' {
         $manifest = @(
             [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso-secret-tenant' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso-secret-tenant'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -901,7 +905,7 @@ Describe 'Invoke-PulseCollection' {
             [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
             [pscustomobject]@{ Dataset = 'organizationMdmAuthority'; Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = 'organization' }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -939,7 +943,11 @@ Describe 'Invoke-PulseCollection' {
             [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
             [pscustomobject]@{ Dataset = 'organizationMdmAuthority'; Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = 'organization' }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso'; TenantId = $tenantId }
+        $context = [pscustomobject]@{
+            ProfileId = 'contoso'
+            TenantId  = $tenantId
+            ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+        }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -967,7 +975,7 @@ Describe 'Invoke-PulseCollection' {
             [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
             [pscustomobject]@{ Dataset = 'organizationMdmAuthority'; Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = 'organization' }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -993,7 +1001,7 @@ Describe 'Invoke-PulseCollection' {
             [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $true; IdFromDataset = $null }
             [pscustomobject]@{ Dataset = 'organizationMdmAuthority'; Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = 'organization' }
         )
-        $context = [pscustomobject]@{ ProfileId = 'contoso' }
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
         InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
             param($store, $manifest, $context)
@@ -1032,7 +1040,13 @@ Describe 'Get-PulseTenantSnapshot' {
         $checkTwo = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies')
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne, $checkTwo) }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{
+                ProfileId = 'contoso-tenant-id'
+                TenantId  = 'contoso-tenant-id'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { @([pscustomobject]@{ id = 'p1' }) }
@@ -1062,12 +1076,14 @@ Describe 'Get-PulseTenantSnapshot' {
         $resolvedContext = [pscustomobject]@{
             ProfileId = 'contoso-tenant-id'
             TenantId = 'tenant-1'
+            ClientId = [guid]'22222222-2222-2222-2222-222222222222'
             PlanCalls = [System.Collections.Generic.List[string]]::new()
             PlanContexts = [System.Collections.Generic.List[object]]::new()
         }
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($check) }
         Mock Get-GraphContext -ModuleName TenantPulse { $resolvedContext }
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
         $planRegistry = InModuleScope TenantPulse {
             @{
                 intuneRbacGroupProtection = {
@@ -1116,8 +1132,13 @@ Describe 'Get-PulseTenantSnapshot' {
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($check) }
         Mock Get-GraphContext -ModuleName TenantPulse {
-            [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'tenant-1' }
+            [pscustomobject]@{
+                ProfileId = 'contoso-tenant-id'
+                TenantId  = 'tenant-1'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
         }
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Invoke-PulseWindowsDataProcessorPlan -ModuleName TenantPulse {
             param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym)
             [pscustomobject][ordered]@{
@@ -1185,10 +1206,18 @@ Describe 'Get-PulseTenantSnapshot' {
         # differently-named GraphKit profile, or the profile were renamed between runs.
         $sameTenantId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
         Mock Get-GraphContext -ModuleName TenantPulse -ParameterFilter { $ProfileId -eq 'contoso-prod' } {
-            [pscustomobject]@{ ProfileId = 'contoso-prod'; TenantId = $sameTenantId }
+            [pscustomobject]@{
+                ProfileId = 'contoso-prod'
+                TenantId  = $sameTenantId
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
         }
         Mock Get-GraphContext -ModuleName TenantPulse -ParameterFilter { $ProfileId -eq 'contoso-renamed' } {
-            [pscustomobject]@{ ProfileId = 'contoso-renamed'; TenantId = $sameTenantId }
+            [pscustomobject]@{
+                ProfileId = 'contoso-renamed'
+                TenantId  = $sameTenantId
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
         }
 
         $storeRootA = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
@@ -1226,7 +1255,13 @@ Describe 'Get-PulseTenantSnapshot' {
         $checkOne = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies')
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne) }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{
+                ProfileId = 'contoso-tenant-id'
+                TenantId  = 'contoso-tenant-id'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse {
             # Reproduces exactly what Get-GraphObject stamps onto a real returned row.
@@ -1303,7 +1338,13 @@ Describe 'Get-PulseTenantSnapshot' {
         $checkTwo = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies')
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne, $checkTwo) }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{
+                ProfileId = 'contoso-tenant-id'
+                TenantId  = 'contoso-tenant-id'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphObject -ModuleName TenantPulse { throw 'AADSTS700016: Application not found in the directory.' }
 
@@ -1327,7 +1368,13 @@ Describe 'Get-PulseTenantSnapshot' {
         $outOfScope = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies') -Category 'Intune.Compliance'
 
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($inScope, $outOfScope) }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{
+                ProfileId = 'contoso-tenant-id'
+                TenantId  = 'contoso-tenant-id'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
 
@@ -1339,6 +1386,37 @@ Describe 'Get-PulseTenantSnapshot' {
         $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
         $manifest.datasets.PSObject.Properties.Name | Should -Contain 'conditionalAccessPolicies'
         $manifest.datasets.PSObject.Properties.Name | Should -Not -Contain 'deviceCompliancePolicies'
+    }
+
+    It 'records an Unknown expansion preflight decision as GateUnknown rather than PermissionDenied' {
+        Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @() }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{
+                ProfileId = 'contoso-tenant-id'
+                TenantId  = 'tenant-1'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
+        }
+        Mock Get-GraphOperation -ModuleName TenantPulse {
+            if ($Type -eq 'ConfigurationPolicy' -and $Operation -eq 'ListBeta') {
+                throw 'descriptor deliberately unavailable'
+            }
+            New-TestReadDescriptor -ApiVersion 'beta'
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            throw 'an expansion with an Unknown authorization decision must not send'
+        }
+
+        $store = InModuleScope TenantPulse -ArgumentList $script:snapshotRoot {
+            param($snapshotRoot)
+            Get-PulseTenantSnapshot -ProfileId 'contoso-tenant-id' -OutputPath $snapshotRoot -ExpandSettings
+        }
+
+        $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.datasets.configurationPolicies.status | Should -Be 'Skipped'
+        $manifest.datasets.configurationPolicies.failureClass | Should -Be 'GateUnknown'
+        $manifest.datasets.configurationPolicies.reasonCode | Should -Be 'descriptor-unresolved'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
 
     It 'throws for an empty -ProfileId' {
@@ -1363,7 +1441,13 @@ Describe 'Get-PulseTenantSnapshot' {
     It '-Path still works as a deprecated alias for -OutputPath' {
         $checkOne = New-TestCheck -Id 'TP.ENT.0001' -Datasets @('conditionalAccessPolicies')
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($checkOne) }
-        Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id'; TenantId = 'contoso-tenant-id' } }
+        Mock Get-GraphContext -ModuleName TenantPulse {
+            [pscustomobject]@{
+                ProfileId = 'contoso-tenant-id'
+                TenantId  = 'contoso-tenant-id'
+                ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
+            }
+        }
         Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
 

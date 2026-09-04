@@ -173,6 +173,86 @@ Describe 'Invoke-PulsePermissionPreflight' {
         $result.Decisions['ConditionalAccessPolicy/List'].Decision | Should -Be 'Granted'
         $result.Decisions['ConditionalAccessPolicy/List'].Decision | Should -Not -Be 'NotApplicable'
     }
+
+    It 'fails closed locally when the target context has no client id' {
+        $contextWithoutClientId = [pscustomobject]@{
+            ProfileId = 'contoso'
+            TenantId  = '11111111-1111-1111-1111-111111111111'
+        }
+        Mock Test-GraphPermission -ModuleName TenantPulse {
+            throw 'the analyzer must not receive an unbound target app id'
+        }
+        $operations = @(@{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' })
+
+        $result = InModuleScope TenantPulse -ArgumentList $contextWithoutClientId, $operations {
+            param($context, $operations)
+            Invoke-PulsePermissionPreflight -Context $context -Operations $operations
+        }
+
+        $result.Decision | Should -Be 'Unknown'
+        $result.ReasonCode | Should -Be 'target-app-id-unavailable'
+        $result.Decisions['ConditionalAccessPolicy/List'].Decision | Should -Be 'Unknown'
+        Should-Invoke Test-GraphPermission -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
+    It 'rejects an out-of-domain authentication finding as malformed' {
+        Mock Test-GraphPermission -ModuleName TenantPulse {
+            New-TestPermissionFindings -AuthenticationCompatible 'Maybe'
+        }
+        $operations = @(@{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' })
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:context, $operations {
+            param($context, $operations)
+            Invoke-PulsePermissionPreflight -Context $context -Operations $operations
+        }
+
+        $result.Decision | Should -Be 'Unknown'
+        $result.ReasonCode | Should -Be 'malformed-finding-set'
+        $result.Decisions['ConditionalAccessPolicy/List'].Decision | Should -Be 'Unknown'
+    }
+
+    It 'rejects duplicate required findings as malformed instead of trusting the first value' {
+        Mock Test-GraphPermission -ModuleName TenantPulse {
+            @(
+                New-TestPermissionFindings
+                [pscustomobject]@{ Finding = 'MissingGrant'; Value = 'Policy.Read.All'; Detail = 'contradiction' }
+            )
+        }
+        $operations = @(@{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' })
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:context, $operations {
+            param($context, $operations)
+            Invoke-PulsePermissionPreflight -Context $context -Operations $operations
+        }
+
+        $result.Decision | Should -Be 'Unknown'
+        $result.ReasonCode | Should -Be 'malformed-finding-set'
+        $result.Decisions['ConditionalAccessPolicy/List'].Decision | Should -Be 'Unknown'
+    }
+
+    It 'rejects Granted No with no reported missing baseline grant as malformed' {
+        Mock Test-GraphPermission -ModuleName TenantPulse {
+            New-TestPermissionFindings -Granted 'No' -MissingGrant 'None' -AuthenticationCompatible 'Yes'
+        }
+        $operations = @(@{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' })
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:context, $operations {
+            param($context, $operations)
+            Invoke-PulsePermissionPreflight -Context $context -Operations $operations
+        }
+
+        $result.Decision | Should -Be 'Unknown'
+        $result.ReasonCode | Should -Be 'malformed-finding-set'
+        $result.Decisions['ConditionalAccessPolicy/List'].Decision | Should -Be 'Unknown'
+    }
+
+    It 'does not authorize an operation when no authorization decision exists' {
+        $authorized = InModuleScope TenantPulse {
+            Test-PulseOperationAuthorized -AuthorizationDecision $null -Type 'ConditionalAccessPolicy' -Operation 'List'
+        }
+
+        $authorized | Should -BeFalse
+    }
 }
 
 Describe 'Invoke-PulseCollection permission preflight' {
@@ -321,6 +401,30 @@ Describe 'Invoke-PulseCollection permission preflight' {
         $entry.status | Should -Be 'Failed'
         $entry.failureClass | Should -Be 'GateUnknown'
         $entry.reasonCode | Should -Match 'malformed-finding-set'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
+    It 'never invokes a selected data operation whose GraphKit descriptor cannot be resolved' {
+        Mock Get-GraphOperation -ModuleName TenantPulse {
+            throw "No Graph operation is registered for '$Type/$Operation'."
+        }
+        Mock Test-GraphPermission -ModuleName TenantPulse {
+            @($Baseline).Count | Should -Be 0
+            New-TestPermissionFindings
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            throw 'an operation absent from the permission baseline must not be sent'
+        }
+
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'futureDataset'; Type = 'FutureGraphResource'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
+        )
+        Invoke-TestCollection -Manifest $manifest
+
+        $entry = Get-TestManifestStatus -Store $script:store -Dataset 'futureDataset'
+        $entry.status | Should -Be 'Failed'
+        $entry.failureClass | Should -Be 'GateUnknown'
+        $entry.reasonCode | Should -Be 'descriptor-unresolved'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
 

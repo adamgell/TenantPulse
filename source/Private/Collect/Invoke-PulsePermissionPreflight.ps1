@@ -156,8 +156,23 @@ function Get-PulsePermissionFinding {
     )
 
     foreach ($finding in @($Findings)) {
-        if ($null -ne $finding -and [string] $finding.Finding -eq $Name) {
-            return $finding
+        if ($null -eq $finding) { continue }
+        try {
+            $findingName = if ($finding -is [System.Collections.IDictionary]) {
+                if (-not $finding.Contains('Finding')) { continue }
+                [string] $finding['Finding']
+            }
+            else {
+                $property = $finding.PSObject.Properties['Finding']
+                if ($null -eq $property) { continue }
+                [string] $property.Value
+            }
+            if ([string]::Equals($findingName, $Name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $finding
+            }
+        }
+        catch {
+            continue
         }
     }
     return $null
@@ -170,12 +185,63 @@ function Test-PulsePermissionFindingsWellFormed {
         [object[]] $Findings
     )
 
-    if ($null -eq $Findings -or @($Findings).Count -eq 0) { return $false }
-    foreach ($required in @('Configured', 'Granted', 'MissingGrant', 'ExcessGranted', 'AuthenticationCompatible')) {
-        $finding = Get-PulsePermissionFinding -Findings $Findings -Name $required
+    $items = @($Findings)
+    if ($null -eq $Findings -or $items.Count -eq 0) { return $false }
+
+    $requiredDomains = [ordered]@{
+        Configured               = @('Yes', 'No', 'Unknown')
+        Granted                  = @('Yes', 'No')
+        MissingGrant             = $null
+        ExcessGranted            = $null
+        AuthenticationCompatible = @('Yes', 'No', 'Unknown')
+    }
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $values = [ordered]@{}
+
+    foreach ($finding in $items) {
         if ($null -eq $finding) { return $false }
-        if (-not $finding.PSObject.Properties['Value']) { return $false }
-        if ($null -eq $finding.Value) { return $false }
+        try {
+            if ($finding -is [System.Collections.IDictionary]) {
+                if (-not $finding.Contains('Finding') -or -not $finding.Contains('Value')) { return $false }
+                $name = [string] $finding['Finding']
+                $value = $finding['Value']
+            }
+            else {
+                $nameProperty = $finding.PSObject.Properties['Finding']
+                $valueProperty = $finding.PSObject.Properties['Value']
+                if ($null -eq $nameProperty -or $null -eq $valueProperty) { return $false }
+                $name = [string] $nameProperty.Value
+                $value = $valueProperty.Value
+            }
+        }
+        catch {
+            return $false
+        }
+
+        if ([string]::IsNullOrWhiteSpace($name) -or -not $seen.Add($name)) { return $false }
+        if ($null -eq $value) { return $false }
+        $values[$name] = $value
+    }
+
+    foreach ($required in $requiredDomains.Keys) {
+        if (-not $values.Contains($required)) { return $false }
+        $value = $values[$required]
+        if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value)) { return $false }
+
+        $allowed = $requiredDomains[$required]
+        if ($null -ne $allowed -and $value -notin $allowed) { return $false }
+        if ($required -in @('MissingGrant', 'ExcessGranted') -and
+            [string]::Equals($value, 'Unknown', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $false
+        }
+    }
+
+    if ($values.Contains('ServicePrincipalMissing')) {
+        $servicePrincipalMissing = $values['ServicePrincipalMissing']
+        if ($servicePrincipalMissing -isnot [string] -or
+            -not [string]::Equals($servicePrincipalMissing, 'Yes', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $false
+        }
     }
     return $true
 }
@@ -313,11 +379,6 @@ function Invoke-PulsePermissionPreflight {
             -ReasonCode 'granted' -Decisions $decisions -Findings @()
     }
 
-    if ($null -eq $targetAppId) {
-        $targetAppId = [guid]::Empty
-    }
-
-
     $baseline = [System.Collections.Generic.List[object]]::new()
     $resolved = [System.Collections.Generic.List[object]]::new()
     foreach ($operation in $selected) {
@@ -353,6 +414,16 @@ function Invoke-PulsePermissionPreflight {
                 RequiredPermissions = $required
                 Resolved            = ($null -ne $descriptor)
             }) | Out-Null
+    }
+
+    $parsedTargetAppId = [guid]::Empty
+    if ($null -eq $targetAppId -or
+        -not [guid]::TryParse([string] $targetAppId, [ref] $parsedTargetAppId) -or
+        $parsedTargetAppId -eq [guid]::Empty) {
+        Set-PulsePermissionPreflightDecisions -Decisions $decisions -Operations $resolved `
+            -Decision 'Unknown' -ReasonCode 'target-app-id-unavailable'
+        return New-PulsePermissionPreflightResult -TargetAppId $targetAppId -Decision 'Unknown' `
+            -ReasonCode 'target-app-id-unavailable' -Decisions $decisions -Findings @()
     }
 
     $findings = $null
@@ -411,10 +482,33 @@ function Invoke-PulsePermissionPreflight {
     $missingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($value in $missingValues) { [void] $missingSet.Add($value) }
 
+    $requiredPermissionCount = @(
+        $resolved |
+            Where-Object { $_.Resolved } |
+            ForEach-Object { @($_.RequiredPermissions) }
+    ).Count
+    $grantedFinding = Get-PulsePermissionFinding -Findings $findings -Name 'Granted'
+    if ($requiredPermissionCount -gt 0 -and
+        [string]::Equals([string] $grantedFinding.Value, 'No', [System.StringComparison]::OrdinalIgnoreCase) -and
+        $missingValues.Count -eq 0) {
+        Set-PulsePermissionPreflightDecisions -Decisions $decisions -Operations $resolved `
+            -Decision 'Unknown' -ReasonCode 'malformed-finding-set'
+        return New-PulsePermissionPreflightResult -TargetAppId $targetAppId -Decision 'Unknown' `
+            -ReasonCode 'malformed-finding-set' -Decisions $decisions -Findings $findings
+    }
+
     $anyDenied = $false
     $anyUnknown = $false
     foreach ($operation in $resolved) {
         $key = Get-PulsePermissionOperationKey -Type $operation.Type -Operation $operation.Operation
+        if (-not $operation.Resolved) {
+            $anyUnknown = $true
+            $decisions[$key] = New-PulsePermissionOperationDecision -Type $operation.Type -Operation $operation.Operation `
+                -ApiVersion $operation.ApiVersion -Stability $operation.Stability -Decision 'Unknown' `
+                -ReasonCode 'descriptor-unresolved' -RequiredPermissions @($operation.RequiredPermissions)
+            continue
+        }
+
         $blocked = @($operation.RequiredPermissions | Where-Object { $missingSet.Contains($_) })
         if ($blocked.Count -gt 0) {
             $anyDenied = $true
@@ -470,7 +564,6 @@ function Test-PulseOperationAuthorized {
         [Parameter(Mandatory)] [string] $Operation
     )
 
-    if ($null -eq $AuthorizationDecision) { return $true }
     $decision = Get-PulseOperationAuthorization -AuthorizationDecision $AuthorizationDecision -Type $Type -Operation $Operation
     return $decision.Decision -eq 'Granted'
 }
@@ -669,4 +762,3 @@ function Invoke-PulseGraphRead {
     }
     return @(Get-PulseGraphObjectRows -Envelope $envelope)
 }
-

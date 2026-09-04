@@ -81,7 +81,6 @@ BeforeDiscovery {
         throw 'Static read-only gate: discovered zero DatasetMap.psd1 entries (both released and Pending) - the map failed to parse or the read/filter logic is broken.'
     }
 }
-
 BeforeAll {
     $projectPath = "$($PSScriptRoot)\..\.." | Convert-Path
     $script:datasetMapPath = Join-Path -Path $projectPath -ChildPath 'source/Data/DatasetMap.psd1'
@@ -311,7 +310,7 @@ Describe 'Permission preflight operation union is Read/Safe' -Tag 'QA', 'ReadOnl
             }
         )
         $appHealth = @(
-            @{ Type = 'MobileApp'; Operation = 'List'; ApiVersion = 'beta' }
+            @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         )
 
         $operations = InModuleScope TenantPulse -ArgumentList $manifest, $appHealth {
@@ -326,8 +325,7 @@ Describe 'Permission preflight operation union is Read/Safe' -Tag 'QA', 'ReadOnl
             try {
                 $descriptor = Get-GraphOperation -Type $operation.Type -Operation $operation.Operation -ErrorAction Stop
             } catch {
-                # Composite children may target primitives not yet in public GraphKit 0.3.0.
-                # Pending DatasetMap entries already have their own Expected Read/Safe gate.
+                $violations.Add("$($operation.Type)/$($operation.Operation) is unresolved in the exact GraphKit package")
                 continue
             }
 
@@ -337,9 +335,7 @@ Describe 'Permission preflight operation union is Read/Safe' -Tag 'QA', 'ReadOnl
             }
         }
 
-        $resolvedCount | Should -BeGreaterThan 0 -Because 'the preflight union must include at least one released GraphKit descriptor'
+        $resolvedCount | Should -Be $operations.Count -Because 'every operation authorized by preflight must resolve in the exact GraphKit package'
         $violations | Should -BeNullOrEmpty -Because ("preflight may only union Read/Safe operations:`n" + ($violations -join "`n"))
-
     }
 }
-
