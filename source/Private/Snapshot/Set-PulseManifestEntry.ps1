@@ -273,9 +273,8 @@ $CollectedUtc,
         $manifest = Get-PulseSnapshotManifest -Store $Store
 
         if ($PSCmdlet.ParameterSetName -eq 'CollectionFailure') {
-            # Use the dictionary indexer: Add-PulseManifestPropertyAccessors adds
-            # compatibility note properties, and dot assignment can update that view
-            # without changing the serialized dictionary key.
+            # Use the dictionary indexer so this mutation unambiguously updates the
+            # serialized key on every supported IDictionary implementation.
             $manifest['collectionFailure'] = $CollectionFailure
         }
         elseif ($PSCmdlet.ParameterSetName -eq 'Reference') {

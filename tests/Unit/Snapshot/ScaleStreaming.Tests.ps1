@@ -52,6 +52,31 @@ Describe 'TP10A: streaming dataset persist and read' {
         $readBack[5].id | Should -Be '06'
     }
 
+    It 'preserves row order and values across the bounded 128-row read-batch boundary' {
+        $rows = [object[]] @(
+            for ($i = 0; $i -lt 257; $i++) {
+                [pscustomobject]@{ id = ('row-{0:D3}' -f $i); value = $i; nullable = $(if ($i -eq 128) { $null } else { "v-$i" }) }
+            }
+        )
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $rows {
+            param($store, $rows)
+            Write-PulseDataset -Store $store -Name 'BatchBoundary' -Data $rows -ApiVersion 'v1.0' -Status 'Collected'
+        }
+        $readBack = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'BatchBoundary'
+        }
+
+        $readBack.Count | Should -Be 257
+        $readBack[0].id | Should -Be 'row-000'
+        $readBack[127].id | Should -Be 'row-127'
+        $readBack[128].id | Should -Be 'row-128'
+        $readBack[128].nullable | Should -BeNullOrEmpty
+        $readBack[256].id | Should -Be 'row-256'
+        $readBack[256].value | Should -Be 256
+    }
+
     It 'throws on itemCount mismatch instead of silently returning a prefix' {
         $rows = @(
             [pscustomobject]@{ id = 'a' }
@@ -267,21 +292,36 @@ Describe 'TP10A: fragment-and-merge expansion' {
                 IsSecretCapable = $false
             }
         }
-
-        Mock Invoke-PulseSettingsCatalogPolicy -ModuleName TenantPulse {
+        $settingsPayload = [object[]] @(
             [pscustomobject]@{
-                PolicyId = [string] $Policy.id
-                Rows     = @(
-                    [pscustomobject]@{
-                        policyId     = [string] $Policy.id
-                        settingPath  = 'setting-a'
-                        instanceId   = '0'
-                        nameResolved = $true
-                        redacted     = $false
+                id              = '0'
+                settingInstance = [pscustomobject]@{
+                    '@odata.type'       = '#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance'
+                    settingDefinitionId = 'setting-a'
+                    simpleSettingValue  = [pscustomobject]@{
+                        '@odata.type' = '#microsoft.graph.deviceManagementConfigurationStringSettingValue'
+                        value         = 'enabled'
                     }
-                )
-                Gap      = $null
+                }
             }
+        )
+        $capturedManifest = [ordered]@{
+            schemaVersion = '2.0.0'
+            datasets      = [ordered]@{}
+            references    = [ordered]@{}
+            expansions    = [ordered]@{}
+        }
+
+        Mock Get-PulseSnapshotManifest -ModuleName TenantPulse { $capturedManifest }
+        Mock Read-PulseDataset -ModuleName TenantPulse -ParameterFilter {
+            $Name -like 'configurationPolicySettings-*'
+        } {
+            return , [object[]] @($settingsPayload)
+        }
+        Mock Read-PulseDataset -ModuleName TenantPulse -ParameterFilter {
+            $Name -like 'configurationPolicyAssignments-*'
+        } {
+            return , [object[]] @()
         }
         Mock Write-PulseExpansionFragment -ModuleName TenantPulse {
             [pscustomobject]@{ FragmentId = $FragmentId; RowCount = @($Rows).Count }
@@ -303,6 +343,18 @@ Describe 'TP10A: fragment-and-merge expansion' {
         }
 
         $summary.RowCount | Should -Be 65
+        Should-Invoke Get-PulseSnapshotManifest -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Read-PulseDataset -ModuleName TenantPulse -Times 130 -Exactly -ParameterFilter {
+            [object]::ReferenceEquals($ManifestSnapshot, $capturedManifest)
+        }
+        Should-Invoke Read-PulseDataset -ModuleName TenantPulse -Times 65 -Exactly -ParameterFilter {
+            $Name -like 'configurationPolicySettings-*' -and
+            [object]::ReferenceEquals($ManifestSnapshot, $capturedManifest)
+        }
+        Should-Invoke Read-PulseDataset -ModuleName TenantPulse -Times 65 -Exactly -ParameterFilter {
+            $Name -like 'configurationPolicyAssignments-*' -and
+            [object]::ReferenceEquals($ManifestSnapshot, $capturedManifest)
+        }
         Should-Invoke Write-PulseExpansionFragment -ModuleName TenantPulse -Times 3 -Exactly
         Should-Invoke Write-PulseExpansionFragment -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
             $FragmentId -eq $expectedFragmentIds[0] -and

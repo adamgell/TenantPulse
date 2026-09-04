@@ -34,19 +34,41 @@ function Read-PulseDataset {
         [pscustomobject] $Store,
 
         [Parameter(Mandatory)]
-        [string] $Name
+        [string] $Name,
+
+        # A captured expansion may read thousands of datasets governed by the same
+        # immutable-on-disk manifest generation. Let that caller pin one explicit,
+        # call-scoped view instead of reparsing manifest.json for every dataset. This is
+        # deliberately not a store/global cache: manifest writers must always re-read the
+        # latest generation while holding their mutex.
+        [Parameter()]
+        [AllowNull()]
+        [System.Collections.IDictionary] $ManifestSnapshot
     )
 
     Assert-PulseDatasetName -Name $Name
 
-    $manifest = Get-PulseSnapshotManifest -Store $Store
+    if ($PSBoundParameters.ContainsKey('ManifestSnapshot')) {
+        if ($null -eq $ManifestSnapshot) {
+            throw 'Read-PulseDataset: -ManifestSnapshot was explicitly supplied as null.'
+        }
+        if (-not $ManifestSnapshot.Contains('datasets') -or
+            $ManifestSnapshot['datasets'] -isnot [System.Collections.IDictionary]) {
+            throw 'Read-PulseDataset: -ManifestSnapshot has no valid datasets dictionary.'
+        }
+        $manifest = $ManifestSnapshot
+    } else {
+        $manifest = Get-PulseSnapshotManifest -Store $Store
+    }
+
+    $datasets = $manifest['datasets']
     $fileName = "$Name.json"
 
-    if (-not $manifest.datasets -or -not $manifest.datasets.Contains($Name)) {
+    if (-not $datasets.Contains($Name)) {
         throw "Read-PulseDataset: no manifest entry for dataset '$Name' ($fileName)."
     }
 
-    $entry = $manifest.datasets[$Name]
+    $entry = $datasets[$Name]
     if ($entry.status -in @('Failed', 'Skipped')) {
         throw "Read-PulseDataset: dataset '$Name' has status '$($entry.status)' and has no usable rows (failureClass=$($entry.failureClass), reasonCode=$($entry.reasonCode))."
     }
@@ -82,8 +104,35 @@ function Read-PulseDataset {
             $root = $document.RootElement
             $rows = [System.Collections.Generic.List[object]]::new()
             if ($root.ValueKind -eq [System.Text.Json.JsonValueKind]::Array) {
+                # Parse bounded batches rather than invoking ConvertFrom-Json once per
+                # element. The per-element form preserved the no-whole-document-UTF16
+                # memory boundary, but paid cmdlet/parser startup 50,000 times for the
+                # scale fixture (about 3x the former read time). A 128-row batch keeps the
+                # temporary UTF-16 surface bounded while amortizing that startup cost.
+                $batchSize = 128
+                $batchBuilder = [System.Text.StringBuilder]::new()
+                [void] $batchBuilder.Append('[')
+                $batchCount = 0
                 foreach ($element in $root.EnumerateArray()) {
-                    $rows.Add((ConvertFrom-Json -InputObject $element.GetRawText() -Depth 64)) | Out-Null
+                    if ($batchCount -gt 0) { [void] $batchBuilder.Append(',') }
+                    [void] $batchBuilder.Append($element.GetRawText())
+                    $batchCount++
+
+                    if ($batchCount -ge $batchSize) {
+                        [void] $batchBuilder.Append(']')
+                        foreach ($parsedRow in @(ConvertFrom-Json -InputObject $batchBuilder.ToString() -Depth 64)) {
+                            $rows.Add($parsedRow) | Out-Null
+                        }
+                        [void] $batchBuilder.Clear()
+                        [void] $batchBuilder.Append('[')
+                        $batchCount = 0
+                    }
+                }
+                if ($batchCount -gt 0) {
+                    [void] $batchBuilder.Append(']')
+                    foreach ($parsedRow in @(ConvertFrom-Json -InputObject $batchBuilder.ToString() -Depth 64)) {
+                        $rows.Add($parsedRow) | Out-Null
+                    }
                 }
             } elseif ($root.ValueKind -eq [System.Text.Json.JsonValueKind]::Null) {
                 # empty

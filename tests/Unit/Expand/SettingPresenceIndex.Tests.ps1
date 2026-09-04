@@ -249,6 +249,31 @@ Describe 'Invoke-PulseSettingPresenceIndexBuild' {
         $manifest.expansions.PSObject.Properties['settingPresenceIndex'].Value.gaps | Should -BeNullOrEmpty
     }
 
+    It 'passes its one manifest view to every verified-family row read' {
+        $capturedManifest = [ordered]@{
+            expansions = [ordered]@{
+                settingsCatalog = [ordered]@{ status = 'Expanded'; gaps = @() }
+                compliance      = [ordered]@{ status = 'Expanded'; gaps = @() }
+            }
+        }
+        Mock Get-PulseSnapshotManifest -ModuleName TenantPulse { $capturedManifest }
+        Mock Get-PulseExpansionRows -ModuleName TenantPulse { return , [object[]] @() }
+        Mock Publish-PulseSettingPresenceIndex -ModuleName TenantPulse {
+            [pscustomobject]@{ Status = 'Expanded'; DefinitionCount = 0; FamilyCount = $FamilyCount; Gaps = @() }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Invoke-PulseSettingPresenceIndexBuild -Store $store
+        }
+
+        $result.Status | Should -Be 'Expanded'
+        Should-Invoke Get-PulseSnapshotManifest -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Get-PulseExpansionRows -ModuleName TenantPulse -Times 2 -Exactly -ParameterFilter {
+            [object]::ReferenceEquals($ManifestSnapshot, $capturedManifest)
+        }
+    }
+
     It 'publishes Expanded across two families with real data, manifest entry carries the expected fields' {
         InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)

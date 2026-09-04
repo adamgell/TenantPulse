@@ -448,6 +448,21 @@ function Invoke-PulseSettingsCatalogExpansion {
         $eligiblePolicies.Add([pscustomobject]@{ Policy = $policy; PolicyId = $rawId }) | Out-Null
     }
 
+    # Captured re-expansion is a point-in-time read of one quiescent snapshot. Pin one
+    # explicit manifest view for every governed raw dataset read in this call. If the
+    # eager read itself fails, retain the prior per-policy failure classification by
+    # omitting the parameter and allowing Read-PulseDataset to perform its normal read
+    # inside the existing per-policy try/catch. Writers and final publication never see
+    # this view and continue to re-read under their own mutex.
+    $capturedManifestSnapshot = $null
+    if ($FromCapturedPayloads.IsPresent -and $eligiblePolicies.Count -gt 0) {
+        try {
+            $capturedManifestSnapshot = Get-PulseSnapshotManifest -Store $Store
+        } catch {
+            Write-Verbose "Invoke-PulseSettingsCatalogExpansion: could not pin the captured manifest; retaining per-policy read classification: $($_.Exception.Message)"
+        }
+    }
+
     # FORMER FORK POINT (Part D, T3.4): this used to branch on -Sequential/-MaxParallel into
     # either this plain foreach or a bounded RunspacePool worker-pool path. The RunspacePool
     # path is deleted, not merely defaulted off - see this file's own docstring
@@ -487,11 +502,23 @@ function Invoke-PulseSettingsCatalogExpansion {
         $rawAssignmentDatasetName = "$rawAssignmentDatasetPrefix$($eligible.PolicyId)"
         $result = $null
         try {
-            $result = Invoke-PulseSettingsCatalogPolicy -Store $Store -Policy $policy -Context $Context -DefinitionIndex $DefinitionIndex `
-                -FromCapturedPayloads $FromCapturedPayloads.IsPresent -RawDatasetName $rawDatasetName `
-                -RawAssignmentDatasetName $rawAssignmentDatasetName `
-                -TenantId $TenantId -Pseudonym $Pseudonym -NetworkAbortState $NetworkAbortState `
-                -ManifestBatch $manifestBatch
+            $policyParameters = @{
+                Store                    = $Store
+                Policy                   = $policy
+                Context                  = $Context
+                DefinitionIndex          = $DefinitionIndex
+                FromCapturedPayloads     = $FromCapturedPayloads.IsPresent
+                RawDatasetName           = $rawDatasetName
+                RawAssignmentDatasetName = $rawAssignmentDatasetName
+                TenantId                 = $TenantId
+                Pseudonym                = $Pseudonym
+                NetworkAbortState        = $NetworkAbortState
+                ManifestBatch            = $manifestBatch
+            }
+            if ($null -ne $capturedManifestSnapshot) {
+                $policyParameters['ManifestSnapshot'] = $capturedManifestSnapshot
+            }
+            $result = Invoke-PulseSettingsCatalogPolicy @policyParameters
         } catch {
             Write-Verbose "Invoke-PulseSettingsCatalogExpansion: unexpected exception processing policy '$($eligible.PolicyId)': $($_.Exception.Message)"
             $gapEntries.Add([pscustomobject]@{ policyId = $eligible.PolicyId; reason = 'category:WorkerException' }) | Out-Null

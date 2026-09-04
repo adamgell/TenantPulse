@@ -143,6 +143,19 @@ function Invoke-PulseTypedPolicyExpansion {
     $allRows = [System.Collections.Generic.List[object]]::new()
     $gapEntries = [System.Collections.Generic.List[object]]::new()
 
+    # Re-expansion reads one quiescent captured snapshot. Reuse a single call-scoped
+    # manifest view across the per-policy assignment datasets; never attach it to the
+    # store or pass it to a writer. A failed eager load intentionally falls back to the
+    # existing per-policy read/catch behavior so persisted gap classification is stable.
+    $capturedManifestSnapshot = $null
+    if ($FromCapturedPayloads -and $policyList.Count -gt 0) {
+        try {
+            $capturedManifestSnapshot = Get-PulseSnapshotManifest -Store $Store
+        } catch {
+            Write-Verbose "Invoke-PulseTypedPolicyExpansion: could not pin the captured manifest; retaining per-policy read classification: $($_.Exception.Message)"
+        }
+    }
+
     for ($policyIndex = 0; $policyIndex -lt $policyList.Count; $policyIndex++) {
         $policy = $policyList[$policyIndex]
         $policyIdRaw = Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'id'
@@ -194,7 +207,14 @@ function Invoke-PulseTypedPolicyExpansion {
                 # other caller in this module (e.g. Invoke-PulseSettingsCatalogPolicy.ps1's
                 # own -FromCapturedPayloads branch) assigns its result directly for the
                 # identical reason.
-                $rawAssignments = Read-PulseDataset -Store $Store -Name $rawDatasetName
+                $readParameters = @{
+                    Store = $Store
+                    Name  = $rawDatasetName
+                }
+                if ($null -ne $capturedManifestSnapshot) {
+                    $readParameters['ManifestSnapshot'] = $capturedManifestSnapshot
+                }
+                $rawAssignments = Read-PulseDataset @readParameters
             } catch {
                 Write-Verbose "Invoke-PulseTypedPolicyExpansion: captured assignment payload for '$policyId' unreadable: $($_.Exception.Message)"
                 $category = if ($_.Exception.Message -match '(?i)no manifest entry|missing from the snapshot') { 'AssignmentPayloadMissing' } else { 'AssignmentPayloadUnreadable' }

@@ -126,6 +126,72 @@ Describe 'Write-PulseDataset and Read-PulseDataset' {
         $result[1].value | Should -Be 2
     }
 
+    It 'reuses a caller-supplied manifest snapshot while still hash-verifying the dataset bytes' {
+        $data = @([pscustomobject]@{ id = 'cached'; value = 7 })
+        InModuleScope TenantPulse -ArgumentList $script:store, $data {
+            param($store, $data)
+            Write-PulseDataset -Store $store -Name 'CachedSample' -Data $data -ApiVersion 'v1.0' -Status 'Collected'
+        }
+        $manifestSnapshot = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Get-PulseSnapshotManifest -Store $store
+        }
+        Mock Get-PulseSnapshotManifest -ModuleName TenantPulse {
+            throw 'the cached read must not reparse manifest.json'
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store, $manifestSnapshot {
+            param($store, $manifestSnapshot)
+            Read-PulseDataset -Store $store -Name 'CachedSample' -ManifestSnapshot $manifestSnapshot
+        }
+
+        $result.Count | Should -Be 1
+        $result[0].id | Should -Be 'cached'
+        $result[0].value | Should -Be 7
+
+        [System.IO.File]::WriteAllText(
+            (Join-Path $script:store.DatasetsPath 'CachedSample.json'),
+            '[{"id":"tampered","value":8}]',
+            [System.Text.UTF8Encoding]::new($false)
+        )
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store, $manifestSnapshot {
+                param($store, $manifestSnapshot)
+                Read-PulseDataset -Store $store -Name 'CachedSample' -ManifestSnapshot $manifestSnapshot
+            }
+        } | Should -Throw -ExpectedMessage '*hash mismatch*'
+        Should-Invoke Get-PulseSnapshotManifest -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
+    It 'rejects an explicitly null caller-supplied manifest snapshot instead of silently rereading disk' {
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Read-PulseDataset -Store $store -Name 'Sample' -ManifestSnapshot $null
+            }
+        } | Should -Throw -ExpectedMessage '*ManifestSnapshot*explicitly supplied as null*'
+    }
+
+    It 'rejects caller-supplied manifest snapshots without a valid datasets dictionary' {
+        Mock Get-PulseSnapshotManifest -ModuleName TenantPulse {
+            throw 'an explicitly supplied view must remain authoritative'
+        }
+        $invalidSnapshots = [object[]] @(
+            [ordered]@{}
+            [ordered]@{ datasets = $null }
+        )
+
+        foreach ($invalidSnapshot in $invalidSnapshots) {
+            {
+                InModuleScope TenantPulse -ArgumentList $script:store, $invalidSnapshot {
+                    param($store, $invalidSnapshot)
+                    Read-PulseDataset -Store $store -Name 'Sample' -ManifestSnapshot $invalidSnapshot
+                }
+            } | Should -Throw -ExpectedMessage '*ManifestSnapshot*valid datasets dictionary*'
+        }
+        Should-Invoke Get-PulseSnapshotManifest -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
     # Task 1.11 review follow-up: GraphKit's Get-GraphObject stamps every row with
     # _Tenant/_RetrievedUtc/_GraphPath/_ApiVersion (see Remove-PulseGraphRowProvenance's
     # docstring). Write-PulseDataset now strips all four before serialization - this
@@ -618,6 +684,25 @@ Describe 'Get-PulseSnapshotManifest' {
         $manifest.datasets.Ok.status | Should -Be 'Collected'
         $manifest.datasets.Bad.status | Should -Be 'Failed'
         $manifest.datasets.Bad.reason | Should -Be 'timeout'
+    }
+
+    It 'uses native live dictionary access instead of stale synthetic note properties' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Write-PulseDataset -Store $store -Name 'ReplaceMe' -Data @([pscustomobject]@{ id = 1 }) -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        $manifest = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Get-PulseSnapshotManifest -Store $store
+        }
+
+        @($manifest.datasets.PSObject.Properties | Where-Object MemberType -EQ NoteProperty).Count | Should -Be 0
+        $manifest.datasets.ReplaceMe = [ordered]@{ status = 'Failed'; reason = 'replacement' }
+        $manifest.datasets['ReplaceMe'].status | Should -Be 'Failed'
+        $manifest.datasets['ReplaceMe'].reason | Should -Be 'replacement'
+        $manifest.datasets.Contains('ReplaceMe') | Should -BeTrue
+        (ConvertTo-Json -InputObject $manifest.datasets -Depth 8 -Compress) | Should -Match '"ReplaceMe":\{"status":"Failed","reason":"replacement"\}'
     }
 }
 

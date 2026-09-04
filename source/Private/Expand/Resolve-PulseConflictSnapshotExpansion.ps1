@@ -36,7 +36,7 @@ function Resolve-PulseConflictSnapshotExpansion {
     try {
         $manifest = Get-PulseSnapshotManifest -Store $Store
 
-        if ($manifest.expansions -and $manifest.expansions.ContainsKey('conflicts')) {
+        if ($manifest.expansions -and $manifest.expansions.Contains('conflicts')) {
             $entry = $manifest.expansions['conflicts']
 
             if ($entry.status -eq 'NotExpanded') {

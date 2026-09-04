@@ -72,14 +72,14 @@ function Resolve-PulseSettingsCatalogSnapshotExpansion {
     try {
         $manifest = Get-PulseSnapshotManifest -Store $Store
 
-        if (-not $manifest.datasets -or -not $manifest.datasets.ContainsKey('configurationPolicies')) {
+        if (-not $manifest.datasets -or -not $manifest.datasets.Contains('configurationPolicies')) {
             return
         }
         if ($manifest.datasets['configurationPolicies'].status -ne 'Collected') {
             return
         }
 
-        $hasExpansionEntry = $manifest.expansions -and $manifest.expansions.ContainsKey('settingsCatalog')
+        $hasExpansionEntry = $manifest.expansions -and $manifest.expansions.Contains('settingsCatalog')
 
         if ($hasExpansionEntry) {
             $entry = $manifest.expansions['settingsCatalog']
@@ -105,7 +105,7 @@ function Resolve-PulseSettingsCatalogSnapshotExpansion {
         # on the missing reference, or every policy would gap on its missing captured
         # payload - so skip cleanly instead of paying for (and logging) that failure.
         if (-not $hasExpansionEntry) {
-            $hasSettingDefinitionsReference = $manifest.references -and $manifest.references.ContainsKey('settingDefinitions')
+            $hasSettingDefinitionsReference = $manifest.references -and $manifest.references.Contains('settingDefinitions')
             $hasCapturedPolicySettings = $manifest.datasets -and `
                 @($manifest.datasets.Keys | Where-Object { $_ -like 'configurationPolicySettings-*' }).Count -gt 0
             if (-not $hasSettingDefinitionsReference -and -not $hasCapturedPolicySettings) {

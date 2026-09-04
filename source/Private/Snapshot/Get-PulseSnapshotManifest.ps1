@@ -1,9 +1,12 @@
 <#
     Private: read and parse a snapshot store's manifest.json.
 
-    Returns the manifest as a mutable hashtable tree, so both this function's own callers
+    Returns the manifest as a mutable IDictionary tree, so both this function's own callers
     and Set-PulseManifestEntry (which reads, mutates and rewrites the same structure) work
-    with one consistent shape. This is the evaluator's source for NA-with-reason: dataset
+    with one consistent shape. Native PowerShell dictionary dot/index access is deliberately
+    left intact; synthetic PSNoteProperty mirrors are not added because they become stale
+    when a key is replaced and adapting every key turns a large manifest walk quadratic.
+    This is the evaluator's source for NA-with-reason: dataset
     statuses, reasons and hashes all come from here - and, critically, createdUtc, which
     Invoke-PulseEvaluation reads straight off this function's return value as both
     'generatedUtc' (the findings document's own timestamp) and $Context.SnapshotCreatedUtc/
@@ -101,35 +104,5 @@ function Get-PulseSnapshotManifest {
     $raw = Get-Content -LiteralPath $Store.ManifestPath -Raw
     $manifest = ConvertFrom-PulseJsonPreservingStrings -Json $raw -Depth 64 -AsHashtable
     $manifest = ConvertTo-PulseMigratedManifest -Manifest $manifest
-    Add-PulseManifestPropertyAccessors -Value $manifest
     return $manifest
-}
-function Add-PulseManifestPropertyAccessors {
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        [object] $Value
-    )
-
-    if ($null -eq $Value -or $Value -is [string]) {
-        return
-    }
-
-    if ($Value -is [System.Collections.IDictionary]) {
-        foreach ($key in @($Value.Keys)) {
-            $child = $Value[$key]
-            Add-PulseManifestPropertyAccessors -Value $child
-            if ($Value.PSObject.Properties.Name -notcontains ([string] $key)) {
-                $Value.PSObject.Properties.Add([System.Management.Automation.PSNoteProperty]::new([string] $key, $child))
-            }
-        }
-    } elseif ($Value -is [System.Collections.IEnumerable]) {
-        foreach ($item in @($Value)) {
-            Add-PulseManifestPropertyAccessors -Value $item
-        }
-    } elseif ($Value -is [System.Management.Automation.PSObject]) {
-        foreach ($property in @($Value.PSObject.Properties)) {
-            Add-PulseManifestPropertyAccessors -Value $property.Value
-        }
-    }
 }

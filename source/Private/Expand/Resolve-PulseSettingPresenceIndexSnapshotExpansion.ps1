@@ -36,7 +36,7 @@ function Resolve-PulseSettingPresenceIndexSnapshotExpansion {
     try {
         $manifest = Get-PulseSnapshotManifest -Store $Store
 
-        if ($manifest.expansions -and $manifest.expansions.ContainsKey('settingPresenceIndex')) {
+        if ($manifest.expansions -and $manifest.expansions.Contains('settingPresenceIndex')) {
             $entry = $manifest.expansions['settingPresenceIndex']
 
             if ($entry.status -eq 'NotExpanded') {

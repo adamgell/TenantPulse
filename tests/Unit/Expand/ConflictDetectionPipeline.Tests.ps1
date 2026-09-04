@@ -33,6 +33,31 @@ Describe 'Invoke-PulseConflictDetection' {
         $manifest.expansions.PSObject.Properties['conflicts'].Value.gaps | Should -BeNullOrEmpty
     }
 
+    It 'passes its one manifest view to every verified-family row read' {
+        $capturedManifest = [ordered]@{
+            expansions = [ordered]@{
+                settingsCatalog = [ordered]@{ status = 'Expanded'; gaps = @() }
+                compliance      = [ordered]@{ status = 'Expanded'; gaps = @() }
+            }
+        }
+        Mock Get-PulseSnapshotManifest -ModuleName TenantPulse { $capturedManifest }
+        Mock Get-PulseExpansionRows -ModuleName TenantPulse { return , [object[]] @() }
+        Mock Publish-PulseConflictArtifact -ModuleName TenantPulse {
+            [pscustomobject]@{ Status = 'Expanded'; ConflictCount = 0; Gaps = @() }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Invoke-PulseConflictDetection -Store $store
+        }
+
+        $result.Status | Should -Be 'Expanded'
+        Should-Invoke Get-PulseSnapshotManifest -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Get-PulseExpansionRows -ModuleName TenantPulse -Times 2 -Exactly -ParameterFilter {
+            [object]::ReferenceEquals($ManifestSnapshot, $capturedManifest)
+        }
+    }
+
     It 'detects a real conflict across two families sharing the same settingDefinitionId' {
         InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)

@@ -93,7 +93,11 @@ function Invoke-PulseSettingsCatalogPolicy {
 
         [Parameter()]
         [AllowNull()]
-        [System.Collections.IList] $ManifestBatch = $null
+        [System.Collections.IList] $ManifestBatch = $null,
+
+        [Parameter()]
+        [AllowNull()]
+        [System.Collections.IDictionary] $ManifestSnapshot
     )
 
     function New-PulseStructuredGapReason {
@@ -138,16 +142,24 @@ function Invoke-PulseSettingsCatalogPolicy {
     $fetchGap = $null
 
     if ($FromCapturedPayloads) {
+        $readParameters = @{
+            Store = $Store
+            Name  = $RawDatasetName
+        }
+        if ($PSBoundParameters.ContainsKey('ManifestSnapshot')) {
+            $readParameters['ManifestSnapshot'] = $ManifestSnapshot
+        }
         try {
-            $settingsPayload = Read-PulseDataset -Store $Store -Name $RawDatasetName
+            $settingsPayload = Read-PulseDataset @readParameters
         } catch {
             Write-Verbose "Invoke-PulseSettingsCatalogPolicy: captured payload for '$policyId' unreadable: $($_.Exception.Message)"
             $category = if ($_.Exception.Message -match '(?i)no manifest entry|missing from the snapshot') { 'CapturedPayloadMissing' } else { 'CapturedPayloadUnreadable' }
             $fetchGap = New-PulseStructuredGapReason -Category $category
         }
         if (-not $fetchGap) {
+            $readParameters['Name'] = $RawAssignmentDatasetName
             try {
-                $rawAssignments = Read-PulseDataset -Store $Store -Name $RawAssignmentDatasetName
+                $rawAssignments = Read-PulseDataset @readParameters
             } catch {
                 Write-Verbose "Invoke-PulseSettingsCatalogPolicy: captured assignment payload for '$policyId' unreadable: $($_.Exception.Message)"
                 $category = if ($_.Exception.Message -match '(?i)no manifest entry|missing from the snapshot') { 'AssignmentPayloadMissing' } else { 'AssignmentPayloadUnreadable' }

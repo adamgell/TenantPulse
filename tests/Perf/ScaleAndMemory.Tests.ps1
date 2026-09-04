@@ -145,6 +145,10 @@ Describe 'Perf: 5,000-policy Settings Catalog expansion + conflict-detection com
                 # expansion+conflicts").
                 $policies = [System.Collections.Generic.List[object]]::new()
                 $datasetsEntries = [ordered]@{}
+                $emptyAssignmentJson = ConvertTo-PulseCanonicalJson -InputObject @()
+                $emptyAssignmentBytes = [System.Text.Encoding]::UTF8.GetBytes($emptyAssignmentJson)
+                $emptyAssignmentHashBytes = [System.Security.Cryptography.SHA256]::HashData($emptyAssignmentBytes)
+                $emptyAssignmentSha256 = ([System.BitConverter]::ToString($emptyAssignmentHashBytes) -replace '-', '').ToLowerInvariant()
                 for ($i = 1; $i -le $N; $i++) {
                     $id = '{0:D8}-0000-0000-0000-000000000000' -f $i
                     $defId = $defIds[$i % $defIds.Count]
@@ -173,10 +177,28 @@ Describe 'Perf: 5,000-policy Settings Catalog expansion + conflict-detection com
                     $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
                     $sha256 = ([System.BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
                     $datasetsEntries[$name] = [ordered]@{ status = 'Collected'; apiVersion = 'beta'; sha256 = $sha256; itemCount = $response.Count; collectedUtc = '2026-08-16T00:00:00.000Z'; reason = $null }
+
+                    # Assignment capture is mandatory for a trustworthy expanded row.
+                    # Seed a real, hash-governed empty assignment payload for every policy;
+                    # absence must remain distinguishable from a proven empty assignment.
+                    $assignmentName = "configurationPolicyAssignments-$id"
+                    [System.IO.File]::WriteAllBytes((Join-Path $store.DatasetsPath "$assignmentName.json"), $emptyAssignmentBytes)
+                    $datasetsEntries[$assignmentName] = [ordered]@{ status = 'Collected'; apiVersion = 'beta'; sha256 = $emptyAssignmentSha256; itemCount = 0; collectedUtc = '2026-08-16T00:00:00.000Z'; reason = $null }
                 }
                 $manifest = Get-PulseSnapshotManifest -Store $store
                 foreach ($k in $datasetsEntries.Keys) { $manifest.datasets[$k] = $datasetsEntries[$k] }
                 Set-PulseAtomicFileContent -Path $store.ManifestPath -Value (ConvertTo-PulseCanonicalJson -InputObject $manifest)
+                $manifestDatasetCount = $manifest.datasets.Count
+
+                # The seed builder is not part of a real re-expansion caller's live set.
+                # Release its duplicate manifest/entry graph before the forced-GC baseline
+                # so the measured window reflects only the store, policies, and definition
+                # index that production actually carries into this operation.
+                $datasetsEntries = $null
+                $manifest = $null
+                $json = $null
+                $bytes = $null
+                $hashBytes = $null
 
                 # --- MEASURED WINDOW STARTS HERE ---
                 [System.GC]::Collect(); [System.GC]::WaitForPendingFinalizers(); [System.GC]::Collect()
@@ -226,26 +248,36 @@ Describe 'Perf: 5,000-policy Settings Catalog expansion + conflict-detection com
                 [pscustomobject]@{
                     ExpandStatus            = $expandSummary.Status
                     ExpandRowCount          = $expandSummary.RowCount
+                    ExpandGapCount          = @($expandSummary.Gaps).Count
                     ExpandSeconds           = $expandSw.Elapsed.TotalSeconds
                     ConflictStatus          = $conflictSummary.Status
                     ConflictCount           = $conflictSummary.ConflictCount
+                    ConflictGapCount        = @($conflictSummary.Gaps).Count
                     ConflictSeconds         = $conflictSw.Elapsed.TotalSeconds
                     MemoryDeltaMB           = ($memAfter - $memBefore) / 1MB
                     IndexStatus             = $indexStatus
                     IndexDefinitionCount    = $indexDefinitionCount
+                    IndexGapCount           = @($indexSummary.Gaps).Count
                     IndexMaxSeconds         = ($indexSeconds | Measure-Object -Maximum).Maximum
                     IndexMaxMemoryDeltaMB   = ($indexMemoryDeltasMB | Measure-Object -Maximum).Maximum
+                    ManifestDatasetCount    = $manifestDatasetCount
                 }
             }
+
+            Write-Host ('TENANTPULSE_PERF pipeline ' + ($result | ConvertTo-Json -Compress))
 
             # Correctness sanity (not the perf point, but a silent budget "pass" over a
             # broken/empty run would be worse than useless):
             $result.ExpandStatus | Should -Be 'Expanded'
             $result.ExpandRowCount | Should -Be 5000
-            $result.ConflictStatus | Should -BeIn @('Expanded', 'Partial')
-            $result.ConflictCount | Should -BeGreaterThan 0
-            $result.IndexStatus | Should -BeIn @('Expanded', 'Partial')
+            $result.ExpandGapCount | Should -Be 0
+            $result.ManifestDatasetCount | Should -Be 10000
+            $result.ConflictStatus | Should -Be 'Expanded'
+            $result.ConflictCount | Should -Be 50
+            $result.ConflictGapCount | Should -Be 0
+            $result.IndexStatus | Should -Be 'Expanded'
             $result.IndexDefinitionCount | Should -BeGreaterThan 0
+            $result.IndexGapCount | Should -Be 0
 
             # Budgets: see docs/spike/2026-08-16-t27-perf-container.md's recorded table.
             $result.ExpandSeconds | Should -BeLessThan $script:PulsePerfExpandBudgetSeconds
@@ -320,6 +352,8 @@ Describe 'Perf: 50,000-row managedDevices dataset write+read memory ceiling' {
                 }
             }
 
+            Write-Host ('TENANTPULSE_PERF dataset ' + ($result | ConvertTo-Json -Compress))
+
             $result.ReadBackCount | Should -Be 50000
 
             # MEASURED FINDING (see docs/spike/2026-08-16-t27-perf-container.md's own
@@ -382,6 +416,7 @@ Describe 'Perf: raw per-policy dataset write scaling (manifest growth characteri
                 $sw.Stop()
                 return $sw.Elapsed.TotalSeconds
             }
+            Write-Host ('TENANTPULSE_PERF unbatchedManifestWrites ' + ($elapsedSeconds | ConvertTo-Json -Compress))
             $elapsedSeconds | Should -BeLessThan $script:PulsePerfManifestWriteBudgetSeconds
         } finally {
             Remove-Item -LiteralPath $storeRoot -Recurse -Force -ErrorAction SilentlyContinue

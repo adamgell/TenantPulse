@@ -60,7 +60,7 @@ function Invoke-PulseConflictDetection {
     $manifest = Get-PulseSnapshotManifest -Store $Store
 
     foreach ($familyName in $familyNames) {
-        $hasEntry = $manifest.expansions -and $manifest.expansions.ContainsKey($familyName)
+        $hasEntry = $manifest.expansions -and $manifest.expansions.Contains($familyName)
         if (-not $hasEntry) { continue }
 
         $sourceEntry = $manifest.expansions[$familyName]
@@ -84,7 +84,7 @@ function Invoke-PulseConflictDetection {
         }
 
         try {
-            $familyRows = Get-PulseExpansionRows -Store $Store -Name $familyName
+            $familyRows = Get-PulseExpansionRows -Store $Store -Name $familyName -ManifestSnapshot $manifest
             $familyGaps = [System.Collections.Generic.List[object]]::new()
             if ($entryStatus -eq 'Partial') {
                 Add-PulseConflictCopiedSourceGaps -Target $familyGaps -SourceEntry $sourceEntry -FamilyName $familyName `

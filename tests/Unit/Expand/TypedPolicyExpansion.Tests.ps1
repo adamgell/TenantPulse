@@ -660,25 +660,82 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
     }
 
     It '-FromCapturedPayloads re-expands from the already-persisted raw assignment dataset, makes NO Graph call at all' {
-        $policy = New-TestCompliancePolicy -Id 'p1'
-        $assignmentResponse = New-TestAssignmentResponse -GroupId 'g1'
+        $policies = @(
+            New-TestCompliancePolicy -Id 'p1'
+            New-TestCompliancePolicy -Id 'p2'
+        )
+        $assignmentResponseOne = New-TestAssignmentResponse -GroupId 'g1'
+        $assignmentResponseTwo = New-TestAssignmentResponse -GroupId 'g2'
 
-        InModuleScope TenantPulse -ArgumentList $script:store, $assignmentResponse {
-            param($store, $assignmentResponse)
-            Write-PulseDataset -Store $store -Name 'complianceAssignments-p1' -Data $assignmentResponse -ApiVersion 'v1.0' -Status 'Collected'
+        InModuleScope TenantPulse -ArgumentList $script:store, $assignmentResponseOne, $assignmentResponseTwo {
+            param($store, $assignmentResponseOne, $assignmentResponseTwo)
+            Write-PulseDataset -Store $store -Name 'complianceAssignments-p1' -Data $assignmentResponseOne -ApiVersion 'v1.0' -Status 'Collected'
+            Write-PulseDataset -Store $store -Name 'complianceAssignments-p2' -Data $assignmentResponseTwo -ApiVersion 'v1.0' -Status 'Collected'
         }
-
-        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $policy, $script:typedPolicyMaps.compliance {
-            param($store, $policy, $typeMap)
-            Invoke-PulseTypedPolicyExpansion -Store $store -Context $null -Policies @($policy) -PolicyType 'compliance' `
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $script:typedPolicyMaps.compliance {
+            param($store, $policies, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $null -Policies $policies -PolicyType 'compliance' `
                 -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance' -FromCapturedPayloads $true
         }
 
         $summary.Status | Should -Be 'Expanded'
         $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store -Name 'compliance'
         $rows = @(Get-Content -LiteralPath $jsonlPath) | ForEach-Object { $_ | ConvertFrom-Json }
-        $rows[0].assignments[0].groupId | Should -Be 'g1'
+        $p1Rows = @($rows | Where-Object policyId -EQ 'p1')
+        $p2Rows = @($rows | Where-Object policyId -EQ 'p2')
+        $p1Rows.Count | Should -BeGreaterThan 0
+        $p2Rows.Count | Should -BeGreaterThan 0
+        @($p1Rows | ForEach-Object { $_.assignments[0].groupId } | Select-Object -Unique) | Should -Be @('g1')
+        @($p2Rows | ForEach-Object { $_.assignments[0].groupId } | Select-Object -Unique) | Should -Be @('g2')
 
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
+    It '-FromCapturedPayloads pins one manifest view across every typed assignment read' {
+        $policies = @(
+            New-TestCompliancePolicy -Id 'p1'
+            New-TestCompliancePolicy -Id 'p2'
+        )
+        $capturedManifest = [ordered]@{
+            schemaVersion = '2.0.0'
+            datasets      = [ordered]@{}
+            references    = [ordered]@{}
+            expansions    = [ordered]@{}
+        }
+        $assignmentOne = New-TestAssignmentResponse -GroupId 'g1'
+        $assignmentTwo = New-TestAssignmentResponse -GroupId 'g2'
+
+        Mock Get-PulseSnapshotManifest -ModuleName TenantPulse { $capturedManifest }
+        Mock Read-PulseDataset -ModuleName TenantPulse -ParameterFilter { $Name -eq 'complianceAssignments-p1' } { return , [object[]] @($assignmentOne) }
+        Mock Read-PulseDataset -ModuleName TenantPulse -ParameterFilter { $Name -eq 'complianceAssignments-p2' } { return , [object[]] @($assignmentTwo) }
+        Mock Publish-PulseExpansionRows -ModuleName TenantPulse {
+            [pscustomobject]@{
+                Status              = 'Expanded'
+                PolicyCount         = $PolicyCount
+                RowCount            = @($Rows).Count
+                UnresolvedNameCount = 0
+                RedactedSecretCount = 0
+                Gaps                = @()
+            }
+        }
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $policies, $script:typedPolicyMaps.compliance {
+            param($store, $policies, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $null -Policies $policies -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance' -FromCapturedPayloads $true
+        }
+
+        $summary.Status | Should -Be 'Expanded'
+        Should-Invoke Get-PulseSnapshotManifest -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Read-PulseDataset -ModuleName TenantPulse -Times 2 -Exactly -ParameterFilter {
+            [object]::ReferenceEquals($ManifestSnapshot, $capturedManifest)
+        }
+        Should-Invoke Read-PulseDataset -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'complianceAssignments-p1' -and [object]::ReferenceEquals($ManifestSnapshot, $capturedManifest)
+        }
+        Should-Invoke Read-PulseDataset -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'complianceAssignments-p2' -and [object]::ReferenceEquals($ManifestSnapshot, $capturedManifest)
+        }
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
 

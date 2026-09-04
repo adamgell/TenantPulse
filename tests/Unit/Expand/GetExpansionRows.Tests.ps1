@@ -49,6 +49,38 @@ Describe 'Get-PulseExpansionRows' {
         }
     }
 
+    It 'reuses a caller-supplied manifest snapshot while still hash-verifying expansion bytes' {
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            $rows = @([pscustomobject]@{ policyId = 'p1'; settingPath = 's1'; instanceId = 'i1'; settingDefinitionId = 'def-1'; value = 'v1' })
+            Publish-PulseExpansionRows -Store $store -Name 'settingsCatalog' -Rows $rows -Gaps @() -PolicyCount 1 | Out-Null
+        }
+        $manifestSnapshot = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Get-PulseSnapshotManifest -Store $store
+        }
+        Mock Get-PulseSnapshotManifest -ModuleName TenantPulse {
+            throw 'the supplied expansion manifest must not be reread'
+        }
+
+        $readBack = InModuleScope TenantPulse -ArgumentList $script:store, $manifestSnapshot {
+            param($store, $manifestSnapshot)
+            Get-PulseExpansionRows -Store $store -Name 'settingsCatalog' -ManifestSnapshot $manifestSnapshot
+        }
+        $readBack.Count | Should -Be 1
+        $readBack[0].settingDefinitionId | Should -Be 'def-1'
+
+        $entry = $manifestSnapshot.expansions.settingsCatalog
+        Add-Content -LiteralPath (Join-Path $script:store.Root $entry.path) -Value 'tampered' -NoNewline
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store, $manifestSnapshot {
+                param($store, $manifestSnapshot)
+                Get-PulseExpansionRows -Store $store -Name 'settingsCatalog' -ManifestSnapshot $manifestSnapshot
+            }
+        } | Should -Throw -ExpectedMessage '*hash mismatch*'
+        Should-Invoke Get-PulseSnapshotManifest -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
     It 'throws naming the file on a hash mismatch (tamper detection)' {
         InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)

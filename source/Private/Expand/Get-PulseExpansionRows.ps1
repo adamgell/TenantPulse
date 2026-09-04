@@ -31,18 +31,38 @@ function Get-PulseExpansionRows {
         [pscustomobject] $Store,
 
         [Parameter(Mandatory)]
-        [string] $Name
+        [string] $Name,
+
+        # Drivers that inspect several expansion families can pin one call-scoped
+        # manifest view and avoid reparsing the same large datasets namespace for each
+        # family. File bytes are still hashed on every read; writers never receive this
+        # view and continue to re-read the latest manifest under their mutex.
+        [Parameter()]
+        [AllowNull()]
+        [System.Collections.IDictionary] $ManifestSnapshot
     )
 
     Assert-PulseDatasetName -Name $Name -Kind 'expansion name'
 
-    $manifest = Get-PulseSnapshotManifest -Store $Store
+    if ($PSBoundParameters.ContainsKey('ManifestSnapshot')) {
+        if ($null -eq $ManifestSnapshot) {
+            throw 'Get-PulseExpansionRows: -ManifestSnapshot was explicitly supplied as null.'
+        }
+        if (-not $ManifestSnapshot.Contains('expansions') -or
+            $ManifestSnapshot['expansions'] -isnot [System.Collections.IDictionary]) {
+            throw 'Get-PulseExpansionRows: -ManifestSnapshot has no valid expansions dictionary.'
+        }
+        $manifest = $ManifestSnapshot
+    } else {
+        $manifest = Get-PulseSnapshotManifest -Store $Store
+    }
+    $expansions = $manifest['expansions']
 
-    if (-not $manifest.expansions -or -not $manifest.expansions.ContainsKey($Name)) {
+    if (-not $expansions.Contains($Name)) {
         throw "Get-PulseExpansionRows: no manifest entry for expansion '$Name'."
     }
 
-    $entry = $manifest.expansions[$Name]
+    $entry = $expansions[$Name]
 
     if ($entry.status -ne 'Expanded' -and $entry.status -ne 'Partial') {
         $reasonText = if ([string]::IsNullOrEmpty([string] $entry.reason)) { '(no reason recorded)' } else { [string] $entry.reason }

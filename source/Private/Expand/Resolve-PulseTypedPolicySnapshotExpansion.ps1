@@ -89,10 +89,10 @@ function Resolve-PulseTypedPolicySnapshotExpansion {
         try {
             $manifest = Get-PulseSnapshotManifest -Store $Store
 
-            if (-not $manifest.datasets -or -not $manifest.datasets.ContainsKey($family.DatasetName)) { continue }
+            if (-not $manifest.datasets -or -not $manifest.datasets.Contains($family.DatasetName)) { continue }
             if ($manifest.datasets[$family.DatasetName].status -ne 'Collected') { continue }
 
-            $hasExpansionEntry = $manifest.expansions -and $manifest.expansions.ContainsKey($family.ExpansionName)
+            $hasExpansionEntry = $manifest.expansions -and $manifest.expansions.Contains($family.ExpansionName)
 
             if ($hasExpansionEntry) {
                 $entry = $manifest.expansions[$family.ExpansionName]

@@ -44,7 +44,7 @@ function Get-PulseConflictArtifact {
 
     $manifest = Get-PulseSnapshotManifest -Store $Store
 
-    if (-not $manifest.expansions -or $manifest.expansions -isnot [System.Collections.IDictionary] -or -not $manifest.expansions.ContainsKey('conflicts')) {
+    if (-not $manifest.expansions -or $manifest.expansions -isnot [System.Collections.IDictionary] -or -not $manifest.expansions.Contains('conflicts')) {
         return [pscustomobject]@{
             Status    = 'NotAvailable'
             Reason    = 'no expansions.conflicts entry in the snapshot manifest - settings expansion was not run for this snapshot.'

@@ -54,7 +54,7 @@ function Invoke-PulseSettingPresenceIndexBuild {
     $manifest = Get-PulseSnapshotManifest -Store $Store
 
     foreach ($familyName in $familyNames) {
-        $hasEntry = $manifest.expansions -and $manifest.expansions.ContainsKey($familyName)
+        $hasEntry = $manifest.expansions -and $manifest.expansions.Contains($familyName)
         if (-not $hasEntry) { continue }
 
         $entryStatus = $manifest.expansions[$familyName].status
@@ -64,7 +64,7 @@ function Invoke-PulseSettingPresenceIndexBuild {
         }
 
         try {
-            $familyRows = Get-PulseExpansionRows -Store $Store -Name $familyName
+            $familyRows = Get-PulseExpansionRows -Store $Store -Name $familyName -ManifestSnapshot $manifest
             $familyGaps = [System.Collections.Generic.List[object]]::new()
             if ($entryStatus -eq 'Partial') {
                 $sourceEntry = $manifest.expansions[$familyName]
