@@ -757,10 +757,13 @@ jobs:
           # interop correction strengthens an existing three-case parameterization.
           # 3320 -> 3323 adds thrown ARM transport normalization plus ambiguous and
           # known retry-exhaustion/no-final-delay contracts.
+          # 3323 -> 3328 adds fail-closed null Graph-envelope elements,
+          # permission-baseline coherence, malformed group-member accounting, and
+          # bounded artifact-fingerprint failure publication.
           # The four tests/Perf assertions are deliberately outside this QA+Unit release
-          # workflow and are not included in its measured 3323-test floor.
+          # workflow and are not included in its measured 3328-test floor.
           # NotRun remains forbidden.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3323 -AllowedSkips $allowedSkips -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3328 -AllowedSkips $allowedSkips -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

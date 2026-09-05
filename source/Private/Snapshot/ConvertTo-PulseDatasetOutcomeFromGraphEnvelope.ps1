@@ -1,7 +1,8 @@
 <#
     Private: validate and map exactly one genuine GraphKit.OperationResult envelope to a
     provider-neutral collection outcome. Genuine means the GraphKit.OperationResult type
-    identity is present and non-null Data, Outcome, and Certainty members exist with
+    identity is present and non-null Data, Outcome, and Certainty members exist, Data has
+    no null elements, and
     supported signal values; successful paged operations additionally require native-Boolean
     Truncated and positive PageCount members. GraphKit 0.3.0 non-paged operations and paged
     terminal failures omit both paging members, so the caller must identify PagingStrategy=None
@@ -109,6 +110,9 @@ function Test-PulseGraphResultEnvelope {
             if ($truncatedFound -and $values['Truncated']) { return $false }
         }
         if ($null -eq $values['Data']) { return $false }
+        foreach ($item in @($values['Data'])) {
+            if ($null -eq $item) { return $false }
+        }
 
         return $true
     } catch {
@@ -231,9 +235,8 @@ function ConvertTo-PulseDatasetOutcomeFromGraphEnvelope {
         if (-not $dataRead.Success) { return New-InvalidEnvelopeOutcome }
         if ($null -ne $dataRead.Value) {
             foreach ($item in @($dataRead.Value)) {
-                if ($null -ne $item) {
-                    $rows.Add($item) | Out-Null
-                }
+                if ($null -eq $item) { return New-InvalidEnvelopeOutcome }
+                $rows.Add($item) | Out-Null
             }
         }
 

@@ -557,10 +557,13 @@
 # interop correction strengthens an existing three-case envelope parameterization.
 # 3320 -> 3323 adds thrown ARM transport normalization plus ambiguous and known
 # retry-exhaustion/no-final-delay contracts.
+# 3323 -> 3328 adds fail-closed null Graph-envelope elements, permission-baseline
+# coherence, malformed group-member accounting, and bounded artifact-fingerprint
+# failure publication.
 # An earlier all-tests discovery reported 3324 because it also included the four dedicated
 # tests/Perf assertions. The release workflow deliberately and explicitly runs tests/QA
-# plus tests/Unit only; its measured package-first total is therefore 3323.
-$script:tenantPulseGateMinimumTests = 3323
+# plus tests/Unit only; its measured package-first total is therefore 3328.
+$script:tenantPulseGateMinimumTests = 3328
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

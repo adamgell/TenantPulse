@@ -315,6 +315,23 @@ Describe 'Invoke-PulsePermissionPreflight' {
         $result.Decisions['ConditionalAccessPolicy/List'].Decision | Should -Be 'Unknown'
     }
 
+    It 'rejects a missing grant outside the resolved descriptor baseline as malformed' {
+        Mock Test-GraphPermission -ModuleName TenantPulse {
+            New-TestPermissionFindings -Granted 'Yes' -MissingGrant 'Unrelated.Permission' -AuthenticationCompatible 'Yes'
+        }
+        $operations = @(@{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' })
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:context, $operations {
+            param($context, $operations)
+            Invoke-PulsePermissionPreflight -Context $context -Operations $operations
+        }
+
+        $result.Decision | Should -Be 'Unknown'
+        $result.ReasonCode | Should -Be 'malformed-finding-set'
+        $result.Decisions['ConditionalAccessPolicy/List'].Decision | Should -Be 'Unknown'
+        $result.Decisions['ConditionalAccessPolicy/List'].ReasonCode | Should -Be 'malformed-finding-set'
+    }
+
     It 'rejects Granted No with no reported missing baseline grant as malformed' {
         Mock Test-GraphPermission -ModuleName TenantPulse {
             New-TestPermissionFindings -Granted 'No' -MissingGrant 'None' -AuthenticationCompatible 'Yes'

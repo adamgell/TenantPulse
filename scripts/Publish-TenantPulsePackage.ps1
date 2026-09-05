@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 3323 / -AllowNotRun 0 (see
+    # MinimumTests 3328 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -313,15 +313,18 @@ else {
     # interop correction strengthens an existing three-case parameterization.
     # 3320 -> 3323 adds thrown ARM transport normalization plus ambiguous and
     # known retry-exhaustion/no-final-delay contracts.
+    # 3323 -> 3328 adds fail-closed null Graph-envelope elements,
+    # permission-baseline coherence, malformed group-member accounting, and
+    # bounded artifact-fingerprint failure publication.
     # The four tests/Perf assertions are deliberately outside the QA+Unit release
-    # workflow and are not included in its measured 3323-test floor.
+    # workflow and are not included in its measured 3328-test floor.
     # NotRun remains forbidden.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 3323 `
+        -MinimumTests 3328 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {

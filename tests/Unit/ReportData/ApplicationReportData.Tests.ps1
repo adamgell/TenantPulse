@@ -853,6 +853,55 @@ Describe 'TenantPulse application report-data contract' {
         @($manifest.expansions.'application-assignments'.gaps.reason) | Should -Contain 'category:page-cap;operation:GroupMember.List'
     }
 
+    It 'does not count a member row without identity as complete membership evidence' {
+        $app = [pscustomobject]@{
+            id = 'app-1'; displayName = 'Malformed Member App'; publisher = 'Vendor'
+            '@odata.type' = '#microsoft.graph.win32LobApp'
+        }
+        $assignment = [pscustomobject]@{
+            id = 'assignment-1'; intent = 'required'
+            target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'group-1' }
+            settings = $null
+        }
+
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } {
+            New-PulseTestGraphEnvelope -Data @($app)
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileAppAssignment' } {
+            New-PulseTestGraphEnvelope -Data @($assignment)
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'Group' } {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'group-1'; displayName = 'Known Group'; description = $null })
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'GroupMember' } {
+            New-PulseTestGraphEnvelope -Data @(
+                [pscustomobject]@{ id = 'member-1' }
+                [pscustomobject]@{ displayName = 'Missing identity' }
+            )
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestEmptyAppInstallEnvelope
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $script:authorization, $script:abortState {
+            param($store, $context, $authorization, $abortState)
+            Invoke-PulseApplicationReportCollection -Store $store -Context $context -AuthorizationDecision $authorization `
+                -NetworkAbortState $abortState -ProfileId 'fixture' -Pseudonym 'tp-fixture'
+        }
+
+        $result.ApplicationAssignments.Status | Should -Be 'Partial'
+        $rows = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            @(Get-PulseExpansionRows -Store $store -Name 'application-assignments')
+        }
+        $rows.Count | Should -Be 1
+        $rows[0].groupMemberCount | Should -Be 1
+        $rows[0].memberResolutionState | Should -Be 'Partial'
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        @($manifest.expansions.'application-assignments'.gaps.reason) |
+            Should -Contain 'category:invalid-provider-data;operation:GroupMember.List'
+    }
+
     It 'records a usable indeterminate non-paged Group.Get response as partial evidence with an explicit gap' {
         $app = [pscustomobject]@{ id = 'app-1'; displayName = 'Partial Group App'; publisher = 'Vendor'; '@odata.type' = '#microsoft.graph.win32LobApp' }
         $assignment = [pscustomobject]@{ id = 'assignment-1'; intent = 'required'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'group-1' }; settings = $null }
@@ -1300,6 +1349,41 @@ Describe 'TenantPulse application report-data contract' {
         }
         $cycle.self = $cycle
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data @($cycle)
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $script:authorization, $script:abortState {
+            param($store, $context, $authorization, $abortState)
+            Invoke-PulseApplicationReportCollection -Store $store -Context $context -AuthorizationDecision $authorization `
+                -NetworkAbortState $abortState -ProfileId 'fixture' -Pseudonym 'tp-fixture'
+        }
+
+        $result.ApplicationAssignments.Status | Should -Be 'Expanded'
+        $result.AppInstallErrors.Status | Should -Be 'Failed'
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.expansions.'application-assignments'.status | Should -Be 'Expanded'
+        $manifest.expansions.'app-install-errors'.status | Should -Be 'Failed'
+        $manifest.expansions.'app-install-errors'.reason | Should -Be 'artifact-publication-failed'
+        @(Get-ChildItem -LiteralPath $script:store.ExpandedPath -Filter 'app-install-errors*.jsonl').Count | Should -Be 0
+    }
+
+    It 'contains an install matrix fingerprint failure without regressing the published assignment artifact' {
+        $values = [object[]]::new(1)
+        $values[0] = [object[]]@('app-cycle', 1)
+        $cycle = [ordered]@{
+            Schema = @(
+                [pscustomobject]@{ Column = 'ApplicationId' }
+                [pscustomobject]@{ Column = 'FailedDeviceCount' }
+            )
+            Values = $values
+            TotalRowCount = 1
+        }
+        $cycle.self = $cycle
+
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } {
+            New-PulseTestGraphEnvelope
+        }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
             New-PulseTestGraphEnvelope -Data @($cycle)
         }

@@ -83,6 +83,7 @@ Describe 'GraphKit collection envelope validation' {
         @{ Case = 'multiple envelopes'; Fixture = 'Multiple' }
         @{ Case = 'an envelope missing Data'; Fixture = 'MissingData' }
         @{ Case = 'an envelope with null Data'; Fixture = 'NullData' }
+        @{ Case = 'an envelope containing a null Data element'; Fixture = 'NullDataElement' }
         @{ Case = 'an envelope missing Truncated'; Fixture = 'MissingTruncated' }
         @{ Case = 'an envelope with an invalid Outcome'; Fixture = 'InvalidOutcome' }
         @{ Case = 'an envelope with an invalid Certainty'; Fixture = 'InvalidCertainty' }
@@ -111,6 +112,9 @@ Describe 'GraphKit collection envelope validation' {
                     }
                     'NullData' {
                         return [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Succeeded'; Certainty = 'Known'; Truncated = $false; Data = $null; PageCount = 1 }
+                    }
+                    'NullDataElement' {
+                        return [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Succeeded'; Certainty = 'Known'; Truncated = $false; Data = @($null); PageCount = 1 }
                     }
                     'MissingTruncated' {
                         return [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Succeeded'; Certainty = 'Known'; Data = @(); PageCount = 1 }
@@ -423,6 +427,7 @@ Describe 'GraphKit expansion envelope validation' {
         @{ Case = 'multiple envelopes'; Fixture = 'Multiple' }
         @{ Case = 'a malformed envelope'; Fixture = 'Malformed' }
         @{ Case = 'an envelope with null Data'; Fixture = 'NullData' }
+        @{ Case = 'an envelope containing a null Data element'; Fixture = 'NullDataElement' }
         @{ Case = 'a returned failed envelope'; Fixture = 'Failed' }
         @{ Case = 'an indeterminate envelope'; Fixture = 'Indeterminate' }
         @{ Case = 'a truncated envelope'; Fixture = 'Truncated' }
@@ -445,6 +450,9 @@ Describe 'GraphKit expansion envelope validation' {
                     }
                     'NullData' {
                         return [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Succeeded'; Certainty = 'Known'; Truncated = $false; Data = $null }
+                    }
+                    'NullDataElement' {
+                        return [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Succeeded'; Certainty = 'Known'; Truncated = $false; Data = @($null); PageCount = 1 }
                     }
                     'Failed' {
                         return [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Failed'; Certainty = 'Known'; Truncated = $false; Data = @(); PageCount = 1 }

@@ -496,11 +496,24 @@ function Invoke-PulsePermissionPreflight {
     $missingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($value in $missingValues) { [void] $missingSet.Add($value) }
 
-    $requiredPermissionCount = @(
-        $resolved |
-            Where-Object { $_.Resolved } |
-            ForEach-Object { @($_.RequiredPermissions) }
-    ).Count
+    $requiredPermissionSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($operation in @($resolved | Where-Object { $_.Resolved })) {
+        foreach ($permission in @($operation.RequiredPermissions)) {
+            if (-not [string]::IsNullOrWhiteSpace([string] $permission)) {
+                [void] $requiredPermissionSet.Add([string] $permission)
+            }
+        }
+    }
+    foreach ($missingValue in $missingValues) {
+        if (-not $requiredPermissionSet.Contains($missingValue)) {
+            Set-PulsePermissionPreflightDecisions -Decisions $decisions -Operations $resolved `
+                -Decision 'Unknown' -ReasonCode 'malformed-finding-set'
+            return New-PulsePermissionPreflightResult -TargetAppId $targetAppId -Decision 'Unknown' `
+                -ReasonCode 'malformed-finding-set' -Decisions $decisions -Findings $findings
+        }
+    }
+
+    $requiredPermissionCount = $requiredPermissionSet.Count
     $grantedFinding = Get-PulsePermissionFinding -Findings $findings -Name 'Granted'
     if ($requiredPermissionCount -gt 0 -and
         [string]::Equals([string] $grantedFinding.Value, 'No', [System.StringComparison]::OrdinalIgnoreCase) -and
