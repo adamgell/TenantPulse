@@ -186,7 +186,9 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
 
     Context 'legacy Pending descriptor placeholders are closed out' {
         It 'contains no Pending dataset entries in the production map' {
-            $script:pendingDatasetCases | Should -BeNullOrEmpty -Because 'unreleased TenantPulse composites must use explicit provider-plan metadata, never invented GraphKit Type/Operation expectations'
+            $map = Import-PowerShellDataFile -Path $script:datasetMapPath
+            $pending = @($map.Keys | Where-Object { $map[$_].Pending })
+            $pending | Should -BeNullOrEmpty -Because 'unreleased TenantPulse composites must use explicit provider-plan metadata, never invented GraphKit Type/Operation expectations'
         }
     }
 

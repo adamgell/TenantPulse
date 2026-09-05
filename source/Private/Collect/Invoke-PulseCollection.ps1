@@ -465,8 +465,13 @@ function Invoke-PulseCollection {
             # Collected write goes through this so no dataset content ever ships the raw
             # tenant id unredacted, not just the two datasets that happened to surface it.
             $rows = Protect-PulseTypedPolicySensitivePayload -Data @($outcome.Rows) -DatasetName $entry.Dataset -TypedPolicyMaps $typedPolicyMaps
+            $reason = $null
+            if ($outcome.Status -ne 'Collected') {
+                $reason = Protect-PulseReason -Message ([string] $outcome.ReasonCode) -ProfileId $ProfileId `
+                    -Pseudonym $TenantPseudonym -TenantId $contextTenantId
+            }
             Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $rows `
-                -ApiVersion $outcome.ApiVersion -Status $outcome.Status -ReasonCode $outcome.ReasonCode `
+                -ApiVersion $outcome.ApiVersion -Status $outcome.Status -Reason $reason -ReasonCode $outcome.ReasonCode `
                 -Detail $outcome.Detail -FailureClass $outcome.FailureClass -Provider $outcome.Provider `
                 -Operations $outcome.Operations -Gaps $outcome.Gaps `
                 -TenantId $contextTenantId -Pseudonym $TenantPseudonym

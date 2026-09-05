@@ -10,10 +10,10 @@ than silently changing schema `1.0`.
 `Invoke-PulseEvaluation` itself returns a `[pscustomobject]` with two top-level properties,
 only one of which is ever serialized:
 
-```
+```powershell
 {
     Document     = <the findings document below>
-    RedactionMap = @{ '<raw evidence identity>' = 'tp-<hmac-hex>' , ... }
+RedactionMap = @{ '<raw evidence identity>' = 'tp-<hmac-hex>' , ... }
 }
 ```
 
@@ -42,7 +42,7 @@ a `Document` (no fresh `RedactionMap`) cannot redact.
 
 Classified / safe-share documents add:
 
-```
+```text
 privacy = {
   classification: "1.0",
   complete: true,
@@ -282,7 +282,7 @@ report), not for the findings document itself.
 
 ### `manifest.expansions.<name>` (per-family status entry)
 
-```
+```text
 manifest.expansions.<name> = {
   status: 'Expanded' | 'Partial' | 'NotExpanded' | 'Failed';
   path; format: 'jsonl' | 'json'; schemaVersion; sha256;

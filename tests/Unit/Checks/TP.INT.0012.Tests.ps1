@@ -74,15 +74,18 @@ BeforeAll {
             [string] $FeatureUpdateVersion,
             [string] $EndOfSupportDate = $null
         )
-        [pscustomobject]@{
+        $profileProperties = [ordered]@{
             id                   = $Id
             displayName          = $DisplayName
             featureUpdateVersion = $FeatureUpdateVersion
-            endOfSupportDate     = $EndOfSupportDate
             assignments          = @(
                 @{ target = @{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'grp-assigned' } }
             )
         }
+        if ($PSBoundParameters.ContainsKey('EndOfSupportDate')) {
+            $profileProperties.endOfSupportDate = $EndOfSupportDate
+        }
+        [pscustomobject] $profileProperties
     }
  }
 
@@ -124,8 +127,10 @@ Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support buil
     }
 
     It 'NotApplicable: an assigned profile with an absent endOfSupportDate cannot prove current support' {
+        $featureProfile = New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 25H2'
+        $featureProfile.PSObject.Properties.Name | Should -Not -Contain 'endOfSupportDate'
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
-            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @((New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 25H2')) }
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($featureProfile) }
         )
 
         $finding.status | Should -Be 'NotApplicable'
@@ -155,10 +160,10 @@ Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support buil
     }
 
     It 'NotApplicable: missing assignment evidence cannot prove an otherwise-current profile is deployed' {
-        $profile = New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 25H2' -EndOfSupportDate '2028-10-11T06:59:59Z'
-        $profile.PSObject.Properties.Remove('assignments')
+        $featureProfile = New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Ring A' -FeatureUpdateVersion 'Windows 11, version 25H2' -EndOfSupportDate '2028-10-11T06:59:59Z'
+        $featureProfile.PSObject.Properties.Remove('assignments')
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
-            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($profile) }
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($featureProfile) }
         )
 
         $finding.status | Should -Be 'NotApplicable'
@@ -181,12 +186,12 @@ Describe 'TP.INT.0012 - Windows Feature Update policy avoids end-of-support buil
     }
 
     It 'NotApplicable: an exclusion-only profile is not treated as deployed' {
-        $profile = New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Excluded ring' -FeatureUpdateVersion 'Windows 11, version 22H2' -EndOfSupportDate '2025-10-15T06:59:59Z'
-        $profile.assignments = @(
+        $featureProfile = New-PulseFeatureUpdateProfile -Id 'p1' -DisplayName 'Excluded ring' -FeatureUpdateVersion 'Windows 11, version 22H2' -EndOfSupportDate '2025-10-15T06:59:59Z'
+        $featureProfile.assignments = @(
             @{ target = @{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'excluded-group' } }
         )
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0012' -Datasets @(
-            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($profile) }
+            @{ Name = 'windowsFeatureUpdateProfiles'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($featureProfile) }
         )
 
         $finding.status | Should -Be 'NotApplicable'

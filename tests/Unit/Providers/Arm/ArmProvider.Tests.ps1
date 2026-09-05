@@ -119,15 +119,15 @@ Describe 'ARM stays outside the Graph catalog' {
 
 Describe 'ARM authority and audience' {
     It 'binds Global ARM traffic to management.azure.com and the ARM audience' {
-        $profile = InModuleScope TenantPulseArmAdapterTest {
+        $cloudProfile = InModuleScope TenantPulseArmAdapterTest {
             Get-PulseArmCloudProfile -Cloud 'Global'
         }
-        $profile.Cloud | Should -Be 'Global'
-        $profile.Authority | Should -Be 'management.azure.com'
-        $profile.Audience | Should -Be 'https://management.azure.com/.default'
-        $profile.BaseUri.AbsoluteUri | Should -Be 'https://management.azure.com/'
-        $profile.PSObject.Properties.Name | Should -Not -Contain 'Type'
-        $profile.PSObject.Properties.Name | Should -Not -Contain 'Operation'
+        $cloudProfile.Cloud | Should -Be 'Global'
+        $cloudProfile.Authority | Should -Be 'management.azure.com'
+        $cloudProfile.Audience | Should -Be 'https://management.azure.com/.default'
+        $cloudProfile.BaseUri.AbsoluteUri | Should -Be 'https://management.azure.com/'
+        $cloudProfile.PSObject.Properties.Name | Should -Not -Contain 'Type'
+        $cloudProfile.PSObject.Properties.Name | Should -Not -Contain 'Operation'
     }
 
     It 'binds USGov and China to their ARM authorities, not Graph' {
@@ -568,6 +568,74 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
         $outcome.Rows[0].Name | Should -Be 'after-throttle'
         $script:ArmSendUris.Count | Should -Be 2
         $script:DelaySeconds[0] | Should -Be 2
+    }
+
+    It 'normalizes a thrown transport failure into a terminal indeterminate outcome' {
+        Reset-ArmProviderTestState
+        $transportCanary = 'raw-dns-failure customer-host.example'
+        $injections = Get-ArmTestInjections
+        $injections.Send = {
+            param([uri] $Uri, [string] $Method)
+            $script:ArmSendUris.Add([string] $Uri)
+            throw 'raw-dns-failure customer-host.example'
+        }
+
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList $injections, $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
+                -ApiVersion $ApiVersion -Injections $Injections -MaxAttempts 2
+        }
+
+        $outcome.Status | Should -Be 'Failed'
+        $outcome.FailureClass | Should -Be 'Indeterminate'
+        $outcome.ReasonCode | Should -Be 'indeterminate'
+        $outcome.Detail.Certainty | Should -Be 'Indeterminate'
+        ($outcome | ConvertTo-Json -Depth 12 -Compress) | Should -Not -Match ([regex]::Escape($transportCanary))
+        $script:ArmSendUris.Count | Should -Be 2
+        $script:DelaySeconds.Count | Should -Be 1
+    }
+
+    It 'does not delay after the last ambiguous ARM retry attempt' {
+        Reset-ArmProviderTestState
+        $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -StatusCode 503 -Body @{ error = @{ code = 'ServiceUnavailable' } }))
+        $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -StatusCode 503 -Body @{ error = @{ code = 'ServiceUnavailable' } }))
+
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
+                -ApiVersion $ApiVersion -Injections $Injections -MaxAttempts 2
+        }
+
+        $outcome.Status | Should -Be 'Failed'
+        $outcome.FailureClass | Should -Be 'Indeterminate'
+        $outcome.ReasonCode | Should -Be 'indeterminate'
+        $outcome.Detail.Certainty | Should -Be 'Indeterminate'
+        $script:ArmSendUris.Count | Should -Be 2
+        $script:DelaySeconds.Count | Should -Be 1
+    }
+
+    It 'does not delay after exhausted known 401 or 429 responses' {
+        foreach ($case in @(
+                @{ StatusCode = 401; FailureClass = 'AuthenticationFailed'; CanRefresh = $true }
+                @{ StatusCode = 429; FailureClass = 'ProviderFailed'; CanRefresh = $false }
+            )) {
+            Reset-ArmProviderTestState
+            $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -StatusCode $case.StatusCode -Body @{ error = @{} }))
+            $injections = Get-ArmTestInjections
+            $injections.CanRefresh = $case.CanRefresh
+
+            $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList $injections, $script:FixtureApiVersion, $script:IntuneResourceId {
+                param($Injections, $ApiVersion, $ResourceId)
+                Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
+                    -ApiVersion $ApiVersion -Injections $Injections -MaxAttempts 1
+            }
+
+            $outcome.Status | Should -Be 'Failed'
+            $outcome.FailureClass | Should -Be $case.FailureClass
+            $outcome.Detail.Certainty | Should -Be 'Known'
+            $script:ArmSendUris.Count | Should -Be 1
+            $script:DelaySeconds.Count | Should -Be 0
+        }
     }
 
     It 'maps deadline expiry without sending after the clock is exhausted' {

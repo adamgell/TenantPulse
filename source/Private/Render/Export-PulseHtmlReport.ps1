@@ -4,7 +4,8 @@
 
     Always writes <OutputPath>/tenantpulse-report.html. The file is a single HTML
     document: inline CSS only, no scripts, no external stylesheets/fonts/images, and a
-    Content-Security-Policy that sets default-src 'none' with style-src 'unsafe-inline'.
+    Content-Security-Policy that sets default-src 'none', img-src data:, style-src
+    'unsafe-inline', base-uri 'none', form-action 'none', and frame-ancestors 'none'.
     Portal links and authority URLs are emitted as escaped text, never as href/src
     attributes, so opening the file cannot initiate a network request.
 

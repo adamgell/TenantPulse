@@ -346,7 +346,7 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             $reasonCode = if ($_.Exception.Message -match '(?i)unknown') { 'unknown-setting' } else { 'missing-setting' }
             $partialCount++
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass 'InvalidProviderData' `
-                    -ReasonCode $reasonCode -Detail @{ policyId = $policyId; message = $_.Exception.Message } `
+                    -ReasonCode $reasonCode -Detail @{ policyId = $policyId } `
                     -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta')) | Out-Null
         }
     }

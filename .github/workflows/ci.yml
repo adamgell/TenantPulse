@@ -755,10 +755,12 @@ jobs:
           # fixed-schema, assignment-evidence, report-counter, and paging regressions.
           # 3319 -> 3320 adds malformed ARM continuation coverage; the paged-failure
           # interop correction strengthens an existing three-case parameterization.
+          # 3320 -> 3323 adds thrown ARM transport normalization plus ambiguous and
+          # known retry-exhaustion/no-final-delay contracts.
           # The four tests/Perf assertions are deliberately outside this QA+Unit release
-          # workflow and are not included in its measured 3320-test floor.
+          # workflow and are not included in its measured 3323-test floor.
           # NotRun remains forbidden.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3320 -AllowedSkips $allowedSkips -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3323 -AllowedSkips $allowedSkips -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

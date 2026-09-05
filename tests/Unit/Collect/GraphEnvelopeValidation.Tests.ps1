@@ -347,6 +347,7 @@ Describe 'GraphKit collection envelope validation' {
         $entry = $saved.datasets.mobileApps
         $entry.status | Should -Be 'Partial'
         $entry.reasonCode | Should -Be 'indeterminate'
+        $entry.reason | Should -BeExactly 'indeterminate'
         $entry.detail.truncated | Should -BeFalse
         $entry.detail.pageCount | Should -Be 1
         @($entry.gaps)[0].reasonCode | Should -Be 'indeterminate'
@@ -372,6 +373,7 @@ Describe 'GraphKit collection envelope validation' {
         $entry.status | Should -Be 'Failed'
         $entry.failureClass | Should -Be 'Indeterminate'
         $entry.reasonCode | Should -Be 'indeterminate'
+        $entry.reason | Should -BeExactly 'indeterminate'
         $entry.detail.truncated | Should -BeFalse
         $entry.detail.pageCount | Should -Be 1
         Test-Path -LiteralPath (Join-Path $script:store.DatasetsPath 'mobileApps.json') | Should -BeFalse

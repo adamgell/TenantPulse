@@ -307,7 +307,31 @@ function Invoke-PulseArmProvider {
                 break
             }
 
-            $transport = & $send -Uri $pageUri -Method 'GET'
+            try {
+                $transport = & $send -Uri $pageUri -Method 'GET'
+            }
+            catch {
+                # Transport exceptions carry unbounded host, tenant, and proxy text. Reduce
+                # them to the same no-response record the retry policy already understands;
+                # never let the raw exception escape into a persisted outcome.
+                $budgetAfterSend = Test-ArmBudget
+                if ($null -ne $budgetAfterSend) {
+                    $decision = [pscustomobject]@{
+                        ShouldRetry  = $false
+                        Outcome      = $budgetAfterSend
+                        Certainty    = 'Indeterminate'
+                        ForceRefresh = $false
+                        FailureClass = $budgetAfterSend
+                    }
+                    break
+                }
+                $transport = [pscustomobject]@{
+                    StatusCode       = 0
+                    Body             = $null
+                    Headers          = @{}
+                    ResponseReceived = $false
+                }
+            }
             $responseReceived = $true
             $statusCode = 0
             if ($null -eq $transport) {
@@ -327,6 +351,24 @@ function Invoke-PulseArmProvider {
                 -AttemptCertainty $certainty -ForceRefreshUsed $forceRefreshUsed -CanRefresh $canRefresh
             if ($decision.ForceRefresh) { $forceRefreshUsed = $true }
             if (-not $decision.ShouldRetry) { break }
+
+            if ($attempt -ge $MaxAttempts) {
+                $failureClass = if ($statusCode -eq 401) {
+                    'AuthenticationFailed'
+                } elseif ($certainty -eq 'Rejected') {
+                    'ProviderFailed'
+                } else {
+                    'Indeterminate'
+                }
+                $decision = [pscustomobject]@{
+                    ShouldRetry  = $false
+                    Outcome      = 'Failed'
+                    Certainty    = $(if ($failureClass -eq 'Indeterminate') { 'Indeterminate' } else { 'Known' })
+                    ForceRefresh = $false
+                    FailureClass = $failureClass
+                }
+                break
+            }
 
             $retryAfter = $null
             if ($null -ne $transport) {

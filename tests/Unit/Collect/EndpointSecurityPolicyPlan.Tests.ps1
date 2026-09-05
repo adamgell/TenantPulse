@@ -258,6 +258,8 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'policy:bitlocker-parent-only'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        @($result.Outcome.Gaps[0].Detail.Keys) | Should -Be @('policyId')
+        $result.Outcome.Gaps[0].Detail.ContainsKey('message') | Should -BeFalse
     }
 
     It 'keeps all LAPS criteria on each policy instead of combining near-miss policies' {
@@ -685,7 +687,8 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'policy:laps-missing'
         $result.Outcome.Gaps[0].ReasonCode | Should -Be 'missing-setting'
-        $result.Outcome.Gaps[0].Detail.message | Should -Be 'LAPS Complexity setting was not returned.'
+        @($result.Outcome.Gaps[0].Detail.Keys) | Should -Be @('policyId')
+        $result.Outcome.Gaps[0].Detail.policyId | Should -Be 'laps-missing'
     }
 
     It 'asserts the released beta descriptors before the policy list and settings reads' {

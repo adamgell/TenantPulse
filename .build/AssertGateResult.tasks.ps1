@@ -555,10 +555,12 @@
 # counters, and descriptor-aware paging completeness.
 # 3319 -> 3320 adds malformed ARM continuation coverage; the GraphKit paged-failure
 # interop correction strengthens an existing three-case envelope parameterization.
+# 3320 -> 3323 adds thrown ARM transport normalization plus ambiguous and known
+# retry-exhaustion/no-final-delay contracts.
 # An earlier all-tests discovery reported 3324 because it also included the four dedicated
 # tests/Perf assertions. The release workflow deliberately and explicitly runs tests/QA
-# plus tests/Unit only; its measured package-first total is therefore 3320.
-$script:tenantPulseGateMinimumTests = 3320
+# plus tests/Unit only; its measured package-first total is therefore 3323.
+$script:tenantPulseGateMinimumTests = 3323
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

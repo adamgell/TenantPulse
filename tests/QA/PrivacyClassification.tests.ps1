@@ -296,7 +296,7 @@ Describe 'ConvertTo-PulseSafeShareDocument' {
     It 'fails closed when evidence detail is unclassified' {
         $key = $script:KeyGen1
         {
-            InModuleScope TenantPulse -ArgumentList $key {
+            InModuleScope TenantPulse -ArgumentList (, $key) {
                 param($Key)
                 $document = [pscustomobject]@{
                     schemaVersion = '1.0'
@@ -379,7 +379,7 @@ Describe 'ConvertTo-PulseSafeShareDocument' {
     It 'refuses an evaluation document already labeled local-only' {
         $key = $script:KeyGen1
         {
-            InModuleScope TenantPulse -ArgumentList $key {
+            InModuleScope TenantPulse -ArgumentList (, $key) {
                 param($Key)
                 $document = [pscustomobject]@{
                     schemaVersion = '1.0'
@@ -394,7 +394,7 @@ Describe 'ConvertTo-PulseSafeShareDocument' {
     It 'rejects a hand-built finding whose reasonCode is not a lowercase hyphenated token' {
         $key = $script:KeyGen1
         {
-            InModuleScope TenantPulse -ArgumentList $key {
+            InModuleScope TenantPulse -ArgumentList (, $key) {
                 param($Key)
                 $document = [pscustomobject]@{
                     schemaVersion = '1.0'
@@ -410,7 +410,7 @@ Describe 'ConvertTo-PulseSafeShareDocument' {
     It 'rejects an unknown top-level complex field rather than reusing coincidental child names' {
         $key = $script:KeyGen1
         {
-            InModuleScope TenantPulse -ArgumentList $key {
+            InModuleScope TenantPulse -ArgumentList (, $key) {
                 param($Key)
                 $document = [pscustomobject]@{
                     schemaVersion = '1.0'
@@ -502,7 +502,7 @@ Describe 'ConvertTo-PulseSafeShareDocument' {
     It 'rejects a document privacy class that conflicts with a fixed schema class' {
         $key = $script:KeyGen1
         {
-            InModuleScope TenantPulse -ArgumentList $key {
+            InModuleScope TenantPulse -ArgumentList (, $key) {
                 param($Key)
                 $document = [pscustomobject]@{
                     schemaVersion = '1.0'
