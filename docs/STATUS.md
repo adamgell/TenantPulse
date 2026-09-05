@@ -63,8 +63,25 @@ SHA-256 `4c29a40684c5420fdd3afff1bdb797aabfe2a6707b8f591dd1f5ecd92c02e498`, Pest
 SHA-256 `99053001a9632ae84ef03bcf451837cbe041f7bd74c2f1eb82d243cfcf83091b`, and proof-file
 SHA-256 `6d9eecd8f90eec0097267a1092f718601697331481efa5cd131a0fe29c59ac61`. This is local
 package evidence for the exact pre-fix candidate only; it does not transfer to later source changes
-and does not claim remote CI, merge, live-tenant behavior, or publication. The ARM review fix has
-focused deterministic proof and needs a fresh package-first full run before it supersedes this record.
+and does not claim remote CI, merge, live-tenant behavior, or publication. At that point the ARM
+review fix had focused deterministic proof only. The fresh package-first run that supersedes it for
+the later source is recorded next.
+
+The current local package-first proof for exact commit
+`cd2daf6381766a255af654f83b6c62e26fbd2424` (tree
+`f634b0b7c3310d01db3242761a5bd098229272d4`) is run
+`1ebc4a52-1c3b-425c-b4b0-df7dbb5feaf4`: 3,328/3,328 deterministic tests passed with zero failures,
+errors, skips, NotRun, or failed containers. It binds 62 shipped files and the 563,166-byte package
+SHA-256 `ebb235212654d213a94f03648fd3df10b3a543fed18a57b870ce683734e19216`, built-module SHA-256
+`0766c68f0740996e86c7656d30b4b70e9308252d5260480ad48cc981b9b933fe`, built-manifest SHA-256
+`b1e5e258080107c4ce2b093e3d9d80c55245019d9610964dfdc7cf5983a6166a`, NUnit-result SHA-256
+`28780d6d0d33b0dff5ec738a4405e5287a870e99aa6084e1682f737b4ce9ada3`, Pester-object SHA-256
+`8eb2717112765c7ea05c5c996cf88769244e9631f0f4741e8c1c8c1fd510ba9c`, and proof-file SHA-256
+`66bf06ad54fbba006171038bb05f3011df5d2e3cef76bf1a12ed53deec67cca7`. A verified
+no-key/no-`-Publish` publisher dry run rechecked the 3,328-test gate and all 62 module/package digests
+against that archive and reported `Nothing was published`. This remains local deterministic package
+evidence only; it does not claim remote CI, merge, live-tenant behavior, PSGallery publication, or
+customer acceptance.
 
 Historical proof run `9ef9712e-bddc-4dc9-82f0-f085ab874656` binds all 59 shipped files and the exact
 result pair for an earlier candidate. That 418,518-byte local candidate archive SHA-256 is
