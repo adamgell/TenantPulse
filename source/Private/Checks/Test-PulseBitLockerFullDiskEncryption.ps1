@@ -121,6 +121,7 @@ function Test-PulseBitLockerFullDiskEncryption {
 
     $qualifyingPolicies = [System.Collections.Generic.List[object]]::new()
     $malformedReason = $null
+    $hasUnresolvedQualifyingAssignment = $false
     foreach ($policy in $policies) {
         $policyId = [string] $policy.policyId
         if ([string]::IsNullOrWhiteSpace($policyId)) {
@@ -142,8 +143,29 @@ function Test-PulseBitLockerFullDiskEncryption {
             continue
         }
 
-        if ([bool] $policy.isFullDiskEncryption -and (Test-PulseCompositeRowIsAssigned -Row $policy)) {
-            $qualifyingPolicies.Add($policy)
+        if ([bool] $policy.isFullDiskEncryption) {
+            $assignmentIntentText = [string] (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'assignmentIntent')
+            if (-not [string]::IsNullOrWhiteSpace($assignmentIntentText)) {
+                if ($assignmentIntentText -notin @('Include', 'Empty', 'ExcludeOnly')) {
+                    $hasUnresolvedQualifyingAssignment = $true
+                    continue
+                }
+                if ($assignmentIntentText -eq 'Include') {
+                    $qualifyingPolicies.Add($policy)
+                }
+                continue
+            }
+
+            $assignmentIntent = ConvertTo-PulseAssignmentIntent -Assignments (
+                Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'assignments'
+            )
+            if (-not $assignmentIntent.Complete) {
+                $hasUnresolvedQualifyingAssignment = $true
+                continue
+            }
+            if ($assignmentIntent.IsAssigned) {
+                $qualifyingPolicies.Add($policy)
+            }
         }
     }
 
@@ -169,6 +191,10 @@ function Test-PulseBitLockerFullDiskEncryption {
     if ($fullyEncrypted.Count -gt 0) {
         $evidence = ConvertTo-PulseMaesterEvidence -Rows $policies -IdentityProperty 'policyId' -SortKeyProperty 'policyName' -DetailProperties @('policyName', 'isFullDiskEncryption')
         return New-PulseFinding -Status Pass -Reason "At least one Endpoint Security Disk Encryption policy ($($fullyEncrypted.Count) of $($policies.Count)) enforces full-disk encryption (not used-space-only, not unconfigured) for the OS drive." -Evidence $evidence
+    }
+
+    if ($hasUnresolvedQualifyingAssignment) {
+        return New-PulseFinding -Status NotApplicable -Reason 'At least one full-disk encryption policy has unresolved assignment evidence, so the check cannot prove either effective enforcement or an authoritative failure.'
     }
 
     if ($policies.Count -eq 0) {

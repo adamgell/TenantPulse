@@ -93,6 +93,29 @@ BeforeAll {
                 return New-PulseFinding -Status Pass -Evidence @(@{ Identity = 'obj-pass-1' })
             }
 
+            function Test-PulseFixtureClassifiedPassRule {
+                param($Datasets)
+                return New-PulseFinding -Status Pass -RequireClassification
+            }
+
+            function Test-PulseFixtureCompatibilityPassRule {
+                param($Datasets)
+                return New-PulseFinding -Status Pass -Reason 'compatibility free text'
+            }
+
+            function Test-PulseFixtureClassifiedEvidenceRule {
+                param($Datasets)
+                return New-PulseFinding -Status Warn -Reason 'Reviewed evidence' `
+                    -ReasonCode 'reviewed-evidence' -Evidence @(@{
+                        Identity = 'alice@contoso.example'
+                        SortKey = 'alice@contoso.example'
+                        Detail = @{ upn = 'alice@contoso.example'; count = 1 }
+                        FieldClasses = @{
+                            Identity = 'Identity'; SortKey = 'Identity'; upn = 'Identity'; count = 'SafeTechnical'
+                        }
+                    }) -RequireClassification
+            }
+
             function Test-PulseFixtureWarnRule {
                 param($Datasets)
                 return New-PulseFinding -Status Warn -Reason 'two objects need review' -Evidence @(
@@ -149,6 +172,18 @@ BeforeAll {
                     Status     = 'Fail'
                     Evidence   = @([pscustomobject]@{ Detail = 'no identity on this one' })
                     Reason     = 'duck-typed, missing Identity'
+                }
+            }
+
+            function Test-PulseFixtureDuckTypedInvalidReasonCodeRule {
+                param($Datasets)
+                return [pscustomobject]@{
+                    PSTypeName      = 'TenantPulse.RuleResult'
+                    Status          = 'Fail'
+                    Evidence        = $null
+                    Reason          = 'Reviewed text'
+                    ReasonCode      = 'alice@contoso.example'
+                    PrivacyComplete = $true
                 }
             }
 
@@ -830,6 +865,53 @@ Describe 'Invoke-PulseEvaluation' {
         # The redaction map must never have been asked to key on a null/empty identity.
         $evaluation.RedactionMap.Keys | Should -Not -Contain $null
         $evaluation.RedactionMap.Keys | Should -Not -Contain ''
+    }
+
+    It 'degrades only a duck-typed result with an invalid ReasonCode and never serializes the value' {
+        $bad = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuckTypedInvalidReasonCodeRule' }
+        $ok = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureClassifiedPassRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($bad, $ok)
+        $badFinding = $evaluation.Document.findings | Where-Object id -eq 'TP.INT.0001'
+        $badFinding.status | Should -Be 'Error'
+        $badFinding.reason | Should -Match 'lowercase hyphenated token'
+        $badFinding.PSObject.Properties.Name | Should -Not -Contain 'reasonCode'
+        (ConvertTo-Json $evaluation.Document -Depth 12) | Should -Not -Match 'alice@contoso\.example'
+        ($evaluation.Document.findings | Where-Object id -eq 'TP.INT.0002').status | Should -Be 'Pass'
+    }
+
+    It 'aggregates finding privacy completeness into a local-only document boundary' {
+        $complete = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureClassifiedPassRule' }
+        $compat = New-PulseFixtureCheck -Id 'TP.INT.0002' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureCompatibilityPassRule' }
+
+        $completeEvaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($complete)
+        $completeEvaluation.Document.privacy.complete | Should -BeTrue
+        $completeEvaluation.Document.privacy.boundary | Should -Be 'classified'
+
+        $mixedEvaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($complete, $compat)
+        $mixedEvaluation.Document.privacy.complete | Should -BeFalse
+        $mixedEvaluation.Document.privacy.boundary | Should -Be 'local-only'
+        $mixedEvaluation.Document.privacy.compatLayer | Should -BeTrue
+    }
+
+    It 'carries classified evidence metadata into the document so safe-share can protect it' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureClassifiedEvidenceRule' }
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.privacy.complete | Should -BeTrue
+        $evaluation.Document.findings[0].evidence[0].fieldClasses.upn | Should -Be 'Identity'
+
+        $shared = InModuleScope TenantPulse -ArgumentList $evaluation.Document, $evaluation.RedactionMap, $script:keyPath {
+            param($document, $redactionMap, $keyPath)
+            $key = [System.IO.File]::ReadAllBytes($keyPath)
+            ConvertTo-PulseSafeShareDocument -Document $document -RedactionMap $redactionMap -OperatorKey $key
+        }
+        $shared.findings[0].evidence[0].identity | Should -Match '^tp-[a-f0-9]{64}$'
+        $shared.findings[0].evidence[0].detail.upn | Should -Match '^tp-[a-f0-9]{64}$'
+        $shared.findings[0].evidence[0].detail.count | Should -Be 1
+        $shared.findings[0].evidence[0].PSObject.Properties.Name | Should -Not -Contain 'fieldClasses'
+        $shared.collectionOutcomes.datasetFailed.reasonCode | Should -BeNullOrEmpty
+        $shared.collectionOutcomes.datasetSkipped.reasonCode | Should -BeNullOrEmpty
     }
 
     It 'degrades a check to Error when its evidence has a duplicate (SortKey, Identity) pair' {

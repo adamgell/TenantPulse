@@ -6,8 +6,9 @@
     observed device population), not from an assumption of "every platform Intune
     supports" - a tenant that has only ever enrolled Windows devices is not faulted for
     lacking an iOS compliance policy nobody needs. Compliance policy PLATFORM is
-    discriminated by the object's '@odata.type' (deviceCompliancePolicies is a v1.0 List
-    of a polymorphic type - each row's own '@odata.type' is Microsoft's own supported way
+    discriminated by the object's '@odata.type' (deviceCompliancePolicies uses GraphKit's
+    beta ListBeta collection so platform-specific derived policy shapes are not omitted;
+    each row's own '@odata.type' is Microsoft's own supported way
     to tell a windows10CompliancePolicy from an iosCompliancePolicy). Android is matched by
     substring because Intune ships more than one Android compliance policy type
     (androidWorkProfileCompliancePolicy, androidDeviceOwnerCompliancePolicy, and the legacy

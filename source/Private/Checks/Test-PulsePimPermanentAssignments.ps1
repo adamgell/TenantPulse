@@ -39,6 +39,11 @@
     expanded members for pass/fail counting. Group expansion is retained only as blast-radius
     evidence; an empty group or a group whose current members are all exempt still leaves the
     standing group assignment in place.
+
+    Graph normally supplies an id for every schedule instance, but incomplete captured rows
+    must remain independently reviewable rather than collapsing the check to Error. When id is
+    absent or blank, evidence uses a deterministic per-evaluation ordinal alias; it does not
+    invent or imply a Microsoft Graph object id.
 #>
 
 function Test-PulsePimPermanentAssignments {
@@ -63,8 +68,16 @@ function Test-PulsePimPermanentAssignments {
 
     $offending = [System.Collections.Generic.List[object]]::new()
     $exempt = [System.Collections.Generic.List[object]]::new()
+    $permanentInstanceOrdinal = -1
     foreach ($instance in @($closure.PermanentActiveInstances)) {
+        $permanentInstanceOrdinal++
         $principalId = [string] (Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'principalId')
+        $instanceId = [string] (Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'id')
+        $evidenceIdentity = if ([string]::IsNullOrWhiteSpace($instanceId)) {
+            "pim-permanent-assignment-$permanentInstanceOrdinal"
+        } else {
+            $instanceId
+        }
         $groupAssignment = $false
         $blastRadiusPrincipalIds = if ([string]::IsNullOrWhiteSpace($principalId)) { @() } else { @($principalId) }
         if ($memberMap.Present -and $memberMap.Map.Contains($principalId)) {
@@ -74,6 +87,7 @@ function Test-PulsePimPermanentAssignments {
 
         $entry = [pscustomobject]@{
             Instance                = $instance
+            EvidenceIdentity        = $evidenceIdentity
             GroupAssignment         = $groupAssignment
             BlastRadiusPrincipalIds = @($blastRadiusPrincipalIds)
         }
@@ -103,7 +117,7 @@ function Test-PulsePimPermanentAssignments {
     $evidence = @($offending | ForEach-Object {
         $instance = $_.Instance
         @{
-            Identity = [string] (Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'id')
+            Identity = $_.EvidenceIdentity
             Detail   = @{
                 principalId             = Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'principalId'
                 roleDefinitionId        = Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'roleDefinitionId'
@@ -116,7 +130,7 @@ function Test-PulsePimPermanentAssignments {
     $evidence += @($exempt | ForEach-Object {
         $instance = $_.Instance
         @{
-            Identity = [string] (Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'id')
+            Identity = $_.EvidenceIdentity
             Detail   = @{
                 principalId             = Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'principalId'
                 roleDefinitionId        = Get-PulseSettingsCatalogValueProperty -Node $instance -PropertyName 'roleDefinitionId'

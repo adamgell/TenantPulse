@@ -237,6 +237,15 @@ Describe 'ARM resource ID validation' {
         } | Should -Throw -ExpectedMessage '*tenant*'
     }
 
+    It 'rejects a single backslash inside an otherwise valid ARM resource ID' {
+        {
+            InModuleScope TenantPulseArmAdapterTest -ArgumentList $script:BoundSubscriptionId {
+                param($SubscriptionId)
+                Test-PulseArmResourceId -ResourceId "/subscriptions/$SubscriptionId/resourceGroups/rg\one/providers/Microsoft.Compute/virtualMachines/vm1"
+            }
+        } | Should -Throw -ExpectedMessage '*backslash*'
+    }
+
     It 'rejects Graph-shaped, relative, traversal, and query resource IDs' {
         $ns = $script:IntuneNs
         $bad = @(
@@ -244,6 +253,7 @@ Describe 'ARM resource ID validation' {
             '/v1.0/deviceManagement/diagnosticSettings'
             "$($script:IntuneResourceId)/../subscriptions/$($script:BoundSubscriptionId)"
             "$($script:IntuneResourceId)?api-version=2021-05-01-preview"
+            "$($script:IntuneResourceId)\providers/contoso.invalid"
             "//providers/$ns"
             "https://management.azure.com$($script:IntuneResourceId)"
             '/subscriptions/not-a-guid'
@@ -480,6 +490,66 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
         $outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
         $outcome.Gaps[0].ReasonCode | Should -Be 'untrusted-arm-authority'
         @($outcome.Rows).Count | Should -Be 1
+        $script:ArmSendUris.Count | Should -Be 1
+    }
+
+    It 'refuses a same-authority continuation that changes <Case> before the second send' -ForEach @(
+        @{
+            Case = 'the bound resource path'
+            NextLink = 'https://management.azure.com/subscriptions/{0}/providers/microsoft.insights/diagnosticSettings?api-version=2021-05-01-preview&skipToken=2'
+        }
+        @{
+            Case = 'the bound API version'
+            NextLink = 'https://management.azure.com/providers/microsoft.intune/providers/microsoft.insights/diagnosticSettings?api-version=2022-01-01&skipToken=2'
+        }
+        @{
+            Case = 'the required API version by omitting it'
+            NextLink = 'https://management.azure.com/providers/microsoft.intune/providers/microsoft.insights/diagnosticSettings?skipToken=2'
+        }
+        @{
+            Case = 'the unique API version by duplicating it'
+            NextLink = 'https://management.azure.com/providers/microsoft.intune/providers/microsoft.insights/diagnosticSettings?api-version=2021-05-01-preview&api-version=2021-05-01-preview&skipToken=2'
+        }
+    ) {
+        Reset-ArmProviderTestState
+        $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -Body @{
+                    value = @(@{ name = 'page-1' }); nextLink = ($NextLink -f $script:OtherSubscriptionId)
+                }))
+
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
+                -ApiVersion $ApiVersion -Injections $Injections
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        $outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $outcome.Gaps[0].ReasonCode | Should -Be 'untrusted-arm-continuation'
+        @($outcome.Rows).Count | Should -Be 1
+        $script:ArmSendUris.Count | Should -Be 1
+    }
+
+    It 'retains the first page and classifies a malformed continuation URI without throwing' {
+        Reset-ArmProviderTestState
+        $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -Body @{
+                    value    = @(@{ name = 'page-1' })
+                    nextLink = 'http://['
+                }))
+
+        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
+            param($Injections, $ApiVersion, $ResourceId)
+            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
+                -ApiVersion $ApiVersion -Injections $Injections
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        @($outcome.Rows).Count | Should -Be 1
+        $outcome.Rows[0].Name | Should -Be 'page-1'
+        @($outcome.Gaps).Count | Should -Be 1
+        $outcome.Gaps[0].Scope | Should -Be 'nextLink'
+        $outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $outcome.Gaps[0].ReasonCode | Should -Be 'untrusted-arm-continuation'
+        $outcome.Gaps[0].Detail.message | Should -BeExactly 'ARM continuation URI is malformed.'
         $script:ArmSendUris.Count | Should -Be 1
     }
 

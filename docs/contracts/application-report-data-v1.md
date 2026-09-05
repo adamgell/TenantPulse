@@ -30,19 +30,27 @@ One permission preflight includes the exact operation union before any report ta
 | `AppInstallSummaryReport` | `Get` | `beta` | Non-mutating install-summary report action |
 
 Every call requires exactly one genuine, complete or explicitly partial
-`GraphKit.OperationResult`. Raw rows, a lookalike object, multiple envelopes, null `Data`, or a
-missing/non-Boolean `Truncated` signal is invalid provider data. Authentication failure aborts
-later network report work and sets the snapshot's top-level `collectionFailure`; other failures
-remain isolated to their artifact or row scope.
+`GraphKit.OperationResult`. Raw rows, a lookalike object, multiple envelopes, or null `Data` is
+invalid provider data. A successful `PagingStrategy=NextLink` envelope additionally requires
+native-Boolean `Truncated` and positive-integer `PageCount` completeness signals. GraphKit's
+terminal paged failure envelopes and `PagingStrategy=None` envelopes may omit both, while any
+supplied values remain type-checked and a contradictory `Truncated=true` on a non-paged result
+remains invalid. Authentication failure aborts later network report work and sets the snapshot's
+top-level `collectionFailure`; other failures remain isolated to their artifact or row scope.
 
 `AppInstallSummaryReport.Get` is request-body paged rather than `@odata.nextLink` paged. TenantPulse
-sends `skip`, `top = 200`, `filter`, `orderBy`, and `select`, then continues until the accumulated
-matrix-row count equals `TotalRowCount`, subject to a hard 200-page limit. A missing, changing,
-exceeded, unreachable, or repeated page is a bounded gap; a repeated payload is not counted twice
-toward completeness. Rows from completed pages remain available as `Partial`; they are never
-upgraded to complete merely because the GraphKit request envelope itself succeeded. A complete
-direct named-record response is already the complete row set and does not enter matrix paging.
-An empty first GraphKit `Data` array is missing provider data, not an authoritative empty report.
+sends `skip`, `top = 200`, `filter`, `orderBy = ["ApplicationId asc"]`, and `select`, then
+continues until the accumulated matrix-row count equals `TotalRowCount`, subject to a hard
+200-page limit. `skip` advances by the number of rows actually returned, so a short non-terminal
+page cannot cause omitted rows. Application identity is checked across pages even with the stable
+sort request: an overlapping/reordered page is discarded and recorded as a bounded gap rather
+than counted toward false completeness. A continuation that lacks a unique application-identity
+witness stops Partial. A missing, changing, exceeded, unreachable, or repeated page is likewise a
+bounded gap; a repeated payload is not counted twice toward completeness. Rows from completed
+pages remain available as `Partial`; they are never upgraded to complete merely because the
+GraphKit request envelope itself succeeded. A complete direct named-record response is already
+the complete row set and does not enter matrix paging. An empty first GraphKit `Data` array is
+missing provider data, not an authoritative empty report.
 
 ## Artifact manifest
 
@@ -57,6 +65,9 @@ count, and a content-addressed file under `expanded/`. Status is:
 - `Expanded`: the requested scope is complete, including a valid zero-row result.
 - `Partial`: usable rows exist and one or more bounded gaps identify omitted or uncertain scope.
 - `NotExpanded`: no usable artifact could be produced, with a bounded reason.
+- `Failed`: collection produced candidate rows, but local redaction, serialization, or atomic
+  publication could not safely publish this artifact. The sibling report remains independent and
+  is still attempted unless a Graph authentication failure set the run-wide network abort.
 
 Readers must resolve the file through the manifest and verify its hash. They must not guess a
 filename or treat a missing/`NotExpanded` artifact as an authoritative empty result.
@@ -100,6 +111,9 @@ Groups are cached per collection run. Repeated include/exclude assignments to on
 most one `Group.Get` and one `GroupMember.List`. Group metadata and membership certainty are
 independent: a missing group can retain a known member count, and a truncated member walk retains
 the observed count with `memberResolutionState = Partial` rather than calling it complete.
+If child group/member authentication fails after an application's assignment list was fetched,
+those assignment rows keep their independently proven `assignmentResolutionState`; only the
+failed child and later suppressed child resolutions are marked `Failed`/`NotEvaluated`.
 
 ## `app-install-errors` row schema
 
@@ -112,7 +126,8 @@ Every row carries `schemaVersion = "1"` and stable normalized fields:
 collector accepts both a Graph report `Schema`/`Values` matrix and direct named records. A valid
 schema with zero values and `TotalRowCount = 0` is authoritative empty data. A malformed matrix row
 becomes an explicit gap; valid sibling rows remain usable. Duplicate normalized column names are
-rejected. A populated row is usable only when it contains a non-empty application identity value
+rejected for both matrix schemas and direct named records, so punctuation/case aliases cannot
+overwrite one another by enumeration order. A populated row is usable only when it contains a non-empty application identity value
 (`ApplicationId`, `DisplayName`, or a documented alias) plus at least one non-null report signal
 value such as failed device/user count, install status, or error code. Numeric zero is a meaningful
 count, not a missing value. The current Intune summary's `ApplicationId`, `DisplayName`,

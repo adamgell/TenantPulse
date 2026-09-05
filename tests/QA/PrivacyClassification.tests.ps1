@@ -200,6 +200,19 @@ Describe 'ConvertTo-PulseClassifiedReason' {
             }
         } | Should -Throw -ExpectedMessage '*BoundedReviewedText*'
     }
+
+    It 'rejects reason codes that are not lowercase hyphenated tokens' -ForEach @(
+        'ContainsUppercase',
+        'contains_underscore',
+        'alice@contoso.example'
+    ) {
+        {
+            InModuleScope TenantPulse -ArgumentList $_ {
+                param($ReasonCode)
+                ConvertTo-PulseClassifiedReason -ReasonCode $ReasonCode -Text 'Reviewed text'
+            }
+        } | Should -Throw -ExpectedMessage '*lowercase hyphenated token*'
+    }
 }
 
 Describe 'New-PulseFinding classification contract' {
@@ -247,6 +260,15 @@ Describe 'New-PulseFinding classification contract' {
                 )
             }
         } | Should -Throw -ExpectedMessage '*unclassified*'
+    }
+
+    It 'rejects a non-token ReasonCode before it can mark free text classified' {
+        {
+            InModuleScope TenantPulse {
+                New-PulseFinding -Status Fail -ReasonCode 'alice@contoso.example' `
+                    -Reason 'Reviewed text' -RequireClassification
+            }
+        } | Should -Throw -ExpectedMessage '*lowercase hyphenated token*'
     }
 }
 
@@ -353,9 +375,208 @@ Describe 'ConvertTo-PulseSafeShareDocument' {
         $shared.findings[0].evidence[0].detail.secret.redacted | Should -BeTrue
         $shared.findings[0].evidence[0].detail.guidance | Should -Be $markup
     }
+
+    It 'refuses an evaluation document already labeled local-only' {
+        $key = $script:KeyGen1
+        {
+            InModuleScope TenantPulse -ArgumentList $key {
+                param($Key)
+                $document = [pscustomobject]@{
+                    schemaVersion = '1.0'
+                    findings      = @()
+                    privacy       = ConvertTo-PulsePrivacyEnvelope -Complete $false
+                }
+                ConvertTo-PulseSafeShareDocument -Document $document -OperatorKey $Key | Out-Null
+            }
+        } | Should -Throw -ExpectedMessage '*local-only*'
+    }
+
+    It 'rejects a hand-built finding whose reasonCode is not a lowercase hyphenated token' {
+        $key = $script:KeyGen1
+        {
+            InModuleScope TenantPulse -ArgumentList $key {
+                param($Key)
+                $document = [pscustomobject]@{
+                    schemaVersion = '1.0'
+                    findings      = @([pscustomobject]@{
+                            id = 'TP.INT.0001'; reason = 'Reviewed text'; reasonCode = 'INVALID_code'; evidence = @()
+                        })
+                }
+                ConvertTo-PulseSafeShareDocument -Document $document -OperatorKey $Key | Out-Null
+            }
+        } | Should -Throw -ExpectedMessage '*lowercase hyphenated token*'
+    }
+
+    It 'rejects an unknown top-level complex field rather than reusing coincidental child names' {
+        $key = $script:KeyGen1
+        {
+            InModuleScope TenantPulse -ArgumentList $key {
+                param($Key)
+                $document = [pscustomobject]@{
+                    schemaVersion = '1.0'
+                    findings      = @()
+                    unknown       = [pscustomobject]@{ producer = 'looks-safe' }
+                }
+                ConvertTo-PulseSafeShareDocument -Document $document -OperatorKey $Key | Out-Null
+            }
+        } | Should -Throw -ExpectedMessage '*document.unknown*unclassified*'
+    }
+
+    It 'walks classified non-finding lists and rejects an identity hidden in SafeTechnical data' {
+        $identity = $script:CanaryIdentity
+        $key = $script:KeyGen1
+        {
+            InModuleScope TenantPulse -ArgumentList $identity, $key {
+                param($Identity, $Key)
+                $document = [pscustomobject]@{
+                    schemaVersion  = '1.0'
+                    findings       = @()
+                    coverage       = [pscustomobject]@{ buckets = @('safe-token', $Identity) }
+                    privacyClasses = [pscustomobject]@{
+                        findings = 'BoundedReviewedText'
+                        coverage = 'SafeTechnical'
+                    }
+                }
+                ConvertTo-PulseSafeShareDocument -Document $document -OperatorKey $Key | Out-Null
+            }
+        } | Should -Throw -ExpectedMessage '*SafeTechnical*'
+    }
+
+    It 'protects Identity and SecretSensitive top-level primitive scalars before pass-through' {
+        $key = $script:KeyGen1
+        $shared = InModuleScope TenantPulse -ArgumentList (, $key) {
+            param($Key)
+            $document = [pscustomobject]@{
+                schemaVersion = '1.0'
+                tenant        = 9001
+                secretScalar  = $true
+                findings      = @()
+                privacyClasses = [pscustomobject]@{
+                    secretScalar = 'SecretSensitive'
+                }
+            }
+            ConvertTo-PulseSafeShareDocument -Document $document -OperatorKey $Key
+        }
+
+        $shared.tenant | Should -Match '^tp-[a-f0-9]{64}$'
+        [string] $shared.tenant | Should -Not -Be '9001'
+        $shared.secretScalar.redacted | Should -BeTrue
+        $shared.secretScalar.class | Should -Be 'SecretSensitive'
+    }
+
+    It 'protects Identity and SecretSensitive primitive scalars nested in objects and lists' {
+        $key = $script:KeyGen1
+        $shared = InModuleScope TenantPulse -ArgumentList (, $key) {
+            param($Key)
+            $document = [pscustomobject]@{
+                schemaVersion = '1.0'
+                findings      = @()
+                identities    = [pscustomobject]@{
+                    numeric = 314159
+                    flags   = @($true, $false)
+                }
+                secrets       = [pscustomobject]@{
+                    numeric = 2718
+                    flags   = @($true, $false)
+                }
+                privacyClasses = [pscustomobject]@{
+                    identities = 'Identity'
+                    secrets    = 'SecretSensitive'
+                }
+            }
+            ConvertTo-PulseSafeShareDocument -Document $document -OperatorKey $Key
+        }
+
+        $shared.identities.numeric | Should -Match '^tp-[a-f0-9]{64}$'
+        @($shared.identities.flags) | Should -HaveCount 2
+        foreach ($value in @($shared.identities.flags)) {
+            $value | Should -Match '^tp-[a-f0-9]{64}$'
+        }
+        $shared.secrets.numeric.redacted | Should -BeTrue
+        foreach ($value in @($shared.secrets.flags)) {
+            $value.redacted | Should -BeTrue
+            $value.class | Should -Be 'SecretSensitive'
+        }
+    }
+
+    It 'rejects a document privacy class that conflicts with a fixed schema class' {
+        $key = $script:KeyGen1
+        {
+            InModuleScope TenantPulse -ArgumentList $key {
+                param($Key)
+                $document = [pscustomobject]@{
+                    schemaVersion = '1.0'
+                    tenant        = 'tenant-display-name'
+                    findings      = @()
+                    privacyClasses = [pscustomobject]@{
+                        tenant = 'SafeOperatorLabel'
+                    }
+                }
+                ConvertTo-PulseSafeShareDocument -Document $document -OperatorKey $Key | Out-Null
+            }
+        } | Should -Throw -ExpectedMessage '*tenant*conflicts*Identity*'
+    }
+
+    It 'enforces SafeTechnical for the <Field> string in every canonical collection outcome' -ForEach @(
+        @{ Field = 'reasonCode' }
+        @{ Field = 'failureClass' }
+        @{ Field = 'certainty' }
+    ) {
+        $key = $script:KeyGen1
+        {
+            InModuleScope TenantPulse -ArgumentList $key, $Field {
+                param($Key, $OutcomeField)
+                $outcome = [pscustomobject]@{
+                    status       = 'Collected'
+                    reasonCode   = 'collected'
+                    failureClass = $null
+                    gapCount     = 0
+                    truncated    = $false
+                    certainty    = 'Determinate'
+                }
+                $outcome.$OutcomeField = 'review <unsafe>'
+
+                $document = [pscustomobject]@{
+                    schemaVersion      = '1.0'
+                    findings           = @()
+                    collectionOutcomes = [pscustomobject]@{ example = $outcome }
+                }
+                ConvertTo-PulseSafeShareDocument -Document $document -OperatorKey $Key | Out-Null
+            }
+        } | Should -Throw -ExpectedMessage '*SafeTechnical*'
+    }
 }
 
 Describe 'check descriptor privacy validation' {
+    It 'rejects unknown Privacy keys instead of silently ignoring unclassified contracts' {
+        $errors = InModuleScope TenantPulse {
+            Test-PulseCheckDescriptor -Label 'TP.ENT.0001' -Descriptor @{
+                Id         = 'TP.ENT.0001'
+                Title      = 'Security Defaults state is appropriate'
+                Category   = 'Entra.Identity'
+                Severity   = 'High'
+                Effort     = 'Low'
+                Impact     = 'High'
+                Data       = @{ Datasets = @('securityDefaultsPolicy'); Gates = @() }
+                Rule       = @{ Type = 'Expression'; Expression = '$true' }
+                Consulting = @{
+                    WhatItMeans = 'Author reviewed.'; WhyItMatters = 'Author reviewed.'
+                    Remediation = @('Do the thing.'); PortalLinks = @('https://learn.microsoft.com/entra')
+                }
+                References = @{
+                    Research = 'docs/research/iha-v2/2026-08-15-microsoft-official-guidance.md#x'
+                    Authorities = @('https://learn.microsoft.com/entra')
+                }
+                Privacy = @{
+                    EvidenceFields = @{ count = 'SafeTechnical' }
+                    UnreviewedFields = @{ tenant = 'Identity' }
+                }
+            }
+        }
+
+        ($errors -join "`n") | Should -Match 'Privacy\.UnreviewedFields.*is not supported'
+    }
+
     It 'rejects an unknown Privacy.EvidenceFields class' {
         $errors = InModuleScope TenantPulse {
             Test-PulseCheckDescriptor -Label 'TP.ENT.0001' -Descriptor @{

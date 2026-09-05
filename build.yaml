@@ -48,7 +48,6 @@ NestedModule:
 # Defining 'Workflows' (suite of InvokeBuild tasks) to be run using their alias
 BuildWorkflow:
   '.': # "." is the default Invoke-Build workflow. It is called when no -Tasks is specified to the build.ps1
-    - pack
     - test
 
   build:
@@ -73,6 +72,11 @@ BuildWorkflow:
 
   # Defining test task to be run when invoking `./build.ps1 -Tasks test`
   test:
+    # Always rebuild/package first. Functional tests import output/module rather than
+    # source files, so allowing a direct test workflow to reuse an older output candidate
+    # could certify bytes that do not include current source edits. The default workflow
+    # delegates only to test, preventing a redundant second pack in the same invocation.
+    - pack
     # Uncomment to modify the PSModulePath in the test pipeline (also requires the build configuration section SetPSModulePath).
     #- Set_PSModulePath
     # Capture and invalidate before Pester: the final release proof is emitted only if the

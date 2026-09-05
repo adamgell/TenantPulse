@@ -445,6 +445,40 @@ Describe 'TP.INT.0015 - LAPS configuration policy meets minimum security bar' {
         @($finding.evidence).Count | Should -Be 1
     }
 
+    It 'NotApplicable: imported <Intent> assignment evidence remains unresolved even when all four LAPS criteria qualify' -ForEach @(
+        @{ Intent = 'Unknown' }
+        @{ Intent = 'Malformed' }
+    ) {
+        $policy = New-PulseLapsPolicyFixture -PolicyId 'p-unresolved' -PolicyName 'Compliant but unresolved'
+        $policy.assignmentIntent = $Intent
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.status | Should -Not -Be 'Fail'
+        $finding.reason | Should -Match 'assignment'
+    }
+
+    It 'NotApplicable: <Shape> assignment evidence remains unresolved for a qualifying all-four-criteria LAPS policy' -ForEach @(
+        @{ Shape = 'missing' }
+        @{ Shape = 'null' }
+    ) {
+        $policy = New-PulseLapsPolicyFixture -PolicyId 'p-unresolved' -PolicyName 'Compliant but assignment-unknown'
+        $policy.PSObject.Properties.Remove('assignmentIntent')
+        if ($Shape -eq 'null') {
+            $policy | Add-Member -NotePropertyName assignmentIntent -NotePropertyValue $null
+            $policy | Add-Member -NotePropertyName assignments -NotePropertyValue $null
+        }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'assignment'
+    }
+
     It 'Fail: zero LAPS policies exist' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
             @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @() }

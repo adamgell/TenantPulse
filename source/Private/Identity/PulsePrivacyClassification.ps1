@@ -318,6 +318,42 @@ function New-PulseClassifiedValue {
     }
 }
 
+function Test-PulseReasonCode {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $ReasonCode
+    )
+
+    if ([string]::IsNullOrEmpty($ReasonCode)) {
+        return $false
+    }
+
+    return [regex]::IsMatch(
+        $ReasonCode,
+        '^[a-z0-9]+(?:-[a-z0-9]+)*$',
+        [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+    )
+}
+
+function Assert-PulseReasonCode {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string] $ReasonCode
+    )
+
+    if (-not (Test-PulseReasonCode -ReasonCode $ReasonCode)) {
+        # Never echo the rejected value: the validation boundary exists specifically so an
+        # identity- or secret-shaped value cannot become serialized diagnostic text.
+        throw 'ReasonCode must be a lowercase hyphenated token.'
+    }
+}
+
 function ConvertTo-PulseClassifiedReason {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -336,9 +372,7 @@ function ConvertTo-PulseClassifiedReason {
         [object[]] $Arguments
     )
 
-    if ($ReasonCode -notmatch '^[a-z0-9]+(-[a-z0-9]+)*$') {
-        throw "ConvertTo-PulseClassifiedReason: ReasonCode '$ReasonCode' must be a lowercase hyphenated token."
-    }
+    Assert-PulseReasonCode -ReasonCode $ReasonCode
 
     $classifiedArguments = @()
     foreach ($argument in @($Arguments)) {
@@ -585,6 +619,18 @@ function ConvertTo-PulseSafeShareDocument {
         throw 'ConvertTo-PulseSafeShareDocument: never pass the evaluation wrapper; pass Document only.'
     }
 
+    if ($Document.PSObject.Properties.Name -contains 'privacy') {
+        $privacy = $Document.privacy
+        $complete = if ($null -ne $privacy -and $privacy.PSObject.Properties.Name -contains 'complete') {
+            $privacy.complete
+        } else {
+            $null
+        }
+        if ($complete -isnot [bool] -or -not $complete) {
+            throw 'ConvertTo-PulseSafeShareDocument: document privacy boundary is local-only or incomplete.'
+        }
+    }
+
     $json = ConvertTo-PulseCanonicalJson -InputObject $Document
     $clone = ConvertFrom-PulseJsonPreservingStrings -Json $json -Depth 64
 
@@ -598,6 +644,7 @@ function ConvertTo-PulseSafeShareDocument {
     function Get-SafeSharePseudonym {
         param([string] $Raw)
         if ([string]::IsNullOrEmpty($Raw)) { return $Raw }
+        if ($Raw -match '^tp-[a-f0-9]{64}$') { return $Raw }
         if ($map.ContainsKey($Raw)) { return $map[$Raw] }
         if ($null -eq $OperatorKey -or $OperatorKey.Length -ne 32) {
             throw "ConvertTo-PulseSafeShareDocument: Identity value is not in RedactionMap and no OperatorKey was supplied."
@@ -618,6 +665,14 @@ function ConvertTo-PulseSafeShareDocument {
             return $null
         }
 
+        if ($Node -is [System.Collections.IList]) {
+            for ($index = 0; $index -lt $Node.Count; $index++) {
+                $Node[$index] = Convert-SafeShareNode -Node $Node[$index] `
+                    -FieldClasses $FieldClasses -NodePath "$NodePath[$index]"
+            }
+            return $Node
+        }
+
         if ($Node -is [pscustomobject]) {
             foreach ($property in @($Node.PSObject.Properties)) {
                 $name = $property.Name
@@ -626,36 +681,84 @@ function ConvertTo-PulseSafeShareDocument {
                 if ($FieldClasses.ContainsKey($name)) {
                     $className = $FieldClasses[$name]
                 }
+                if ([string]::IsNullOrEmpty($className) -and $FieldClasses.ContainsKey('*')) {
+                    $className = $FieldClasses['*']
+                }
+                if ([string]::IsNullOrEmpty($className)) {
+                    throw "ConvertTo-PulseSafeShareDocument: '$childPath' is unclassified."
+                }
 
                 if ($property.Value -is [pscustomobject] -or $property.Value -is [System.Collections.IList]) {
-                    $property.Value = Convert-SafeShareNode -Node $property.Value -FieldClasses $FieldClasses -NodePath $childPath
+                    $childClasses = $FieldClasses
+                    if (-not [string]::IsNullOrEmpty($className)) {
+                        $childClasses = @{ '*' = $className }
+                    }
+                    $property.Value = Convert-SafeShareNode -Node $property.Value -FieldClasses $childClasses -NodePath $childPath
                     continue
                 }
 
-                if ([string]::IsNullOrEmpty($className)) {
-                    if ($null -eq $property.Value -or $property.Value -is [bool] -or $property.Value -is [int] -or $property.Value -is [int64] -or $property.Value -is [double] -or $property.Value -is [decimal]) {
+                # Identity and secret protection is a class rule, not a text-only rule.
+                # Apply it before primitive pass-through so numeric and Boolean values
+                # cannot survive raw merely because they contain no text canary.
+                switch ($className) {
+                    'Identity' {
+                        if ($null -ne $property.Value) {
+                            $property.Value = Get-SafeSharePseudonym -Raw ([string] $property.Value)
+                        }
                         continue
                     }
-                    throw "ConvertTo-PulseSafeShareDocument: '$childPath' is unclassified."
+                    'SecretSensitive' {
+                        $property.Value = New-PulseSecretRedactionMarker
+                        continue
+                    }
+                }
+
+                if ($null -eq $property.Value -or $property.Value -is [bool] -or
+                    $property.Value -is [byte] -or $property.Value -is [int16] -or
+                    $property.Value -is [uint16] -or $property.Value -is [int] -or
+                    $property.Value -is [uint32] -or $property.Value -is [int64] -or
+                    $property.Value -is [uint64] -or $property.Value -is [double] -or
+                    $property.Value -is [float] -or $property.Value -is [decimal]) {
+                    continue
                 }
 
                 if (-not (Test-PulseValueFitsPrivacyClass -Class $className -Value $property.Value)) {
                     throw "ConvertTo-PulseSafeShareDocument: '$childPath' value does not fit class '$className'."
                 }
 
-                switch ($className) {
-                    'Identity' {
-                        $property.Value = Get-SafeSharePseudonym -Raw ([string] $property.Value)
-                    }
-                    'SecretSensitive' {
-                        $property.Value = New-PulseSecretRedactionMarker
-                    }
-                    default {
-                        # retained
-                    }
-                }
+                # Safe classes retain the validated value.
             }
             return $Node
+        }
+
+        $leafClass = if ($FieldClasses.ContainsKey('*')) { [string] $FieldClasses['*'] } else { $null }
+        if ([string]::IsNullOrEmpty($leafClass)) {
+            if ($Node -is [bool] -or $Node -is [byte] -or $Node -is [int16] -or
+                $Node -is [uint16] -or $Node -is [int] -or $Node -is [uint32] -or
+                $Node -is [int64] -or $Node -is [uint64] -or $Node -is [double] -or
+                $Node -is [float] -or $Node -is [decimal]) {
+                return $Node
+            }
+            throw "ConvertTo-PulseSafeShareDocument: '$NodePath' is unclassified."
+        }
+
+        # Identity and secret protection applies to every scalar type. A number or Boolean
+        # can itself be a tenant identifier or sensitive value, even though it cannot match
+        # one of the text-shaped canaries used to validate safe classes.
+        switch ($leafClass) {
+            'Identity' { return Get-SafeSharePseudonym -Raw ([string] $Node) }
+            'SecretSensitive' { return New-PulseSecretRedactionMarker }
+        }
+
+        # Primitive non-text values classified into a safe class cannot contain an identity,
+        # secret, path, or markup canary, so retain them after the sensitive classes above
+        # have been handled.
+        if ($Node -isnot [string]) {
+            return $Node
+        }
+
+        if (-not (Test-PulseValueFitsPrivacyClass -Class $leafClass -Value $Node)) {
+            throw "ConvertTo-PulseSafeShareDocument: '$NodePath' value does not fit class '$leafClass'."
         }
 
         return $Node
@@ -665,6 +768,10 @@ function ConvertTo-PulseSafeShareDocument {
         $reasonCode = $null
         if ($finding.PSObject.Properties.Name -contains 'reasonCode') {
             $reasonCode = $finding.reasonCode
+        }
+
+        if (-not [string]::IsNullOrEmpty([string] $reasonCode)) {
+            Assert-PulseReasonCode -ReasonCode ([string] $reasonCode)
         }
 
         if ($finding.PSObject.Properties.Name -contains 'reason' -and -not [string]::IsNullOrEmpty([string] $finding.reason)) {
@@ -747,6 +854,43 @@ function ConvertTo-PulseSafeShareDocument {
             }
         }
     }
+
+    # The schema-level map classifies major document sections. Fixed scaffolding fields are
+    # safe technical metadata, and the defaults keep legacy hand-built test/renderer inputs
+    # compatible while still walking every scalar in every nested list and object.
+    $documentFieldClasses = @{
+        schemaVersion      = 'SafeTechnical'
+        generatedUtc       = 'SafeTechnical'
+        tenant             = 'Identity'
+        producer           = 'SafeTechnical'
+        coverage           = 'SafeTechnical'
+        scores             = 'SafeTechnical'
+        findings           = 'BoundedReviewedText'
+        collectionOutcomes = 'SafeTechnical'
+        privacyClasses     = 'SafeTechnical'
+        privacy            = 'SafeTechnical'
+        notices            = 'BoundedReviewedText'
+        references         = 'SafeTechnical'
+    }
+    if ($clone.PSObject.Properties.Name -contains 'privacyClasses' -and $null -ne $clone.privacyClasses) {
+        foreach ($property in @($clone.privacyClasses.PSObject.Properties)) {
+            if (-not (Test-PulsePrivacyClassName -Class ([string] $property.Value))) {
+                throw "ConvertTo-PulseSafeShareDocument: document privacy class '$($property.Name)' is invalid."
+            }
+
+            if ($documentFieldClasses.ContainsKey($property.Name)) {
+                $fixedClass = [string] $documentFieldClasses[$property.Name]
+                if ($fixedClass -ne [string] $property.Value) {
+                    throw "ConvertTo-PulseSafeShareDocument: document privacy class '$($property.Name)' conflicts with fixed schema class '$fixedClass'."
+                }
+                continue
+            }
+
+            $documentFieldClasses[$property.Name] = [string] $property.Value
+        }
+    }
+
+    $clone = Convert-SafeShareNode -Node $clone -FieldClasses $documentFieldClasses -NodePath 'document'
 
     $clone | Add-Member -NotePropertyName privacy -NotePropertyValue (ConvertTo-PulsePrivacyEnvelope -Complete $true) -Force
     return $clone

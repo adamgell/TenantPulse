@@ -77,11 +77,7 @@ jobs:
         shell: pwsh
         run: pwsh -File ./build.ps1 -ResolveDependency -Tasks noop
 
-      - name: Pack candidate
-        shell: pwsh
-        run: pwsh -File ./build.ps1 -Tasks pack
-
-      - name: Test
+      - name: Pack and test current candidate
         shell: pwsh
         run: pwsh -File ./build.ps1 -Tasks test
 
@@ -752,8 +748,17 @@ jobs:
           # +2 provider-plan and +6 BitLocker/LAPS assignment-certainty regressions.
           # 3006 -> 3258 after Conditional Access certainty closeout: +252 effective-
           # scope, grant, admin-role, privacy-alias, and evidence-identity regressions.
+          # 3258 -> 3303 after core-program hardening: +45 default-workflow privacy,
+          # envelope, ARM, provenance, version-routing, terminal-outcome,
+          # assignment-certainty, catalog, and application-report regressions.
+          # 3303 -> 3319 after final audit hardening: +16 primitive-privacy,
+          # fixed-schema, assignment-evidence, report-counter, and paging regressions.
+          # 3319 -> 3320 adds malformed ARM continuation coverage; the paged-failure
+          # interop correction strengthens an existing three-case parameterization.
+          # The four tests/Perf assertions are deliberately outside this QA+Unit release
+          # workflow and are not included in its measured 3320-test floor.
           # NotRun remains forbidden.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3258 -AllowedSkips $allowedSkips -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3320 -AllowedSkips $allowedSkips -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

@@ -15,7 +15,7 @@
 
 $script:PulseCompositeChildOperations = [ordered]@{
     deviceCompliancePolicies = @(
-        @{ Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'v1.0' }
+        @{ Type = 'DeviceCompliancePolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
     )
     deviceConfigurations = @(
@@ -665,11 +665,16 @@ function Convert-PulseGraphObjectResult {
     [CmdletBinding()]
     param(
         [AllowNull()]
-        $Result
+        $Result,
+
+        [Parameter()]
+        [ValidateSet('None', 'NextLink')]
+        [string] $PagingStrategy = 'NextLink'
     )
 
     $items = @($Result)
-    if ($items.Count -ne 1 -or -not (Test-PulseGraphResultEnvelope -InputObject $items[0])) {
+    if ($items.Count -ne 1 -or
+        -not (Test-PulseGraphResultEnvelope -InputObject $items[0] -PagingStrategy $PagingStrategy)) {
         return $null
     }
 
@@ -692,9 +697,15 @@ function Get-PulseGraphObjectRows {
 }
 
 function Test-PulseGraphEnvelopeIncomplete {
-    param([AllowNull()] $Envelope)
+    param(
+        [AllowNull()] $Envelope,
 
-    if (-not (Test-PulseGraphResultEnvelope -InputObject $Envelope)) { return $true }
+        [Parameter()]
+        [ValidateSet('None', 'NextLink')]
+        [string] $PagingStrategy = 'NextLink'
+    )
+
+    if (-not (Test-PulseGraphResultEnvelope -InputObject $Envelope -PagingStrategy $PagingStrategy)) { return $true }
     $outcome = Get-PulseGraphEnvelopeProperty -Envelope $Envelope -Name 'outcome'
     $truncatedRaw = Get-PulseGraphEnvelopeProperty -Envelope $Envelope -Name 'truncated'
     $certainty = Get-PulseGraphEnvelopeProperty -Envelope $Envelope -Name 'certainty'
@@ -716,7 +727,11 @@ function Invoke-PulseGraphRead {
         [string] $Operation,
 
         [Parameter()]
-        [hashtable] $Parameters
+        [hashtable] $Parameters,
+
+        [Parameter()]
+        [ValidateSet('None', 'NextLink')]
+        [string] $PagingStrategy = 'NextLink'
     )
 
     $graphObjectParams = @{
@@ -731,8 +746,8 @@ function Invoke-PulseGraphRead {
     }
 
     $raw = @(Get-GraphObject @graphObjectParams)
-    $envelope = Convert-PulseGraphObjectResult -Result $raw
-    if (Test-PulseGraphEnvelopeIncomplete -Envelope $envelope) {
+    $envelope = Convert-PulseGraphObjectResult -Result $raw -PagingStrategy $PagingStrategy
+    if (Test-PulseGraphEnvelopeIncomplete -Envelope $envelope -PagingStrategy $PagingStrategy) {
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new('Graph envelope incomplete'),
             'GraphKit.OperationIncomplete',

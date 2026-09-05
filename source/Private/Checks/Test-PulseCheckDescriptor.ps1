@@ -635,6 +635,11 @@ function Test-PulseCheckDescriptor {
         } else {
             $privacy = $Descriptor.Privacy
             $privacyMaps = @('EvidenceFields', 'CatalogFields')
+            foreach ($privacyKey in @($privacy.Keys)) {
+                if ($privacyMaps -notcontains [string] $privacyKey) {
+                    $errors.Add("${Label}: Privacy.${privacyKey}: is not supported; allowed keys are EvidenceFields and CatalogFields.")
+                }
+            }
             foreach ($mapName in $privacyMaps) {
                 if (-not $privacy.ContainsKey($mapName) -or $null -eq $privacy[$mapName]) {
                     continue

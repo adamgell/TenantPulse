@@ -422,6 +422,48 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         @($finding.evidence).Count | Should -Be 1
     }
 
+    It 'NotApplicable: imported <Intent> assignment evidence remains unresolved even when the encryption setting qualifies' -ForEach @(
+        @{ Intent = 'Unknown' }
+        @{ Intent = 'Malformed' }
+    ) {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{
+                Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'
+                Data = @([pscustomobject]@{
+                        policyId = 'p-unresolved'; policyName = 'Full but unresolved'
+                        isFullDiskEncryption = $true; assignmentIntent = $Intent
+                    })
+            }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.status | Should -Not -Be 'Fail'
+        $finding.reason | Should -Match 'assignment'
+    }
+
+    It 'NotApplicable: <Shape> assignment evidence remains unresolved for a qualifying full-disk policy' -ForEach @(
+        @{ Shape = 'missing' }
+        @{ Shape = 'null' }
+    ) {
+        $policy = [pscustomobject]@{
+            policyId = 'p-unresolved'; policyName = 'Full but assignment-unknown'; isFullDiskEncryption = $true
+        }
+        if ($Shape -eq 'null') {
+            $policy | Add-Member -NotePropertyName assignmentIntent -NotePropertyValue $null
+            $policy | Add-Member -NotePropertyName assignments -NotePropertyValue $null
+        }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{
+                Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'
+                Data = @($policy)
+            }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'assignment'
+    }
+
     It 'Fail: zero Disk Encryption policies exist' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
             @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @() }

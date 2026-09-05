@@ -14,8 +14,8 @@
     -Status Failed or -Status Skipped, no dataset file is written - only the manifest
     entry, via Set-PulseManifestEntry, which is the sole function allowed to touch
     manifest.json. -Envelope (AC-26) accepts exactly one genuine GraphKit.OperationResult
-    with required non-null Data, Outcome, Certainty, and native-Boolean Truncated members, then maps
-    it onto that same status contract. Collected is persisted only for
+    with required non-null Data, Outcome, and Certainty members, plus descriptor-appropriate
+    paging completeness members, then maps it onto that same status contract. Collected is persisted only for
     Succeeded/Known/not-truncated envelopes; their Data may be authoritatively empty.
     Truncated, Indeterminate, page-cap, or otherwise incomplete successful envelopes become
     Partial (usable rows) or Failed/Indeterminate (no safe rows). Missing, multiple,
@@ -56,6 +56,9 @@ function Write-PulseDataset {
         [AllowNull()]
         $Envelope,
 
+        [Parameter()]
+        [ValidateSet('None', 'NextLink')]
+        [string] $PagingStrategy = 'NextLink',
 
         [Parameter(Mandatory)]
         [AllowNull()]
@@ -130,14 +133,16 @@ function Write-PulseDataset {
         $envelopeCandidate = $Envelope
     } else {
         $dataItems = @($Data)
-        if ($dataItems.Count -eq 1 -and (Test-PulseGraphResultEnvelope -InputObject $dataItems[0])) {
+        if ($dataItems.Count -eq 1 -and
+            (Test-PulseGraphResultEnvelope -InputObject $dataItems[0] -PagingStrategy $PagingStrategy)) {
             $envelopeCandidate = $dataItems[0]
         }
     }
 
     if ($envelopeBound -or $null -ne $envelopeCandidate) {
         $mapped = ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelopeCandidate `
-            -Dataset $Name -ApiVersion $ApiVersion -Provider $Provider -Operations $Operations
+            -Dataset $Name -ApiVersion $ApiVersion -Provider $Provider -Operations $Operations `
+            -PagingStrategy $PagingStrategy
         $Status = $mapped.Status
         $Data = $mapped.Rows
         $Gaps = $mapped.Gaps

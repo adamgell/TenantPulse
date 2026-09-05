@@ -65,6 +65,7 @@ function Test-PulseLapsConfigurationMeetsBar {
     $criteriaFields = @('backsUpToEntra', 'hasSufficientComplexity', 'hasSufficientLength', 'hasPostAuthAction')
     $compliantPolicies = [System.Collections.Generic.List[object]]::new()
     $malformedReason = $null
+    $hasUnresolvedQualifyingAssignment = $false
     foreach ($policy in $policies) {
         $policyId = [string] $policy.policyId
         if ([string]::IsNullOrWhiteSpace($policyId)) {
@@ -93,13 +94,33 @@ function Test-PulseLapsConfigurationMeetsBar {
         }
         if ($rowMalformed) { continue }
 
-        $meetsBar = ([bool] $policy.backsUpToEntra) -and
+        $criteriaMeetBar = ([bool] $policy.backsUpToEntra) -and
             ([bool] $policy.hasSufficientComplexity) -and
             ([bool] $policy.hasSufficientLength) -and
-            ([bool] $policy.hasPostAuthAction) -and
-            (Test-PulseCompositeRowIsAssigned -Row $policy)
-        if ($meetsBar) {
-            $compliantPolicies.Add($policy)
+            ([bool] $policy.hasPostAuthAction)
+        if ($criteriaMeetBar) {
+            $assignmentIntentText = [string] (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'assignmentIntent')
+            if (-not [string]::IsNullOrWhiteSpace($assignmentIntentText)) {
+                if ($assignmentIntentText -notin @('Include', 'Empty', 'ExcludeOnly')) {
+                    $hasUnresolvedQualifyingAssignment = $true
+                    continue
+                }
+                if ($assignmentIntentText -eq 'Include') {
+                    $compliantPolicies.Add($policy)
+                }
+                continue
+            }
+
+            $assignmentIntent = ConvertTo-PulseAssignmentIntent -Assignments (
+                Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'assignments'
+            )
+            if (-not $assignmentIntent.Complete) {
+                $hasUnresolvedQualifyingAssignment = $true
+                continue
+            }
+            if ($assignmentIntent.IsAssigned) {
+                $compliantPolicies.Add($policy)
+            }
         }
     }
 
@@ -125,6 +146,10 @@ function Test-PulseLapsConfigurationMeetsBar {
     if ($compliant.Count -gt 0) {
         $evidence = ConvertTo-PulseMaesterEvidence -Rows $policies -IdentityProperty 'policyId' -SortKeyProperty 'policyName' -DetailProperties @('policyName', 'backsUpToEntra', 'hasSufficientComplexity', 'hasSufficientLength', 'hasPostAuthAction')
         return New-PulseFinding -Status Pass -Reason "At least one Windows LAPS policy ($($compliant.Count) of $($policies.Count)) meets the full minimum security bar on a single policy: backs up to Entra ID, 4-class-or-higher password complexity, >= 14-character passwords, and a recognized post-authentication reset action." -Evidence $evidence
+    }
+
+    if ($hasUnresolvedQualifyingAssignment) {
+        return New-PulseFinding -Status NotApplicable -Reason 'At least one LAPS policy meets the configuration bar but has unresolved assignment evidence, so the check cannot prove either effective coverage or an authoritative failure.'
     }
 
     if ($policies.Count -eq 0) {

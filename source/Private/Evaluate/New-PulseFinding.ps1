@@ -129,6 +129,10 @@ function New-PulseFinding {
         throw "New-PulseFinding: -Reason is mandatory when -Status is 'NotApplicable' - a rule declaring its own check inapplicable must always say why."
     }
 
+    if (-not [string]::IsNullOrEmpty($ReasonCode)) {
+        Assert-PulseReasonCode -ReasonCode $ReasonCode
+    }
+
     $normalized = ConvertTo-PulseNormalizedEvidence -Evidence $Evidence
 
     $reasonComplete = [string]::IsNullOrEmpty($Reason) -or -not [string]::IsNullOrEmpty($ReasonCode)

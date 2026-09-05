@@ -57,10 +57,11 @@ BeforeAll {
                 AuthenticationAborted = $script:PolicyAssignmentFixture.InitiallyAborted
                 Reason = if ($script:PolicyAssignmentFixture.InitiallyAborted) { 'authentication-failed: collection aborted' } else { $null }
             }
+            $datasetApiVersion = if ($fixture.Dataset -eq 'deviceCompliancePolicies') { 'beta' } else { 'v1.0' }
             $result = Invoke-PulsePolicyAssignmentPlan `
                 -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
                 -Dataset $fixture.Dataset `
-                -ManifestEntry ([pscustomobject]@{ Dataset = $fixture.Dataset; Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }) `
+                -ManifestEntry ([pscustomobject]@{ Dataset = $fixture.Dataset; Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = $datasetApiVersion }) `
                 -ProfileId 'fixture' -TenantPseudonym 'tp-fixture' -NetworkAbortState $abort
 
             [pscustomobject]@{
@@ -77,11 +78,17 @@ Describe 'Invoke-PulsePolicyAssignmentPlan' {
         @{
             Dataset = 'deviceCompliancePolicies'
             RootType = 'DeviceCompliancePolicy'
+            RootOperation = 'ListBeta'
+            RootApiVersion = 'beta'
+            DatasetApiVersion = 'beta'
             ChildType = 'DeviceCompliancePolicyAssignment'
         }
         @{
             Dataset = 'deviceConfigurations'
             RootType = 'DeviceConfiguration'
+            RootOperation = 'List'
+            RootApiVersion = 'v1.0'
+            DatasetApiVersion = 'v1.0'
             ChildType = 'DeviceConfigurationAssignment'
         }
     ) {
@@ -98,15 +105,22 @@ Describe 'Invoke-PulsePolicyAssignmentPlan' {
 
         $fixture.Outcome.Status | Should -Be 'Collected'
         $fixture.Outcome.Provider | Should -Be 'TenantPulse'
-        @($fixture.Outcome.Operations) | Should -Be @("$RootType.List", "$ChildType.List")
+        $fixture.Outcome.ApiVersion | Should -BeExactly $DatasetApiVersion
+        @($fixture.Outcome.Operations) | Should -Be @("$RootType.$RootOperation", "$ChildType.List")
         @($fixture.Outcome.Rows.id) | Should -Be @('policy-a', 'policy-b')
         @($fixture.Outcome.Rows[0].assignments.id) | Should -Be @('assignment-a', 'assignment-z')
         @($fixture.Outcome.Rows[1].assignments).Count | Should -Be 0
         @($fixture.Calls | ForEach-Object { "$($_.Type)/$($_.Operation)/$($_.Id)" }) | Should -Be @(
-            "$RootType/List/"
+            "$RootType/$RootOperation/"
             "$ChildType/List/policy-a"
             "$ChildType/List/policy-b"
         )
+        Should-Invoke Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Type -eq $RootType -and $Operation -eq $RootOperation -and $ApiVersion -eq $RootApiVersion
+        }
+        Should-Invoke Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Type -eq $ChildType -and $Operation -eq 'List' -and $ApiVersion -eq 'v1.0'
+        }
     }
 
     It 'retains valid parents but gaps missing and duplicate IDs without issuing ambiguous child reads' {
@@ -145,6 +159,8 @@ Describe 'Invoke-PulsePolicyAssignmentPlan' {
         $fixture.Outcome.Rows[1].assignments | Should -BeNullOrEmpty
         @($fixture.Outcome.Gaps.Scope) | Should -Contain 'dataset:deviceCompliancePolicies/root'
         @($fixture.Outcome.Gaps.Scope) | Should -Contain 'policy:known-b/assignments'
+        ($fixture.Outcome.Gaps | Where-Object Scope -EQ 'dataset:deviceCompliancePolicies/root').ApiVersion | Should -BeExactly 'beta'
+        ($fixture.Outcome.Gaps | Where-Object Scope -EQ 'policy:known-b/assignments').ApiVersion | Should -BeExactly 'v1.0'
     }
 
     It 'fails closed for a malformed root envelope and sends no child operations' {
@@ -164,6 +180,11 @@ Describe 'Invoke-PulsePolicyAssignmentPlan' {
         $fixture.Outcome.Status | Should -Be 'Failed'
         $fixture.Outcome.FailureClass | Should -Be 'AuthenticationFailed'
         $fixture.Outcome.ReasonCode | Should -Be 'authentication-failed'
+        $fixture.Outcome.ApiVersion | Should -BeExactly 'beta'
+        @($fixture.Outcome.Operations) | Should -Be @(
+            'DeviceCompliancePolicy.ListBeta'
+            'DeviceCompliancePolicyAssignment.List'
+        )
         @($fixture.Calls).Count | Should -Be 0
     }
 
@@ -244,7 +265,7 @@ Describe 'Invoke-PulsePolicyAssignmentPlan' {
                     -Decision Granted -ReasonCode granted -Decisions $decisions
                 $manifest = @([pscustomobject]@{
                         Dataset = 'deviceCompliancePolicies'; Provider = 'TenantPulse'
-                        Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0'; Pending = $false
+                        Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'beta'; Pending = $false
                     })
                 $context = [pscustomobject]@{ TenantId = 'tenant'; ProfileId = 'fixture' }
 
@@ -262,7 +283,7 @@ Describe 'Invoke-PulsePolicyAssignmentPlan' {
             }
 
             @($result.Calls) | Should -Be @(
-                'DeviceCompliancePolicy/List/'
+                'DeviceCompliancePolicy/ListBeta/'
                 'DeviceCompliancePolicyAssignment/List/policy-one'
             )
             @($result.Joined).Count | Should -Be 1
@@ -270,6 +291,7 @@ Describe 'Invoke-PulsePolicyAssignmentPlan' {
             @($result.Raw).Count | Should -Be 1
             $result.Raw[0].target.groupId | Should -Be 'group-one'
             $result.Manifest.datasets.deviceCompliancePolicies.provider | Should -Be 'TenantPulse'
+            $result.Manifest.datasets.deviceCompliancePolicies.apiVersion | Should -BeExactly 'beta'
             $result.Manifest.datasets.'complianceAssignments-policy-one'.status | Should -Be 'Collected'
             $result.Manifest.expansions.compliance.status | Should -Be 'Expanded'
         } finally {

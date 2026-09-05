@@ -39,7 +39,7 @@ function Test-PulseArmResourceId {
         throw "ARM resource ID '{0}' must be an absolute path starting with '/'." -f $ResourceId
     }
 
-    if ($ResourceId.Contains('?') -or $ResourceId.Contains('#') -or $ResourceId.Contains('\\')) {
+    if ($ResourceId.Contains('?') -or $ResourceId.Contains('#') -or $ResourceId.Contains('\')) {
         throw "ARM resource ID '{0}' must not include a query, fragment, or backslash." -f $ResourceId
     }
 

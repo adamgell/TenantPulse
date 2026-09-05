@@ -42,6 +42,11 @@
     any other catalog problem rather than throwing a raw, unrelated error. A file literally
     named 'DatasetMap.psd1' living inside the catalog -Path itself is excluded from
     descriptor scanning (it is the map, not a check).
+
+    Research evidence cross-check: the shipping default catalog uses the built module root
+    as RepoRoot, so every required References.Research file and heading is validated at
+    import. Fixture or alternate catalogs retain structural-only validation unless their
+    caller supplies -RepoRoot explicitly.
 #>
 
 function Import-PulseCheckCatalog {
@@ -52,7 +57,12 @@ function Import-PulseCheckCatalog {
         [string] $Path,
 
         [Parameter()]
-        [string] $DatasetMapPath
+        [string] $DatasetMapPath,
+
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string] $RepoRoot
     )
 
     $moduleBase = if ($MyInvocation.MyCommand.Module) {
@@ -61,8 +71,14 @@ function Import-PulseCheckCatalog {
         $PSScriptRoot
     }
 
-    if (-not $PSBoundParameters.ContainsKey('Path') -or [string]::IsNullOrEmpty($Path)) {
+    $usesDefaultCatalogPath = -not $PSBoundParameters.ContainsKey('Path') -or [string]::IsNullOrEmpty($Path)
+    if ($usesDefaultCatalogPath) {
         $Path = Join-Path $moduleBase 'Data/Checks'
+    }
+
+    if ($usesDefaultCatalogPath -and
+        (-not $PSBoundParameters.ContainsKey('RepoRoot') -or [string]::IsNullOrEmpty($RepoRoot))) {
+        $RepoRoot = $moduleBase
     }
 
     if (-not $PSBoundParameters.ContainsKey('DatasetMapPath') -or [string]::IsNullOrEmpty($DatasetMapPath)) {
@@ -145,7 +161,8 @@ function Import-PulseCheckCatalog {
             $file.Name
         }
 
-        $fieldErrors = @(Test-PulseCheckDescriptor -Descriptor $data -Label $label -DatasetMap $datasetMap -DatasetMapPath $DatasetMapPath)
+        $fieldErrors = @(Test-PulseCheckDescriptor -Descriptor $data -Label $label -DatasetMap $datasetMap `
+                -DatasetMapPath $DatasetMapPath -RepoRoot $RepoRoot)
         if ($fieldErrors.Count -gt 0) {
             foreach ($fieldError in $fieldErrors) {
                 $allErrors.Add("$($file.Name): $fieldError")

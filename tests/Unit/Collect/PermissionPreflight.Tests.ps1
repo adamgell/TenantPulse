@@ -107,7 +107,7 @@ BeforeAll {
 Describe 'Get-PulsePermissionPreflightOperations' {
     It 'declares the exact root and assignment child operations for both authoritative policy plans' {
         $manifest = @(
-            [pscustomobject]@{ Dataset = 'deviceCompliancePolicies'; Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }
+            [pscustomobject]@{ Dataset = 'deviceCompliancePolicies'; Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'beta' }
             [pscustomobject]@{ Dataset = 'deviceConfigurations'; Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }
         )
 
@@ -118,7 +118,7 @@ Describe 'Get-PulsePermissionPreflightOperations' {
         }
 
         @($operations | ForEach-Object { '{0}/{1}/{2}' -f $_.Type, $_.Operation, $_.ApiVersion }) | Should -Be @(
-            'DeviceCompliancePolicy/List/v1.0'
+            'DeviceCompliancePolicy/ListBeta/beta'
             'DeviceCompliancePolicyAssignment/List/v1.0'
             'DeviceConfiguration/List/v1.0'
             'DeviceConfigurationAssignment/List/v1.0'
@@ -226,7 +226,7 @@ Describe 'Invoke-PulsePermissionPreflight' {
     It 'calls Test-GraphPermission once with TargetAppId equal to Context.ClientId and the descriptor union as Baseline' {
         $operations = @(
             @{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' }
-            @{ Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'v1.0' }
+            @{ Type = 'DeviceCompliancePolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         )
         Mock Test-GraphPermission -ModuleName TenantPulse {
             $script:preflightDone = $true
@@ -662,7 +662,7 @@ Describe 'Invoke-PulseCollection permission preflight' {
         $entry.status | Should -Be 'Failed'
         $entry.failureClass | Should -Be 'PermissionDenied'
         $entry.reasonCode | Should -Be 'missing-grant'
-        @($entry.operations) | Should -Contain 'ListBeta'
+        @($entry.operations) | Should -Contain 'ConfigurationPolicyAssignment.ListBeta'
         Should-NotInvoke Invoke-PulseEndpointSecurityPolicyPlan -ModuleName TenantPulse
         Should-NotInvoke Get-GraphObject -ModuleName TenantPulse
     }
@@ -674,7 +674,7 @@ Describe 'Invoke-PulseCollection permission preflight' {
             } else {
                 'DeviceManagementConfiguration.Read.All'
             }
-            New-TestDescriptor -Type $Type -Operation $Operation -ApiVersion 'v1.0' `
+            New-TestDescriptor -Type $Type -Operation $Operation -ApiVersion $ApiVersion `
                 -RequiredPermissions @(@{ Type = 'Application'; Value = $permission })
         }
         Mock Test-GraphPermission -ModuleName TenantPulse {
@@ -690,7 +690,7 @@ Describe 'Invoke-PulseCollection permission preflight' {
         $manifest = @(
             [pscustomobject]@{
                 Dataset = 'deviceCompliancePolicies'; Provider = 'TenantPulse'
-                Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0'
+                Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'beta'
             }
         )
         Invoke-TestCollection -Manifest $manifest
@@ -797,6 +797,7 @@ Describe 'Invoke-PulseCollection permission preflight' {
                 Outcome    = 'Succeeded'
                 Certainty  = 'Indeterminate'
                 Truncated  = $true
+                PageCount  = 200
                 Data       = [pscustomobject]@{ id = 'p1' }
             }
         }

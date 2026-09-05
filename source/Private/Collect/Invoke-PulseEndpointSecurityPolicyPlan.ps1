@@ -231,7 +231,8 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
     }
 
     $rows = [System.Collections.Generic.List[object]]::new()
-    foreach ($selectedPolicy in $selected) {
+    for ($selectedIndex = 0; $selectedIndex -lt $selected.Count; $selectedIndex++) {
+        $selectedPolicy = $selected[$selectedIndex]
         $policyId = [string] $selectedPolicy.PolicyId
         $settings = @()
         try {
@@ -248,6 +249,15 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             if ($failure.AbortCollection) {
                 $NetworkAbortState.AuthenticationAborted = $true
                 $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
+                for ($remainingIndex = $selectedIndex + 1; $remainingIndex -lt $selected.Count; $remainingIndex++) {
+                    $remainingPolicyId = [string] $selected[$remainingIndex].PolicyId
+                    $notExpandedCount++
+                    $gaps.Add((New-PulseCollectionGap -Scope "policy:$remainingPolicyId" `
+                            -FailureClass 'AuthenticationFailed' `
+                            -ReasonCode 'not-attempted-after-authentication-failure' `
+                            -Detail @{ policyId = $remainingPolicyId } `
+                            -Operation 'ConfigurationPolicySetting.ListBeta' -ApiVersion 'beta')) | Out-Null
+                }
                 break
             }
             continue
@@ -259,13 +269,23 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             $assignmentIntentResult = ConvertTo-PulseAssignmentIntent -Assignments $assignmentRows
         } catch {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
+            $notExpandedCount++
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass $failure.FailureClass `
                     -ReasonCode $failure.ReasonCode `
                     -Detail @{ policyId = $policyId } `
                     -Operation 'ConfigurationPolicyAssignment.ListBeta' -ApiVersion 'beta')) | Out-Null
             if ($failure.AbortCollection) {
                 $NetworkAbortState.AuthenticationAborted = $true
-                $NetworkAbortState.Reason = 'auth-failure: collection aborted'
+                $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
+                for ($remainingIndex = $selectedIndex + 1; $remainingIndex -lt $selected.Count; $remainingIndex++) {
+                    $remainingPolicyId = [string] $selected[$remainingIndex].PolicyId
+                    $notExpandedCount++
+                    $gaps.Add((New-PulseCollectionGap -Scope "policy:$remainingPolicyId" `
+                            -FailureClass 'AuthenticationFailed' `
+                            -ReasonCode 'not-attempted-after-authentication-failure' `
+                            -Detail @{ policyId = $remainingPolicyId } `
+                            -Operation 'ConfigurationPolicyAssignment.ListBeta' -ApiVersion 'beta')) | Out-Null
+                }
                 break
             }
             continue
@@ -348,14 +368,19 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             -Provider 'GraphKit' -ApiVersion $apiVersion -Operations $operations
     }
 
-    $topFailureClass = [string] $gapArray[0].FailureClass
-    $topReasonCode = [string] $gapArray[0].ReasonCode
-    foreach ($gap in $gapArray) {
-        if ([string] $gap.FailureClass -ne $topFailureClass -or
-            [string] $gap.ReasonCode -ne $topReasonCode) {
-            $topFailureClass = 'ProviderFailed'
-            $topReasonCode = 'provider-failed'
-            break
+    if ($NetworkAbortState.AuthenticationAborted) {
+        $topFailureClass = 'AuthenticationFailed'
+        $topReasonCode = 'authentication-failed'
+    } else {
+        $topFailureClass = [string] $gapArray[0].FailureClass
+        $topReasonCode = [string] $gapArray[0].ReasonCode
+        foreach ($gap in $gapArray) {
+            if ([string] $gap.FailureClass -ne $topFailureClass -or
+                [string] $gap.ReasonCode -ne $topReasonCode) {
+                $topFailureClass = 'ProviderFailed'
+                $topReasonCode = 'provider-failed'
+                break
+            }
         }
     }
     return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gapArray `

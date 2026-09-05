@@ -60,7 +60,10 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         Assert-PulseReadOnlyDescriptor -Type $spec.Type -Operation $spec.Operation -ApiVersion $spec.ApiVersion
     }
 
-    $operations = @('ListBeta', 'Get')
+    $operations = @(
+        'DeviceManagementUnifiedRoleAssignment.ListBeta'
+        'Group.Get'
+    )
     $apiVersion = if ($ManifestEntry.PSObject.Properties['ApiVersion'] -and $ManifestEntry.ApiVersion) {
         [string] $ManifestEntry.ApiVersion
     } else {
@@ -141,7 +144,8 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         if (-not $hasPrincipals -or $principals.Count -eq 0 -or [string]::IsNullOrWhiteSpace($roleDefinitionName)) {
             $scopeId = if ([string]::IsNullOrWhiteSpace($assignmentId)) { 'unknown' } else { $assignmentId }
             $gaps.Add((New-PulseCollectionGap -Scope "assignment:$scopeId" -FailureClass 'InvalidProviderData' `
-                    -ReasonCode 'invalid-provider-data' -Detail @{ assignmentId = $scopeId } -Operation 'ListBeta' -ApiVersion 'beta'))
+                    -ReasonCode 'invalid-provider-data' -Detail @{ assignmentId = $scopeId } `
+                    -Operation 'DeviceManagementUnifiedRoleAssignment.ListBeta' -ApiVersion 'beta'))
             continue
         }
 
@@ -192,7 +196,8 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         if ($hasInvalidPrincipal) {
             $scopeId = if ([string]::IsNullOrWhiteSpace($assignmentId)) { 'unknown' } else { $assignmentId }
             $gaps.Add((New-PulseCollectionGap -Scope "assignment:$scopeId" -FailureClass 'InvalidProviderData' `
-                    -ReasonCode 'invalid-provider-data' -Detail @{ assignmentId = $scopeId } -Operation 'ListBeta' -ApiVersion 'beta'))
+                    -ReasonCode 'invalid-provider-data' -Detail @{ assignmentId = $scopeId } `
+                    -Operation 'DeviceManagementUnifiedRoleAssignment.ListBeta' -ApiVersion 'beta'))
         }
     }
 
@@ -205,19 +210,29 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
     $expandedCount = 0
     $partialCount = 0
     $notExpandedCount = 0
-    foreach ($groupId in $groupIds) {
+    for ($groupIndex = 0; $groupIndex -lt $groupIds.Count; $groupIndex++) {
+        $groupId = $groupIds[$groupIndex]
         $groupRows = @()
         try {
-            $groupRows = @(Invoke-PulseGraphRead -Context $Context -Type 'Group' -Operation 'Get' -Parameters @{ id = $groupId })
+            $groupRows = @(Invoke-PulseGraphRead -Context $Context -Type 'Group' -Operation 'Get' `
+                    -Parameters @{ id = $groupId } -PagingStrategy 'None')
 
         } catch {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
             $notExpandedCount++
             $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass $failure.FailureClass `
-                    -ReasonCode $failure.ReasonCode -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
+                    -ReasonCode $failure.ReasonCode -Detail @{ groupId = $groupId } -Operation 'Group.Get' -ApiVersion 'v1.0'))
             if ($failure.AbortCollection) {
                 $NetworkAbortState.AuthenticationAborted = $true
                 $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
+                for ($remainingIndex = $groupIndex + 1; $remainingIndex -lt $groupIds.Count; $remainingIndex++) {
+                    $remainingGroupId = $groupIds[$remainingIndex]
+                    $notExpandedCount++
+                    $gaps.Add((New-PulseCollectionGap -Scope "group:$remainingGroupId" `
+                            -FailureClass 'AuthenticationFailed' `
+                            -ReasonCode 'not-attempted-after-authentication-failure' `
+                            -Detail @{ groupId = $remainingGroupId } -Operation 'Group.Get' -ApiVersion 'v1.0'))
+                }
                 break
             }
             continue
@@ -226,7 +241,7 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
         if ($groupRows.Count -ne 1 -or $null -eq $groupRows[0]) {
             $partialCount++
             $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass 'InvalidProviderData' `
-                    -ReasonCode 'invalid-provider-data' -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
+                    -ReasonCode 'invalid-provider-data' -Detail @{ groupId = $groupId } -Operation 'Group.Get' -ApiVersion 'v1.0'))
             continue
         }
 
@@ -248,7 +263,7 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
             ($null -ne $assignable -and $assignable -isnot [bool])) {
             $partialCount++
             $gaps.Add((New-PulseCollectionGap -Scope "group:$groupId" -FailureClass 'InvalidProviderData' `
-                    -ReasonCode 'invalid-provider-data' -Detail @{ groupId = $groupId } -Operation 'Get' -ApiVersion 'v1.0'))
+                    -ReasonCode 'invalid-provider-data' -Detail @{ groupId = $groupId } -Operation 'Group.Get' -ApiVersion 'v1.0'))
             continue
         }
         $restricted = if ($null -eq $restricted) { [bool] $false } else { [bool] $restricted }
@@ -294,7 +309,10 @@ function Invoke-PulseIntuneRbacGroupProtectionPlan {
 
     $topFailureClass = 'ProviderFailed'
     $topReasonCode = 'provider-failed'
-    if ($gapArray.Count -gt 0) {
+    if ($NetworkAbortState.AuthenticationAborted) {
+        $topFailureClass = 'AuthenticationFailed'
+        $topReasonCode = 'authentication-failed'
+    } elseif ($gapArray.Count -gt 0) {
         $candidateFailureClass = [string] $gapArray[0].FailureClass
         $candidateReasonCode = [string] $gapArray[0].ReasonCode
         $uniformFailureTuple = $true

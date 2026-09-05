@@ -16,11 +16,11 @@
 #>
 
 $script:PulseApplicationReportOperations = @(
-    [pscustomobject]@{ Type = 'AppInstallSummaryReport'; Operation = 'Get'; ApiVersion = 'beta' }
-    [pscustomobject]@{ Type = 'Group'; Operation = 'Get'; ApiVersion = 'v1.0' }
-    [pscustomobject]@{ Type = 'GroupMember'; Operation = 'List'; ApiVersion = 'v1.0' }
-    [pscustomobject]@{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
-    [pscustomobject]@{ Type = 'MobileAppAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+    [pscustomobject]@{ Type = 'AppInstallSummaryReport'; Operation = 'Get'; ApiVersion = 'beta'; PagingStrategy = 'None' }
+    [pscustomobject]@{ Type = 'Group'; Operation = 'Get'; ApiVersion = 'v1.0'; PagingStrategy = 'None' }
+    [pscustomobject]@{ Type = 'GroupMember'; Operation = 'List'; ApiVersion = 'v1.0'; PagingStrategy = 'NextLink' }
+    [pscustomobject]@{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta'; PagingStrategy = 'NextLink' }
+    [pscustomobject]@{ Type = 'MobileAppAssignment'; Operation = 'List'; ApiVersion = 'v1.0'; PagingStrategy = 'NextLink' }
 )
 
 function Get-PulseApplicationReportOperations {
@@ -29,7 +29,10 @@ function Get-PulseApplicationReportOperations {
     param()
 
     return @($script:PulseApplicationReportOperations | ForEach-Object {
-            [pscustomobject]@{ Type = $_.Type; Operation = $_.Operation; ApiVersion = $_.ApiVersion }
+            [pscustomobject]@{
+                Type = $_.Type; Operation = $_.Operation; ApiVersion = $_.ApiVersion
+                PagingStrategy = $_.PagingStrategy
+            }
         })
 }
 
@@ -230,6 +233,18 @@ function Test-PulseAppInstallSourceMap {
 
     $hasIdentity = $false
     $hasSignal = $false
+    $normalizedKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($name in @($SourceColumns.Keys)) {
+        $normalizedKey = ConvertTo-PulseInstallColumnKey -Name ([string] $name)
+        # Direct named records do not pass through the matrix-schema duplicate check.
+        # Two distinct source keys such as ApplicationId/application-id normalize to the
+        # same lookup key and would otherwise overwrite one another based on enumeration
+        # order. Refuse the whole record rather than choosing an arbitrary identity/value.
+        if ([string]::IsNullOrWhiteSpace($normalizedKey) -or -not $normalizedKeys.Add($normalizedKey)) {
+            return $false
+        }
+    }
+
     foreach ($name in @($SourceColumns.Keys)) {
         $normalizedKey = ConvertTo-PulseInstallColumnKey -Name ([string] $name)
         $value = $SourceColumns[$name]
@@ -361,7 +376,7 @@ function Publish-PulseReportDataRows {
         [Array]::Sort($sortedGaps, $gapComparison)
     }
     $unresolved = if ($Name -eq 'application-assignments') {
-        @($safeRows | Where-Object { $_.groupResolutionState -in @('Failed', 'Partial') -or $_.assignmentResolutionState -in @('Failed', 'Malformed', 'Partial') }).Count
+        @($safeRows | Where-Object { $_.groupResolutionState -in @('Failed', 'Partial', 'NotEvaluated') -or $_.assignmentResolutionState -in @('Failed', 'Malformed', 'Partial') }).Count
     } else { 0 }
 
     $notExpandedReason = if ($sortedGaps.Count -gt 0) { [string] $sortedGaps[0].reason } else { $null }
@@ -388,9 +403,10 @@ function Invoke-PulseReportGraphOperation {
         }
         if ($PSBoundParameters.ContainsKey('Parameters')) { $invokeParams.Parameters = $Parameters }
         $raw = @(Get-GraphObject @invokeParams)
-        $envelope = Convert-PulseGraphObjectResult -Result $raw
+        $envelope = Convert-PulseGraphObjectResult -Result $raw -PagingStrategy $Spec.PagingStrategy
         return ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelope -Dataset $Dataset `
-            -ApiVersion $Spec.ApiVersion -Provider 'GraphKit' -Operations @($Spec.Operation)
+            -ApiVersion $Spec.ApiVersion -Provider 'GraphKit' -Operations @($Spec.Operation) `
+            -PagingStrategy $Spec.PagingStrategy
     } catch {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
         return New-PulseCollectionOutcome -Dataset $Dataset -Status Failed -Rows @() -Gaps @() `
@@ -459,6 +475,53 @@ function Get-PulseReportMatrixRowCount {
     return $valueRows.Count
 }
 
+function Get-PulseReportMatrixPageIdentity {
+    param(
+        [AllowNull()] $Schema,
+        [AllowNull()] $Values
+    )
+
+    $columnNames = @($Schema | ForEach-Object {
+            if ($_ -is [string]) { [string] $_ }
+            else { [string] (Get-PulseReportValue -InputObject $_ -Name @('column', 'name', 'property')) }
+        })
+    $applicationIdIndexes = @(
+        for ($i = 0; $i -lt $columnNames.Count; $i++) {
+            if ((ConvertTo-PulseInstallColumnKey -Name $columnNames[$i]) -in @('appid', 'applicationid', 'mobileappid')) {
+                $i
+            }
+        }
+    )
+    if ($applicationIdIndexes.Count -ne 1) {
+        return [pscustomobject]@{ Verifiable = $false; Duplicate = $false; Keys = @() }
+    }
+
+    $valueRows = @($Values)
+    if ($columnNames.Count -gt 1 -and $valueRows.Count -eq $columnNames.Count -and
+        @($valueRows | Where-Object { $_ -is [System.Collections.IEnumerable] -and $_ -isnot [string] }).Count -eq 0) {
+        $valueRows = , [object[]] $valueRows
+    }
+
+    $keys = [System.Collections.Generic.List[string]]::new()
+    $pageKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($valueRow in $valueRows) {
+        $cells = @($valueRow)
+        if ($cells.Count -ne $columnNames.Count) {
+            return [pscustomobject]@{ Verifiable = $false; Duplicate = $false; Keys = @() }
+        }
+        $key = [string] $cells[[int] $applicationIdIndexes[0]]
+        if ([string]::IsNullOrWhiteSpace($key)) {
+            return [pscustomobject]@{ Verifiable = $false; Duplicate = $false; Keys = @() }
+        }
+        $key = $key.Trim()
+        if (-not $pageKeys.Add($key)) {
+            return [pscustomobject]@{ Verifiable = $false; Duplicate = $true; Keys = @() }
+        }
+        $keys.Add($key) | Out-Null
+    }
+    return [pscustomobject]@{ Verifiable = $true; Duplicate = $false; Keys = $keys.ToArray() }
+}
+
 function Invoke-PulseAppInstallReportPages {
     param(
         [Parameter(Mandatory)] $Context,
@@ -470,6 +533,7 @@ function Invoke-PulseAppInstallReportPages {
     $payloadRows = [System.Collections.Generic.List[object]]::new()
     $gaps = [System.Collections.Generic.List[object]]::new()
     $pageFingerprints = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $seenApplicationIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $expectedTotal = $null
     $collectedRowCount = 0
     $skip = 0
@@ -480,7 +544,17 @@ function Invoke-PulseAppInstallReportPages {
     while ($pageCount -lt $MaxPages) {
         $pageCount++
         $outcome = Invoke-PulseReportGraphOperation -Context $Context -Spec $Spec -Dataset 'app-install-errors' `
-            -Parameters @{ Body = [ordered]@{ filter = ''; orderBy = @(); select = @(); skip = $skip; top = $PageSize } }
+            -Parameters @{ Body = [ordered]@{
+                    filter = ''
+                    # The Graph report action accepts orderBy. ApplicationId is the
+                    # summary row's stable identity, so pin it to reduce page drift; the
+                    # cross-page identity check below still fails closed if the live
+                    # dataset changes or the service ignores the requested order.
+                    orderBy = @('ApplicationId asc')
+                    select = @()
+                    skip = $skip
+                    top = $PageSize
+                } }
 
         if ($outcome.FailureClass) { $failureClass = $outcome.FailureClass }
         if ($outcome.Status -eq 'Failed') {
@@ -528,6 +602,7 @@ function Invoke-PulseAppInstallReportPages {
         }
         if (-not $matrixShaped) {
             foreach ($responseRow in $responseRows) { $payloadRows.Add($responseRow) | Out-Null }
+            $collectedRowCount += $responseRows.Count
             break
         }
         if ($responseRows.Count -ne 1) {
@@ -542,7 +617,6 @@ function Invoke-PulseAppInstallReportPages {
             $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'repeated-page' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
             break
         }
-        $payloadRows.Add($payload) | Out-Null
         $schemaProperty = Get-PulseReportProperty -InputObject $payload -Name @('schema', 'Schema')
         $valuesProperty = Get-PulseReportProperty -InputObject $payload -Name @('values', 'Values')
         $totalProperty = Get-PulseReportProperty -InputObject $payload -Name @('totalRowCount', 'TotalRowCount')
@@ -552,26 +626,66 @@ function Invoke-PulseAppInstallReportPages {
         }
 
         $batchCount = Get-PulseReportMatrixRowCount -Schema $schemaProperty.Value -Values $valuesProperty.Value
-        $collectedRowCount += $batchCount
+        $pageIdentity = Get-PulseReportMatrixPageIdentity -Schema $schemaProperty.Value -Values $valuesProperty.Value
+        if ($pageIdentity.Duplicate) {
+            $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'overlapping-page' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
+            break
+        }
+        $overlap = $false
+        if ($pageIdentity.Verifiable) {
+            foreach ($applicationId in @($pageIdentity.Keys)) {
+                if ($seenApplicationIds.Contains([string] $applicationId)) {
+                    $overlap = $true
+                    break
+                }
+            }
+        }
+        if ($overlap) {
+            # Do not publish the overlapping page: keeping only prior confirmed pages
+            # avoids duplicating one application while another application is omitted.
+            $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'overlapping-page' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
+            break
+        }
 
         $parsedTotal = 0L
         $totalIsValid = $totalProperty.Success -and $null -ne $totalProperty.Value -and
             [int64]::TryParse([string] $totalProperty.Value, [Globalization.NumberStyles]::Integer,
                 [Globalization.CultureInfo]::InvariantCulture, [ref] $parsedTotal) -and $parsedTotal -ge 0
         if (-not $totalIsValid) {
+            # The page itself is usable even though its total cannot drive another safe
+            # request. Preserve its rows, then stop Partial with the bounded total gap.
+            $payloadRows.Add($payload) | Out-Null
+            $collectedRowCount += $batchCount
             $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'total-row-count-missing' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
             break
         }
+        $totalChanged = $false
         if ($null -eq $expectedTotal) {
             $expectedTotal = $parsedTotal
         } elseif ([int64] $expectedTotal -ne $parsedTotal) {
+            $totalChanged = $true
+        }
+
+        $prospectiveRowCount = $collectedRowCount + $batchCount
+        $payloadRows.Add($payload) | Out-Null
+        $collectedRowCount = $prospectiveRowCount
+        if ($pageIdentity.Verifiable) {
+            foreach ($applicationId in @($pageIdentity.Keys)) {
+                $seenApplicationIds.Add([string] $applicationId) | Out-Null
+            }
+        }
+
+        if ($totalChanged -or $prospectiveRowCount -gt [int64] $expectedTotal -or
+            ($batchCount -eq 0 -and $prospectiveRowCount -ne [int64] $expectedTotal)) {
             $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'total-row-count-mismatch' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
             break
         }
-
         if ($collectedRowCount -eq [int64] $expectedTotal) { break }
-        if ($batchCount -eq 0 -or $collectedRowCount -gt [int64] $expectedTotal) {
-            $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'total-row-count-mismatch' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
+        if (-not $pageIdentity.Verifiable) {
+            # A single complete page needs no cross-page witness. Continuing skip/top
+            # paging without a unique application identity could count reordered or
+            # overlapping data as complete, so retain this page as Partial and stop.
+            $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'stable-row-identity-missing' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
             break
         }
         if ($pageCount -ge $MaxPages) {
@@ -579,14 +693,29 @@ function Invoke-PulseAppInstallReportPages {
             break
         }
 
-        $skip += $PageSize
+        # Intune may return a short non-terminal page. Advance by what the service
+        # actually returned; adding PageSize would skip rows between pages.
+        $skip += $batchCount
+    }
+
+    $status = if ($gaps.Count -eq 0) {
+        'Collected'
+    } elseif ($payloadRows.Count -gt 0) {
+        'Partial'
+    } else {
+        'Failed'
+    }
+    $resolvedFailureClass = if ($status -eq 'Failed' -and [string]::IsNullOrWhiteSpace([string] $failureClass)) {
+        'InvalidProviderData'
+    } else {
+        $failureClass
     }
 
     return [pscustomobject]@{
-        Status = $(if ($gaps.Count -eq 0) { 'Collected' } else { 'Partial' })
+        Status = $status
         PayloadRows = $payloadRows.ToArray()
         Gaps = $gaps.ToArray()
-        FailureClass = $failureClass
+        FailureClass = $resolvedFailureClass
         ReasonCode = $(if ($gaps.Count -gt 0) {
                 $reason = [string] $gaps[0].reason
                 if ($reason -match '^category:([^;]+)') { $Matches[1] } else { 'partial' }
@@ -594,6 +723,24 @@ function Invoke-PulseAppInstallReportPages {
         ExpectedTotal = $expectedTotal
         CollectedRowCount = $collectedRowCount
     }
+}
+
+function Publish-PulseReportArtifactFailure {
+    param(
+        [Parameter(Mandatory)] [pscustomobject] $Store,
+        [Parameter(Mandatory)] [ValidateSet('application-assignments', 'app-install-errors')] [string] $Name,
+        [Parameter(Mandatory)] [string] $ProfileId,
+        [Parameter(Mandatory)] [string] $Pseudonym,
+        [AllowNull()] [string] $TenantId
+    )
+
+    # Never persist the exception: a serializer/redaction/provider object can place tenant
+    # content in its message. The fixed code is enough to distinguish this local artifact
+    # failure from Graph collection and permission outcomes.
+    $reason = Protect-PulseReason -Message 'artifact-publication-failed' -ProfileId $ProfileId `
+        -Pseudonym $Pseudonym -TenantId $TenantId
+    Set-PulseExpansionEntry -Store $Store -Name $Name -Status Failed -Reason $reason
+    return [pscustomobject]@{ Status = 'Failed'; RowCount = 0; Gaps = @() }
 }
 
 function Invoke-PulseApplicationReportCollection {
@@ -622,8 +769,17 @@ function Invoke-PulseApplicationReportCollection {
     $installOperations = @($operationByKey['AppInstallSummaryReport/Get'])
 
     $results = [ordered]@{ ApplicationAssignments = $null; AppInstallErrors = $null }
-    foreach ($operation in @(Get-PulseApplicationReportOperations)) {
-        Assert-PulseReadOnlyDescriptor -Type $operation.Type -Operation $operation.Operation -ApiVersion $operation.ApiVersion
+    foreach ($operation in @($operationByKey.Values)) {
+        $descriptor = Assert-PulseReadOnlyDescriptor -Type $operation.Type -Operation $operation.Operation `
+            -ApiVersion $operation.ApiVersion -PassThru
+        if ($null -ne $descriptor) {
+            $resolvedPagingStrategy = [string] $descriptor.PagingStrategy
+            if ($resolvedPagingStrategy -notin @('None', 'NextLink') -or
+                $resolvedPagingStrategy -ne $operation.PagingStrategy) {
+                throw "Invoke-PulseApplicationReportCollection: descriptor-paging-drift for '$($operation.Type)/$($operation.Operation)'."
+            }
+            $operation.PagingStrategy = $resolvedPagingStrategy
+        }
     }
 
     $assignmentAuthorization = Get-PulseReportAuthorization -AuthorizationDecision $AuthorizationDecision -Operations $assignmentOperations
@@ -695,23 +851,6 @@ function Invoke-PulseApplicationReportCollection {
                     $groupResolution = $null
                     $assignmentState = if ($assignmentOutcome.Status -eq 'Partial') { 'Partial' } else { 'Resolved' }
 
-                    # Authentication failure is a whole-run network stop. Preserve one row
-                    # for each already-retrieved assignment, but do not let a later target
-                    # start another metadata/member request after the shared abort flips.
-                    if ($NetworkAbortState.AuthenticationAborted) {
-                        if ($targetType -in @('groupAssignmentTarget', 'exclusionGroupAssignmentTarget')) {
-                            $groupResolution = [pscustomobject]@{
-                                Name = $null; Description = $null; MemberCount = $null
-                                GroupState = 'Failed'; MemberState = 'NotEvaluated'
-                            }
-                        }
-                        $gaps.Add((New-PulseReportGap -Scope $appId -ReasonCode 'authentication-failed' -Operation 'MobileAppAssignment.List')) | Out-Null
-                        $rows.Add((New-PulseApplicationAssignmentRow -Application $app -Assignment $assignment `
-                                    -AssignmentCount $assignments.Count -AssignmentResolutionState 'Failed' `
-                                    -GroupResolution $groupResolution)) | Out-Null
-                        continue
-                    }
-
                     $assignmentId = [string] (Get-PulseReportValue -InputObject $assignment -Name @('id'))
                     if ([string]::IsNullOrWhiteSpace($assignmentId)) {
                         $assignmentState = 'Malformed'
@@ -733,6 +872,16 @@ function Invoke-PulseApplicationReportCollection {
                             $gaps.Add((New-PulseReportGap -Scope $appId -ReasonCode 'group-id-missing' -Operation 'MobileAppAssignment.List')) | Out-Null
                         } elseif ($groupCache.ContainsKey($groupId)) {
                             $groupResolution = $groupCache[$groupId]
+                        } elseif ($NetworkAbortState.AuthenticationAborted) {
+                            # The assignment list for this app is already known. A child
+                            # authentication failure must suppress only the not-yet-started
+                            # group lookup; relabeling the fetched assignment itself Failed
+                            # would discard independently established assignment truth.
+                            $groupResolution = [pscustomobject]@{
+                                Name = $null; Description = $null; MemberCount = $null
+                                GroupState = 'NotEvaluated'; MemberState = 'NotEvaluated'
+                            }
+                            $gaps.Add((New-PulseReportGap -Scope $groupId -ReasonCode 'authentication-failed' -Operation 'Group.Get')) | Out-Null
                         } else {
                             $groupState = 'Failed'
                             $memberState = 'NotEvaluated'
@@ -799,9 +948,14 @@ function Invoke-PulseApplicationReportCollection {
                 }
             }
 
-            $results.ApplicationAssignments = Publish-PulseReportDataRows -Store $Store -Name 'application-assignments' `
-                -Rows $rows.ToArray() -Gaps $gaps.ToArray() -SourceCount $apps.Count `
-                -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $tenantId
+            try {
+                $results.ApplicationAssignments = Publish-PulseReportDataRows -Store $Store -Name 'application-assignments' `
+                    -Rows $rows.ToArray() -Gaps $gaps.ToArray() -SourceCount $apps.Count `
+                    -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $tenantId
+            } catch {
+                $results.ApplicationAssignments = Publish-PulseReportArtifactFailure -Store $Store -Name 'application-assignments' `
+                    -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $tenantId
+            }
         }
     }
 
@@ -822,13 +976,18 @@ function Invoke-PulseApplicationReportCollection {
             Set-PulseExpansionEntry -Store $Store -Name 'app-install-errors' -Status NotExpanded -Reason $reason
             $results.AppInstallErrors = [pscustomobject]@{ Status = 'NotExpanded'; RowCount = 0; Gaps = @() }
         } else {
-            $converted = ConvertTo-PulseAppInstallErrorRows -PayloadRows @($installOutcome.PayloadRows)
-            $installGaps = [System.Collections.Generic.List[object]]::new()
-            foreach ($gap in @($converted.Gaps)) { $installGaps.Add($gap) | Out-Null }
-            foreach ($gap in @($installOutcome.Gaps)) { $installGaps.Add($gap) | Out-Null }
-            $results.AppInstallErrors = Publish-PulseReportDataRows -Store $Store -Name 'app-install-errors' `
-                -Rows @($converted.Rows) -Gaps $installGaps.ToArray() -SourceCount @($installOutcome.PayloadRows).Count `
-                -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $tenantId
+            try {
+                $converted = ConvertTo-PulseAppInstallErrorRows -PayloadRows @($installOutcome.PayloadRows)
+                $installGaps = [System.Collections.Generic.List[object]]::new()
+                foreach ($gap in @($converted.Gaps)) { $installGaps.Add($gap) | Out-Null }
+                foreach ($gap in @($installOutcome.Gaps)) { $installGaps.Add($gap) | Out-Null }
+                $results.AppInstallErrors = Publish-PulseReportDataRows -Store $Store -Name 'app-install-errors' `
+                    -Rows @($converted.Rows) -Gaps $installGaps.ToArray() -SourceCount @($installOutcome.PayloadRows).Count `
+                    -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $tenantId
+            } catch {
+                $results.AppInstallErrors = Publish-PulseReportArtifactFailure -Store $Store -Name 'app-install-errors' `
+                    -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $tenantId
+            }
         }
     }
 

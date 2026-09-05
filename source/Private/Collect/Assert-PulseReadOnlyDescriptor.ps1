@@ -45,7 +45,10 @@ function Assert-PulseReadOnlyDescriptor {
         [Parameter()]
         [AllowNull()]
         [AllowEmptyString()]
-        [string] $ApiVersion
+        [string] $ApiVersion,
+
+        [Parameter()]
+        [switch] $PassThru
     )
 
     $descriptor = Get-GraphOperation -Type $Type -Operation $Operation -ErrorAction Stop
@@ -66,5 +69,9 @@ function Assert-PulseReadOnlyDescriptor {
         if ($resolvedApiVersion -ne $ApiVersion) {
             throw "Assert-PulseReadOnlyDescriptor: descriptor-version-drift: DatasetMap.psd1 declares ApiVersion '$ApiVersion' for '$Type/$Operation' but the resolved GraphKit descriptor is '$resolvedApiVersion'. Update DatasetMap.psd1 to match."
         }
+    }
+
+    if ($PassThru) {
+        return $descriptor
     }
 }

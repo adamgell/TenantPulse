@@ -218,14 +218,34 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
     It 'represents compliance and device-configuration assignment collection as explicit TenantPulse plans' {
         $map = Import-PowerShellDataFile -Path $script:datasetMapPath
 
-        foreach ($name in @('deviceCompliancePolicies', 'deviceConfigurations')) {
+        $expectedApiVersions = @{
+            deviceCompliancePolicies = 'beta'
+            deviceConfigurations     = 'v1.0'
+        }
+        foreach ($name in $expectedApiVersions.Keys) {
             $entry = $map[$name]
             $entry.Provider | Should -BeExactly 'TenantPulse'
             $entry.Plan | Should -BeExactly 'Invoke-PulsePolicyAssignmentPlan'
-            $entry.ApiVersion | Should -BeExactly 'v1.0'
+            $entry.ApiVersion | Should -BeExactly $expectedApiVersions[$name]
             $entry.ContainsKey('Type') | Should -BeFalse
             $entry.ContainsKey('Operation') | Should -BeFalse
             $entry.ContainsKey('Pending') | Should -BeFalse
+        }
+    }
+
+    It 'resolves the mixed-version compliance plan and stable configuration plan against the exact GraphKit catalog' {
+        $expected = @(
+            @{ Type = 'DeviceCompliancePolicy'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+            @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+            @{ Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'v1.0' }
+            @{ Type = 'DeviceConfigurationAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+        )
+
+        foreach ($operation in $expected) {
+            $descriptor = Get-GraphOperation -Type $operation.Type -Operation $operation.Operation -ErrorAction Stop
+            $descriptor.ApiVersion | Should -BeExactly $operation.ApiVersion
+            $descriptor.ThrottleClass | Should -BeExactly 'Read'
+            $descriptor.ReplayPolicy | Should -BeExactly 'Safe'
         }
     }
 
@@ -337,18 +357,23 @@ Describe 'Permission preflight operation union is Read/Safe' -Tag 'QA', 'ReadOnl
                 }
             }
         )
-        $appHealth = @(
-            @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
-        )
+        $applicationReportOperations = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations)
+        }
 
-        $operations = InModuleScope TenantPulse -ArgumentList $manifest, $appHealth {
-            param($manifest, $appHealth)
+        $operations = InModuleScope TenantPulse -ArgumentList $manifest, $applicationReportOperations {
+            param($manifest, $applicationReportOperations)
             $registry = Resolve-PulseProviderPlanRegistry
             Get-PulsePermissionPreflightOperations -Manifest $manifest -ExpandSettings `
-                -AdditionalOperations $appHealth -ProviderPlanRegistry $registry
+                -AdditionalOperations $applicationReportOperations -ProviderPlanRegistry $registry
         }
 
         $operations | Should -Not -BeNullOrEmpty
+        @($applicationReportOperations).Count | Should -Be 5
+        $operationKeys = @($operations | ForEach-Object { '{0}/{1}' -f $_.Type, $_.Operation })
+        foreach ($reportOperation in $applicationReportOperations) {
+            $operationKeys | Should -Contain ('{0}/{1}' -f $reportOperation.Type, $reportOperation.Operation)
+        }
         $violations = [System.Collections.Generic.List[string]]::new()
         $resolvedCount = 0
         foreach ($operation in $operations) {

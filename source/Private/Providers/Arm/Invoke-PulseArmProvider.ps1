@@ -79,6 +79,65 @@ function Get-PulseArmPageContent {
     }
 }
 
+function Get-PulseArmQueryParameterValues {
+    param(
+        [Parameter(Mandatory)] [uri] $Uri,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    $values = [System.Collections.Generic.List[string]]::new()
+    $query = $Uri.Query.TrimStart('?')
+    if ([string]::IsNullOrEmpty($query)) { return $values.ToArray() }
+
+    foreach ($component in $query.Split('&', [System.StringSplitOptions]::RemoveEmptyEntries)) {
+        $parts = $component.Split('=', 2)
+        $key = [uri]::UnescapeDataString($parts[0])
+        if (-not [string]::Equals($key, $Name, [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+        $value = if ($parts.Count -eq 2) { [uri]::UnescapeDataString($parts[1]) } else { '' }
+        $values.Add($value) | Out-Null
+    }
+    return $values.ToArray()
+}
+
+function Test-PulseArmContinuationUri {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)] [uri] $Uri,
+        [Parameter(Mandatory)] [uri] $InitialUri,
+        [Parameter(Mandatory)] [string] $ApiVersion,
+        [Parameter()] [ValidateSet('Global', 'USGov', 'China')] [string] $Cloud = 'Global'
+    )
+
+    $null = Test-PulseArmAuthority -Uri $Uri -Cloud $Cloud
+
+    $invalidReason = $null
+    if (-not [string]::IsNullOrEmpty($Uri.UserInfo) -or -not [string]::IsNullOrEmpty($Uri.Fragment)) {
+        $invalidReason = 'userinfo and fragments are forbidden'
+    } elseif (-not [string]::Equals($Uri.AbsolutePath, $InitialUri.AbsolutePath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $invalidReason = 'resource path changed'
+    } else {
+        $versionValues = @(Get-PulseArmQueryParameterValues -Uri $Uri -Name 'api-version')
+        if ($versionValues.Count -ne 1) {
+            $invalidReason = 'exactly one api-version is required'
+        } elseif (-not [string]::Equals($versionValues[0], $ApiVersion, [System.StringComparison]::Ordinal)) {
+            $invalidReason = 'api-version changed'
+        }
+    }
+
+    if ($null -ne $invalidReason) {
+        $exception = [System.InvalidOperationException]::new(
+            "Untrusted ARM continuation: $invalidReason. Refusing to attach a bearer token."
+        )
+        $exception.Data['TenantPulse.ArmContinuationViolation'] = $true
+        throw $exception
+    }
+
+    return $true
+}
+
 function Invoke-PulseArmProvider {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -213,16 +272,22 @@ function Invoke-PulseArmProvider {
         }
 
         try {
-            $null = Test-PulseArmAuthority -Uri $pageUri -Cloud $Cloud
+            $null = Test-PulseArmContinuationUri -Uri $pageUri -InitialUri $request.Uri `
+                -ApiVersion $ApiVersion -Cloud $Cloud
         }
         catch {
+            $reasonCode = if ($_.Exception.Data['TenantPulse.ArmContinuationViolation'] -eq $true) {
+                'untrusted-arm-continuation'
+            } else {
+                'untrusted-arm-authority'
+            }
             if ($rows.Count -eq 0) {
                 return ConvertTo-PulseArmCollectionOutcome -Dataset $Dataset -Status 'Failed' `
-                    -FailureClass 'InvalidProviderData' -ReasonCode 'untrusted-arm-authority' `
+                    -FailureClass 'InvalidProviderData' -ReasonCode $reasonCode `
                     -Detail (New-ArmFailureDetail) -ApiVersion $ApiVersion
             }
             $gaps.Add((New-PulseCollectionGap -Scope 'nextLink' -FailureClass 'InvalidProviderData' `
-                    -ReasonCode 'untrusted-arm-authority' -Detail @{ message = $_.Exception.Message } `
+                    -ReasonCode $reasonCode -Detail @{ message = $_.Exception.Message } `
                     -Operation 'GET' -ApiVersion $ApiVersion)) | Out-Null
             break
         }
@@ -327,7 +392,16 @@ function Invoke-PulseArmProvider {
             $pageUri = $null
         }
         else {
-            $pageUri = [uri] $page.NextLink
+            try {
+                $pageUri = [uri] $page.NextLink
+            }
+            catch {
+                $gaps.Add((New-PulseCollectionGap -Scope 'nextLink' -FailureClass 'InvalidProviderData' `
+                        -ReasonCode 'untrusted-arm-continuation' `
+                        -Detail @{ message = 'ARM continuation URI is malformed.' } `
+                        -Operation 'GET' -ApiVersion $ApiVersion)) | Out-Null
+                $pageUri = $null
+            }
         }
     }
 

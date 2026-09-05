@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 3258 / -AllowNotRun 0 (see
+    # MinimumTests 3320 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -304,13 +304,22 @@ else {
     # +2 provider-plan and +6 BitLocker/LAPS assignment-certainty regressions.
     # 3006 -> 3258 after Conditional Access certainty closeout: +252 effective-
     # scope, grant, admin-role, privacy-alias, and evidence-identity regressions.
+    # 3258 -> 3303 after core-program hardening: +45 default-workflow privacy,
+    # envelope, ARM, provenance, version-routing, terminal-outcome,
+    # assignment-certainty, catalog, and application-report regressions.
+    # 3303 -> 3319 after final audit hardening: +16 primitive-privacy,
+    # fixed-schema, assignment-evidence, report-counter, and paging regressions.
+    # 3319 -> 3320 adds malformed ARM continuation coverage; the paged-failure
+    # interop correction strengthens an existing three-case parameterization.
+    # The four tests/Perf assertions are deliberately outside the QA+Unit release
+    # workflow and are not included in its measured 3320-test floor.
     # NotRun remains forbidden.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 3258 `
+        -MinimumTests 3320 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {

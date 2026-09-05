@@ -1,9 +1,12 @@
 <#
     Private: validate and map exactly one genuine GraphKit.OperationResult envelope to a
     provider-neutral collection outcome. Genuine means the GraphKit.OperationResult type
-    identity is present and non-null Data, Outcome, Certainty, and native-Boolean Truncated members
-    exist with supported signal values; a plain object carrying similarly named properties
-    is not an envelope.
+    identity is present and non-null Data, Outcome, and Certainty members exist with
+    supported signal values; successful paged operations additionally require native-Boolean
+    Truncated and positive PageCount members. GraphKit 0.3.0 non-paged operations and paged
+    terminal failures omit both paging members, so the caller must identify PagingStrategy=None
+    before only a successful member-free shape is accepted. A plain object carrying similarly
+    named properties is not an envelope.
 
     AC-26: Collected is allowed only when Outcome=Succeeded, Certainty=Known, Truncated is
     not true, and no cap/incompleteness signal is present. Succeeded with usable but
@@ -20,7 +23,11 @@ function Test-PulseGraphResultEnvelope {
     param(
         [Parameter()]
         [AllowNull()]
-        $InputObject
+        $InputObject,
+
+        [Parameter()]
+        [ValidateSet('None', 'NextLink')]
+        [string] $PagingStrategy = 'NextLink'
     )
 
     try {
@@ -30,7 +37,7 @@ function Test-PulseGraphResultEnvelope {
         }
 
         $values = [ordered]@{}
-        foreach ($name in @('Outcome', 'Certainty', 'Truncated', 'Data')) {
+        foreach ($name in @('Outcome', 'Certainty', 'Data')) {
             if ($InputObject -is [System.Collections.IDictionary]) {
                 $matchingKey = @($InputObject.Keys | Where-Object {
                         [string]::Equals([string] $_, $name, [System.StringComparison]::OrdinalIgnoreCase)
@@ -45,6 +52,32 @@ function Test-PulseGraphResultEnvelope {
             }
         }
 
+        $truncatedFound = $false
+        $pageCountFound = $false
+        if ($InputObject -is [System.Collections.IDictionary]) {
+            foreach ($key in @($InputObject.Keys)) {
+                if ([string]::Equals([string] $key, 'Truncated', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $truncatedFound = $true
+                    $values['Truncated'] = $InputObject[$key]
+                }
+                if ([string]::Equals([string] $key, 'PageCount', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $pageCountFound = $true
+                    $values['PageCount'] = $InputObject[$key]
+                }
+            }
+        } else {
+            $truncatedProperty = $InputObject.PSObject.Properties['Truncated']
+            $pageCountProperty = $InputObject.PSObject.Properties['PageCount']
+            if ($null -ne $truncatedProperty) {
+                $truncatedFound = $true
+                $values['Truncated'] = $truncatedProperty.Value
+            }
+            if ($null -ne $pageCountProperty) {
+                $pageCountFound = $true
+                $values['PageCount'] = $pageCountProperty.Value
+            }
+        }
+
         if ($values['Outcome'] -isnot [string] -or
             $values['Outcome'] -notin @('Succeeded', 'Failed', 'Cancelled', 'DeadlineExpired')) {
             return $false
@@ -53,7 +86,28 @@ function Test-PulseGraphResultEnvelope {
             $values['Certainty'] -notin @('Known', 'Indeterminate')) {
             return $false
         }
-        if ($values['Truncated'] -isnot [bool]) { return $false }
+        if ($truncatedFound -and $values['Truncated'] -isnot [bool]) { return $false }
+        if ($pageCountFound -and
+            ($values['PageCount'] -isnot [int] -or [int] $values['PageCount'] -lt 1)) {
+            return $false
+        }
+        if ($PagingStrategy -eq 'NextLink') {
+            # GraphKit's terminal paged failure envelope has no Truncated/PageCount:
+            # those fields describe the completeness of a successful page traversal.
+            # A successful NextLink result must always carry both proof signals; a
+            # supported non-success result may omit them, but any supplied value was
+            # still type/range checked above.
+            if ($values['Outcome'] -eq 'Succeeded' -and
+                (-not $truncatedFound -or -not $pageCountFound)) {
+                return $false
+            }
+        } else {
+            # GraphKit 0.3.0's non-paged result has neither member. Universal envelope
+            # producers and older fixtures may still add harmless Truncated=$false or
+            # PageCount metadata; the resolved None descriptor is the completeness proof.
+            # Truncated=$true still contradicts that proof and therefore fails closed.
+            if ($truncatedFound -and $values['Truncated']) { return $false }
+        }
         if ($null -eq $values['Data']) { return $false }
 
         return $true
@@ -77,6 +131,10 @@ function ConvertTo-PulseDatasetOutcomeFromGraphEnvelope {
         [Parameter(Mandatory)]
         [ValidateSet('v1.0', 'beta')]
         [string] $ApiVersion,
+
+        [Parameter()]
+        [ValidateSet('None', 'NextLink')]
+        [string] $PagingStrategy = 'NextLink',
 
         [Parameter()]
         [AllowNull()]
@@ -141,7 +199,7 @@ function ConvertTo-PulseDatasetOutcomeFromGraphEnvelope {
     }
 
     try {
-        if (-not (Test-PulseGraphResultEnvelope -InputObject $Envelope)) {
+        if (-not (Test-PulseGraphResultEnvelope -InputObject $Envelope -PagingStrategy $PagingStrategy)) {
             return New-InvalidEnvelopeOutcome
         }
 
@@ -150,17 +208,19 @@ function ConvertTo-PulseDatasetOutcomeFromGraphEnvelope {
         $outcomeText = if ($outcomeRead.Success) { ConvertTo-SafeEnvelopeString -Value $outcomeRead.Value } else { $null }
         $certaintyText = if ($certaintyRead.Success) { ConvertTo-SafeEnvelopeString -Value $certaintyRead.Value } else { $null }
 
-        $truncated = $null
+        $truncated = $false
         $truncatedRead = Get-SafeEnvelopeProperty -InputObject $Envelope -Name 'Truncated'
-        if (-not $truncatedRead.Success -or $truncatedRead.Value -isnot [bool]) { return New-InvalidEnvelopeOutcome }
-        $truncated = [bool] $truncatedRead.Value
+        if ($truncatedRead.Success) {
+            if ($truncatedRead.Value -isnot [bool]) { return New-InvalidEnvelopeOutcome }
+            $truncated = [bool] $truncatedRead.Value
+        }
 
         $pageCount = $null
         $pageCountRead = Get-SafeEnvelopeProperty -InputObject $Envelope -Name 'PageCount'
-        if ($pageCountRead.Success -and $null -ne $pageCountRead.Value) {
+        if ($PagingStrategy -eq 'NextLink' -and $pageCountRead.Success -and $null -ne $pageCountRead.Value) {
             try {
                 $pageCount = [int] $pageCountRead.Value
-                if ($pageCount -lt 0) { return New-InvalidEnvelopeOutcome }
+                if ($PagingStrategy -eq 'NextLink' -and $pageCount -lt 1) { return New-InvalidEnvelopeOutcome }
             } catch {
                 return New-InvalidEnvelopeOutcome
             }
@@ -197,7 +257,16 @@ function ConvertTo-PulseDatasetOutcomeFromGraphEnvelope {
         }
 
         if (-not $isSucceeded) {
-            return New-InvalidEnvelopeOutcome
+            $failure = switch ($outcomeText) {
+                'Failed' { @{ Class = 'ProviderFailed'; Code = 'provider-failed' }; break }
+                'Cancelled' { @{ Class = 'Cancelled'; Code = 'cancelled' }; break }
+                'DeadlineExpired' { @{ Class = 'DeadlineExpired'; Code = 'deadline-expired' }; break }
+                default { $null }
+            }
+            if ($null -eq $failure) { return New-InvalidEnvelopeOutcome }
+            return New-PulseCollectionOutcome -Dataset $Dataset -Status Failed -Rows @() -Gaps @() `
+                -FailureClass $failure.Class -ReasonCode $failure.Code -Detail $detail `
+                -Provider $providerValue -ApiVersion $ApiVersion -Operations $operationsValue
         }
 
         $reasonCode = if ($truncated -and $null -ne $pageCount -and $pageCount -ge 2) {

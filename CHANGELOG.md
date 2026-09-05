@@ -72,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persistence, rejects semantically unknown report matrices, and uses a canonical total-order
   tie-breaker for content-addressed rows.
 - Graph collection now fails closed unless `Get-GraphObject -PassThruResult` returns exactly one complete `GraphKit.OperationResult`; null, rows-only, multiple, type-spoofed, and malformed results can no longer be persisted as `Collected`, while bounded partial rows retain indeterminate, truncation, and page-cap detail.
-- Review finding 6 is implemented: Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta` and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count; child gaps name the setting primitive explicitly.
+- Review finding 6 is implemented: Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta`, `ConfigurationPolicySetting.ListBeta`, and `ConfigurationPolicyAssignment.ListBeta`, independent of tenant policy count; setting and assignment gaps name their respective primitives explicitly.
 - Direct, composite, and expansion collection paths now use one canonical Graph failure mapper. A request-time `403` is recorded as `Failed` / `PermissionDenied`; only `AuthenticationFailed` aborts subsequent network collection, while deadline expiration, cancellation, indeterminate certainty, permission denial, and provider failure remain explicit and isolated.
 
 ### Changed

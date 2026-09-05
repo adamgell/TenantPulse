@@ -826,14 +826,14 @@ Describe 'Invoke-PulseCollection' {
 
     It 'downgrades an ApiVersion drift to a per-dataset Failed outcome instead of aborting the run' {
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
-        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' -and $Operation -eq 'ListBeta' } { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' }) }
 
         # conditionalAccessPolicies' map ApiVersion ('beta') deliberately does not match
         # the mocked resolved descriptor's ApiVersion ('v1.0') above.
         $manifest = @(
             [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
-            [pscustomobject]@{ Dataset = 'deviceCompliancePolicies'; Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false }
+            [pscustomobject]@{ Dataset = 'deviceCompliancePolicies'; Type = 'DeviceCompliancePolicy'; Operation = 'ListBeta'; ApiVersion = 'beta'; Pending = $false }
         )
         $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
 
@@ -978,6 +978,35 @@ Describe 'Invoke-PulseCollection' {
         $result.datasets.organizationMdmAuthority.status | Should -Be 'Collected'
     }
 
+    It 'IdFromDataset: resolves id from the IDictionary row shape returned by GraphKit JSON transport' {
+        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'List' } {
+            New-PulseTestGraphEnvelope -Data @([ordered]@{ id = 'org-dictionary-1' })
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Operation -eq 'GetMdmAuthority' } {
+            New-PulseTestGraphEnvelope -Data @([ordered]@{ mobileDeviceManagementAuthority = 'intune' })
+        }
+
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'organization'; Type = 'Organization'; Operation = 'List'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = $null }
+            [pscustomobject]@{ Dataset = 'organizationMdmAuthority'; Type = 'Organization'; Operation = 'GetMdmAuthority'; ApiVersion = 'v1.0'; Pending = $false; IdFromDataset = 'organization' }
+        )
+        $context = [pscustomobject]@{ ProfileId = 'contoso'; ClientId = [guid]'22222222-2222-2222-2222-222222222222' }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $context {
+            param($store, $manifest, $context)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'contoso' -TenantPseudonym 'tp-abc123'
+        }
+
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Operation -eq 'GetMdmAuthority' -and $Parameters.id -eq 'org-dictionary-1'
+        }
+        $result = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $result.datasets.organization.status | Should -Be 'Collected'
+        $result.datasets.organizationMdmAuthority.status | Should -Be 'Collected'
+    }
+
     # Task 1.11 GraphKit 0.1.1 live-gate surprise (Ivy24 lab tenant): Organization.id IS
     # the raw tenant GUID. Write-PulseDataset now redacts the tenant GUID out of the
     # organization.json FILE content (see Snapshot.Tests.ps1's Write-PulseDataset
@@ -1100,7 +1129,7 @@ Describe 'Get-PulseTenantSnapshot' {
             }
         }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
-        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' -and $Operation -eq 'ListBeta' } { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' }) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { throw "Get-GraphObject failed: 403 Forbidden." }
@@ -1388,7 +1417,8 @@ Describe 'Get-PulseTenantSnapshot' {
                 ClientId  = [guid]'22222222-2222-2222-2222-222222222222'
             }
         }
-        Mock Get-GraphOperation -ModuleName TenantPulse { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' -and $Operation -eq 'ListBeta' } { New-TestReadDescriptor -ApiVersion 'beta' }
+        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' -and $Operation -eq 'List' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse {
             # Reproduces exactly what Get-GraphObject stamps onto a real returned row.
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
@@ -1396,7 +1426,7 @@ Describe 'Get-PulseTenantSnapshot' {
                 _Tenant       = 'contoso-tenant-id'
                 _RetrievedUtc = [datetime]::UtcNow
                 _GraphPath    = '/deviceManagement/deviceCompliancePolicies'
-                _ApiVersion   = 'v1.0'
+                _ApiVersion   = 'beta'
             })
         }
 

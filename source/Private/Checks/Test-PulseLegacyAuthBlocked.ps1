@@ -215,38 +215,77 @@ function Test-PulseLegacyAuthBlocked {
         if ($record.SignInScope.CouldCoverExchangeActiveSync) { $potentialEas = $true }
         if ($record.SignInScope.CouldCoverOther) { $potentialOther = $true }
     }
-    $allMissingCouldBeCovered = $potentialEas -and $potentialOther
+    $unknownBuckets = @()
+    $definitivelyUncoveredBuckets = @()
+    foreach ($bucket in $missingBuckets) {
+        $couldBeCovered = switch ($bucket) {
+            'exchangeActiveSync' { $potentialEas; break }
+            'other' { $potentialOther; break }
+            default { $false }
+        }
+        if ($couldBeCovered) { $unknownBuckets += $bucket }
+        else { $definitivelyUncoveredBuckets += $bucket }
+    }
 
-    if ($incompleteEnforcedPolicies.Count -gt 0 -and $allMissingCouldBeCovered) {
-        $evidence = @($incompleteEnforcedPolicies | ForEach-Object {
-            $policyIdentity = Get-PulseCaPolicyEvidenceIdentity -Policy $_.Policy -CollectionOrdinal $_.CollectionOrdinal
-            @{
-                Identity = $policyIdentity
-                Detail = @{
-                    displayName = $_.Policy.displayName
-                    applicationScope = $_.ApplicationScope.State
-                    applicationScopeReason = $_.ApplicationScope.ReasonCode
-                    userScope = $_.UserScope.State
-                    userScopeReason = $_.UserScope.ReasonCode
-                    signInScope = $_.SignInScope.State
-                    signInScopeReason = $_.SignInScope.ReasonCode
-                    blockRequirement = $_.BlockRequirement.State
-                    blockRequirementReason = $_.BlockRequirement.ReasonCode
-                }
+    # Retain only the incomplete enforced policies that contribute to an unknown missing
+    # bucket. They explain why that bucket is not called definitively uncovered, including
+    # on the mixed-certainty Fail path where a different bucket is provably open.
+    $uncertainCoveragePolicies = @($incompleteEnforcedPolicies | Where-Object {
+        ($unknownBuckets -contains 'exchangeActiveSync' -and $_.SignInScope.CouldCoverExchangeActiveSync) -or
+        ($unknownBuckets -contains 'other' -and $_.SignInScope.CouldCoverOther)
+    })
+    $uncertainCoverageEvidence = @($uncertainCoveragePolicies | ForEach-Object {
+        $policyIdentity = Get-PulseCaPolicyEvidenceIdentity -Policy $_.Policy -CollectionOrdinal $_.CollectionOrdinal
+        @{
+            Identity = $policyIdentity
+            Detail = @{
+                displayName = $_.Policy.displayName
+                applicationScope = $_.ApplicationScope.State
+                applicationScopeReason = $_.ApplicationScope.ReasonCode
+                userScope = $_.UserScope.State
+                userScopeReason = $_.UserScope.ReasonCode
+                signInScope = $_.SignInScope.State
+                signInScopeReason = $_.SignInScope.ReasonCode
+                blockRequirement = $_.BlockRequirement.State
+                blockRequirementReason = $_.BlockRequirement.ReasonCode
             }
-        }) + $exclusionEvidence
-        return New-PulseFinding -Status NotApplicable -Reason "$($incompleteEnforcedPolicies.Count) enabled legacy-auth block policy/policies could cover every missing legacy client bucket but have incomplete grant, user scope, application scope, or sign-in scope evidence." -Evidence $evidence
+        }
+    })
+
+    if ($unknownBuckets.Count -gt 0 -and $definitivelyUncoveredBuckets.Count -eq 0) {
+        $evidence = $uncertainCoverageEvidence + $exclusionEvidence
+        return New-PulseFinding -Status NotApplicable -Reason "$($uncertainCoveragePolicies.Count) enabled legacy-auth block policy/policies could cover every missing legacy client bucket but have incomplete grant, user scope, application scope, or sign-in scope evidence." -Evidence $evidence
     }
 
     $reportOnlyCoversEas = @($reportOnlyBlockPolicies | Where-Object { $_.SignInScope.CoversExchangeActiveSync }).Count -gt 0
     $reportOnlyCoversOther = @($reportOnlyBlockPolicies | Where-Object { $_.SignInScope.CoversOther }).Count -gt 0
-    if ($reportOnlyCoversEas -and $reportOnlyCoversOther) {
-        $evidence = @($reportOnlyBlockPolicies | ForEach-Object {
+    $reportOnlyCoverageEvidence = @($reportOnlyBlockPolicies | ForEach-Object {
             $policyIdentity = Get-PulseCaPolicyEvidenceIdentity -Policy $_.Policy -CollectionOrdinal $_.CollectionOrdinal
             @{ Identity = $policyIdentity; Detail = @{ displayName = $_.Policy.displayName; state = 'enabledForReportingButNotEnforced' } }
-        }) + $exclusionEvidence
+        })
+    if ($reportOnlyCoversEas -and $reportOnlyCoversOther -and
+        $enforcedBlockPolicies.Count -eq 0 -and $uncertainCoveragePolicies.Count -eq 0) {
+        $evidence = $reportOnlyCoverageEvidence + $exclusionEvidence
         return New-PulseFinding -Status Fail -Reason "$($reportOnlyBlockPolicies.Count) Conditional Access polic$(if ($reportOnlyBlockPolicies.Count -eq 1) { 'y' } else { 'ies' }) would block legacy authentication but $(if ($reportOnlyBlockPolicies.Count -eq 1) { 'is' } else { 'are' }) still in report-only mode - nothing is actually enforced." -Evidence $evidence
     }
 
-    return New-PulseFinding -Status Fail -Reason "No complete, tenant-wide enforced Conditional Access policy set blocks both legacy client buckets. Definitively uncovered: $($missingBuckets -join ', ')." -Evidence $exclusionEvidence
+    $reason = "No complete, tenant-wide enforced Conditional Access policy set blocks both legacy client buckets. Definitively uncovered: $($definitivelyUncoveredBuckets -join ', ')."
+    if ($unknownBuckets.Count -gt 0) {
+        $reason += " Coverage unknown because incomplete enforced policy evidence could still cover: $($unknownBuckets -join ', ')."
+    }
+    $enforcedCoverageEvidence = @($enforcedBlockPolicies | ForEach-Object {
+            $policyIdentity = Get-PulseCaPolicyEvidenceIdentity -Policy $_.Policy -CollectionOrdinal $_.CollectionOrdinal
+            @{ Identity = $policyIdentity; Detail = @{
+                    displayName = $_.Policy.displayName
+                    coversExchangeActiveSync = $_.SignInScope.CoversExchangeActiveSync
+                    coversOther = $_.SignInScope.CoversOther
+                } }
+        })
+    $mixedReportOnlyEvidence = if ($reportOnlyCoversEas -and $reportOnlyCoversOther) {
+        $reportOnlyCoverageEvidence
+    } else {
+        @()
+    }
+    return New-PulseFinding -Status Fail -Reason $reason `
+        -Evidence ($enforcedCoverageEvidence + $uncertainCoverageEvidence + $mixedReportOnlyEvidence + $exclusionEvidence)
 }

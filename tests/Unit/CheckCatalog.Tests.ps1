@@ -43,6 +43,17 @@ Describe 'Import-PulseCheckCatalog' {
         $result[0].References.Cis | Should -Be @('CIS Microsoft 365 Foundations Benchmark v7.0.0, Rec. 5.2.2.1 (E3 Level 1)')
     }
 
+    It 'forwards an explicit RepoRoot so catalog import validates research files and anchors' {
+        New-Item -Path $script:tempRoot -ItemType Directory -Force | Out-Null
+        {
+            InModuleScope TenantPulse -ArgumentList (Join-Path $script:fixturesRoot 'valid'), $script:tempRoot {
+                param($path, $repoRoot)
+                function Test-PulseFixtureRule { $true }
+                Import-PulseCheckCatalog -Path $path -RepoRoot $repoRoot
+            }
+        } | Should -Throw -ExpectedMessage '*References.Research*file*is not present*'
+    }
+
     It 'does not throw and yields zero descriptors for an empty catalog directory' {
         New-Item -Path $script:tempRoot -ItemType Directory -Force | Out-Null
 

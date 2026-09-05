@@ -98,6 +98,10 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
             }
 
         $result.Outcome.Status | Should -Be 'Collected'
+        $result.Outcome.Operations | Should -Be @(
+            'DeviceManagementUnifiedRoleAssignment.ListBeta'
+            'Group.Get'
+        )
         @($result.Outcome.Rows).Count | Should -Be 2
         @($result.Outcome.Rows | ForEach-Object groupId) | Should -Be @('group-a', 'group-b')
         $result.Outcome.Rows[0].roleDefinitionName | Should -Be 'App Manager, School Administrator'
@@ -195,6 +199,7 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         @($result.Outcome.Rows).Count | Should -Be 0
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'assignment:assignment-a'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'DeviceManagementUnifiedRoleAssignment.ListBeta'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
         @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'Group').Count | Should -Be 0
     }
@@ -215,6 +220,7 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         @($result.Outcome.Rows).Count | Should -Be 0
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'assignment:assignment-a'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'DeviceManagementUnifiedRoleAssignment.ListBeta'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
         $result.Outcome.Gaps[0].ReasonCode | Should -Be 'invalid-provider-data'
         @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'Group').Count | Should -Be 0
@@ -244,7 +250,7 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         @($result.Outcome.Rows).Count | Should -Be 0
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'group:group-a'
-        $result.Outcome.Gaps[0].Operation | Should -Be 'Get'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'Group.Get'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
     }
 
@@ -287,7 +293,7 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         $result.Outcome.Rows[0].groupId | Should -Be 'group-a'
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'group:group-b'
-        $result.Outcome.Gaps[0].Operation | Should -Be 'Get'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'Group.Get'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'PermissionDenied'
         $result.Outcome.Gaps[0].ReasonCode | Should -Be 'permission-denied'
     }
@@ -334,10 +340,20 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         $result.Outcome.Status | Should -Be 'Failed'
         $result.Outcome.FailureClass | Should -Be 'AuthenticationFailed'
         $result.Outcome.ReasonCode | Should -Be 'authentication-failed'
-        # Authentication abort is run-wide: the first child failure is retained and the
-        # second group is never requested or fabricated as another gap.
-        @($result.Outcome.Gaps).Count | Should -Be 1
+        # Authentication abort is run-wide: the failed child is retained and every
+        # remaining enumerated group is explicitly classified as not attempted.
+        @($result.Outcome.Gaps).Count | Should -Be 2
         @($result.Outcome.Gaps.FailureClass | Sort-Object -Unique) | Should -Be @('AuthenticationFailed')
+        $result.Outcome.Gaps[0].Scope | Should -Be 'group:group-a'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be 'authentication-failed'
+        $result.Outcome.Gaps[1].Scope | Should -Be 'group:group-b'
+        $result.Outcome.Gaps[1].ReasonCode | Should -Be 'not-attempted-after-authentication-failure'
+        @($result.Outcome.Gaps.Operation) | Should -Be @('Group.Get', 'Group.Get')
+        @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'Group').Count | Should -Be 1
+        $result.Outcome.Detail.enumeratedCount | Should -Be 2
+        $result.Outcome.Detail.expandedCount | Should -Be 0
+        $result.Outcome.Detail.partialCount | Should -Be 0
+        $result.Outcome.Detail.notExpandedCount | Should -Be 2
     }
 
     It 'records a missing role-definition relation as an assignment gap instead of an unknown-role row' {
@@ -353,7 +369,7 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         @($result.Outcome.Rows).Count | Should -Be 0
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'assignment:assignment-a'
-        $result.Outcome.Gaps[0].Operation | Should -Be 'ListBeta'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'DeviceManagementUnifiedRoleAssignment.ListBeta'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
         $result.Outcome.Gaps[0].ReasonCode | Should -Be 'invalid-provider-data'
         @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'Group').Count | Should -Be 0
@@ -371,7 +387,7 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
         @($result.Outcome.Rows).Count | Should -Be 0
         @($result.Outcome.Gaps).Count | Should -Be 1
         $result.Outcome.Gaps[0].Scope | Should -Be 'assignment:assignment-a'
-        $result.Outcome.Gaps[0].Operation | Should -Be 'ListBeta'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'DeviceManagementUnifiedRoleAssignment.ListBeta'
         $result.Outcome.Gaps[0].ApiVersion | Should -Be 'beta'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
         @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'Group').Count | Should -Be 0
@@ -436,9 +452,9 @@ Describe 'Invoke-PulseIntuneRbacGroupProtectionPlan' {
             Should -Be $result.Outcome.Detail.enumeratedCount
         $invalidGap = @($result.Outcome.Gaps | Where-Object Scope -eq 'group:group-invalid')[0]
         $deniedGap = @($result.Outcome.Gaps | Where-Object Scope -eq 'group:group-denied')[0]
-        $invalidGap.Operation | Should -Be 'Get'
+        $invalidGap.Operation | Should -Be 'Group.Get'
         $invalidGap.ApiVersion | Should -Be 'v1.0'
-        $deniedGap.Operation | Should -Be 'Get'
+        $deniedGap.Operation | Should -Be 'Group.Get'
         $deniedGap.ApiVersion | Should -Be 'v1.0'
         $deniedGap.FailureClass | Should -Be 'PermissionDenied'
     }

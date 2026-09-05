@@ -206,6 +206,11 @@ function Invoke-PulseCollection {
                 $planCommand = $planRegistration
             }
         }
+        $datasetProvider = if ($null -ne $planRegistration -or -not [string]::IsNullOrWhiteSpace($declaredPlan)) {
+            'TenantPulse'
+        } else {
+            'GraphKit'
+        }
 
         if (-not [string]::IsNullOrWhiteSpace($declaredPlan) -and $null -eq $planCommand) {
             $reason = Protect-PulseReason -Message 'provider-plan-unavailable: declared TenantPulse plan is not registered' `
@@ -226,7 +231,7 @@ function Invoke-PulseCollection {
             $abortOperations = if ($null -ne $planCommand) { @($planOperationNames) } else { @($entry.Operation) }
             Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
                 -Reason $NetworkAbortState.Reason -ReasonCode 'authentication-failed' -Detail @{ status = 'collection aborted' } `
-                -FailureClass 'AuthenticationFailed' -Provider 'GraphKit' -Operations $abortOperations
+                -FailureClass 'AuthenticationFailed' -Provider $datasetProvider -Operations $abortOperations
             continue
         }
         $datasetAuthorization = Get-PulseDatasetAuthorization -AuthorizationDecision $AuthorizationDecision `
@@ -237,7 +242,12 @@ function Invoke-PulseCollection {
                 -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
             $operations = @(
                 foreach ($candidate in @($datasetAuthorization.Operations)) {
-                    if ($null -ne $candidate -and $candidate.Operation) { [string] $candidate.Operation }
+                    if ($null -eq $candidate -or -not $candidate.Operation) { continue }
+                    if ($datasetProvider -eq 'TenantPulse' -and $candidate.Type) {
+                        '{0}.{1}' -f [string] $candidate.Type, [string] $candidate.Operation
+                    } else {
+                        [string] $candidate.Operation
+                    }
                 }
             )
 
@@ -245,7 +255,7 @@ function Invoke-PulseCollection {
             Write-PulseDataset -Store $Store -Name $entry.Dataset -ApiVersion $entry.ApiVersion -Status 'Failed' `
                 -Reason $reason -ReasonCode $datasetAuthorization.ReasonCode `
                 -Detail @{ decision = $datasetAuthorization.Decision } -FailureClass $failureClass `
-                -Provider 'GraphKit' -Operations $operations -TenantId $contextTenantId -Pseudonym $TenantPseudonym
+                -Provider $datasetProvider -Operations $operations -TenantId $contextTenantId -Pseudonym $TenantPseudonym
             continue
         }
 
@@ -371,9 +381,12 @@ function Invoke-PulseCollection {
             $rowList = @($dependencyRows)
             if ($null -ne $dependencyRows -and $rowList.Count -gt 0 -and $null -ne $rowList[0]) {
                 $firstRow = $rowList[0]
-                $idProperty = $firstRow.PSObject.Properties['id']
-                if ($null -ne $idProperty -and $idProperty.Value) {
-                    $dependencyId = [string] $idProperty.Value
+                # GraphKit parses Graph JSON with ConvertFrom-Json -AsHashtable, so live
+                # rows are IDictionary values whose keys never appear in PSObject.Properties.
+                # Use the shared shape-neutral accessor rather than the object-only adapter.
+                $rawDependencyId = Get-PulseSettingsCatalogValueProperty -Node $firstRow -PropertyName 'id'
+                if ($rawDependencyId) {
+                    $dependencyId = [string] $rawDependencyId
                 }
             }
 
@@ -395,8 +408,10 @@ function Invoke-PulseCollection {
             $extraParameters = @{ id = $dependencyId }
         }
 
+        $descriptor = $null
         try {
-            Assert-PulseReadOnlyDescriptor -Type $entry.Type -Operation $entry.Operation -ApiVersion $entry.ApiVersion
+            $descriptor = Assert-PulseReadOnlyDescriptor -Type $entry.Type -Operation $entry.Operation `
+                -ApiVersion $entry.ApiVersion -PassThru
         } catch {
             if ($_.Exception.Message -match 'descriptor-version-drift') {
                 $reason = Protect-PulseReason -Message $_.Exception.Message -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
@@ -423,11 +438,18 @@ function Invoke-PulseCollection {
             if ($extraParameters.Count -gt 0) {
                 $graphObjectParams.Parameters = $extraParameters
             }
+            $pagingStrategy = [string] $descriptor.PagingStrategy
+            if ($pagingStrategy -notin @('None', 'NextLink')) {
+                # A missing descriptor result is possible only in mocked tests. Defaulting
+                # to paged is the fail-closed direction: metadata-free results cannot be
+                # promoted to Collected unless a real non-paged descriptor said None.
+                $pagingStrategy = 'NextLink'
+            }
             $rawGraphResult = @(Get-GraphObject @graphObjectParams)
-            $envelope = Convert-PulseGraphObjectResult -Result $rawGraphResult
+            $envelope = Convert-PulseGraphObjectResult -Result $rawGraphResult -PagingStrategy $pagingStrategy
             $outcome = ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelope `
                 -Dataset $entry.Dataset -ApiVersion $entry.ApiVersion -Provider 'GraphKit' `
-                -Operations @($entry.Operation)
+                -Operations @($entry.Operation) -PagingStrategy $pagingStrategy
             # SECRET CONTRACT (C1 fix): Sensitive-flagged properties (per TypedPolicyMaps.psd1
             # - e.g. windows10CustomConfiguration's omaSettings[].value) are redacted
             # BEFORE this row set ever reaches Write-PulseDataset - the raw dataset file

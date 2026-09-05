@@ -166,7 +166,7 @@ Describe 'Graph failure adapter contract' {
         $outcome.ReasonCode | Should -Be $ReasonCode
     }
 
-    It 'promotes a uniform <Name> RBAC child-gap tuple to the failed parent' -ForEach $failureCases {
+    It 'promotes <Name> RBAC child gaps to the failed parent without erasing suppressed work' -ForEach $failureCases {
         $record = New-AdapterGraphErrorRecord -Outcome $Outcome -Certainty $Certainty -StatusCode $StatusCode -Category $Category
         $outcome = InModuleScope TenantPulse -ArgumentList $record {
             param($record)
@@ -192,7 +192,14 @@ Describe 'Graph failure adapter contract' {
         $outcome.FailureClass | Should -Be $FailureClass
         $outcome.ReasonCode | Should -Be $ReasonCode
         @($outcome.Gaps.FailureClass | Sort-Object -Unique) | Should -Be @($FailureClass)
-        @($outcome.Gaps.ReasonCode | Sort-Object -Unique) | Should -Be @($ReasonCode)
+        if ($Aborts) {
+            @($outcome.Gaps.ReasonCode | Sort-Object -Unique) | Should -Be @(
+                'authentication-failed'
+                'not-attempted-after-authentication-failure'
+            )
+        } else {
+            @($outcome.Gaps.ReasonCode | Sort-Object -Unique) | Should -Be @($ReasonCode)
+        }
     }
 
     It 'maps <Name> through the Endpoint Security composite top-level read' -ForEach $failureCases {

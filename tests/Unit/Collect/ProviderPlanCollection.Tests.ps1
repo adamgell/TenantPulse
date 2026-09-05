@@ -684,6 +684,43 @@ Describe 'Invoke-PulseCollection provider plans' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 
+    It 'preserves TenantPulse ownership and Type.Operation identities when preflight denies a provider plan' {
+        $planRegistry = @{
+            syntheticComposite = @{
+                Command = { throw 'a denied composite must never dispatch' }
+                RequiresNetwork = $true
+                SupportsNetworkAbortState = $false
+                Operations = @(
+                    @{ Type = 'MobileApp'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+                    @{ Type = 'Group'; Operation = 'Get'; ApiVersion = 'v1.0' }
+                )
+            }
+        }
+        $decisions = [ordered]@{
+            'MobileApp/ListBeta' = [pscustomobject]@{ Decision = 'Denied'; ReasonCode = 'missing-grant' }
+            'Group/Get' = [pscustomobject]@{ Decision = 'Granted'; ReasonCode = 'granted' }
+        }
+        $authorization = [pscustomobject]@{ Decisions = $decisions }
+        $manifest = @([pscustomobject]@{
+                Dataset = 'syntheticComposite'; Type = $null; Operation = $null; ApiVersion = 'beta'
+                Pending = $false; IdFromDataset = $null; Plan = 'Invoke-SyntheticComposite'
+            })
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $planRegistry, $authorization {
+            param($store, $manifest, $context, $registry, $authorization)
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-test' `
+                -ProviderPlanRegistry $registry -AuthorizationDecision $authorization
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $entry = $saved.datasets.syntheticComposite
+        $entry.status | Should -Be 'Failed'
+        $entry.failureClass | Should -Be 'PermissionDenied'
+        $entry.provider | Should -Be 'TenantPulse'
+        @($entry.operations) | Should -Be @('MobileApp.ListBeta', 'Group.Get')
+    }
+
     It 'treats a caller registration for the built-in no-network dataset as networked after auth abort' {
         Mock Get-GraphOperation -ModuleName TenantPulse {
             @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @() }
@@ -720,6 +757,8 @@ Describe 'Invoke-PulseCollection provider plans' {
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.status | Should -Be 'Failed'
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.failureClass | Should -Be 'AuthenticationFailed'
         $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.reasonCode | Should -Be 'authentication-failed'
+        $saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.provider | Should -Be 'TenantPulse'
+        @($saved.datasets.dataProcessorServiceForWindowsFeaturesOnboarding.operations) | Should -Be @('MobileApp.ListBeta')
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
     }
 

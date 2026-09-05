@@ -14,8 +14,9 @@ archive. Historical GraphKit `0.2.2` and TenantPulse `0.1.3` package identities 
 below.
 
 Current-source 0.3.0 program work records Endpoint Security composite provenance as the stable
-qualified set `ConfigurationPolicy.ListBeta` and `ConfigurationPolicySetting.ListBeta`, with
-setting failures attributed to the latter primitive. The finding-14 request to accept `Partial`
+qualified set `ConfigurationPolicy.ListBeta`, `ConfigurationPolicySetting.ListBeta`, and
+`ConfigurationPolicyAssignment.ListBeta`, with setting and assignment failures attributed to
+their respective primitives. The finding-14 request to accept `Partial`
 in released schema 1.0.0/1.1.0 manifests remains rejected: those writers emitted only `Collected`,
 `Failed`, and `Skipped`; migration fails closed without modifying the manifest. Schema 2.0.0 is
 the first writer contract that introduced `Partial`.

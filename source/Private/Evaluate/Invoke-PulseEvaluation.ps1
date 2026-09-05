@@ -243,11 +243,41 @@ function Invoke-PulseEvaluation {
     $datasetCache = @{}
     $redactionMap = @{}
     $findings = [System.Collections.Generic.List[pscustomobject]]::new()
+    $allFindingsPrivacyComplete = $true
 
     foreach ($check in $sortedChecks) {
         $result = Invoke-PulseCheckEvaluation -Check $check -Store $Store -Manifest $manifest `
             -DatasetCache $datasetCache -Context $Context -OperatorKey $operatorKey `
             -GateProvider $GateProvider
+
+        $rawReasonCode = $null
+        if ($result -is [System.Collections.IDictionary]) {
+            if ($result.ContainsKey('ReasonCode') -and -not [string]::IsNullOrEmpty([string] $result.ReasonCode)) {
+                $rawReasonCode = [string] $result.ReasonCode
+            }
+        } elseif ($result.PSObject.Properties.Name -contains 'ReasonCode' -and -not [string]::IsNullOrEmpty([string] $result.ReasonCode)) {
+            $rawReasonCode = [string] $result.ReasonCode
+        }
+
+        if (-not [string]::IsNullOrEmpty($rawReasonCode) -and -not (Test-PulseReasonCode -ReasonCode $rawReasonCode)) {
+            $result = @{
+                Status          = 'Error'
+                Evidence        = @()
+                Reason          = 'ReasonCode must be a lowercase hyphenated token.'
+                PrivacyComplete = $false
+            }
+            $rawReasonCode = $null
+        }
+
+        $resultPrivacyComplete = $false
+        if ($result -is [System.Collections.IDictionary]) {
+            if ($result.ContainsKey('PrivacyComplete') -and $result.PrivacyComplete -is [bool]) {
+                $resultPrivacyComplete = [bool] $result.PrivacyComplete
+            }
+        } elseif ($result.PSObject.Properties.Name -contains 'PrivacyComplete' -and $result.PrivacyComplete -is [bool]) {
+            $resultPrivacyComplete = [bool] $result.PrivacyComplete
+        }
+        $allFindingsPrivacyComplete = $allFindingsPrivacyComplete -and $resultPrivacyComplete
 
         # H2 fix: by the time control reaches here, $result.Evidence entries are guaranteed
         # (by Invoke-PulseCheckEvaluation's own try/catch around evidence normalization) to
@@ -311,9 +341,13 @@ function Invoke-PulseEvaluation {
 
         $evidenceOut = @(foreach ($item in $evidenceItems) {
             [pscustomobject]@{
-                identity = $item.Identity
-                detail   = $item.Detail
-                sortKey  = $item.SortKey
+                identity     = $item.Identity
+                detail       = $item.Detail
+                sortKey      = $item.SortKey
+                # Classification metadata is part of the local findings contract. The
+                # safe-share converter consumes it to protect each tenant-derived detail
+                # field, then removes it from the shareable document.
+                fieldClasses = [pscustomobject] $item.FieldClasses
             }
         })
 
@@ -322,14 +356,7 @@ function Invoke-PulseEvaluation {
             $reason = Protect-PulseReason -Message $reason -ProfileId '' -Pseudonym $reasonPseudonym
         }
 
-        $reasonCode = $null
-        if ($result -is [System.Collections.IDictionary]) {
-            if ($result.ContainsKey('ReasonCode') -and -not [string]::IsNullOrEmpty([string] $result.ReasonCode)) {
-                $reasonCode = [string] $result.ReasonCode
-            }
-        } elseif ($result.PSObject.Properties.Name -contains 'ReasonCode' -and -not [string]::IsNullOrEmpty([string] $result.ReasonCode)) {
-            $reasonCode = [string] $result.ReasonCode
-        }
+        $reasonCode = $rawReasonCode
 
         $consultingSource = $check.Consulting
         $referencesSource = $check.References
@@ -438,7 +465,9 @@ function Invoke-PulseEvaluation {
             collectionOutcomes = 'SafeTechnical'
             notices            = 'BoundedReviewedText'
             references         = 'SafeTechnical'
+            privacy            = 'SafeTechnical'
         }
+        privacy             = ConvertTo-PulsePrivacyEnvelope -Complete $allFindingsPrivacyComplete
         notices             = [pscustomobject]@{
             cisDisclaimer = $cisDisclaimer
         }
@@ -460,6 +489,11 @@ function ConvertTo-PulseCanonicalCollectionOutcomes {
     )
 
     $result = [ordered]@{}
+    $supportedFailureClasses = @(
+        'DescriptorPending', 'PlatformUnavailable', 'PermissionDenied', 'LicenseRequired',
+        'GateUnknown', 'DependencyUnavailable', 'AuthenticationFailed', 'DeadlineExpired',
+        'Cancelled', 'InvalidProviderData', 'ProviderFailed', 'Indeterminate'
+    )
     if ($null -eq $Datasets) {
         return [pscustomobject]$result
     }
@@ -501,12 +535,19 @@ function ConvertTo-PulseCanonicalCollectionOutcomes {
                 $status = $rawStatus
             }
 
-            # reasonCode/failureClass are trusted structured metadata only when the
-            # status is canonical; an unsupported-status entry contributes none of them.
+            # A canonical status alone does not make neighboring persisted text safe.
+            # Legacy snapshots may have copied a free-text Reason into reasonCode, and a
+            # hand-edited manifest can carry arbitrary failure/certainty strings. Project
+            # only the closed structured vocabularies into the SafeTechnical document
+            # boundary; invalid metadata becomes null rather than being serialized.
             if ($null -ne $status) {
-                $reasonCode = [string] $entry.reasonCode
-                if ($null -ne $entry.failureClass -and -not [string]::IsNullOrWhiteSpace([string] $entry.failureClass)) {
-                    $failureClass = [string] $entry.failureClass
+                $rawReasonCode = $entry.reasonCode
+                if ($rawReasonCode -is [string] -and (Test-PulseReasonCode -ReasonCode $rawReasonCode)) {
+                    $reasonCode = [string] $rawReasonCode
+                }
+                $rawFailureClass = $entry.failureClass
+                if ($rawFailureClass -is [string] -and $rawFailureClass -cin $supportedFailureClasses) {
+                    $failureClass = [string] $rawFailureClass
                 }
             }
             $detail = $entry.detail
@@ -519,7 +560,7 @@ function ConvertTo-PulseCanonicalCollectionOutcomes {
                 if ($null -ne $truncatedValue) {
                     try { $truncated = [bool] $truncatedValue } catch { $truncated = $false }
                 }
-                if ($null -ne $certaintyValue -and -not [string]::IsNullOrWhiteSpace([string] $certaintyValue)) {
+                if ($certaintyValue -is [string] -and $certaintyValue -cin @('Known', 'Indeterminate')) {
                     $certainty = [string] $certaintyValue
                 }
             }

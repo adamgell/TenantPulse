@@ -23,6 +23,7 @@ BeforeAll {
             Type          = $Type
             Operation     = $Operation
             ApiVersion    = $(if ($Operation -eq 'ListBeta' -or $Type -eq 'AppInstallSummaryReport') { 'beta' } else { 'v1.0' })
+            PagingStrategy = $(if ($Type -in @('AppInstallSummaryReport', 'Group')) { 'None' } else { 'NextLink' })
             ThrottleClass = 'Read'
             ReplayPolicy  = 'Safe'
         }
@@ -97,6 +98,13 @@ Describe 'TenantPulse application report-data contract' {
             'GroupMember/List/v1.0'
             'MobileApp/ListBeta/beta'
             'MobileAppAssignment/List/v1.0'
+        )
+        @($operations | ForEach-Object { '{0}/{1}/{2}' -f $_.Type, $_.Operation, $_.PagingStrategy }) | Should -Be @(
+            'AppInstallSummaryReport/Get/None'
+            'Group/Get/None'
+            'GroupMember/List/NextLink'
+            'MobileApp/ListBeta/NextLink'
+            'MobileAppAssignment/List/NextLink'
         )
     }
 
@@ -303,14 +311,14 @@ Describe 'TenantPulse application report-data contract' {
         $secondValues = [object[]]::new(1)
         $secondValues[0] = [object[]]@('app-3', 'Gamma', 7, 2, 0)
         $script:installReportPages = @{
-            0   = [pscustomobject]@{ Schema = $script:installReportSchema; Values = $firstValues; TotalRowCount = 3 }
-            200 = [pscustomobject]@{ Schema = $script:installReportSchema; Values = $secondValues; TotalRowCount = 3 }
+            0 = [pscustomobject]@{ Schema = $script:installReportSchema; Values = $firstValues; TotalRowCount = 3 }
+            2 = [pscustomobject]@{ Schema = $script:installReportSchema; Values = $secondValues; TotalRowCount = 3 }
         }
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
             $Parameters.Body.top | Should -Be 200
-            @($Parameters.Body.orderBy).Count | Should -Be 0
+            @($Parameters.Body.orderBy) | Should -Be @('ApplicationId asc')
             @($Parameters.Body.select).Count | Should -Be 0
             New-PulseTestGraphEnvelope -Data @($script:installReportPages[[int] $Parameters.Body.skip])
         }
@@ -334,13 +342,181 @@ Describe 'TenantPulse application report-data contract' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } -Times 2 -Exactly
     }
 
+    It 'advances request-body paging by the rows actually returned from a short page' {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(1)
+        $firstValues[0] = [object[]]@('app-1', 'Alpha', 1)
+        $secondValues = [object[]]::new(1)
+        $secondValues[0] = [object[]]@('app-2', 'Beta', 2)
+        $script:shortPageBodies = [System.Collections.Generic.List[object]]::new()
+        $script:shortPages = @{
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2 }
+            1 = [pscustomobject]@{ Schema = $schema; Values = $secondValues; TotalRowCount = 2 }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            $script:shortPageBodies.Add($Parameters.Body) | Out-Null
+            New-PulseTestGraphEnvelope -Data @($script:shortPages[[int] $Parameters.Body.skip])
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Collected'
+        $outcome.CollectedRowCount | Should -Be 2
+        @($outcome.PayloadRows).Count | Should -Be 2
+        @($script:shortPageBodies | ForEach-Object { [int] $_.skip }) | Should -Be @(0, 1)
+        foreach ($body in $script:shortPageBodies) {
+            $body.top | Should -Be 200
+            @($body.orderBy) | Should -Be @('ApplicationId asc')
+        }
+    }
+
+    It 'fails closed when reordered report pages overlap on application identity' {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(1)
+        $firstValues[0] = [object[]]@('app-same', 'Before reorder', 1)
+        $overlapValues = [object[]]::new(1)
+        $overlapValues[0] = [object[]]@('app-same', 'After reorder', 2)
+        $script:overlapBodies = [System.Collections.Generic.List[object]]::new()
+        $script:overlapPages = @{
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2 }
+            1 = [pscustomobject]@{ Schema = $schema; Values = $overlapValues; TotalRowCount = 2 }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            $script:overlapBodies.Add($Parameters.Body) | Out-Null
+            New-PulseTestGraphEnvelope -Data @($script:overlapPages[[int] $Parameters.Body.skip])
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        $outcome.CollectedRowCount | Should -Be 1
+        @($outcome.PayloadRows).Count | Should -Be 1
+        @($outcome.Gaps.reason) | Should -Contain 'category:overlapping-page;operation:AppInstallSummaryReport.Get'
+        @($script:overlapBodies | ForEach-Object { [int] $_.skip }) | Should -Be @(0, 1)
+        foreach ($body in $script:overlapBodies) {
+            @($body.orderBy) | Should -Be @('ApplicationId asc')
+        }
+    }
+
+    It 'discards an overlapping later page before retaining its rows when TotalRowCount is missing' {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(1)
+        $firstValues[0] = [object[]]@('app-same', 'Before reorder', 1)
+        $overlapValues = [object[]]::new(1)
+        $overlapValues[0] = [object[]]@('app-same', 'After reorder', 2)
+        $script:missingTotalOverlapPages = @{
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 3 }
+            1 = [pscustomobject]@{ Schema = $schema; Values = $overlapValues }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data @($script:missingTotalOverlapPages[[int] $Parameters.Body.skip])
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        $outcome.CollectedRowCount | Should -Be 1
+        @($outcome.PayloadRows).Count | Should -Be 1
+        @($outcome.Gaps.reason) | Should -Contain 'category:overlapping-page;operation:AppInstallSummaryReport.Get'
+    }
+
+    It 'refuses a first page containing duplicate application identities as unusable' {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $values = [object[]]::new(2)
+        $values[0] = [object[]]@('app-same', 'First copy', 1)
+        $values[1] = [object[]]@('APP-SAME', 'Second copy', 2)
+        $script:duplicateIdentityPage = [pscustomobject]@{ Schema = $schema; Values = $values; TotalRowCount = 2 }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data @($script:duplicateIdentityPage)
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Failed'
+        $outcome.CollectedRowCount | Should -Be 0
+        @($outcome.PayloadRows).Count | Should -Be 0
+        @($outcome.Gaps.reason) | Should -Contain 'category:overlapping-page;operation:AppInstallSummaryReport.Get'
+    }
+
+    It 'retains a valid later page as Partial when TotalRowCount changes between requests' {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(1)
+        $firstValues[0] = [object[]]@('app-1', 'Alpha', 1)
+        $secondValues = [object[]]::new(1)
+        $secondValues[0] = [object[]]@('app-2', 'Beta', 2)
+        $script:changingTotalPages = @{
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2 }
+            1 = [pscustomobject]@{ Schema = $schema; Values = $secondValues; TotalRowCount = 3 }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data @($script:changingTotalPages[[int] $Parameters.Body.skip])
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        $outcome.CollectedRowCount | Should -Be 2
+        @($outcome.PayloadRows).Count | Should -Be 2
+        @($outcome.Gaps.reason) | Should -Contain 'category:total-row-count-mismatch;operation:AppInstallSummaryReport.Get'
+    }
+
     It 'retains earlier install-summary pages as Partial when a declared total cannot be reached' {
         $schema = @([pscustomobject]@{ Column = 'ApplicationId' }, [pscustomobject]@{ Column = 'DisplayName' }, [pscustomobject]@{ Column = 'FailedDeviceCount' })
         $firstValues = [object[]]::new(1)
         $firstValues[0] = [object[]]@('app-1', 'Alpha', 3)
         $script:incompleteReportPages = @{
-            0   = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 3 }
-            200 = [pscustomobject]@{ Schema = $schema; Values = @(); TotalRowCount = 3 }
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 3 }
+            1 = [pscustomobject]@{ Schema = $schema; Values = @(); TotalRowCount = 3 }
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
@@ -372,7 +548,7 @@ Describe 'TenantPulse application report-data contract' {
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' -and $Parameters.Body.skip -eq 0 } {
             New-PulseTestGraphEnvelope -Data @($firstPage)
         }
-        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' -and $Parameters.Body.skip -eq 200 } {
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' -and $Parameters.Body.skip -eq 1 } {
             throw '503 Service Unavailable'
         }
 
@@ -510,6 +686,28 @@ Describe 'TenantPulse application report-data contract' {
         }
         @($rows | ForEach-Object appId) | Should -Be @('app-1', 'app-2')
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } -Times 1 -Exactly
+    }
+
+    It 'reports the terminal row count for a complete direct named-record response' {
+        $script:directNamedRows = @(
+            [pscustomobject]@{ ApplicationId = 'app-1'; DisplayName = 'First'; FailedDeviceCount = 0 }
+            [pscustomobject]@{ ApplicationId = 'app-2'; DisplayName = 'Second'; FailedDeviceCount = 3 }
+        )
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data $script:directNamedRows
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Collected'
+        $outcome.CollectedRowCount | Should -Be 2
+        @($outcome.PayloadRows).Count | Should -Be 2
     }
 
     It 'scrubs the tenant id recursively from settings, descriptions, names, and source columns before publication' {
@@ -655,7 +853,7 @@ Describe 'TenantPulse application report-data contract' {
         @($manifest.expansions.'application-assignments'.gaps.reason) | Should -Contain 'category:page-cap;operation:GroupMember.List'
     }
 
-    It 'records a usable partial Group.Get response as partial evidence with an explicit gap' {
+    It 'records a usable indeterminate non-paged Group.Get response as partial evidence with an explicit gap' {
         $app = [pscustomobject]@{ id = 'app-1'; displayName = 'Partial Group App'; publisher = 'Vendor'; '@odata.type' = '#microsoft.graph.win32LobApp' }
         $assignment = [pscustomobject]@{ id = 'assignment-1'; intent = 'required'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'group-1' }; settings = $null }
 
@@ -666,7 +864,14 @@ Describe 'TenantPulse application report-data contract' {
             New-PulseTestGraphEnvelope -Data @($assignment)
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'Group' } {
-            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'group-1'; displayName = 'Known Group'; description = 'Partial metadata' }) -Truncated $true -PageCount 2
+            [pscustomobject]@{
+                PSTypeName = 'GraphKit.OperationResult'
+                Outcome    = 'Succeeded'
+                Certainty  = 'Indeterminate'
+                Data       = @([pscustomobject]@{ id = 'group-1'; displayName = 'Known Group'; description = 'Partial metadata' })
+                Telemetry  = @()
+                Provenance = @{}
+            }
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'GroupMember' } {
             New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'member-1' })
@@ -688,7 +893,7 @@ Describe 'TenantPulse application report-data contract' {
         }
         $rows[0].groupResolutionState | Should -Be 'Partial'
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
-        @($manifest.expansions.'application-assignments'.gaps.reason) | Should -Contain 'category:page-cap;operation:Group.Get'
+        @($manifest.expansions.'application-assignments'.gaps.reason) | Should -Contain 'category:indeterminate;operation:Group.Get'
     }
 
     It 'rejects mismatched group metadata identity while retaining independently known membership' {
@@ -919,6 +1124,23 @@ Describe 'TenantPulse application report-data contract' {
         @($converted.Gaps.reason | Where-Object { $_ -match 'invalid-provider-data' }).Count | Should -Be 2
     }
 
+    It 'rejects direct named records whose distinct source keys normalize to the same key' {
+        $collision = [pscustomobject][ordered]@{
+            ApplicationId    = 'app-original'
+            'application-id' = 'app-shadow'
+            FailedDeviceCount = 1
+        }
+
+        $converted = InModuleScope TenantPulse -ArgumentList $collision {
+            param($row)
+            ConvertTo-PulseAppInstallErrorRows -PayloadRows @($row)
+        }
+
+        @($converted.Rows).Count | Should -Be 0
+        @($converted.Gaps).Count | Should -Be 1
+        $converted.Gaps[0].reason | Should -Match 'invalid-provider-data'
+    }
+
     It 'retains valid matrix rows and custom columns while isolating a malformed row' {
         $valueRows = [object[]]::new(3)
         $valueRows[0] = [object[]]@('Alpha', '0x1', 'first')
@@ -1042,6 +1264,61 @@ Describe 'TenantPulse application report-data contract' {
         }
     }
 
+    It 'records an assignment artifact redaction failure and still publishes the independent install report' {
+        $cycle = [ordered]@{ label = 'assignment-cycle' }
+        $cycle.self = $cycle
+        $app = [pscustomobject]@{ id = 'app-1'; displayName = 'Cycle App'; '@odata.type' = '#microsoft.graph.win32LobApp' }
+        $assignment = [pscustomobject]@{
+            id = 'assignment-1'; intent = 'required'
+            target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget' }
+            settings = $cycle
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope -Data @($app) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileAppAssignment' } { New-PulseTestGraphEnvelope -Data @($assignment) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } { New-PulseTestEmptyAppInstallEnvelope }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $script:authorization, $script:abortState {
+            param($store, $context, $authorization, $abortState)
+            Invoke-PulseApplicationReportCollection -Store $store -Context $context -AuthorizationDecision $authorization `
+                -NetworkAbortState $abortState -ProfileId 'fixture' -Pseudonym 'tp-fixture'
+        }
+
+        $result.ApplicationAssignments.Status | Should -Be 'Failed'
+        $result.AppInstallErrors.Status | Should -Be 'Expanded'
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.expansions.'application-assignments'.status | Should -Be 'Failed'
+        $manifest.expansions.'application-assignments'.reason | Should -Be 'artifact-publication-failed'
+        $manifest.expansions.'app-install-errors'.status | Should -Be 'Expanded'
+        @(Get-ChildItem -LiteralPath $script:store.ExpandedPath -Filter 'application-assignments*.jsonl').Count | Should -Be 0
+    }
+
+    It 'records an install artifact redaction failure without regressing the published assignment artifact' {
+        $cycle = [ordered]@{
+            ApplicationId     = 'app-cycle'
+            DisplayName       = 'Cycle App'
+            FailedDeviceCount = 1
+        }
+        $cycle.self = $cycle
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data @($cycle)
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $script:authorization, $script:abortState {
+            param($store, $context, $authorization, $abortState)
+            Invoke-PulseApplicationReportCollection -Store $store -Context $context -AuthorizationDecision $authorization `
+                -NetworkAbortState $abortState -ProfileId 'fixture' -Pseudonym 'tp-fixture'
+        }
+
+        $result.ApplicationAssignments.Status | Should -Be 'Expanded'
+        $result.AppInstallErrors.Status | Should -Be 'Failed'
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.expansions.'application-assignments'.status | Should -Be 'Expanded'
+        $manifest.expansions.'app-install-errors'.status | Should -Be 'Failed'
+        $manifest.expansions.'app-install-errors'.reason | Should -Be 'artifact-publication-failed'
+        @(Get-ChildItem -LiteralPath $script:store.ExpandedPath -Filter 'app-install-errors*.jsonl').Count | Should -Be 0
+    }
+
     It 'aborts all later report reads after Group.Get authentication failure' {
         $apps = @(
             [pscustomobject]@{ id = 'app-1'; displayName = 'First'; '@odata.type' = '#microsoft.graph.win32LobApp' }
@@ -1069,6 +1346,41 @@ Describe 'TenantPulse application report-data contract' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'GroupMember' } -Times 0 -Exactly
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileAppAssignment' } -Times 1 -Exactly
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } -Times 0 -Exactly
+    }
+
+    It 'preserves fetched assignment truth when child authentication abort suppresses later group resolution' {
+        $app = [pscustomobject]@{ id = 'app-1'; displayName = 'Fetched Assignments'; '@odata.type' = '#microsoft.graph.win32LobApp' }
+        $assignments = @(
+            [pscustomobject]@{ id = 'a1'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'group-1' } }
+            [pscustomobject]@{ id = 'a2'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'group-2' } }
+            [pscustomobject]@{ id = 'a3'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget' } }
+        )
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope -Data @($app) }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileAppAssignment' } { New-PulseTestGraphEnvelope -Data $assignments }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'Group' -and $Parameters.id -eq 'group-1' } {
+            throw 'AADSTS700016: fixture authentication failure'
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $script:authorization, $script:abortState {
+            param($store, $context, $authorization, $abortState)
+            Invoke-PulseApplicationReportCollection -Store $store -Context $context -AuthorizationDecision $authorization `
+                -NetworkAbortState $abortState -ProfileId 'fixture' -Pseudonym 'tp-fixture'
+        }
+
+        $result.ApplicationAssignments.Status | Should -Be 'Partial'
+        $rows = InModuleScope TenantPulse -ArgumentList $script:store { param($store) @(Get-PulseExpansionRows -Store $store -Name 'application-assignments') }
+        @($rows).Count | Should -Be 3
+        @($rows | ForEach-Object assignmentResolutionState) | Should -Be @('Resolved', 'Resolved', 'Resolved')
+        ($rows | Where-Object assignmentId -eq 'a1').groupResolutionState | Should -Be 'Failed'
+        ($rows | Where-Object assignmentId -eq 'a2').groupResolutionState | Should -Be 'NotEvaluated'
+        ($rows | Where-Object assignmentId -eq 'a2').memberResolutionState | Should -Be 'NotEvaluated'
+        ($rows | Where-Object assignmentId -eq 'a3').groupResolutionState | Should -Be 'NotApplicable'
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        @($manifest.expansions.'application-assignments'.gaps | Where-Object policyId -eq 'group-2').reason |
+            Should -Contain 'category:authentication-failed;operation:Group.Get'
+        @($manifest.expansions.'application-assignments'.gaps.reason) | Should -Not -Contain 'category:authentication-failed;operation:MobileAppAssignment.List'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'Group' } -Times 1 -Exactly
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'GroupMember' } -Times 0 -Exactly
     }
 
     It 'aborts all later report reads after GroupMember.List authentication failure' {

@@ -158,7 +158,7 @@ BeforeAll {
 }
 
 Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
-    It 'keeps the default workflow pack-before-test' {
+    It 'makes default and direct test workflows package current source before testing' {
         $buildYaml = Get-Content -LiteralPath (Join-Path $script:repoRoot 'build.yaml') -Raw
         $defaultWorkflow = [regex]::Match(
             $buildYaml,
@@ -168,7 +168,28 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
         $orderedTasks = @([regex]::Matches($defaultWorkflow.Groups['body'].Value, '(?m)^\s+-\s+(?<task>\S+)\s*$') |
             ForEach-Object { $_.Groups['task'].Value })
 
-        $orderedTasks | Should -Be @('pack', 'test')
+        $orderedTasks | Should -Be @('test')
+
+        $testWorkflow = [regex]::Match(
+            $buildYaml,
+            '(?ms)^  test:\s*$(?<body>.*?)(?=^  [a-zA-Z0-9_.-]+:\s*$)'
+        )
+        $testWorkflow.Success | Should -BeTrue
+        $testTasks = @([regex]::Matches($testWorkflow.Groups['body'].Value, '(?m)^\s+-\s+(?<task>\S+)\s*$') |
+            ForEach-Object { $_.Groups['task'].Value })
+
+        $testTasks | Should -Be @(
+            'pack'
+            'Capture_Candidate_Proof_Input'
+            'Pester_Tests_Stop_On_Fail'
+            'Pester_if_Code_Coverage_Under_Threshold'
+            'Assert_Gate_Result'
+            'Record_Tested_Module_Digest'
+        )
+
+        $ciWorkflow = Get-Content -LiteralPath (Join-Path $script:repoRoot '.github/workflows/ci.yml') -Raw
+        @([regex]::Matches($ciWorkflow, '(?m)pwsh -File \./build\.ps1 -Tasks test\s*$')).Count | Should -Be 1
+        $ciWorkflow | Should -Not -Match '(?m)pwsh -File \./build\.ps1 -Tasks pack\s*$'
     }
 
     It 'keeps TenantPulse dependent only on exact GraphKit 0.3.0 at runtime' {

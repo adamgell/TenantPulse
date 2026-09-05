@@ -545,7 +545,20 @@
 # 3006 -> 3258 after the Conditional Access certainty closeout: +252 regressions for
 # effective scope lower bounds, grant combinations, current Microsoft admin-role coverage,
 # privacy-safe exception correlation, and deterministic policy evidence identities.
-$script:tenantPulseGateMinimumTests = 3258
+# 3258 -> 3303 after the core-program hardening closeout: +45 default-workflow
+# regressions for privacy
+# classification, Graph-envelope interpretation, ARM continuation safety, provider
+# provenance, API-version routing, terminal outcome accounting, assignment certainty,
+# catalog validation, and application-report collection/publication.
+# 3303 -> 3319 after the final audit hardening: +16 regressions for primitive privacy,
+# fixed-schema classifications, assignment-evidence uncertainty, application/legacy
+# counters, and descriptor-aware paging completeness.
+# 3319 -> 3320 adds malformed ARM continuation coverage; the GraphKit paged-failure
+# interop correction strengthens an existing three-case envelope parameterization.
+# An earlier all-tests discovery reported 3324 because it also included the four dedicated
+# tests/Perf assertions. The release workflow deliberately and explicitly runs tests/QA
+# plus tests/Unit only; its measured package-first total is therefore 3320.
+$script:tenantPulseGateMinimumTests = 3320
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

@@ -46,7 +46,7 @@ function Test-PulseGroupClosureMemberIsGroup {
 function ConvertTo-PulseGroupClosureEnvelope {
     param($Result)
 
-    $envelope = Convert-PulseGraphObjectResult -Result $Result
+    $envelope = Convert-PulseGraphObjectResult -Result $Result -PagingStrategy 'NextLink'
     if ($null -eq $envelope) {
         throw [System.Management.Automation.ErrorRecord]::new(
             [System.InvalidOperationException]::new('Graph envelope incomplete'),

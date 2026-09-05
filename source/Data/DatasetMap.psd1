@@ -78,7 +78,11 @@
 #>
 @{
     conditionalAccessPolicies   = @{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' }
-    deviceCompliancePolicies    = @{ Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }
+
+    # The compliance plan deliberately has a mixed-version operation set. Its beta root
+    # preserves platform-specific policy types that v1.0 omits; per-policy assignments use
+    # GraphKit's stable v1.0 child descriptor. The dataset records the root shape version.
+    deviceCompliancePolicies    = @{ Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'beta' }
     deviceConfigurations        = @{ Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }
     appProtectionPolicies       = @{ Type = 'AppProtectionPolicy'; Operation = 'List'; ApiVersion = 'beta' }
     managedDevices               = @{ Type = 'ManagedDevice'; Operation = 'List'; ApiVersion = 'v1.0' }

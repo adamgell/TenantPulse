@@ -183,6 +183,24 @@ Describe 'TP.ENT.0004 - Legacy authentication is blocked by an enforced Conditio
         $finding.reason | Should -Match $MissingBucket
     }
 
+    It 'Fail with mixed certainty: names only the provably absent bucket as definitively uncovered' {
+        $policy = New-PulseLegacyAuthPolicy -DisplayName 'Possibly universal EAS block'
+        $policy.conditions.clientAppTypes = @('exchangeActiveSync')
+        $policy.conditions | Add-Member -NotePropertyName futureCondition -NotePropertyValue @{ mode = 'future' }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'Definitively uncovered: other'
+        $finding.reason | Should -Match 'Coverage unknown[^.]*exchangeActiveSync'
+        $finding.reason | Should -Not -Match 'Definitively uncovered:[^.]*exchangeActiveSync'
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'ca-Possibly universal EAS block'
+        $finding.evidence[0].detail.signInScope | Should -Be 'Incomplete'
+    }
+
     It 'preserves unknown grant controls as incomplete candidate evidence' -ForEach @(
         @{ Control = 'unknownFutureValue' }
         @{ Control = 'futureGrantControl' }
@@ -233,6 +251,21 @@ Describe 'TP.ENT.0004 - Legacy authentication is blocked by an enforced Conditio
 
         $finding.status | Should -Be 'Fail'
         $finding.reason | Should -Match 'report-only'
+    }
+
+    It 'Fail: mixed enforced and report-only coverage reports the remaining enforced gap accurately' {
+        $enforcedEas = New-PulseLegacyAuthPolicy -DisplayName 'Enforced EAS'
+        $enforcedEas.conditions.clientAppTypes = @('exchangeActiveSync')
+        $reportOnlyBoth = New-PulseLegacyAuthPolicy -DisplayName 'Report-Only Both' -State 'enabledForReportingButNotEnforced'
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($enforcedEas, $reportOnlyBoth) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'Definitively uncovered: other'
+        $finding.reason | Should -Not -Match 'nothing is actually enforced'
+        @($finding.evidence.detail.displayName) | Should -Contain 'Enforced EAS'
+        @($finding.evidence.detail.displayName) | Should -Contain 'Report-Only Both'
     }
 
     It 'Fail: no policy at all blocks legacy authentication' {

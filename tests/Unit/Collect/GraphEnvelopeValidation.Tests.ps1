@@ -161,6 +161,175 @@ Describe 'GraphKit collection envelope validation' {
         (Get-Content -LiteralPath (Join-Path $script:store.DatasetsPath 'mobileApps.json') -Raw) | Should -Be '[]'
     }
 
+    It 'accepts the immutable GraphKit 0.3.0 non-paged envelope shape with neither Truncated nor PageCount' {
+        $envelope = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'
+            Outcome    = 'Succeeded'
+            Certainty  = 'Known'
+            Data       = @([ordered]@{ id = 'graphkit-030-row' })
+            Telemetry  = @()
+            Provenance = @{}
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $envelope {
+            param($envelope)
+            ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelope `
+                -Dataset 'legacyNonPaged' -ApiVersion 'v1.0' -Operations @('Group.Get') `
+                -PagingStrategy 'None'
+        }
+
+        $outcome.Status | Should -Be 'Collected'
+        $outcome.Rows.Count | Should -Be 1
+        $outcome.Rows[0].id | Should -Be 'graphkit-030-row'
+        $outcome.Detail.truncated | Should -BeFalse
+        $outcome.Detail.PSObject.Properties.Name | Should -Not -Contain 'pageCount'
+    }
+
+    It 'persists a non-paged GraphKit 0.3.0 envelope through collection when the descriptor declares None' {
+        $manifest = @([pscustomobject]@{
+                Dataset = 'organization'; Type = 'Organization'; Operation = 'Get'; ApiVersion = 'v1.0'; Pending = $false
+            })
+        $authorization = [pscustomobject]@{
+            PSTypeName  = 'TenantPulse.PermissionPreflight'
+            TargetAppId = 'fixture-client-id'
+            Decision    = 'Granted'
+            ReasonCode  = 'granted'
+            Decisions   = [ordered]@{
+                'Organization/Get' = [pscustomobject]@{
+                    Type = 'Organization'; Operation = 'Get'; ApiVersion = 'v1.0'
+                    Stability = 'Stable'; Decision = 'Granted'; ReasonCode = 'granted'
+                    RequiredPermissions = @('Organization.Read.All')
+                }
+            }
+            Findings = @()
+        }
+        $envelope = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'
+            Outcome    = 'Succeeded'
+            Certainty  = 'Known'
+            Data       = @([ordered]@{ id = 'organization-row' })
+            Telemetry  = @()
+            Provenance = @{}
+        }
+
+        InModuleScope TenantPulse -ArgumentList $script:store, $manifest, $script:context, $authorization, $envelope {
+            param($store, $manifest, $context, $authorization, $envelope)
+            $script:GraphEnvelope = $envelope
+            Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse {
+                [pscustomobject]@{
+                    Type = 'Organization'; Operation = 'Get'; ApiVersion = 'v1.0'
+                    PagingStrategy = 'None'; ThrottleClass = 'Read'; ReplayPolicy = 'Safe'
+                }
+            }
+            Mock Get-GraphObject -ModuleName TenantPulse { return $script:GraphEnvelope }
+
+            Invoke-PulseCollection -Store $store -Manifest $manifest -Context $context `
+                -ProfileId 'profile-1' -TenantPseudonym 'tp-envelope-test' -AuthorizationDecision $authorization
+        }
+
+        $saved = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $entry = $saved.datasets.organization
+        $entry.status | Should -Be 'Collected'
+        $entry.itemCount | Should -Be 1
+        $entry.detail.PSObject.Properties.Name | Should -Not -Contain 'pageCount'
+        @((Get-Content -LiteralPath (Join-Path $script:store.DatasetsPath 'organization.json') -Raw | ConvertFrom-Json)).Count | Should -Be 1
+    }
+
+    It 'rejects a paged GraphKit envelope when both completeness members are missing' {
+        $envelope = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'
+            Outcome    = 'Succeeded'
+            Certainty  = 'Known'
+            Data       = @([ordered]@{ id = 'must-not-be-authoritative' })
+            Telemetry  = @()
+            Provenance = @{}
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $envelope {
+            param($envelope)
+            ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelope `
+                -Dataset 'damagedPagedResult' -ApiVersion 'beta' -Operations @('MobileApp.ListBeta')
+        }
+
+        $outcome.Status | Should -Be 'Failed'
+        $outcome.FailureClass | Should -Be 'InvalidProviderData'
+        @($outcome.Rows).Count | Should -Be 0
+    }
+
+    It 'rejects a paged GraphKit envelope when PageCount is missing despite Truncated being present' {
+        $envelope = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'
+            Outcome    = 'Succeeded'
+            Certainty  = 'Known'
+            Truncated  = $false
+            Data       = @([ordered]@{ id = 'must-not-be-authoritative' })
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $envelope {
+            param($envelope)
+            ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelope `
+                -Dataset 'damagedPagedResult' -ApiVersion 'beta' -Operations @('MobileApp.ListBeta')
+        }
+
+        $outcome.Status | Should -Be 'Failed'
+        $outcome.FailureClass | Should -Be 'InvalidProviderData'
+    }
+
+    It 'rejects a paged GraphKit envelope whose PageCount is a non-native <Shape>' -ForEach @(
+        @{ Shape = 'string'; Value = '1' }
+        @{ Shape = 'Boolean'; Value = $true }
+        @{ Shape = 'fraction'; Value = 1.5 }
+    ) {
+        $envelope = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'
+            Outcome    = 'Succeeded'
+            Certainty  = 'Known'
+            Truncated  = $false
+            PageCount  = $Value
+            Data       = @([ordered]@{ id = 'must-not-be-authoritative' })
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $envelope {
+            param($envelope)
+            ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelope `
+                -Dataset 'malformedPagedResult' -ApiVersion 'beta' -Operations @('MobileApp.ListBeta')
+        }
+
+        $outcome.Status | Should -Be 'Failed'
+        $outcome.FailureClass | Should -Be 'InvalidProviderData'
+    }
+
+    It 'maps the exact GraphKit paged <Outcome> envelope without success-only paging members' -ForEach @(
+        @{ Outcome = 'Failed'; ExpectedFailureClass = 'ProviderFailed'; ExpectedReasonCode = 'provider-failed' }
+        @{ Outcome = 'Cancelled'; ExpectedFailureClass = 'Cancelled'; ExpectedReasonCode = 'cancelled' }
+        @{ Outcome = 'DeadlineExpired'; ExpectedFailureClass = 'DeadlineExpired'; ExpectedReasonCode = 'deadline-expired' }
+    ) {
+        # Invoke-GraphPaging returns this exact shape when a page operation is not
+        # successful. Truncated and PageCount describe successful traversal completeness
+        # and are therefore absent on GraphKit's terminal failure envelope.
+        $envelope = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'
+            Outcome    = $Outcome
+            Certainty  = 'Indeterminate'
+            Data       = @()
+            Telemetry  = @()
+            Provenance = @{}
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $envelope {
+            param($envelope)
+            ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $envelope `
+                -Dataset 'failedEnvelope' -ApiVersion 'v1.0' -Operations @('Group.Get')
+        }
+
+        $outcome.Status | Should -Be 'Failed'
+        $outcome.FailureClass | Should -Be $ExpectedFailureClass
+        $outcome.ReasonCode | Should -Be $ExpectedReasonCode
+        @($outcome.Rows).Count | Should -Be 0
+        $outcome.Detail.truncated | Should -BeFalse
+        $outcome.Detail.PSObject.Properties.Name | Should -Not -Contain 'pageCount'
+    }
+
     It 'persists Succeeded/Indeterminate/non-truncated rows as Partial with indeterminate detail' {
         $envelope = New-TestGraphEnvelope -Certainty 'Indeterminate' -Truncated $false `
             -Data @([pscustomobject]@{ id = 'safe-row' }) -PageCount 1
@@ -267,7 +436,10 @@ Describe 'GraphKit expansion envelope validation' {
                         [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Succeeded'; Certainty = 'Known'; Truncated = $false; Data = @(); PageCount = 1 }
                     }
                     'Malformed' {
-                        return [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Succeeded'; Certainty = 'Known'; Data = @() }
+                        # A paged result always carries PageCount. Omitting Truncated while
+                        # retaining that paging signal is malformed; the immutable 0.3.0
+                        # non-paged shape legitimately carries neither property.
+                        return [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Succeeded'; Certainty = 'Known'; Data = @(); PageCount = 1 }
                     }
                     'NullData' {
                         return [pscustomobject]@{ PSTypeName = 'GraphKit.OperationResult'; Outcome = 'Succeeded'; Certainty = 'Known'; Truncated = $false; Data = $null }

@@ -185,6 +185,23 @@ Describe 'TP.ENT.0022 - Zero permanent-active assignments for privileged roles (
         ($finding.evidence | Where-Object identity -eq 'i-exempt').detail.exempt | Should -Be $true
     }
 
+    It 'Fail with one uniquely addressable evidence row per id-less permanent assignment' {
+        $instances = @(
+            (New-PulseScheduleInstance -PrincipalId 'u-without-id-one')
+            (New-PulseScheduleInstance -PrincipalId 'u-without-id-two')
+        )
+
+        $finding = Invoke-PulsePimFixture -Instances $instances
+
+        $finding.status | Should -Be 'Fail'
+        @($finding.evidence).Count | Should -Be 2
+        @($finding.evidence.identity) | Should -Be @(
+            'pim-permanent-assignment-0'
+            'pim-permanent-assignment-1'
+        )
+        @($finding.evidence.identity | Select-Object -Unique).Count | Should -Be 2
+    }
+
     It 'Fail: not flagged when isPrivileged has no true entries at all' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0022' -Datasets @(
             @{ Name = 'roleAssignmentScheduleInstances'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }

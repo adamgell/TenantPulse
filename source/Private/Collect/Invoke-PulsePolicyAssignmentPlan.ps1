@@ -2,8 +2,11 @@
     Private: collect an Intune policy root and its authoritative per-policy assignments.
 
     GraphKit deliberately exposes one operation at a time. TenantPulse owns this bounded,
-    sequential join for deviceCompliancePolicies and deviceConfigurations: one root List,
-    followed by one assignment List for each unambiguous parent id. The result always
+    sequential join for deviceCompliancePolicies and deviceConfigurations: one root read,
+    followed by one assignment List for each unambiguous parent id. Compliance policy roots
+    use the beta descriptor because beta-only platform policy types must not be omitted; their
+    assignment children remain on the stable v1.0 descriptor. Device configurations stay on
+    v1.0 for both operations. The result always
     carries an `assignments` property. A complete zero-row child is `@()`; unavailable or
     incomplete child evidence is `$null` plus a policy-scoped gap. Consumers can therefore
     distinguish authoritative absence from missing evidence without another Graph call.
@@ -48,15 +51,25 @@ function Invoke-PulsePolicyAssignmentPlan {
     $spec = switch ($Dataset) {
         'deviceCompliancePolicies' {
             [pscustomobject]@{
-                RootType       = 'DeviceCompliancePolicy'
-                AssignmentType = 'DeviceCompliancePolicyAssignment'
+                RootType             = 'DeviceCompliancePolicy'
+                RootOperation        = 'ListBeta'
+                RootApiVersion       = 'beta'
+                AssignmentType       = 'DeviceCompliancePolicyAssignment'
+                AssignmentOperation  = 'List'
+                AssignmentApiVersion = 'v1.0'
+                DatasetApiVersion    = 'beta'
             }
             break
         }
         'deviceConfigurations' {
             [pscustomobject]@{
-                RootType       = 'DeviceConfiguration'
-                AssignmentType = 'DeviceConfigurationAssignment'
+                RootType             = 'DeviceConfiguration'
+                RootOperation        = 'List'
+                RootApiVersion       = 'v1.0'
+                AssignmentType       = 'DeviceConfigurationAssignment'
+                AssignmentOperation  = 'List'
+                AssignmentApiVersion = 'v1.0'
+                DatasetApiVersion    = 'v1.0'
             }
             break
         }
@@ -65,20 +78,25 @@ function Invoke-PulsePolicyAssignmentPlan {
         }
     }
 
-    $apiVersion = 'v1.0'
-    $rootOperation = "$($spec.RootType).List"
-    $assignmentOperation = "$($spec.AssignmentType).List"
+    $rootOperation = "$($spec.RootType).$($spec.RootOperation)"
+    $assignmentOperation = "$($spec.AssignmentType).$($spec.AssignmentOperation)"
     $operations = @($rootOperation, $assignmentOperation)
 
     if ($NetworkAbortState.AuthenticationAborted) {
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass 'AuthenticationFailed' -ReasonCode 'authentication-failed' `
             -Detail @{ status = 'collection aborted' } -Provider 'TenantPulse' `
-            -ApiVersion $apiVersion -Operations $operations
+            -ApiVersion $spec.DatasetApiVersion -Operations $operations
     }
 
-    Assert-PulseReadOnlyDescriptor -Type $spec.RootType -Operation 'List' -ApiVersion $apiVersion
-    Assert-PulseReadOnlyDescriptor -Type $spec.AssignmentType -Operation 'List' -ApiVersion $apiVersion
+    $rootDescriptor = Assert-PulseReadOnlyDescriptor -Type $spec.RootType -Operation $spec.RootOperation `
+        -ApiVersion $spec.RootApiVersion -PassThru
+    $assignmentDescriptor = Assert-PulseReadOnlyDescriptor -Type $spec.AssignmentType -Operation $spec.AssignmentOperation `
+        -ApiVersion $spec.AssignmentApiVersion -PassThru
+    $rootPagingStrategy = [string] $rootDescriptor.PagingStrategy
+    if ($rootPagingStrategy -notin @('None', 'NextLink')) { $rootPagingStrategy = 'NextLink' }
+    $assignmentPagingStrategy = [string] $assignmentDescriptor.PagingStrategy
+    if ($assignmentPagingStrategy -notin @('None', 'NextLink')) { $assignmentPagingStrategy = 'NextLink' }
 
     function Copy-PolicyWithAssignments {
         param(
@@ -127,7 +145,7 @@ function Invoke-PulsePolicyAssignmentPlan {
 
     $rootRaw = $null
     try {
-        $rootRaw = @(Get-GraphObject -Context $Context -Type $spec.RootType -Operation 'List' `
+        $rootRaw = @(Get-GraphObject -Context $Context -Type $spec.RootType -Operation $spec.RootOperation `
                 -PassThruResult -ErrorAction Stop)
     } catch {
         $failure = Resolve-PulseGraphFailure -ErrorRecord $_
@@ -137,17 +155,18 @@ function Invoke-PulsePolicyAssignmentPlan {
         }
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass $failure.FailureClass -ReasonCode $failure.ReasonCode `
-            -Detail @{ operation = $rootOperation } -Provider 'TenantPulse' -ApiVersion $apiVersion `
+            -Detail @{ operation = $rootOperation } -Provider 'TenantPulse' -ApiVersion $spec.DatasetApiVersion `
             -Operations $operations
     }
 
-    $rootEnvelope = Convert-PulseGraphObjectResult -Result $rootRaw
+    $rootEnvelope = Convert-PulseGraphObjectResult -Result $rootRaw -PagingStrategy $rootPagingStrategy
     $rootOutcome = ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $rootEnvelope `
-        -Dataset $Dataset -ApiVersion $apiVersion -Provider 'TenantPulse' -Operations $operations
+        -Dataset $Dataset -ApiVersion $spec.RootApiVersion -Provider 'TenantPulse' -Operations $operations `
+        -PagingStrategy $rootPagingStrategy
     if ($rootOutcome.Status -eq 'Failed') {
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps @() `
             -FailureClass $rootOutcome.FailureClass -ReasonCode $rootOutcome.ReasonCode `
-            -Detail $rootOutcome.Detail -Provider 'TenantPulse' -ApiVersion $apiVersion -Operations $operations
+            -Detail $rootOutcome.Detail -Provider 'TenantPulse' -ApiVersion $spec.DatasetApiVersion -Operations $operations
     }
 
     $gaps = [System.Collections.Generic.List[object]]::new()
@@ -155,7 +174,7 @@ function Invoke-PulsePolicyAssignmentPlan {
         $rootGap = @($rootOutcome.Gaps)[0]
         $gaps.Add((New-PulseCollectionGap -Scope "dataset:$Dataset/root" `
                 -FailureClass ([string] $rootGap.FailureClass) -ReasonCode ([string] $rootGap.ReasonCode) `
-                -Detail $rootGap.Detail -Operation $rootOperation -ApiVersion $apiVersion)) | Out-Null
+                -Detail $rootGap.Detail -Operation $rootOperation -ApiVersion $spec.RootApiVersion)) | Out-Null
     }
 
     $candidateRows = [System.Collections.Generic.List[object]]::new()
@@ -167,7 +186,7 @@ function Invoke-PulsePolicyAssignmentPlan {
         if ([string]::IsNullOrWhiteSpace($policyId)) {
             $gaps.Add((New-PulseCollectionGap -Scope "dataset:$Dataset/parent:$index" `
                     -FailureClass 'InvalidProviderData' -ReasonCode 'missing-parent-id' `
-                    -Detail @{ ordinal = $index } -Operation $rootOperation -ApiVersion $apiVersion)) | Out-Null
+                    -Detail @{ ordinal = $index } -Operation $rootOperation -ApiVersion $spec.RootApiVersion)) | Out-Null
             $index++
             continue
         }
@@ -185,7 +204,7 @@ function Invoke-PulsePolicyAssignmentPlan {
             if ($duplicateIds.Add($candidate.Id)) {
                 $gaps.Add((New-PulseCollectionGap -Scope "policy:$($candidate.Id)" `
                         -FailureClass 'InvalidProviderData' -ReasonCode 'duplicate-parent-id' `
-                        -Detail @{ id = $candidate.Id } -Operation $rootOperation -ApiVersion $apiVersion)) | Out-Null
+                        -Detail @{ id = $candidate.Id } -Operation $rootOperation -ApiVersion $spec.RootApiVersion)) | Out-Null
             }
             continue
         }
@@ -210,17 +229,21 @@ function Invoke-PulsePolicyAssignmentPlan {
             $joined.Add((Copy-PolicyWithAssignments -Policy $parent.Policy -Assignments $null)) | Out-Null
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId/assignments" `
                     -FailureClass 'AuthenticationFailed' -ReasonCode 'not-attempted-after-authentication-failure' `
-                    -Detail @{ policyId = $policyId } -Operation $assignmentOperation -ApiVersion $apiVersion)) | Out-Null
+                    -Detail @{ policyId = $policyId } -Operation $assignmentOperation `
+                    -ApiVersion $spec.AssignmentApiVersion)) | Out-Null
             continue
         }
 
         try {
-            $childRaw = @(Get-GraphObject -Context $Context -Type $spec.AssignmentType -Operation 'List' `
+            $childRaw = @(Get-GraphObject -Context $Context -Type $spec.AssignmentType `
+                    -Operation $spec.AssignmentOperation `
                     -Parameters @{ id = $policyId } -PassThruResult -ErrorAction Stop)
-            $childEnvelope = Convert-PulseGraphObjectResult -Result $childRaw
+            $childEnvelope = Convert-PulseGraphObjectResult -Result $childRaw `
+                -PagingStrategy $assignmentPagingStrategy
             $childOutcome = ConvertTo-PulseDatasetOutcomeFromGraphEnvelope -Envelope $childEnvelope `
-                -Dataset "$Dataset/$policyId/assignments" -ApiVersion $apiVersion `
-                -Provider 'TenantPulse' -Operations @($assignmentOperation)
+                -Dataset "$Dataset/$policyId/assignments" -ApiVersion $spec.AssignmentApiVersion `
+                -Provider 'TenantPulse' -Operations @($assignmentOperation) `
+                -PagingStrategy $assignmentPagingStrategy
 
             if ($childOutcome.Status -eq 'Collected') {
                 $assignments = Sort-PolicyAssignmentRows -Rows @($childOutcome.Rows)
@@ -246,13 +269,14 @@ function Invoke-PulsePolicyAssignmentPlan {
             }
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId/assignments" `
                     -FailureClass $childFailureClass -ReasonCode $childReasonCode -Detail $childDetail `
-                    -Operation $assignmentOperation -ApiVersion $apiVersion)) | Out-Null
+                    -Operation $assignmentOperation -ApiVersion $spec.AssignmentApiVersion)) | Out-Null
         } catch {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
             $joined.Add((Copy-PolicyWithAssignments -Policy $parent.Policy -Assignments $null)) | Out-Null
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId/assignments" `
                     -FailureClass $failure.FailureClass -ReasonCode $failure.ReasonCode `
-                    -Detail @{ policyId = $policyId } -Operation $assignmentOperation -ApiVersion $apiVersion)) | Out-Null
+                    -Detail @{ policyId = $policyId } -Operation $assignmentOperation `
+                    -ApiVersion $spec.AssignmentApiVersion)) | Out-Null
             if ($failure.AbortCollection) {
                 $NetworkAbortState.AuthenticationAborted = $true
                 $NetworkAbortState.Reason = 'authentication-failed: collection aborted'
@@ -268,14 +292,14 @@ function Invoke-PulsePolicyAssignmentPlan {
     if ($joined.Count -eq 0 -and $gaps.Count -gt 0) {
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Failed' -Rows @() -Gaps $gaps.ToArray() `
             -FailureClass 'InvalidProviderData' -ReasonCode 'no-authoritative-parent-rows' -Detail $detail `
-            -Provider 'TenantPulse' -ApiVersion $apiVersion -Operations $operations
+            -Provider 'TenantPulse' -ApiVersion $spec.DatasetApiVersion -Operations $operations
     }
     if ($gaps.Count -gt 0) {
         return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Partial' -Rows $joined.ToArray() -Gaps $gaps.ToArray() `
             -ReasonCode 'partial-policy-assignments' -Detail $detail -Provider 'TenantPulse' `
-            -ApiVersion $apiVersion -Operations $operations
+            -ApiVersion $spec.DatasetApiVersion -Operations $operations
     }
     return New-PulseCollectionOutcome -Dataset $Dataset -Status 'Collected' -Rows $joined.ToArray() -Gaps @() `
-        -ReasonCode 'collected' -Detail $detail -Provider 'TenantPulse' -ApiVersion $apiVersion `
+        -ReasonCode 'collected' -Detail $detail -Provider 'TenantPulse' -ApiVersion $spec.DatasetApiVersion `
         -Operations $operations
 }

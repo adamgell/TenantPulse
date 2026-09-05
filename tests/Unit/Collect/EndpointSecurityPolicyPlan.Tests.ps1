@@ -57,6 +57,7 @@ BeforeAll {
             [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Policies,
             [Parameter(Mandatory)] [hashtable] $SettingsByPolicy,
             [Parameter()] [hashtable] $SettingErrors = @{},
+            [Parameter()] [hashtable] $AssignmentErrors = @{},
             [Parameter()] [AllowNull()] $AssignmentResult,
             [Parameter()] [switch] $UseAssignmentResult
         )
@@ -66,6 +67,7 @@ BeforeAll {
             Policies         = @($Policies)
             SettingsByPolicy = $SettingsByPolicy
             SettingErrors    = $SettingErrors
+            AssignmentErrors = $AssignmentErrors
             AssignmentResult = $AssignmentResult
             UseAssignmentResult = [bool] $UseAssignmentResult
         }
@@ -106,6 +108,9 @@ BeforeAll {
                     return New-PulseTestGraphEnvelope -Data @($script:EndpointFixture.SettingsByPolicy[$policyId])
                 }
                 if ($Type -eq 'ConfigurationPolicyAssignment') {
+                    if ($script:EndpointFixture.AssignmentErrors.ContainsKey($policyId)) {
+                        throw $script:EndpointFixture.AssignmentErrors[$policyId]
+                    }
                     if ($script:EndpointFixture.UseAssignmentResult) {
                         return $script:EndpointFixture.AssignmentResult
                     }
@@ -116,16 +121,19 @@ BeforeAll {
                 throw "Unexpected Graph call '$Type/$Operation'."
             }
 
+            $abortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
             $outcome = Invoke-PulseEndpointSecurityPolicyPlan `
                 -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
                 -Dataset $fixture.Dataset `
                 -ManifestEntry ([pscustomobject]@{ Dataset = $fixture.Dataset; ApiVersion = 'beta'; Type = 'EndpointSecurityPolicyWalk'; Operation = 'Walk' }) `
                 -ProfileId 'fixture' `
-                -TenantPseudonym 'tp-fixture'
+                -TenantPseudonym 'tp-fixture' `
+                -NetworkAbortState $abortState
 
             [pscustomobject]@{
                 Outcome = $outcome
                 Calls   = @($script:EndpointCalls)
+                Abort   = $abortState
             }
         }
     }
@@ -468,6 +476,103 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $result.Outcome.Gaps[0].Scope | Should -Be 'policy:laps-bad'
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'ProviderFailed'
         $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicySetting.ListBeta'
+    }
+
+    It 'classifies every remaining selected policy as not attempted after a settings authentication failure' {
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $policies = @(
+            (New-EndpointPolicy -Id 'bitlocker-a' -Name 'A' -Family 'endpointSecurityDiskEncryption')
+            (New-EndpointPolicy -Id 'bitlocker-b' -Name 'B' -Family 'endpointSecurityDiskEncryption')
+            (New-EndpointPolicy -Id 'bitlocker-c' -Name 'C' -Family 'endpointSecurityDiskEncryption')
+        )
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies $policies `
+            -SettingsByPolicy @{
+                'bitlocker-b' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+                'bitlocker-c' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+            } `
+            -SettingErrors @{ 'bitlocker-a' = 'AADSTS700016: application not found' }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        $result.Outcome.FailureClass | Should -Be 'AuthenticationFailed'
+        $result.Outcome.ReasonCode | Should -Be 'authentication-failed'
+        $result.Abort.AuthenticationAborted | Should -BeTrue
+        $result.Abort.Reason | Should -BeExactly 'authentication-failed: collection aborted'
+        @($result.Calls | Where-Object Kind -eq 'Graph' | Where-Object Type -eq 'ConfigurationPolicySetting').Count | Should -Be 1
+        @($result.Outcome.Gaps).Count | Should -Be 3
+        @($result.Outcome.Gaps.Scope) | Should -Be @('policy:bitlocker-a', 'policy:bitlocker-b', 'policy:bitlocker-c')
+        @($result.Outcome.Gaps.ReasonCode) | Should -Be @(
+            'authentication-failed'
+            'not-attempted-after-authentication-failure'
+            'not-attempted-after-authentication-failure'
+        )
+        $result.Outcome.Detail.enumeratedCount | Should -Be 3
+        $result.Outcome.Detail.notExpandedCount | Should -Be 3
+    }
+
+    It 'counts a failed assignment expansion as NotExpanded and continues with later policies' {
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $policies = @(
+            (New-EndpointPolicy -Id 'bitlocker-a' -Name 'A' -Family 'endpointSecurityDiskEncryption')
+            (New-EndpointPolicy -Id 'bitlocker-b' -Name 'B' -Family 'endpointSecurityDiskEncryption')
+        )
+        $settings = @{
+            'bitlocker-a' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+            'bitlocker-b' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+        }
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies $policies `
+            -SettingsByPolicy $settings `
+            -AssignmentErrors @{ 'bitlocker-a' = 'assignment provider unavailable' }
+
+        $result.Outcome.Status | Should -Be 'Partial'
+        @($result.Outcome.Rows).Count | Should -Be 1
+        $result.Outcome.Rows[0].policyId | Should -Be 'bitlocker-b'
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be 'policy:bitlocker-a'
+        $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicyAssignment.ListBeta'
+        $result.Outcome.Detail.enumeratedCount | Should -Be 2
+        $result.Outcome.Detail.expandedCount | Should -Be 1
+        $result.Outcome.Detail.partialCount | Should -Be 0
+        $result.Outcome.Detail.notExpandedCount | Should -Be 1
+    }
+
+    It 'stops sends and classifies all later policies after an assignment authentication failure' {
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $policies = @(
+            (New-EndpointPolicy -Id 'bitlocker-a' -Name 'A' -Family 'endpointSecurityDiskEncryption')
+            (New-EndpointPolicy -Id 'bitlocker-b' -Name 'B' -Family 'endpointSecurityDiskEncryption')
+        )
+        $settings = @{
+            'bitlocker-a' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+            'bitlocker-b' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+        }
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies $policies `
+            -SettingsByPolicy $settings `
+            -AssignmentErrors @{ 'bitlocker-a' = 'AADSTS700016: application not found' }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        $result.Outcome.FailureClass | Should -Be 'AuthenticationFailed'
+        $result.Outcome.ReasonCode | Should -Be 'authentication-failed'
+        $result.Abort.AuthenticationAborted | Should -BeTrue
+        $result.Abort.Reason | Should -BeExactly 'authentication-failed: collection aborted'
+        @($result.Calls | Where-Object Kind -eq 'Graph').Count | Should -Be 3
+        @($result.Outcome.Gaps).Count | Should -Be 2
+        @($result.Outcome.Gaps.Scope) | Should -Be @('policy:bitlocker-a', 'policy:bitlocker-b')
+        @($result.Outcome.Gaps.ReasonCode) | Should -Be @(
+            'authentication-failed'
+            'not-attempted-after-authentication-failure'
+        )
+        @($result.Outcome.Gaps.Operation) | Should -Be @(
+            'ConfigurationPolicyAssignment.ListBeta'
+            'ConfigurationPolicyAssignment.ListBeta'
+        )
+        $result.Outcome.Detail.enumeratedCount | Should -Be 2
+        $result.Outcome.Detail.notExpandedCount | Should -Be 2
     }
 
     It 'fails closed when an assignment read returns rows without a GraphKit envelope' {
