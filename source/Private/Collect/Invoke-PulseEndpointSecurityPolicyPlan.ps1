@@ -5,9 +5,55 @@
     ConfigurationPolicySetting.ListBeta, and ConfigurationPolicyAssignment.ListBeta
     primitives. This plan performs the template-family filter, sequential per-policy
     child reads, and compact row resolution. Missing or unrecognized template metadata,
-    a child-read failure, or an invalid child value remains scoped to its policy and
-    cannot become an authoritative empty collection or a false check result.
+    a child-read failure, an incomplete assignment classification, or an invalid child
+    value remains scoped to its policy and cannot become an authoritative empty collection
+    or a false check result.
 #>
+
+function ConvertTo-PulseEndpointSecurityAssignmentGapReasons {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        [object[]] $MalformedReasons = @(),
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $State
+    )
+
+    # ConvertTo-PulseAssignmentIntent may name an unfamiliar Graph target type in its
+    # diagnostic suffix. Provider gaps are persisted evidence, so keep only a finite
+    # vocabulary here and never copy raw target-derived values into Detail.
+    $safeReasons = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($reason in @($MalformedReasons)) {
+        $reasonText = [string] $reason
+        $safeReason = switch -Regex ($reasonText) {
+            '^null-assignment$'                       { 'null-assignment'; break }
+            '^missing-target-type$'                   { 'missing-target-type'; break }
+            '^missing-scope-tag-target-type$'         { 'missing-scope-tag-target-type'; break }
+            '^unsupported-scope-tag-target-type(?::.*)?$' { 'unsupported-scope-tag-target-type'; break }
+            '^missing-entra-object-id$'                { 'missing-entra-object-id'; break }
+            '^missing-group-id$'                       { 'missing-group-id'; break }
+            '^unknown-target-type(?::.*)?$'            { 'unknown-target-type'; break }
+            default                                    { 'unrecognized-assignment-shape' }
+        }
+        [void] $safeReasons.Add($safeReason)
+    }
+
+    if ($safeReasons.Count -eq 0) {
+        $fallback = if ([string]::Equals($State, 'Unknown', [System.StringComparison]::OrdinalIgnoreCase)) {
+            'assignment-intent-unknown'
+        } else {
+            'assignment-target-malformed'
+        }
+        [void] $safeReasons.Add($fallback)
+    }
+
+    return @(ConvertTo-PulseOrdinalStringArray -Values $safeReasons)
+}
 
 function Invoke-PulseEndpointSecurityPolicyPlan {
     [CmdletBinding()]
@@ -206,11 +252,11 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             }
             continue
         }
-        $assignmentIntent = 'Unknown'
+        $assignmentIntentResult = $null
         try {
             $assignmentRows = @(Invoke-PulseGraphRead -Context $Context -Type 'ConfigurationPolicyAssignment' -Operation 'ListBeta' `
                     -Parameters @{ id = $policyId })
-            $assignmentIntent = [string] (ConvertTo-PulseAssignmentIntent -Assignments $assignmentRows).State
+            $assignmentIntentResult = ConvertTo-PulseAssignmentIntent -Assignments $assignmentRows
         } catch {
             $failure = Resolve-PulseGraphFailure -ErrorRecord $_
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass $failure.FailureClass `
@@ -223,6 +269,31 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
                 break
             }
             continue
+        }
+
+        $assignmentIntent = [string] $assignmentIntentResult.State
+        if ($assignmentIntent -notin @('Empty', 'ExcludeOnly', 'Include', 'Malformed', 'Unknown')) {
+            $assignmentIntent = 'Unknown'
+        }
+        $assignmentComplete = [bool] $assignmentIntentResult.Complete
+        if ($assignmentIntent -in @('Malformed', 'Unknown')) {
+            $assignmentComplete = $false
+        } elseif (-not $assignmentComplete) {
+            # An incomplete result can never leave a qualifying Include value on the row,
+            # even if a future classifier accidentally returns an inconsistent record.
+            $assignmentIntent = 'Unknown'
+        }
+        if (-not $assignmentComplete) {
+            $safeMalformedReasons = @(ConvertTo-PulseEndpointSecurityAssignmentGapReasons `
+                    -MalformedReasons @($assignmentIntentResult.MalformedReasons) -State $assignmentIntent)
+            $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass 'InvalidProviderData' `
+                    -ReasonCode 'assignment-intent-incomplete' `
+                    -Detail @{
+                        policyId         = $policyId
+                        assignmentState  = $assignmentIntent
+                        malformedReasons = $safeMalformedReasons
+                    } `
+                    -Operation 'ConfigurationPolicyAssignment.ListBeta' -ApiVersion 'beta')) | Out-Null
         }
 
         try {
@@ -246,7 +317,11 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
                         assignmentIntent        = $assignmentIntent
                     }) | Out-Null
             }
-            $expandedCount++
+            if ($assignmentComplete) {
+                $expandedCount++
+            } else {
+                $partialCount++
+            }
         } catch {
             $reasonCode = if ($_.Exception.Message -match '(?i)unknown') { 'unknown-setting' } else { 'missing-setting' }
             $partialCount++

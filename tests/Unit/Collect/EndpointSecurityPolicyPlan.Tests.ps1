@@ -487,6 +487,81 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicyAssignment.ListBeta'
     }
 
+    It 'marks valid <Label> settings Partial when a successful assignment envelope contains a malformed target' -ForEach @(
+        @{
+            Label      = 'BitLocker'
+            Dataset    = 'endpointSecurityDiskEncryptionPolicies'
+            PolicyId   = 'bitlocker-malformed-assignment'
+            Family     = 'endpointSecurityDiskEncryption'
+            TemplateId = ''
+        }
+        @{
+            Label      = 'LAPS'
+            Dataset    = 'endpointSecurityLapsPolicies'
+            PolicyId   = 'laps-malformed-assignment'
+            Family     = 'endpointSecurityAccountProtection'
+            TemplateId = 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796'
+        }
+    ) {
+        $policy = New-EndpointPolicy -Id $PolicyId -Name "$Label malformed assignment" -Family $Family -TemplateId $TemplateId
+        if ($Label -eq 'BitLocker') {
+            $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+            $settings = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+        } else {
+            $settings = @(
+                (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+                (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4')
+                (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
+                (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_3')
+            )
+        }
+
+        $rawTargetCanary = 'futureAssignmentTarget-raw-target-canary'
+        $assignmentEnvelope = New-PulseTestGraphEnvelope -Data @(
+            [pscustomobject]@{
+                id     = 'assignment-malformed'
+                source = 'direct'
+                target = [pscustomobject]@{
+                    '@odata.type' = "#microsoft.graph.$rawTargetCanary"
+                }
+            }
+        )
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset $Dataset `
+            -Policies @($policy) `
+            -SettingsByPolicy @{ $PolicyId = $settings } `
+            -UseAssignmentResult `
+            -AssignmentResult $assignmentEnvelope
+
+        $result.Outcome.Status | Should -Be 'Partial'
+        @($result.Outcome.Rows).Count | Should -Be 1
+        $result.Outcome.Rows[0].policyId | Should -Be $PolicyId
+        $result.Outcome.Rows[0].assignmentIntent | Should -Be 'Malformed'
+        if ($Label -eq 'BitLocker') {
+            $result.Outcome.Rows[0].isFullDiskEncryption | Should -BeTrue
+        } else {
+            $result.Outcome.Rows[0].backsUpToEntra | Should -BeTrue
+            $result.Outcome.Rows[0].hasSufficientComplexity | Should -BeTrue
+            $result.Outcome.Rows[0].hasSufficientLength | Should -BeTrue
+            $result.Outcome.Rows[0].hasPostAuthAction | Should -BeTrue
+        }
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $gap = $result.Outcome.Gaps[0]
+        $gap.Scope | Should -Be "policy:$PolicyId"
+        $gap.FailureClass | Should -Be 'InvalidProviderData'
+        $gap.ReasonCode | Should -Be 'assignment-intent-incomplete'
+        $gap.Operation | Should -Be 'ConfigurationPolicyAssignment.ListBeta'
+        $gap.ApiVersion | Should -Be 'beta'
+        @($gap.Detail.Keys | Sort-Object) | Should -Be @('assignmentState', 'malformedReasons', 'policyId')
+        $gap.Detail.assignmentState | Should -Be 'Malformed'
+        @($gap.Detail.malformedReasons) | Should -Be @('unknown-target-type')
+        ($gap | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape($rawTargetCanary))
+        $result.Outcome.Detail.enumeratedCount | Should -Be 1
+        $result.Outcome.Detail.expandedCount | Should -Be 0
+        $result.Outcome.Detail.partialCount | Should -Be 1
+        $result.Outcome.Detail.notExpandedCount | Should -Be 0
+    }
+
     It 'fails rather than returning an authoritative empty result when the only selected policy is missing a LAPS criterion' {
         $policy = New-EndpointPolicy -Id 'laps-missing' -Name 'Missing criterion' -Family 'endpointSecurityAccountProtection' -TemplateId 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796'
         $result = Invoke-EndpointPlanFixture `

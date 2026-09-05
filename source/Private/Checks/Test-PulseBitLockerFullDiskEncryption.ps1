@@ -10,9 +10,10 @@
     inspected for the BitLocker CSP's system-drive encryption-type setting. DatasetMap.psd1
     names Invoke-PulseEndpointSecurityPolicyPlan directly; that plan composes released
     GraphKit Read/Safe list, settings, and assignment primitives and returns the resolved
-    per-policy shape ({policyId, policyName, isFullDiskEncryption:[bool]}). This rule
-    deliberately does not re-implement suffix matching; the provider plan resolves it once,
-    centrally, and hands the rule a native boolean or an explicit gap.
+    per-policy shape ({policyId, policyName, isFullDiskEncryption:[bool],
+    assignmentIntent}). This rule deliberately does not re-implement suffix matching; the
+    provider plan resolves it once, centrally, and hands the rule a native boolean or an
+    explicit gap.
 
     SETTING IDENTITY - CORRECTED (T3.4 whole-task dual review, fix round 1,
     CRITICAL-ADJUDICATION finding; corpus-verified against

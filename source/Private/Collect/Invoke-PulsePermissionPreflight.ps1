@@ -14,6 +14,14 @@
 #>
 
 $script:PulseCompositeChildOperations = [ordered]@{
+    deviceCompliancePolicies = @(
+        @{ Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'v1.0' }
+        @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+    )
+    deviceConfigurations = @(
+        @{ Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'v1.0' }
+        @{ Type = 'DeviceConfigurationAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
+    )
     intuneRbacGroupProtection = @(
         @{ Type = 'DeviceManagementUnifiedRoleAssignment'; Operation = 'ListBeta'; ApiVersion = 'beta' }
         @{ Type = 'Group'; Operation = 'Get'; ApiVersion = 'v1.0' }

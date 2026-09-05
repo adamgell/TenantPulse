@@ -665,6 +665,60 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         Test-Path -LiteralPath (Join-Path $script:store.DatasetsPath 'complianceAssignments-p1.json') -PathType Leaf | Should -BeTrue
     }
 
+    It 'reuses authoritative embedded assignments, persists them, and performs no duplicate assignment read' {
+        $policy = New-TestCompliancePolicy -Id 'embedded-p1'
+        $policy | Add-Member -NotePropertyName assignments -NotePropertyValue (New-TestAssignmentResponse -GroupId 'embedded-group')
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'Expanded'
+        $persisted = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'complianceAssignments-embedded-p1'
+        }
+        @($persisted).Count | Should -Be 1
+        $persisted[0].target.groupId | Should -Be 'embedded-group'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
+    It 'preserves authoritative embedded zero assignments without falling back to Graph' {
+        $policy = New-TestCompliancePolicy -Id 'embedded-empty'
+        $policy | Add-Member -NotePropertyName assignments -NotePropertyValue @()
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'Expanded'
+        $persisted = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'complianceAssignments-embedded-empty'
+        }
+        @($persisted).Count | Should -Be 0
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
+    It 'treats an explicit null assignments property as unavailable evidence and never invokes legacy fallback' {
+        $policy = New-TestCompliancePolicy -Id 'embedded-unknown'
+        $policy | Add-Member -NotePropertyName assignments -NotePropertyValue $null
+
+        $summary = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $script:typedPolicyMaps.compliance {
+            param($store, $context, $policy, $typeMap)
+            Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($policy) -PolicyType 'compliance' `
+                -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+        }
+
+        $summary.Status | Should -Be 'NotExpanded'
+        $summary.Gaps[0].reason | Should -Be 'category:AssignmentEvidenceUnavailable'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
     It '-FromCapturedPayloads re-expands from the already-persisted raw assignment dataset, makes NO Graph call at all' {
         $policies = @(
             New-TestCompliancePolicy -Id 'p1'

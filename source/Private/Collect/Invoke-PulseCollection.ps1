@@ -291,9 +291,15 @@ function Invoke-PulseCollection {
                     -Rows $planResult.Rows -Gaps $planResult.Gaps -FailureClass $planFailureClass `
                     -ReasonCode $planResult.ReasonCode -Detail $planResult.Detail -Provider $planResult.Provider `
                     -ApiVersion $planApiVersion -Operations $planResult.Operations
+                # Provider plans can return the same polymorphic typed-policy rows as the
+                # direct collector. Apply the shared map-driven secret protection before
+                # either complete or partial rows reach disk; it is a pass-through for
+                # every other provider-plan dataset.
+                $planRows = Protect-PulseTypedPolicySensitivePayload -Data @($outcome.Rows) `
+                    -DatasetName $entry.Dataset -TypedPolicyMaps $typedPolicyMaps
                 $reason = Protect-PulseReason -Message ([string]$outcome.ReasonCode) -ProfileId $ProfileId `
                     -Pseudonym $TenantPseudonym -TenantId $contextTenantId
-                Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $outcome.Rows `
+                Write-PulseDataset -Store $Store -Name $entry.Dataset -Data $planRows `
                     -ApiVersion $outcome.ApiVersion -Status $outcome.Status -Reason $reason `
                     -ReasonCode $outcome.ReasonCode -Detail $outcome.Detail -FailureClass $outcome.FailureClass `
                     -Provider $outcome.Provider -Operations $outcome.Operations -Gaps $outcome.Gaps `
@@ -309,7 +315,7 @@ function Invoke-PulseCollection {
                         -ProfileId $ProfileId -Pseudonym $TenantPseudonym -TenantId $contextTenantId
                 }
                 if ($outcome.Status -eq 'Collected') {
-                    $collectedRows[$entry.Dataset] = @($outcome.Rows)
+                    $collectedRows[$entry.Dataset] = @($planRows)
                 }
             } catch {
                 $failure = Resolve-PulseGraphFailure -ErrorRecord $_

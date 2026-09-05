@@ -11,15 +11,14 @@
     -Policies is the ALREADY-COLLECTED `deviceCompliancePolicies`/`deviceConfigurations`
     dataset (read back from the snapshot store by the caller, Invoke-PulseTypedPolicyExpansionPipeline)
     - unlike T2.2's `configurationPolicies`, this task's own datasets are collected by the
-    ordinary check-driven Invoke-PulseCollection flow already; this function's only NEW
-    Graph traffic is the per-policy ASSIGNMENT fetch (DeviceCompliancePolicyAssignment.List
-    / DeviceConfigurationAssignment.List - both ALREADY RELEASED in GraphKit 0.1.1, so
-    unlike T2.2's settingsCatalog rows, assignments here are NOT deferred).
+    ordinary check-driven Invoke-PulseCollection flow already. Current producer rows carry
+    authoritative embedded assignments, which this expansion reuses and persists without
+    another Graph request. A per-policy assignment fetch remains only as a legacy-fixture
+    fallback when the assignments property is truly absent.
 
-    ASSIGNMENTS ARE MANDATORY, NOT BEST-EFFORT (per this task's spec - "wire real assignment
-    fan-out... with Assert-PulseReadOnlyDescriptor at call sites"): a policy whose own
-    assignment fetch fails gaps the WHOLE policy (category:AssignmentFetchFailed, zero
-    rows) rather than emitting setting rows with assignments:null - a row this task's own
+    ASSIGNMENTS ARE MANDATORY, NOT BEST-EFFORT: a policy whose embedded assignment evidence
+    is explicitly unavailable, or whose legacy fallback fetch fails, gaps the WHOLE policy
+    (zero rows) rather than emitting setting rows with assignments:null - a row this task's own
     frozen schema describes as carrying real assignment data must never silently degrade to
     the T2.2 G-gate's "assignments deferred" shape; a failure here is a genuine per-policy
     Graph error, classified and gapped like any other fetch failure, never smoothed over.
@@ -48,7 +47,7 @@
     persisted manifest). The raw exception only ever reaches Write-Verbose.
 
     RAW ASSIGNMENT PERSISTENCE + -FromCapturedPayloads (P1-11 sibling fix, T2.3): every
-    successfully-fetched raw assignment payload is ALSO persisted as its own hash-verified
+    successful embedded or legacy-fetched raw assignment payload is ALSO persisted as its own hash-verified
     dataset (`<PolicyType>Assignments-<policyId>`, via Write-PulseDataset - the exact same
     "collected raw payload gets the same durable/verifiable contract as everything else"
     pattern T2.2's own configurationPolicySettings-<policyId> write uses) BEFORE the walk
@@ -126,7 +125,44 @@ function Invoke-PulseTypedPolicyExpansion {
         return "category:$Category"
     }
 
-    if (-not $FromCapturedPayloads) {
+    function Get-PulseEmbeddedAssignmentProperty {
+        param([AllowNull()] $Policy)
+
+        if ($null -eq $Policy) {
+            return [pscustomobject]@{ Found = $false; Value = $null }
+        }
+        if ($Policy -is [System.Collections.IDictionary]) {
+            foreach ($key in @($Policy.Keys)) {
+                if ([string]::Equals([string] $key, 'assignments', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return [pscustomobject]@{ Found = $true; Value = $Policy[$key] }
+                }
+            }
+            return [pscustomobject]@{ Found = $false; Value = $null }
+        }
+        $property = $Policy.PSObject.Properties['assignments']
+        if ($null -eq $property) {
+            return [pscustomobject]@{ Found = $false; Value = $null }
+        }
+        return [pscustomobject]@{ Found = $true; Value = $property.Value }
+    }
+
+    $policyList = @($Policies)
+    $requiresLegacyFallback = $false
+    foreach ($candidatePolicy in $policyList) {
+        $candidateId = Get-PulseSettingsCatalogValueProperty -Node $candidatePolicy -PropertyName 'id'
+        $candidateType = Get-PulseSettingsCatalogValueProperty -Node $candidatePolicy -PropertyName '@odata.type'
+        if ([string]::IsNullOrWhiteSpace([string] $candidateId) -or
+            [string]::IsNullOrWhiteSpace([string] $candidateType) -or
+            -not $TypeMap.Contains([string] $candidateType)) {
+            continue
+        }
+        if (-not (Get-PulseEmbeddedAssignmentProperty -Policy $candidatePolicy).Found) {
+            $requiresLegacyFallback = $true
+            break
+        }
+    }
+
+    if (-not $FromCapturedPayloads -and $requiresLegacyFallback) {
         try {
             Assert-PulseReadOnlyDescriptor -Type $AssignmentType -Operation 'List' -ApiVersion 'v1.0'
         } catch {
@@ -139,7 +175,6 @@ function Invoke-PulseTypedPolicyExpansion {
         }
     }
 
-    $policyList = @($Policies)
     $allRows = [System.Collections.Generic.List[object]]::new()
     $gapEntries = [System.Collections.Generic.List[object]]::new()
 
@@ -148,7 +183,7 @@ function Invoke-PulseTypedPolicyExpansion {
     # store or pass it to a writer. A failed eager load intentionally falls back to the
     # existing per-policy read/catch behavior so persisted gap classification is stable.
     $capturedManifestSnapshot = $null
-    if ($FromCapturedPayloads -and $policyList.Count -gt 0) {
+    if ($FromCapturedPayloads -and $requiresLegacyFallback) {
         try {
             $capturedManifestSnapshot = Get-PulseSnapshotManifest -Store $Store
         } catch {
@@ -195,8 +230,17 @@ function Invoke-PulseTypedPolicyExpansion {
         $rawDatasetName = "$RawDatasetPrefix$policyId"
         $rawAssignments = $null
         $assignmentGap = $null
+        $embeddedAssignments = Get-PulseEmbeddedAssignmentProperty -Policy $policy
 
-        if ($FromCapturedPayloads) {
+        if ($embeddedAssignments.Found) {
+            if ($null -eq $embeddedAssignments.Value) {
+                $assignmentGap = New-PulseTypedGapReason -Category 'AssignmentEvidenceUnavailable'
+            } else {
+                $rawAssignments = @($embeddedAssignments.Value)
+                Write-PulseDataset -Store $Store -Name $rawDatasetName -Data $rawAssignments -ApiVersion 'v1.0' -Status 'Collected' `
+                    -TenantId $TenantId -Pseudonym $Pseudonym
+            }
+        } elseif ($FromCapturedPayloads) {
             try {
                 # NO extra @() wrap around Read-PulseDataset (ARRAY-RETURN UNROLLING TRAP,
                 # see Get-PulseSettingsCatalogValueProperty's own docstring for the general

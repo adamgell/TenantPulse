@@ -23,11 +23,13 @@
     platforms at all, so faulting the tenant for lacking one would be asserting a
     requirement Microsoft itself does not support meeting.
 
-    HONEST LIMITATION: this checks policy EXISTENCE per platform, not that the policy is
-    actually ASSIGNED to any device - deviceCompliancePolicies (v1.0 List, no $expand) does
-    not carry assignment data in this dataset's shape. An unassigned compliance policy would
-    still Pass this check. Assignment verification is future work (see TP.INT.0003 for the
-    related "what happens with NO assigned policy" default-behavior check).
+    Assignment evidence is joined during collection. Include targets count as coverage;
+    authoritative empty and exclusion-only targets do not. Missing/malformed assignment
+    evidence, an incomplete root list, and an unclassified policy discriminator with
+    potentially covering assignment intent remain NotApplicable unless known evidence
+    already proves the universal Pass or a complete platform branch proves a Fail. A
+    policy-scoped assignment gap only affects the platform represented by that policy; it
+    must not hide a known offender on another platform.
 #>
 
 function Test-PulseCompliancePolicyPerPlatform {
@@ -35,8 +37,14 @@ function Test-PulseCompliancePolicyPerPlatform {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)]
-        [hashtable] $Datasets
+        [hashtable] $Datasets,
+
+        [Parameter(Mandatory)]
+        [hashtable] $DatasetOutcomes
     )
+
+    $outcomeState = Resolve-PulseDatasetOutcomeState -DatasetOutcomes $DatasetOutcomes `
+        -DatasetName 'deviceCompliancePolicies' -Caller $MyInvocation.MyCommand.Name
 
     $devices = @($Datasets.managedDevices)
     # Ordinal sort/dedup (post-review fix, matching every other "deterministic ordering
@@ -67,15 +75,84 @@ function Test-PulseCompliancePolicyPerPlatform {
         return $null
     }
 
-    $policies = @($Datasets.deviceCompliancePolicies)
-    $assignedPolicyTypes = [System.Collections.Generic.List[string]]::new()
-    foreach ($policy in $policies) {
-        $intent = ConvertTo-PulseAssignmentIntent -Assignments (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'assignments')
-        if (-not $intent.IsAssigned) { continue }
-        $odataType = [string] (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName '@odata.type')
-        if ($odataType) { $assignedPolicyTypes.Add($odataType) | Out-Null }
+    $categorizePolicyType = {
+        param([AllowNull()] [string] $ODataType)
+
+        if ([string]::IsNullOrWhiteSpace($ODataType)) { return $null }
+        if ([string]::Equals($ODataType, '#microsoft.graph.windows10CompliancePolicy', [System.StringComparison]::OrdinalIgnoreCase)) { return 'windows' }
+        if ([string]::Equals($ODataType, '#microsoft.graph.iosCompliancePolicy', [System.StringComparison]::OrdinalIgnoreCase)) { return 'ios' }
+        if ([string]::Equals($ODataType, '#microsoft.graph.macOSCompliancePolicy', [System.StringComparison]::OrdinalIgnoreCase)) { return 'macos' }
+
+        foreach ($androidType in @(
+                '#microsoft.graph.androidCompliancePolicy'
+                '#microsoft.graph.androidWorkProfileCompliancePolicy'
+                '#microsoft.graph.androidDeviceOwnerCompliancePolicy'
+                '#microsoft.graph.aospDeviceOwnerCompliancePolicy'
+            )) {
+            if ([string]::Equals($ODataType, $androidType, [System.StringComparison]::OrdinalIgnoreCase)) { return 'android' }
+        }
+
+        return $null
     }
-    $policyTypes = @($assignedPolicyTypes)
+
+    $policies = @($Datasets.deviceCompliancePolicies)
+    $assignedPolicyCategories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $unresolvedPolicyCategories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $policyRowsById = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
+    $duplicatePolicyIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $hasUnclassifiedPotentialCoverage = $false
+    foreach ($policy in $policies) {
+        $policyId = [string] (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'id')
+        if (-not [string]::IsNullOrWhiteSpace($policyId)) {
+            if ($policyRowsById.ContainsKey($policyId)) {
+                [void] $duplicatePolicyIds.Add($policyId)
+            } else {
+                $policyRowsById.Add($policyId, $policy)
+            }
+        }
+
+        $intent = ConvertTo-PulseAssignmentIntent -Assignments (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'assignments')
+        $odataType = [string] (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName '@odata.type')
+        $policyCategory = & $categorizePolicyType $odataType
+        if ($null -eq $policyCategory) {
+            if ($intent.IsAssigned -or -not $intent.Complete) {
+                $hasUnclassifiedPotentialCoverage = $true
+            }
+            continue
+        }
+
+        if ($intent.IsAssigned) {
+            [void] $assignedPolicyCategories.Add($policyCategory)
+        } elseif (-not $intent.Complete) {
+            [void] $unresolvedPolicyCategories.Add($policyCategory)
+        }
+    }
+
+    $hasBroadPartialUncertainty = $false
+    if ($outcomeState.IsPartial) {
+        foreach ($gap in @($DatasetOutcomes['deviceCompliancePolicies']['Gaps'])) {
+            $scope = [string] (Get-PulseSettingsCatalogValueProperty -Node $gap -PropertyName 'Scope')
+            if ($scope -match '^policy:(.+)/assignments$') {
+                $gapPolicyId = [string] $Matches[1]
+            } else {
+                $hasBroadPartialUncertainty = $true
+                continue
+            }
+
+            if (-not $policyRowsById.ContainsKey($gapPolicyId) -or $duplicatePolicyIds.Contains($gapPolicyId)) {
+                $hasBroadPartialUncertainty = $true
+                continue
+            }
+
+            $gapPolicyType = [string] (Get-PulseSettingsCatalogValueProperty -Node $policyRowsById[$gapPolicyId] -PropertyName '@odata.type')
+            $gapPolicyCategory = & $categorizePolicyType $gapPolicyType
+            if ($null -eq $gapPolicyCategory) {
+                $hasUnclassifiedPotentialCoverage = $true
+            } else {
+                [void] $unresolvedPolicyCategories.Add($gapPolicyCategory)
+            }
+        }
+    }
 
     $inScopePlatforms = @()
     $outOfScopePlatforms = @()
@@ -95,16 +172,24 @@ function Test-PulseCompliancePolicyPerPlatform {
     }
 
     $missingPlatforms = @()
+    $unresolvedPlatforms = @()
+    $definitelyMissingPlatforms = @()
     foreach ($entry in $inScopePlatforms) {
         $hasPolicy = switch ($entry.Category) {
-            'windows' { $policyTypes -contains '#microsoft.graph.windows10CompliancePolicy' }
-            'ios' { $policyTypes -contains '#microsoft.graph.iosCompliancePolicy' }
-            'android' { @($policyTypes | Where-Object { $_ -match 'android' }).Count -gt 0 }
-            'macos' { $policyTypes -contains '#microsoft.graph.macOSCompliancePolicy' }
+            'windows' { $assignedPolicyCategories.Contains('windows') }
+            'ios' { $assignedPolicyCategories.Contains('ios') }
+            'android' { $assignedPolicyCategories.Contains('android') }
+            'macos' { $assignedPolicyCategories.Contains('macos') }
         }
 
         if (-not $hasPolicy) {
             $missingPlatforms += $entry.Platform
+            $hasUnresolvedPolicy = $unresolvedPolicyCategories.Contains([string] $entry.Category)
+            if ($hasBroadPartialUncertainty -or $hasUnclassifiedPotentialCoverage -or $hasUnresolvedPolicy) {
+                $unresolvedPlatforms += $entry.Platform
+            } else {
+                $definitelyMissingPlatforms += $entry.Platform
+            }
         }
     }
 
@@ -113,11 +198,15 @@ function Test-PulseCompliancePolicyPerPlatform {
         return New-PulseFinding -Status Pass -Reason "$coveredNote$outOfScopeNote"
     }
 
+    if ($definitelyMissingPlatforms.Count -eq 0) {
+        return New-PulseFinding -Status NotApplicable -Reason "Policy type evidence, partial root evidence, or assignment evidence is unresolved for $($unresolvedPlatforms.Count) enrolled platform(s): $($unresolvedPlatforms -join ', '); absence cannot be proven.$outOfScopeNote"
+    }
+
     $evidence = @()
-    foreach ($platform in $missingPlatforms) {
+    foreach ($platform in $definitelyMissingPlatforms) {
         $count = @($devices | Where-Object { [string] $_.operatingSystem -eq $platform }).Count
         $evidence += @{ Identity = $platform; Detail = @{ enrolledDeviceCount = $count } }
     }
 
-    return New-PulseFinding -Status Fail -Reason "$($missingPlatforms.Count) of $($inScopePlatforms.Count) enrolled in-scope platform(s) have no compliance policy at all: $($missingPlatforms -join ', ')$outOfScopeNote" -Evidence $evidence
+    return New-PulseFinding -Status Fail -Reason "$($definitelyMissingPlatforms.Count) of $($inScopePlatforms.Count) enrolled in-scope platform(s) have no authoritatively assigned compliance policy: $($definitelyMissingPlatforms -join ', ')$outOfScopeNote" -Evidence $evidence
 }

@@ -215,6 +215,20 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         $entry.ContainsKey('Pending') | Should -BeFalse
     }
 
+    It 'represents compliance and device-configuration assignment collection as explicit TenantPulse plans' {
+        $map = Import-PowerShellDataFile -Path $script:datasetMapPath
+
+        foreach ($name in @('deviceCompliancePolicies', 'deviceConfigurations')) {
+            $entry = $map[$name]
+            $entry.Provider | Should -BeExactly 'TenantPulse'
+            $entry.Plan | Should -BeExactly 'Invoke-PulsePolicyAssignmentPlan'
+            $entry.ApiVersion | Should -BeExactly 'v1.0'
+            $entry.ContainsKey('Type') | Should -BeFalse
+            $entry.ContainsKey('Operation') | Should -BeFalse
+            $entry.ContainsKey('Pending') | Should -BeFalse
+        }
+    }
+
     It 'resolves managed-device cleanup rules through the exact GraphKit 0.3.0 Read/Safe descriptor' {
         $map = Import-PowerShellDataFile -Path $script:datasetMapPath
         $entry = $map['managedDeviceCleanupRules']

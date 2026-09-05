@@ -137,8 +137,19 @@ If the usable rows do not prove that one safe direction, the check remains fail-
 the presence of `PartialDatasets` is never permission to treat incomplete scope as a
 complete assessment.
 
-The built-in catalog has exactly four partial-aware descriptors:
+The built-in catalog has exactly six partial-aware descriptors:
 
+- `TP.INT.0002` / `deviceCompliancePolicies` is assignment-scoped: known assigned policy
+  coverage may prove Pass, and a known missing enrolled platform may prove Fail when every
+  gap is scoped to another recognized platform. Relevant assignment gaps, root-list gaps,
+  and unclassified policy types that could carry coverage remain `NotApplicable`.
+- `TP.INT.0004` / `deviceConfigurations` is assignment-scoped: two known assigned Update
+  rings with positive deadlines may prove Pass, and a known shortage may prove Fail when
+  every gap belongs to a recognized non-ring configuration. Relevant assignment gaps,
+  root-list gaps, and unclassified configurations remain `NotApplicable` only when the
+  known plus distinct possible candidates could still reach two; a single possible ring
+  cannot hide a provable zero-of-two shortage. Deadline fields must be native finite
+  whole-number scalars, not PowerShell-coercible strings, booleans, or arrays.
 - `TP.INT.0013` / `intuneRbacGroupProtection` is universal: a known unprotected group may
   prove Fail; it cannot prove Pass with gaps.
 - `TP.INT.0014` / `endpointSecurityDiskEncryptionPolicies` is existential: a known policy
@@ -149,7 +160,7 @@ The built-in catalog has exactly four partial-aware descriptors:
 - `TP.INT.0029` / `securityBaselinesAssignedAndCurrent` is universal: a known unassigned or
   obsolete baseline may prove Fail; it cannot prove Pass with gaps.
 
-The other 49 checks remain `NotApplicable` when a required dataset is `Partial`. For these four
+The other 47 checks remain `NotApplicable` when a required dataset is `Partial`. For these six
 opt-ins, a structurally valid Partial dataset with no decisive proof is also `NotApplicable`.
 Zero usable rows, invalid gaps/outcomes, or a malformed known row without decisive monotonic proof
 is `Error`; a decisive witness/offender remains authoritative even when an unrelated row is

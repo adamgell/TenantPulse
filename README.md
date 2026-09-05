@@ -35,12 +35,16 @@ The unreleased line also carries one canonical Graph failure mapping across dire
 and expansion collectors. A request-time `403` is `Failed` / `PermissionDenied`, and only
 `AuthenticationFailed` stops later network work; deadline expiration, cancellation, indeterminate
 certainty, permission denial, and provider failure remain explicit and isolated. Partial evaluation
-is an exact, reviewed opt-in for only `TP.INT.0013`, `TP.INT.0014`, `TP.INT.0015`, and
-`TP.INT.0029`: the two universal checks may Fail on a known offender but cannot Pass with gaps,
-while the two existential checks may Pass on a known native-Boolean witness but cannot Fail with
-gaps. The other 49 checks remain `NotApplicable` on Partial. For the four opt-ins, malformed input
-without decisive monotonic proof is `Error`, not `NotApplicable`. Findings schema `1.0`, snapshot
-schema `2.0.0`, and scoring model `1.0` are unchanged. These are deterministic current-source and
+is an exact, reviewed opt-in for six checks. Assignment-scoped checks `TP.INT.0002` and
+`TP.INT.0004` use authoritative policy assignments and ignore only unrelated policy-scoped gaps;
+relevant assignment gaps, root-list uncertainty, and unclassified policy types remain
+`NotApplicable` only when they can affect the result. `TP.INT.0004` bounds possible witnesses
+against its two-ring threshold and rejects coercible non-numeric deadline shapes. Universal checks
+`TP.INT.0013` and `TP.INT.0029` may Fail on a known offender but cannot Pass with gaps, while existential checks `TP.INT.0014` and
+`TP.INT.0015` may Pass on a known native-Boolean witness but cannot Fail with gaps. The other 47
+checks remain `NotApplicable` on Partial. For the six opt-ins, zero usable Partial rows, malformed
+outcomes or gaps, and rule-invalid rows remain `Error`. Findings schema `1.0`, snapshot schema
+`2.0.0`, and scoring model `1.0` are unchanged. These are deterministic current-source and
 package-test claims only; they are not new live-service, merged-release, or publication claims.
 
 The current product-program boundary is narrower than a finished successor release:
@@ -387,12 +391,12 @@ What the current catalog does **not** cover, honestly:
   registration secrets/certificates are invisible. An all-unparseable credential population can
   also currently reach Pass; R4 must make that result `NotApplicable` unless a proven offender
   already establishes Fail.
-- **Intune assignment awareness.** `TP.INT.0002`, `0004`, `0011`, `0012`, `0014`, `0015`, `0017`,
-  and `0018` can still evaluate policy existence/configuration without authoritative positive
-  assignment proof. `TP.INT.0028` has assignment-aware evaluator logic, but its producer does not
-  yet collect the required authoritative full-object/assignment shape. The shared presence and
-  conflict indexes also treat exclusion-only scope as assigned or possibly overlapping instead of
-  effectively targeting nobody.
+- **Intune assignment awareness.** `TP.INT.0011`, `0012`, `0014`, `0015`, `0017`, and `0018` can
+  still evaluate policy existence/configuration without authoritative positive assignment proof.
+  `TP.INT.0028` has assignment-aware evaluator logic, but its producer does not yet collect the
+  required authoritative full-object/assignment shape. The shared presence and conflict indexes
+  also treat exclusion-only scope as assigned or possibly overlapping instead of effectively
+  targeting nobody.
 - **Bounded output and presentation.** Many affected findings still lack a deterministic evidence
   cap with emitted/omitted counts. Self-contained HTML is now the supported second renderer;
   JSON remains canonical, and neither renderer changes collection, evaluation, or scoring.
@@ -456,9 +460,13 @@ collection Phase 1 already does:
 - **Compliance and legacy device configuration policies** (`deviceCompliancePolicies`,
   `deviceConfigurations`) - the older, polymorphic `@odata.type`-typed Graph resources,
   decomposed via a hand-maintained property map (`source/Data/TypedPolicyMaps.psd1`) rather
-  than a Graph-side settings catalog, since none exists for these types. Per-policy
-  assignments preserve include/exclude intent and filter metadata; a malformed assignment
-  target gaps that policy instead of publishing a false unassigned row.
+  than a Graph-side settings catalog, since none exists for these types. Ordinary collection
+  joins each policy to its authoritative per-policy assignment List response first; expansion
+  reuses that embedded evidence with no duplicate Graph read and persists the per-policy raw
+  payload for later snapshot-only re-expansion. A complete zero-row child is an empty array;
+  unavailable child evidence is explicit null plus a scoped gap. Assignments preserve
+  include/exclude intent and filter metadata, and a malformed target gaps that policy instead
+  of publishing a false unassigned row.
 - **Conflict detection** - a single pass over every row from the families above, grouping
   by `settingDefinitionId` to surface settings where two or more policies disagree, with a
   four-state assignment-overlap verdict (`proven`/`possible`/`none`/`unknown`).

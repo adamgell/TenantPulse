@@ -88,6 +88,41 @@ Describe 'Resolve-PulseTypedPolicySnapshotExpansion' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
 
+    It 're-expands from authoritative assignments embedded in the root dataset when no legacy child payload exists' {
+        $policy = New-TestCompliancePolicyForSnapshot -Id 'embedded-payload'
+        $policy | Add-Member -NotePropertyName assignments -NotePropertyValue @(
+            [pscustomobject]@{
+                id = 'embedded-assignment'
+                target = [pscustomobject]@{
+                    '@odata.type' = '#microsoft.graph.groupAssignmentTarget'
+                    groupId = 'embedded-group'
+                }
+            }
+        )
+        InModuleScope TenantPulse -ArgumentList $script:store, $policy {
+            param($store, $policy)
+            Write-PulseDataset -Store $store -Name 'deviceCompliancePolicies' -Data @($policy) `
+                -ApiVersion 'v1.0' -Status 'Collected'
+        }
+
+        InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Resolve-PulseTypedPolicySnapshotExpansion -Store $store
+        }
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $manifest.expansions.compliance.status | Should -Be 'Expanded'
+        $manifest.expansions.compliance.rowCount | Should -BeGreaterThan 0
+        $manifest.datasets.'complianceAssignments-embedded-payload'.status | Should -Be 'Collected'
+        $persistedAssignments = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            Read-PulseDataset -Store $store -Name 'complianceAssignments-embedded-payload'
+        }
+        @($persistedAssignments).Count | Should -Be 1
+        $persistedAssignments[0].id | Should -Be 'embedded-assignment'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
     It 'INVALID (hash-mismatch) branch: a tampered compliance expansion file is re-derived, never trusted as-is' {
         $policy = New-TestCompliancePolicyForSnapshot -Id 'p3'
         $assignments = @([pscustomobject]@{ id = 'a3'; target = [pscustomobject]@{ '@odata.type' = '#microsoft.graph.groupAssignmentTarget'; groupId = 'g3' } })

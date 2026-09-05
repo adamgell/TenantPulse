@@ -6,8 +6,9 @@
     Effort     = 'Medium'
     Impact     = 'High'
     Data       = @{
-        Datasets = @('deviceCompliancePolicies', 'managedDevices')
-        Gates    = @('Intune')
+        Datasets        = @('deviceCompliancePolicies', 'managedDevices')
+        PartialDatasets = @('deviceCompliancePolicies')
+        Gates           = @('Intune')
     }
     Rule       = @{
         Type     = 'Function'

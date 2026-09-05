@@ -36,6 +36,9 @@ BeforeAll {
                     }
                     if ($d.ContainsKey('Data')) { $params.Data = $d.Data }
                     if ($d.ContainsKey('Reason')) { $params.Reason = $d.Reason }
+                    foreach ($field in @('ReasonCode', 'Detail', 'FailureClass', 'Provider', 'Operations', 'Gaps')) {
+                        if ($d.ContainsKey($field)) { $params[$field] = $d[$field] }
+                    }
                     Write-PulseDataset @params
                 }
 
@@ -111,6 +114,24 @@ Describe 'TP.INT.0004 - At least 2 Windows Update rings have deadlines configure
         $finding.status | Should -Be 'Pass'
     }
 
+    It 'Error: a persisted <Shape> deadline value cannot be coerced into a qualifying ring' -ForEach @(
+        @{ Shape = 'string'; InvalidValue = 'not-a-number' }
+        @{ Shape = 'boolean'; InvalidValue = $true }
+        @{ Shape = 'array'; InvalidValue = [object[]] @(1, 2) }
+    ) {
+        $malformed = New-PulseUpdateRing -Id 'malformed'
+        $malformed.deadlineForFeatureUpdatesInDays = $InvalidValue
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseUpdateRing -Id 'known' -FeatureDeadline 3)
+                $malformed
+            ) }
+        )
+
+        $finding.status | Should -Be 'Error'
+    }
+
     It 'Fail: only 1 of 2 rings has a deadline configured' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
             @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
@@ -138,5 +159,193 @@ Describe 'TP.INT.0004 - At least 2 Windows Update rings have deadlines configure
         )
 
         $finding.status | Should -Be 'NotApplicable'
+    }
+
+    It 'NotApplicable: one known ring plus an update ring with unresolved assignments cannot prove fewer than two assigned rings' {
+        $unknown = New-PulseUpdateRing -Id 'unknown' -FeatureDeadline 7
+        $unknown.assignments = $null
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseUpdateRing -Id 'known' -FeatureDeadline 3)
+                $unknown
+            ) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'assignment evidence'
+    }
+
+    It 'Fail: exclusion-only rings do not count as assigned when evidence is complete' {
+        $excluded = New-PulseUpdateRing -Id 'excluded' -FeatureDeadline 7
+        $excluded.assignments = @(
+            @{ target = @{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'group-excluded' } }
+        )
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseUpdateRing -Id 'known' -FeatureDeadline 3)
+                $excluded
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'NotApplicable: a partial root list prevents fewer than two known rings from becoming Fail' {
+        $gap = [pscustomobject]@{
+            Scope = 'dataset:deviceConfigurations/root'; FailureClass = 'Indeterminate'
+            ReasonCode = 'truncated'; Detail = @{ truncated = $true }
+            Operation = 'DeviceConfiguration.List'; ApiVersion = 'v1.0'
+        }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Partial'; Data = @(
+                (New-PulseUpdateRing -Id 'known' -FeatureDeadline 3)
+            ); ReasonCode = 'partial'; Detail = @{}; Provider = 'TenantPulse';
+                Operations = @('DeviceConfiguration.List', 'DeviceConfigurationAssignment.List'); Gaps = @($gap) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+    }
+
+    It 'Fail: an unrelated scoped assignment gap does not hide the known shortage of qualifying update rings' {
+        $gap = [pscustomobject]@{
+            Scope = 'policy:custom-unresolved/assignments'; FailureClass = 'Indeterminate'
+            ReasonCode = 'indeterminate'; Detail = @{}
+            Operation = 'DeviceConfigurationAssignment.List'; ApiVersion = 'v1.0'
+        }
+        $other = [pscustomobject]@{
+            id = 'custom-unresolved'; '@odata.type' = '#microsoft.graph.windows10CustomConfiguration'; assignments = $null
+        }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Partial'; Data = @(
+                (New-PulseUpdateRing -Id 'known' -FeatureDeadline 3)
+                $other
+            ); ReasonCode = 'partial'; Detail = @{}; Provider = 'TenantPulse';
+                Operations = @('DeviceConfiguration.List', 'DeviceConfigurationAssignment.List'); Gaps = @($gap) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'NotApplicable: a <Shape> configuration discriminator can still be a second qualifying update ring' -ForEach @(
+        @{ Shape = 'missing'; TypeValue = $null }
+        @{ Shape = 'blank'; TypeValue = '   ' }
+        @{ Shape = 'unrecognized'; TypeValue = '#microsoft.graph.futureUpdateConfiguration' }
+    ) {
+        $candidate = New-PulseUpdateRing -Id 'unclassified' -FeatureDeadline 14
+        if ($Shape -eq 'missing') {
+            $candidate.PSObject.Properties.Remove('@odata.type')
+        } else {
+            $candidate.'@odata.type' = $TypeValue
+        }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseUpdateRing -Id 'known' -FeatureDeadline 3)
+                $candidate
+            ) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'type evidence'
+    }
+
+    It 'Fail: unclassified configuration evidence cannot qualify when it has <Disqualifier>' -ForEach @(
+        @{ Shape = 'unrecognized'; TypeValue = '#microsoft.graph.futureUpdateConfiguration'; Disqualifier = 'no positive deadline'; AssignmentKind = 'assigned'; FeatureDeadline = $null }
+        @{ Shape = 'missing'; TypeValue = $null; Disqualifier = 'authoritatively empty assignments'; AssignmentKind = 'empty'; FeatureDeadline = 14 }
+        @{ Shape = 'blank'; TypeValue = '   '; Disqualifier = 'exclusion-only assignments'; AssignmentKind = 'excluded'; FeatureDeadline = 14 }
+    ) {
+        $candidate = New-PulseUpdateRing -Id 'unclassified' -FeatureDeadline $FeatureDeadline
+        if ($Shape -eq 'missing') {
+            $candidate.PSObject.Properties.Remove('@odata.type')
+        } else {
+            $candidate.'@odata.type' = $TypeValue
+        }
+        if ($AssignmentKind -eq 'empty') {
+            $candidate.assignments = @()
+        } elseif ($AssignmentKind -eq 'excluded') {
+            $candidate.assignments = @(
+                @{ target = @{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'grp-ex' } }
+            )
+        }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseUpdateRing -Id 'known' -FeatureDeadline 3)
+                $candidate
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: unresolved assignment evidence on a ring without a deadline cannot change the known shortage' {
+        $nonQualifying = New-PulseUpdateRing -Id 'no-deadline'
+        $nonQualifying.assignments = $null
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseUpdateRing -Id 'known' -FeatureDeadline 3)
+                $nonQualifying
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: one deadline-capable unclassified candidate cannot satisfy the two-ring minimum by itself' {
+        $candidate = New-PulseUpdateRing -Id 'only-possible' -FeatureDeadline 14
+        $candidate.'@odata.type' = '#microsoft.graph.futureUpdateConfiguration'
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($candidate) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: one deadline-capable ring with unresolved assignments cannot satisfy the two-ring minimum by itself' {
+        $candidate = New-PulseUpdateRing -Id 'only-possible' -FeatureDeadline 14
+        $candidate.assignments = $null
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($candidate) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'NotApplicable: two distinct deadline-capable candidates can still satisfy the two-ring minimum' {
+        $unclassified = New-PulseUpdateRing -Id 'possible-unclassified' -FeatureDeadline 7
+        $unclassified.'@odata.type' = '#microsoft.graph.futureUpdateConfiguration'
+        $unresolved = New-PulseUpdateRing -Id 'possible-unresolved' -FeatureDeadline 14
+        $unresolved.assignments = $null
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                $unclassified
+                $unresolved
+            ) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+    }
+
+    It 'Pass: two known assigned rings with deadlines are sufficient despite unrelated partial evidence' {
+        $gap = [pscustomobject]@{
+            Scope = 'policy:other/assignments'; FailureClass = 'Indeterminate'
+            ReasonCode = 'indeterminate'; Detail = @{}
+            Operation = 'DeviceConfigurationAssignment.List'; ApiVersion = 'v1.0'
+        }
+        $other = [pscustomobject]@{ id = 'other'; '@odata.type' = '#microsoft.graph.windows10CustomConfiguration'; assignments = $null }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Partial'; Data = @(
+                (New-PulseUpdateRing -Id 'pilot' -FeatureDeadline 3)
+                (New-PulseUpdateRing -Id 'broad' -FeatureDeadline 14)
+                $other
+            ); ReasonCode = 'partial'; Detail = @{}; Provider = 'TenantPulse';
+                Operations = @('DeviceConfiguration.List', 'DeviceConfigurationAssignment.List'); Gaps = @($gap) }
+        )
+
+        $finding.status | Should -Be 'Pass'
     }
 }

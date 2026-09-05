@@ -12,10 +12,9 @@
 
     DECISION, per family, in order:
       1. The family's raw policy dataset (`deviceCompliancePolicies`/`deviceConfigurations`)
-         is not `Collected` in the manifest -> skip this family entirely. A snapshot whose
-         collection never reached (or failed) this dataset has nothing for this function to
-         verify or re-derive - inventing a typed-policy expansion here would fabricate data
-         collection itself never produced.
+         is neither `Collected` nor `Partial` in the manifest -> skip this family entirely.
+         A Partial dataset has explicitly usable known rows plus scoped gaps, so those rows
+         remain eligible for honest re-derivation; Failed/Skipped has no usable evidence.
       2. manifest.expansions.<name> exists with status 'Expanded' or 'Partial' AND its
          recorded file re-hashes to the recorded sha256 -> VERIFIED, already usable as
          written; nothing to do. Any other status, a missing/renamed file, or a hash
@@ -24,7 +23,8 @@
       2a. NEVER-EXPANDED, NO CAPTURED PAYLOADS (rider fix): step 2 found no
           manifest.expansions.<name> entry at all for this family (expansion was never
           attempted) AND no per-policy `<PolicyType>Assignments-<id>` dataset (the only
-          payload source step 3 draws on for this family) exists for ANY policy -> skip
+          legacy payload source step 3 draws on for this family) exists for ANY policy,
+          and no root policy carries the current embedded `assignments` property -> skip
           re-derivation entirely for this family. Step 3 would still terminate cleanly in
           this case (every policy gaps on its own missing assignment payload), but it is a
           predictable, guaranteed-futile fan-out for zero possible rows - skipped outright
@@ -90,7 +90,7 @@ function Resolve-PulseTypedPolicySnapshotExpansion {
             $manifest = Get-PulseSnapshotManifest -Store $Store
 
             if (-not $manifest.datasets -or -not $manifest.datasets.Contains($family.DatasetName)) { continue }
-            if ($manifest.datasets[$family.DatasetName].status -ne 'Collected') { continue }
+            if ($manifest.datasets[$family.DatasetName].status -notin @('Collected', 'Partial')) { continue }
 
             $hasExpansionEntry = $manifest.expansions -and $manifest.expansions.Contains($family.ExpansionName)
 
@@ -112,20 +112,29 @@ function Resolve-PulseTypedPolicySnapshotExpansion {
             # NEVER-EXPANDED, NO CAPTURED PAYLOADS (rider fix (a)): the raw dataset was
             # collected but this family's expansion was never attempted at all (no
             # manifest.expansions entry) AND no per-policy `<PolicyType>Assignments-<id>`
-            # dataset (the only payload source -FromCapturedPayloads draws on here) is on
-            # disk for ANY policy. Re-derivation would still terminate cleanly in this
+            # dataset is on disk for ANY policy and the root rows carry no embedded
+            # assignment signal. Re-derivation would still terminate cleanly in this
             # case (every policy gaps on its own missing assignment payload, yielding
             # NotExpanded) rather than throw, but it is still a guaranteed-futile Read-
             # PulseDataset + per-policy fan-out for zero possible rows - skip it outright.
+            $policies = $null
             if (-not $hasExpansionEntry) {
                 $assignmentPrefix = "$($family.PolicyType)Assignments-"
                 $hasCapturedAssignments = $manifest.datasets -and `
                     @($manifest.datasets.Keys | Where-Object { $_.StartsWith($assignmentPrefix, [System.StringComparison]::Ordinal) }).Count -gt 0
-                if (-not $hasCapturedAssignments) { continue }
+                if (-not $hasCapturedAssignments) {
+                    $policies = Read-PulseDataset -Store $Store -Name $family.DatasetName
+                    $hasEmbeddedAssignmentSignal = @($policies | Where-Object {
+                            Test-PulseRowPropertyPresent -Row $_ -PropertyName 'assignments'
+                        }).Count -gt 0
+                    if (-not $hasEmbeddedAssignmentSignal) { continue }
+                }
             }
 
             # ABSENT OR INVALID - re-expand from captured payloads, never Graph.
-            $policies = Read-PulseDataset -Store $Store -Name $family.DatasetName
+            if ($null -eq $policies) {
+                $policies = Read-PulseDataset -Store $Store -Name $family.DatasetName
+            }
 
             $null = Invoke-PulseTypedPolicyExpansion -Store $Store -Context $null -Policies $policies `
                 -PolicyType $family.PolicyType -TypeMap $family.TypeMap -AssignmentType $family.AssignmentType `

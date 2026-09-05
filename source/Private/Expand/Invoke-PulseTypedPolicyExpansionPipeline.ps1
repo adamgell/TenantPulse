@@ -5,9 +5,10 @@
     Invoke-PulseSettingsCatalogExpansionPipeline's own placement, see that file's own
     docstring). Unlike that pipeline, this one does NOT fetch its own top-level policy list
     from Graph - `deviceCompliancePolicies`/`deviceConfigurations` are ALREADY DatasetMap.psd1
-    entries the ordinary check-driven flow collects (TP.INT.0002 already consumes
-    deviceCompliancePolicies) - this function only READS BACK whatever
-    Invoke-PulseCollection already durably wrote, via Read-PulseDataset.
+    entries whose TenantPulse provider plan joins authoritative assignments during ordinary
+    collection. This function reads those joined rows back and reuses their embedded
+    assignments; its live per-policy Graph path now exists only for legacy rows where the
+    assignments property is truly absent.
 
     A dataset that was not Collected (Skipped/Failed/absent - Read-PulseDataset throws in
     every one of those cases, see its own docstring) is NOT a pipeline failure - it is the

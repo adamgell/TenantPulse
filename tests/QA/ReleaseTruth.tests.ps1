@@ -4,6 +4,8 @@ BeforeAll {
     $changelog = Get-Content -LiteralPath (Join-Path $repoRoot 'CHANGELOG.md') -Raw
     $status = Get-Content -LiteralPath (Join-Path $repoRoot 'docs/STATUS.md') -Raw
     $manifest = Import-PowerShellDataFile -Path (Join-Path $repoRoot 'source/TenantPulse.psd1')
+    $checkContract = Get-Content -LiteralPath (Join-Path $repoRoot 'source/Data/Checks/README.md') -Raw
+    $findingsContract = Get-Content -LiteralPath (Join-Path $repoRoot 'source/Private/Evaluate/FindingsSchema.md') -Raw
 }
 
 Describe 'TenantPulse current release truth' -Tag 'QA' {
@@ -36,5 +38,22 @@ Describe 'TenantPulse current release truth' -Tag 'QA' {
         $status | Should -Match 'CI'
         $status | Should -Match 'Live'
         $status | Should -Match 'Published'
+    }
+
+    It 'keeps the six partial-aware descriptors and both governing contract documents synchronized' {
+        $partialAwareIds = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'source/Data/Checks') -Filter '*.psd1' -File |
+            ForEach-Object { Import-PowerShellDataFile -LiteralPath $_.FullName } |
+            Where-Object { $_.Data.ContainsKey('PartialDatasets') } |
+            ForEach-Object { [string] $_.Id })
+        [System.Array]::Sort($partialAwareIds, [System.StringComparer]::Ordinal)
+
+        ($partialAwareIds -join ',') | Should -Be 'TP.INT.0002,TP.INT.0004,TP.INT.0013,TP.INT.0014,TP.INT.0015,TP.INT.0029'
+        foreach ($contract in @($checkContract, $findingsContract)) {
+            $contract | Should -Match '(?i)(?:exactly |^|\s)six partial-aware|Six catalog descriptors opt in'
+            $contract | Should -Match 'TP\.INT\.0002'
+            $contract | Should -Match 'TP\.INT\.0004'
+            $contract | Should -Match 'other 47 checks'
+            $contract | Should -Not -Match 'other 49 checks|exactly four partial-aware|Only four catalog descriptors'
+        }
     }
 }

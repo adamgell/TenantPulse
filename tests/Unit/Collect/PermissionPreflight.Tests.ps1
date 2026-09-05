@@ -105,6 +105,26 @@ BeforeAll {
 }
 
 Describe 'Get-PulsePermissionPreflightOperations' {
+    It 'declares the exact root and assignment child operations for both authoritative policy plans' {
+        $manifest = @(
+            [pscustomobject]@{ Dataset = 'deviceCompliancePolicies'; Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }
+            [pscustomobject]@{ Dataset = 'deviceConfigurations'; Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }
+        )
+
+        $operations = InModuleScope TenantPulse -ArgumentList (, $manifest) {
+            param($manifest)
+            $registry = Resolve-PulseProviderPlanRegistry
+            @(Get-PulsePermissionPreflightOperations -Manifest $manifest -ProviderPlanRegistry $registry)
+        }
+
+        @($operations | ForEach-Object { '{0}/{1}/{2}' -f $_.Type, $_.Operation, $_.ApiVersion }) | Should -Be @(
+            'DeviceCompliancePolicy/List/v1.0'
+            'DeviceCompliancePolicyAssignment/List/v1.0'
+            'DeviceConfiguration/List/v1.0'
+            'DeviceConfigurationAssignment/List/v1.0'
+        )
+    }
+
     It 'unions ordinary descriptors, composite children, expansion operations, and app-health additions' {
         $manifest = @(
             [pscustomobject]@{ Dataset = 'conditionalAccessPolicies'; Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta'; Pending = $false }
@@ -644,6 +664,42 @@ Describe 'Invoke-PulseCollection permission preflight' {
         $entry.reasonCode | Should -Be 'missing-grant'
         @($entry.operations) | Should -Contain 'ListBeta'
         Should-NotInvoke Invoke-PulseEndpointSecurityPolicyPlan -ModuleName TenantPulse
+        Should-NotInvoke Get-GraphObject -ModuleName TenantPulse
+    }
+
+    It 'does not dispatch an authoritative policy plan when its assignment child operation is denied' {
+        Mock Get-GraphOperation -ModuleName TenantPulse {
+            $permission = if ($Type -eq 'DeviceCompliancePolicyAssignment') {
+                'DeviceManagementConfiguration.ReadWrite.All'
+            } else {
+                'DeviceManagementConfiguration.Read.All'
+            }
+            New-TestDescriptor -Type $Type -Operation $Operation -ApiVersion 'v1.0' `
+                -RequiredPermissions @(@{ Type = 'Application'; Value = $permission })
+        }
+        Mock Test-GraphPermission -ModuleName TenantPulse {
+            New-TestPermissionFindings -Granted 'No' -MissingGrant 'DeviceManagementConfiguration.ReadWrite.All'
+        }
+        Mock Invoke-PulsePolicyAssignmentPlan -ModuleName TenantPulse {
+            throw 'the provider plan must not run when its assignment child is denied'
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            throw 'no Graph request may be sent after the assignment child is denied'
+        }
+
+        $manifest = @(
+            [pscustomobject]@{
+                Dataset = 'deviceCompliancePolicies'; Provider = 'TenantPulse'
+                Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0'
+            }
+        )
+        Invoke-TestCollection -Manifest $manifest
+
+        $entry = Get-TestManifestStatus -Store $script:store -Dataset 'deviceCompliancePolicies'
+        $entry.status | Should -Be 'Failed'
+        $entry.failureClass | Should -Be 'PermissionDenied'
+        $entry.reasonCode | Should -Be 'missing-grant'
+        Should-NotInvoke Invoke-PulsePolicyAssignmentPlan -ModuleName TenantPulse
         Should-NotInvoke Get-GraphObject -ModuleName TenantPulse
     }
 

@@ -36,6 +36,9 @@ BeforeAll {
                     }
                     if ($d.ContainsKey('Data')) { $params.Data = $d.Data }
                     if ($d.ContainsKey('Reason')) { $params.Reason = $d.Reason }
+                    foreach ($field in @('ReasonCode', 'Detail', 'FailureClass', 'Provider', 'Operations', 'Gaps')) {
+                        if ($d.ContainsKey($field)) { $params[$field] = $d[$field] }
+                    }
                     Write-PulseDataset @params
                 }
 
@@ -200,7 +203,7 @@ Describe 'TP.INT.0002 - A compliance policy exists for every enrolled platform' 
         $finding.evidence[0].identity | Should -Be 'Windows'
     }
 
-    It 'Fail: a policy without assignments cannot existence-only Pass' {
+    It 'NotApplicable: an applicable policy with unresolved assignment evidence cannot become an existence-only failure' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
             @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
                 [pscustomobject]@{ id = 'p1'; '@odata.type' = '#microsoft.graph.windows10CompliancePolicy' }
@@ -209,6 +212,122 @@ Describe 'TP.INT.0002 - A compliance policy exists for every enrolled platform' 
                 (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
             ) }
         )
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'assignment evidence'
+    }
+
+    It 'NotApplicable: a partial root list cannot prove that an enrolled platform has no policy' {
+        $gap = [pscustomobject]@{
+            Scope = 'dataset:deviceCompliancePolicies/root'; FailureClass = 'Indeterminate'
+            ReasonCode = 'truncated'; Detail = @{ truncated = $true }
+            Operation = 'DeviceCompliancePolicy.List'; ApiVersion = 'v1.0'
+        }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
+            @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Partial'; Data = @(
+                (New-PulseAssignedCompliancePolicy -Id 'known-android' -ODataType '#microsoft.graph.androidWorkProfileCompliancePolicy')
+            );
+                ReasonCode = 'partial'; Detail = @{}; Provider = 'TenantPulse';
+                Operations = @('DeviceCompliancePolicy.List', 'DeviceCompliancePolicyAssignment.List'); Gaps = @($gap) }
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
+            ) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'partial'
+    }
+
+    It 'Fail: an unrelated scoped assignment gap does not hide a known missing Windows policy' {
+        $gap = [pscustomobject]@{
+            Scope = 'policy:mac-unresolved/assignments'; FailureClass = 'Indeterminate'
+            ReasonCode = 'indeterminate'; Detail = @{}
+            Operation = 'DeviceCompliancePolicyAssignment.List'; ApiVersion = 'v1.0'
+        }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
+            @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Partial'; Data = @(
+                [pscustomobject]@{
+                    id = 'mac-unresolved'; '@odata.type' = '#microsoft.graph.macOSCompliancePolicy'; assignments = $null
+                }
+            ); ReasonCode = 'partial'; Detail = @{}; Provider = 'TenantPulse';
+                Operations = @('DeviceCompliancePolicy.List', 'DeviceCompliancePolicyAssignment.List'); Gaps = @($gap) }
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
+            ) }
+        )
+
         $finding.status | Should -Be 'Fail'
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'Windows'
+    }
+
+    It 'NotApplicable: a <Shape> compliance-policy discriminator cannot prove an enrolled platform is uncovered' -ForEach @(
+        @{ Shape = 'missing'; TypeValue = $null }
+        @{ Shape = 'blank'; TypeValue = '   ' }
+        @{ Shape = 'unrecognized'; TypeValue = '#microsoft.graph.futureCompliancePolicy' }
+    ) {
+        $policy = New-PulseAssignedCompliancePolicy -Id 'unclassified' -ODataType $TypeValue
+        if ($Shape -eq 'missing') {
+            $policy.PSObject.Properties.Remove('@odata.type')
+        }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
+            @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($policy) }
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
+            ) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'type evidence'
+    }
+
+    It 'Fail: a <Shape> compliance-policy discriminator with <AssignmentKind> assignments cannot cover Windows' -ForEach @(
+        @{ Shape = 'missing'; TypeValue = $null; AssignmentKind = 'authoritatively empty' }
+        @{ Shape = 'blank'; TypeValue = '   '; AssignmentKind = 'authoritatively empty' }
+        @{ Shape = 'unrecognized'; TypeValue = '#microsoft.graph.futureCompliancePolicy'; AssignmentKind = 'authoritatively empty' }
+        @{ Shape = 'missing'; TypeValue = $null; AssignmentKind = 'exclusion-only' }
+        @{ Shape = 'blank'; TypeValue = '   '; AssignmentKind = 'exclusion-only' }
+        @{ Shape = 'unrecognized'; TypeValue = '#microsoft.graph.futureCompliancePolicy'; AssignmentKind = 'exclusion-only' }
+    ) {
+        $policy = New-PulseAssignedCompliancePolicy -Id 'unclassified' -ODataType $TypeValue
+        if ($Shape -eq 'missing') {
+            $policy.PSObject.Properties.Remove('@odata.type')
+        }
+        if ($AssignmentKind -eq 'authoritatively empty') {
+            $policy.assignments = @()
+        } else {
+            $policy.assignments = @(
+                @{ target = @{ '@odata.type' = '#microsoft.graph.exclusionGroupAssignmentTarget'; groupId = 'grp-ex' } }
+            )
+        }
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
+            @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @($policy) }
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
+            ) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence[0].identity | Should -Be 'Windows'
+    }
+
+    It 'Pass: known assigned coverage is monotonic even when unrelated root evidence is partial' {
+        $gap = [pscustomobject]@{
+            Scope = 'dataset:deviceCompliancePolicies/root'; FailureClass = 'Indeterminate'
+            ReasonCode = 'truncated'; Detail = @{ truncated = $true }
+            Operation = 'DeviceCompliancePolicy.List'; ApiVersion = 'v1.0'
+        }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0002' -Datasets @(
+            @{ Name = 'deviceCompliancePolicies'; ApiVersion = 'v1.0'; Status = 'Partial'; Data = @(
+                (New-PulseAssignedCompliancePolicy -Id 'p1' -ODataType '#microsoft.graph.windows10CompliancePolicy')
+            ); ReasonCode = 'partial'; Detail = @{}; Provider = 'TenantPulse';
+                Operations = @('DeviceCompliancePolicy.List', 'DeviceCompliancePolicyAssignment.List'); Gaps = @($gap) }
+            @{ Name = 'managedDevices'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseManagedDevice -Id 'd1' -OperatingSystem 'Windows')
+            ) }
+        )
+
+        $finding.status | Should -Be 'Pass'
     }
  }

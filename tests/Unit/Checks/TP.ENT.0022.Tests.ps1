@@ -142,8 +142,8 @@ Describe 'TP.ENT.0022 - Zero permanent-active assignments for privileged roles (
 
     It 'Fail: a permanent group assignment remains one violation when every member is exempt' {
         $groupId = 'grp-exempt-members'
-        $breakGlassId = '66666666-6666-6666-6666-666666666666'
-        $serviceAccountId = '77777777-7777-7777-7777-777777777777'
+        $breakGlassId = 'fixture-break-glass-principal'
+        $serviceAccountId = 'fixture-service-account-principal'
         $instances = @(New-PulseScheduleInstance -Id 'i-exempt-members' -PrincipalId $groupId)
 
         $finding = Invoke-PulsePimFixture -Instances $instances `

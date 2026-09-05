@@ -182,6 +182,7 @@ Describe 'Get-PulseCollectionManifest' {
         $check = New-TestCheck -Id 'TP.INT.0009' -Datasets @('platformDisposition')
         $map = @{
             platformDisposition = @{
+                Provider   = 'TenantPulse'
                 Plan       = 'Invoke-PulseWindowsDataProcessorPlan'
                 ApiVersion = $null
             }
@@ -193,10 +194,33 @@ Describe 'Get-PulseCollectionManifest' {
         }
 
         @($manifest).Count | Should -Be 1
+        $manifest[0].Provider | Should -BeExactly 'TenantPulse'
         $manifest[0].Plan | Should -BeExactly 'Invoke-PulseWindowsDataProcessorPlan'
         $manifest[0].Type | Should -BeNullOrEmpty
         $manifest[0].Operation | Should -BeNullOrEmpty
         $manifest[0].ApiVersion | Should -BeNullOrEmpty
+        $manifest[0].Pending | Should -BeFalse
+    }
+
+    It 'carries the authoritative policy-assignment plan identity without synthetic Graph metadata' {
+        $check = New-TestCheck -Id 'TP.INT.0002' -Datasets @('deviceCompliancePolicies')
+        $map = @{
+            deviceCompliancePolicies = @{
+                Provider   = 'TenantPulse'
+                Plan       = 'Invoke-PulsePolicyAssignmentPlan'
+                ApiVersion = 'v1.0'
+            }
+        }
+
+        $manifest = InModuleScope TenantPulse -ArgumentList @($check), $map {
+            param($checks, $map)
+            Get-PulseCollectionManifest -Checks $checks -DatasetMap $map
+        }
+
+        $manifest[0].Provider | Should -BeExactly 'TenantPulse'
+        $manifest[0].Plan | Should -BeExactly 'Invoke-PulsePolicyAssignmentPlan'
+        $manifest[0].Type | Should -BeNullOrEmpty
+        $manifest[0].Operation | Should -BeNullOrEmpty
         $manifest[0].Pending | Should -BeFalse
     }
 
@@ -1077,6 +1101,7 @@ Describe 'Get-PulseTenantSnapshot' {
         }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-TestReadDescriptor -ApiVersion 'beta' }
         Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
+        Mock Get-GraphOperation -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicyAssignment' } { New-TestReadDescriptor -ApiVersion 'v1.0' }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConditionalAccessPolicy' } { New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' }) }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'DeviceCompliancePolicy' } { throw "Get-GraphObject failed: 403 Forbidden." }
 
@@ -1097,7 +1122,7 @@ Describe 'Get-PulseTenantSnapshot' {
         $manifest.datasets.conditionalAccessPolicies.status | Should -Be 'Collected'
         $manifest.datasets.deviceCompliancePolicies.status | Should -Be 'Failed'
         $manifest.datasets.deviceCompliancePolicies.failureClass | Should -Be 'PermissionDenied'
-        $manifest.datasets.deviceCompliancePolicies.reason | Should -Match '^permission-denied:'
+        $manifest.datasets.deviceCompliancePolicies.reason | Should -Be 'permission-denied'
     }
     It 'passes a supplied dataset-keyed plan registry through the public path sequentially with the same resolved Context' {
         $check = New-TestCheck -Id 'TP.INT.TEST' -Datasets @('intuneRbacGroupProtection', 'endpointSecurityDiskEncryptionPolicies')

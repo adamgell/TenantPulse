@@ -28,37 +28,49 @@ certainty, permission denial, and provider failure remain explicit and isolated,
 provider outcome never satisfies a later collection dependency.
 
 `Data.PartialDatasets` is a strict Function-only opt-in requiring a `DatasetOutcomes` parameter.
-Exactly four checks opt in. Universal checks `TP.INT.0013` and `TP.INT.0029` may Fail when a known
-row proves an offender but cannot Pass while gaps remain. Existential checks `TP.INT.0014` and
-`TP.INT.0015` may Pass on a known witness but cannot Fail while gaps remain; their BitLocker/LAPS
-criteria require native Boolean values. The other 49 checks remain `NotApplicable` on Partial. For
-the four opt-ins, structurally valid non-decisive Partial evidence is also `NotApplicable`; without
-decisive proof, zero rows or malformed outcome, gap, or row data is `Error`. Findings schema `1.0`,
-snapshot schema `2.0.0`, and scoring model `1.0` remain unchanged.
+Exactly six checks opt in. Assignment-scoped checks `TP.INT.0002` and `TP.INT.0004` use
+authoritative assignments and ignore unrelated policy-scoped gaps while preserving
+`NotApplicable` only for uncertainty that can affect the result. `TP.INT.0004` bounds distinct
+possible candidates against its two-ring threshold and rejects coercible non-numeric deadline
+shapes. Universal checks `TP.INT.0013` and `TP.INT.0029` may Fail when a known row proves an offender but cannot Pass
+while gaps remain. Existential checks `TP.INT.0014` and `TP.INT.0015` may Pass on a known witness but
+cannot Fail while gaps remain; their BitLocker/LAPS criteria require native Boolean values. The
+other 47 checks remain `NotApplicable` on Partial. For the six opt-ins, zero usable Partial rows,
+malformed outcomes or gaps, and rule-invalid rows remain `Error`; structurally valid non-decisive
+evidence is `NotApplicable`. Findings schema `1.0`, snapshot schema `2.0.0`, and scoring model `1.0`
+remain unchanged.
 
 This tranche's evidence is deterministic source/package testing only. It adds no new live-service
 or publication proof. Independent review after the earlier 2,510-test candidate found four
 applicable correctness gaps: message-only provider failures could lose canonical authentication or
 permission classification; authentication-aborted expansion pipelines could omit unattempted
 policies or the top-level `collectionFailure`; and a relevant Endpoint Security policy without a
-usable identifier could be treated as authoritative absence. All four are closed at exact tested
-commit `21f6a1025331aa6d14bfb47b32bec403d2ff994d`, tree
-`b6732cf8734a8020b3470f1c431a848ef81e21c0`. The synchronized minimum is 2,517, the active NotRun
-allowance is zero, and the package-first full gate passed 2,517/2,517 with zero failures, errors,
-skips, NotRun, or failed containers.
+usable identifier could be treated as authoritative absence. That earlier four-gap candidate is
+closed at exact tested commit `21f6a1025331aa6d14bfb47b32bec403d2ff994d`, tree
+`b6732cf8734a8020b3470f1c431a848ef81e21c0`. Its synchronized minimum was 2,517, and its
+package-first full gate passed 2,517/2,517 with zero failures, errors, skips, NotRun, or failed
+containers. That proof remains historical evidence for that exact candidate; it does not prove the
+later six-check assignment-aware source described above.
 
-Proof run `9ef9712e-bddc-4dc9-82f0-f085ab874656` binds all 59 shipped files and the exact result pair.
-The 418,518-byte local candidate archive SHA-256 is
+The current local package-first candidate is proven by run
+`2b032616-31ae-44c7-8734-d00a15be6f98`: 2,998/2,998 deterministic tests passed with zero
+failures, errors, skips, NotRun, or failed containers. The proof binds 62 shipped files and
+the candidate package SHA-256
+`36325a317f2be6377c0d7b1f41da10047a697f9455d078d881a78f7191f8d24c`. This is local
+package evidence only; it does not claim remote CI, merge, live-tenant behavior, or publication.
+
+Historical proof run `9ef9712e-bddc-4dc9-82f0-f085ab874656` binds all 59 shipped files and the exact
+result pair for an earlier candidate. That 418,518-byte local candidate archive SHA-256 is
 `386d79effd65afbf1deaca17d57ab3c08a6b63111144ff6a59fc3ed4726a994f`; the tested-release-proof
 SHA-256 is `54ab272f55b2321f81ff8b793e2612aa13581cdb3be501fb935fca8d73513b9e`. The built manifest
 SHA-256 is `62e746a73e616acf14421ddf2355fb258a4af2fa3cf51d4ee015028c8a0432b3`; the built module SHA-256 is
 `1f65e7a1b98c18207aca01c90d33acf3878e957359c460f7a6bf34468ce204a7`.
 
-Source, built, packaged, and clean child-process import gates all preserve exact GraphKit `0.3.0`.
-The publisher revalidated this exact proof in no-key/no-`-Publish` mode and reported that nothing
-was published. A read-only controller-local freeze records `local-package-first` scope,
+For that earlier candidate, source, built, packaged, and clean child-process import gates all
+preserved exact GraphKit `0.3.0`. The publisher revalidated that historical proof in
+no-key/no-`-Publish` mode and reported that nothing was published. A read-only controller-local freeze records `local-package-first` scope,
 `externalTransferApproved = false`, and that the serialized test object contains synthetic
-credential fixtures. Independent code and proof reviews found no P0-P3 issue in the corrected
+credential fixtures. Independent code and proof reviews found no P0-P3 issue in that earlier
 candidate. Push/PR/CodeRabbit, exact-head six-job CI plus gitleaks, merge, and merged-main CI remain
 pending. Local `gitleaks` is not installed, so only the repo-local Secret/PII/control-byte gate is
 locally proven. The immutable TenantPulse `0.2.0` evidence table and exact-package live record below
@@ -695,8 +707,8 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    HTML path does not change the export manifest or touch Graph/snapshots. Remaining work includes bounded,
    policy/root-scoped Conditional Access and role group closure; unique effective role counting;
    GraphKit `Application.List` plus combined app/service-principal credential hygiene; authoritative
-   assignment handling for `TP.INT.0002`, `0004`, `0011`, `0012`, `0014`, `0015`, `0017`, `0018`,
-   and producer-complete `0028`; exclusion-only semantics; deterministic evidence caps with omitted
+   assignment handling for `TP.INT.0011`, `0012`, `0014`, `0015`, `0017`, `0018`, and
+   producer-complete `0028`; exclusion-only semantics; deterministic evidence caps with omitted
    counts. The all-unparseable `TP.ENT.0019` population must
    become `NotApplicable`, not Pass. `TP.ENT.0022` keeps one group assignment as one violation;
    expansion there is blast-radius evidence only.

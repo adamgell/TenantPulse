@@ -222,8 +222,15 @@ For each check, in order:
 
 ### Built-in partial-aware checks
 
-Only four catalog descriptors opt in, each for one dataset:
+Six catalog descriptors opt in, each for one dataset:
 
+- Assignment-scoped `TP.INT.0002` (`deviceCompliancePolicies`) and `TP.INT.0004`
+  (`deviceConfigurations`) consume authoritative assignment evidence. Known coverage may prove
+  Pass; a known deficit may prove Fail only when unresolved policy-scoped gaps cannot affect that
+  conclusion. Relevant assignment gaps, root-list gaps, and unclassified types remain
+  `NotApplicable` when they can affect the result. For `TP.INT.0004`, uncertainty is bounded by
+  distinct candidates against the two-ring threshold, and deadline fields must be native finite
+  whole-number scalars rather than coercible strings, booleans, or arrays.
 - Universal `TP.INT.0013` (`intuneRbacGroupProtection`) and `TP.INT.0029`
   (`securityBaselinesAssignedAndCurrent`) may Fail when a known row proves an offender; neither
   may Pass with gaps.
@@ -232,8 +239,8 @@ Only four catalog descriptors opt in, each for one dataset:
   with gaps. The qualifying BitLocker value and all four qualifying LAPS criteria must be native
   Boolean values, not string or numeric lookalikes.
 
-The other 49 checks remain engine-assigned `NotApplicable` when a required dataset is `Partial`.
-For the four opt-ins, a structurally valid Partial dataset whose known rows do not prove the safe
+The other 47 checks remain engine-assigned `NotApplicable` when a required dataset is `Partial`.
+For the six opt-ins, a structurally valid Partial dataset whose known rows do not prove the safe
 direction is rule-assigned `NotApplicable`. Without decisive proof, zero usable rows, malformed
 outcome/gap structure, unsupported state, or malformed known rows is `Error`. A decisive monotonic
 witness or offender outranks an unrelated malformed row in either row order.

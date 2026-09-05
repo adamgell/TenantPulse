@@ -375,9 +375,11 @@ function Get-PulseTenantSnapshot {
 
         # Task 2.3: compliance + legacy typed-policy expansion. Reads back
         # deviceCompliancePolicies/deviceConfigurations - already collected by the ordinary
-        # check-driven Invoke-PulseCollection call above - and fans out assignments (both
-        # descriptors already released, unlike T2.2's own deferred assignments). Same void-
-        # return discipline as the call above - see this file's own docstring.
+        # check-driven Invoke-PulseCollection call above, including the authoritative
+        # assignments already joined by its TenantPulse provider plan. Expansion reuses
+        # that evidence without a duplicate assignment read; only legacy captured shapes
+        # with no assignments property use the compatibility fallback. Same void-return
+        # discipline as the call above - see this file's own docstring.
         if ($skipExpansionGraph) {
             foreach ($expansionName in @('compliance', 'deviceConfiguration')) {
                 Set-PulseExpansionEntry -Store $store -Name $expansionName -Status 'NotExpanded' -Reason $expansionSuppressedReason

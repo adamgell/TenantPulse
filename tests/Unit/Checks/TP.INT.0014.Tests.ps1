@@ -12,17 +12,20 @@ BeforeAll {
     function script:New-PulsePartialGapFixture {
         param(
             [string] $Scope,
-            [string] $ProviderDetail
+            [string] $ProviderDetail,
+            [string] $FailureClass = 'PermissionDenied',
+            [string] $ReasonCode = 'permission-denied',
+            [string] $Operation = 'ConfigurationPolicySettings.ListBeta'
         )
 
         if ([string]::IsNullOrEmpty($Scope)) { $Scope = 'scope-canary-' + (@('7f3f19ea', '8af2', '4ca9', 'b708', '80e6688cc8e0') -join '-') }
         if ([string]::IsNullOrEmpty($ProviderDetail)) { $ProviderDetail = 'provider-detail-canary ' + ('admin' + [char] 64 + 'example' + '.invalid') + ' ' + ('sec' + 'ret=fixture-only') }
 
-        InModuleScope TenantPulse -ArgumentList $Scope, $ProviderDetail {
-            param($scope, $providerDetail)
-            New-PulseCollectionGap -Scope $scope -FailureClass 'PermissionDenied' `
-                -ReasonCode 'permission-denied' -Detail @{ message = $providerDetail } `
-                -Operation 'ConfigurationPolicySettings.ListBeta' -ApiVersion 'beta'
+        InModuleScope TenantPulse -ArgumentList $Scope, $ProviderDetail, $FailureClass, $ReasonCode, $Operation {
+            param($scope, $providerDetail, $failureClass, $reasonCode, $operation)
+            New-PulseCollectionGap -Scope $scope -FailureClass $FailureClass `
+                -ReasonCode $ReasonCode -Detail @{ message = $providerDetail } `
+                -Operation $Operation -ApiVersion 'beta'
         }
     }
 
@@ -187,6 +190,53 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         } finally {
             Remove-Item -LiteralPath $fixture.StoreRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
+    }
+
+    It 'Partial: a malformed-only assignment on an otherwise qualifying policy is NotApplicable, never Fail' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{
+                Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Partial'
+                Data = @([pscustomobject]@{ policyId = 'p-malformed'; policyName = 'Full but unresolved'; isFullDiskEncryption = $true; assignmentIntent = 'Malformed' })
+                FailureClass = $null; ReasonCode = 'partial'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('ConfigurationPolicyAssignment.ListBeta')
+                Gaps = @((New-PulsePartialGapFixture -Scope 'policy:p-malformed' -FailureClass 'InvalidProviderData' -ReasonCode 'assignment-intent-incomplete' -Operation 'ConfigurationPolicyAssignment.ListBeta'))
+            }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.status | Should -Not -Be 'Fail'
+        $finding.reason | Should -Match 'no known qualifying'
+    }
+
+    It 'Partial: a known assigned qualifying witness Passes with an unrelated malformed assignment gap' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{
+                Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Partial'
+                Data = @(
+                    [pscustomobject]@{ policyId = 'p-witness'; policyName = 'Full and assigned'; isFullDiskEncryption = $true; assignmentIntent = 'Include' }
+                    [pscustomobject]@{ policyId = 'p-malformed'; policyName = 'Full but unresolved'; isFullDiskEncryption = $true; assignmentIntent = 'Malformed' }
+                )
+                FailureClass = $null; ReasonCode = 'partial'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('ConfigurationPolicyAssignment.ListBeta')
+                Gaps = @((New-PulsePartialGapFixture -Scope 'policy:p-malformed' -FailureClass 'InvalidProviderData' -ReasonCode 'assignment-intent-incomplete' -Operation 'ConfigurationPolicyAssignment.ListBeta'))
+            }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'p-witness'
+    }
+
+    It 'Collected: a known assigned nonqualifying policy is a deterministic Fail' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{
+                Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'
+                Data = @([pscustomobject]@{ policyId = 'p-nonqualifying'; policyName = 'Used space only'; isFullDiskEncryption = $false; assignmentIntent = 'Include' })
+            }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'none enforce full-disk encryption'
     }
 
     It 'rejects boolean-like non-native values in both Collected and non-decisive Partial inputs' {

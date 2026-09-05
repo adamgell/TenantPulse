@@ -24,10 +24,19 @@ BeforeAll {
 
 ### Fixed
 
+- Endpoint Security BitLocker and LAPS composites now retain complete assignment-intent
+  classification. Malformed or unknown assignment targets produce a policy-scoped,
+  sanitized `InvalidProviderData` gap and a `Partial` dataset, so unresolved targeting can
+  never be laundered into complete evidence or an existential `Fail`.
 - Composite datasets now use explicit TenantPulse provider-plan metadata instead of
   synthetic GraphKit `Pending` / `Walk` descriptors. Permission preflight includes every
   declared child operation, including Endpoint Security policy assignments, while the
   Windows data-processor disposition records no Graph operation or API version.
+- Compliance and legacy device-configuration collection now joins every unambiguous policy
+  to its authoritative assignment response. `TP.INT.0002` and `TP.INT.0004` require positive
+  assignment evidence and ignore unrelated policy-scoped gaps. Relevant uncertainty degrades
+  only when it can affect the result; `TP.INT.0004` bounds distinct possible candidates against
+  its two-ring threshold and rejects coercible non-numeric deadline shapes.
 - Endpoint Security collection now gaps absent or unrecognized template metadata instead
   of silently publishing authoritative empty results, and current security baselines are
   still collected when the independent legacy-template surface fails.
@@ -47,8 +56,8 @@ BeforeAll {
 ### Changed
 
 - The approved product-program completion work uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
-- `Data.PartialDatasets` is a strict Function-only opt-in that requires `DatasetOutcomes`. Exactly four checks opt in: universal checks `TP.INT.0013` and `TP.INT.0029` may Fail on a known offender but cannot Pass with gaps; existential checks `TP.INT.0014` and `TP.INT.0015` may Pass on a known witness but cannot Fail with gaps. BitLocker and LAPS witnesses require native Boolean values.
-- The other 49 checks remain `NotApplicable` when their dataset status is `Partial`. For the four opt-ins, a structurally valid non-decisive Partial result is also `NotApplicable`; without decisive proof, zero usable rows or malformed outcomes, gaps, or rows are `Error`.
+- `Data.PartialDatasets` is a strict Function-only opt-in that requires `DatasetOutcomes`. Exactly six checks opt in: assignment-scoped checks `TP.INT.0002` and `TP.INT.0004` use authoritative assignment evidence and scope gaps by policy; universal checks `TP.INT.0013` and `TP.INT.0029` may Fail on a known offender but cannot Pass with gaps; existential checks `TP.INT.0014` and `TP.INT.0015` may Pass on a known witness but cannot Fail with gaps. BitLocker and LAPS witnesses require native Boolean values.
+- The other 47 checks remain `NotApplicable` when their dataset status is `Partial`. For the six opt-ins, structurally valid non-decisive Partial evidence is `NotApplicable`; zero usable Partial rows, malformed outcomes or gaps, and rule-invalid rows remain `Error`.
 - Findings schema `1.0`, snapshot schema `2.0.0`, and scoring model `1.0` are unchanged. This deterministic source/package tranche makes no new live-service or publication claim.
 - Review finding 14 remains rejected/obsolete on first-party schema evidence: supported schema 1.0.0/1.1.0 writers could not emit `Partial`, so migration rejects that later state without rewriting the manifest.
 - Classified JSON export now requires complete field classification before it emits a

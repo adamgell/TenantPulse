@@ -12,17 +12,20 @@ BeforeAll {
     function script:New-PulsePartialGapFixture {
         param(
             [string] $Scope,
-            [string] $ProviderDetail
+            [string] $ProviderDetail,
+            [string] $FailureClass = 'PermissionDenied',
+            [string] $ReasonCode = 'permission-denied',
+            [string] $Operation = 'ConfigurationPolicySettings.ListBeta'
         )
 
         if ([string]::IsNullOrEmpty($Scope)) { $Scope = 'scope-canary-' + (@('7f3f19ea', '8af2', '4ca9', 'b708', '80e6688cc8e0') -join '-') }
         if ([string]::IsNullOrEmpty($ProviderDetail)) { $ProviderDetail = 'provider-detail-canary ' + ('admin' + [char] 64 + 'example' + '.invalid') + ' ' + ('sec' + 'ret=fixture-only') }
 
-        InModuleScope TenantPulse -ArgumentList $Scope, $ProviderDetail {
-            param($scope, $providerDetail)
-            New-PulseCollectionGap -Scope $scope -FailureClass 'PermissionDenied' `
-                -ReasonCode 'permission-denied' -Detail @{ message = $providerDetail } `
-                -Operation 'ConfigurationPolicySettings.ListBeta' -ApiVersion 'beta'
+        InModuleScope TenantPulse -ArgumentList $Scope, $ProviderDetail, $FailureClass, $ReasonCode, $Operation {
+            param($scope, $providerDetail, $failureClass, $reasonCode, $operation)
+            New-PulseCollectionGap -Scope $scope -FailureClass $FailureClass `
+                -ReasonCode $ReasonCode -Detail @{ message = $providerDetail } `
+                -Operation $Operation -ApiVersion 'beta'
         }
     }
 
@@ -212,6 +215,56 @@ Describe 'TP.INT.0015 - LAPS configuration policy meets minimum security bar' {
         } finally {
             Remove-Item -LiteralPath $fixture.StoreRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
+    }
+
+    It 'Partial: a malformed-only assignment on an otherwise qualifying policy is NotApplicable, never Fail' {
+        $policy = New-PulseLapsPolicyFixture -PolicyId 'p-malformed' -PolicyName 'Compliant but unresolved'
+        $policy.assignmentIntent = 'Malformed'
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{
+                Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Partial'; Data = @($policy)
+                FailureClass = $null; ReasonCode = 'partial'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('ConfigurationPolicyAssignment.ListBeta')
+                Gaps = @((New-PulsePartialGapFixture -Scope 'policy:p-malformed' -FailureClass 'InvalidProviderData' -ReasonCode 'assignment-intent-incomplete' -Operation 'ConfigurationPolicyAssignment.ListBeta'))
+            }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.status | Should -Not -Be 'Fail'
+        $finding.reason | Should -Match 'no known qualifying'
+    }
+
+    It 'Partial: a known assigned qualifying witness Passes with an unrelated malformed assignment gap' {
+        $malformed = New-PulseLapsPolicyFixture -PolicyId 'p-malformed' -PolicyName 'Compliant but unresolved'
+        $malformed.assignmentIntent = 'Malformed'
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{
+                Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Partial'
+                Data = @(
+                    (New-PulseLapsPolicyFixture -PolicyId 'p-witness' -PolicyName 'Compliant and assigned')
+                    $malformed
+                )
+                FailureClass = $null; ReasonCode = 'partial'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('ConfigurationPolicyAssignment.ListBeta')
+                Gaps = @((New-PulsePartialGapFixture -Scope 'policy:p-malformed' -FailureClass 'InvalidProviderData' -ReasonCode 'assignment-intent-incomplete' -Operation 'ConfigurationPolicyAssignment.ListBeta'))
+            }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        @($finding.evidence).Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be 'p-witness'
+    }
+
+    It 'Collected: a known assigned nonqualifying policy is a deterministic Fail' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{
+                Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'
+                Data = @((New-PulseLapsPolicyFixture -PolicyId 'p-nonqualifying' -PolicyName 'Short but assigned' -HasSufficientLength $false))
+            }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'none meet all four'
     }
 
     It 'rejects boolean-like non-native values for each criterion in Collected and non-decisive Partial inputs' {

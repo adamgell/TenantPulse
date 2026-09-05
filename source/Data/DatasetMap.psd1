@@ -26,6 +26,9 @@
                         the org id.
 
     A TenantPulse-owned provider-plan entry carries:
+        Provider      - 'TenantPulse' when the map explicitly publishes the composition
+                        owner. New aggregate datasets should carry this field rather than
+                        imply that a GraphKit descriptor produced the joined shape.
         Plan          - the private TenantPulse plan command selected by the dataset-keyed
                         provider registry. It never doubles as a GraphKit Type/Operation.
         ApiVersion    - the aggregate Graph API version when every child operation shares
@@ -75,8 +78,8 @@
 #>
 @{
     conditionalAccessPolicies   = @{ Type = 'ConditionalAccessPolicy'; Operation = 'List'; ApiVersion = 'beta' }
-    deviceCompliancePolicies    = @{ Type = 'DeviceCompliancePolicy'; Operation = 'List'; ApiVersion = 'v1.0' }
-    deviceConfigurations        = @{ Type = 'DeviceConfiguration'; Operation = 'List'; ApiVersion = 'v1.0' }
+    deviceCompliancePolicies    = @{ Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }
+    deviceConfigurations        = @{ Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }
     appProtectionPolicies       = @{ Type = 'AppProtectionPolicy'; Operation = 'List'; ApiVersion = 'beta' }
     managedDevices               = @{ Type = 'ManagedDevice'; Operation = 'List'; ApiVersion = 'v1.0' }
     authenticationMethodsPolicy = @{ Type = 'AuthenticationMethodsPolicy'; Operation = 'Get'; ApiVersion = 'beta' }
@@ -141,10 +144,11 @@
     # Task 2.3 (compliance + legacy typed-policy expansion, -ExpandSettings): declared here
     # for the exact same reason as the two Task 2.2 entries directly above - so the STATIC
     # read-only gate proves both are Read/Safe - and consumed the exact same way: NOT
-    # through the ordinary check-driven Invoke-PulseCollection loop (a PER-POLICY id, not
-    # IdFromDataset's single first-row semantics), but fetched directly, once per policy,
-    # by Invoke-PulseTypedPolicyExpansion, which calls Assert-PulseReadOnlyDescriptor
-    # itself against these SAME {Type;Operation} pairs before ever calling Get-GraphObject.
+    # through the ordinary manifest as independent datasets (a PER-POLICY id cannot use
+    # IdFromDataset's single first-row semantics). The authoritative policy provider plan
+    # declares and invokes these child operations once per unambiguous parent. Typed
+    # expansion reuses the embedded result; its direct descriptor call remains only as a
+    # compatibility fallback for legacy policy rows where `assignments` is truly absent.
     # Both descriptors are ALREADY RELEASED in GraphKit 0.1.1; GraphKit 0.2.2 now also
     # releases the Settings Catalog assignment descriptor declared above.
     deviceCompliancePolicyAssignments = @{ Type = 'DeviceCompliancePolicyAssignment'; Operation = 'List'; ApiVersion = 'v1.0' }
@@ -180,8 +184,9 @@
 
     # Task 3.2 (TP.INT.0014): templateFamily-filtered configurationPolicies list + a
     # per-policy settings walk, resolved down to {policyId, policyName,
-    # isFullDiskEncryption}. The provider plan composes ConfigurationPolicy,
-    # ConfigurationPolicySetting, and ConfigurationPolicyAssignment Read/Safe primitives.
+    # isFullDiskEncryption, assignmentIntent}. The provider plan composes
+    # ConfigurationPolicy, ConfigurationPolicySetting, and ConfigurationPolicyAssignment
+    # Read/Safe primitives.
     endpointSecurityDiskEncryptionPolicies = @{ Plan = 'Invoke-PulseEndpointSecurityPolicyPlan'; ApiVersion = 'beta' }
 
     # Task 3.2 (TP.INT.0015): same templateFamily-filtered configurationPolicies + settings
@@ -189,7 +194,8 @@
     # (adc46e5a-f4aa-4ff6-aeff-4f27bc525796 per Maester's own hardcoded value - see
     # Test-PulseLapsConfigurationMeetsBar.ps1's own docstring "template ID trap" note),
     # resolved to {policyId, policyName, backsUpToEntra, hasSufficientComplexity,
-    # hasSufficientLength, hasPostAuthAction}.
+    # hasSufficientLength, hasPostAuthAction, assignmentIntent}. Incomplete assignment
+    # classification remains a scoped provider gap and makes the dataset Partial.
     endpointSecurityLapsPolicies = @{ Plan = 'Invoke-PulseEndpointSecurityPolicyPlan'; ApiVersion = 'beta' }
 
     # Task 3.3 LIVE entries: confirmed via a live Get-GraphOperation -List enumeration of

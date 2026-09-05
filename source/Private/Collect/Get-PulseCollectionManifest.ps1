@@ -10,7 +10,7 @@
     Import-PulseCheckCatalog cross-checks Data.Datasets against at catalog-load time), and
     returns one entry per DISTINCT dataset name. Direct Graph entries carry
     { Dataset; Type; Operation; ApiVersion; Pending }; provider-plan entries carry
-    { Dataset; Plan; ApiVersion } and explicitly leave Type/Operation null. Pending is
+    { Dataset; Provider; Plan; ApiVersion } and explicitly leave Type/Operation null. Pending is
     carried straight through only for direct descriptors so the collector can classify a
     future unreleased descriptor as Skipped without attempting a Graph call. Plan names
     the TenantPulse-owned implementation selected by the dataset-keyed provider registry;
@@ -86,6 +86,7 @@ function Get-PulseCollectionManifest {
         $mapEntry = $DatasetMap[$Name]
         $hasProviderPlan = $mapEntry.ContainsKey('Plan')
         $providerPlan = if ($hasProviderPlan) { [string] $mapEntry.Plan } else { $null }
+        $provider = if ($mapEntry.ContainsKey('Provider')) { [string] $mapEntry.Provider } else { $null }
         if ($hasProviderPlan) {
             if ([string]::IsNullOrWhiteSpace($providerPlan)) {
                 throw "Get-PulseCollectionManifest: provider-plan dataset '$Name' has an empty Plan value."
@@ -94,6 +95,10 @@ function Get-PulseCollectionManifest {
                 if ($mapEntry.ContainsKey($forbiddenField)) {
                     throw "Get-PulseCollectionManifest: provider-plan dataset '$Name' also declares forbidden Graph descriptor metadata '$forbiddenField'."
                 }
+            }
+            if ($mapEntry.ContainsKey('Provider') -and
+                -not [string]::Equals($provider, 'TenantPulse', [System.StringComparison]::Ordinal)) {
+                throw "Get-PulseCollectionManifest: provider-plan dataset '$Name' declares unsupported Provider '$provider'."
             }
         }
 
@@ -109,6 +114,7 @@ function Get-PulseCollectionManifest {
 
         $entries[$Name] = [pscustomobject]@{
             Dataset       = $Name
+            Provider      = $provider
             Type          = $type
             Operation     = $operation
             ApiVersion    = $apiVersion

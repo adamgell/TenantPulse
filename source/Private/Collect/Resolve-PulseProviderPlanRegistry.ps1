@@ -103,7 +103,25 @@ function Resolve-PulseProviderPlanRegistry {
         param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym, $NetworkAbortState)
         Invoke-PulseGroupClosurePlan @PSBoundParameters
     }
+    $policyAssignmentPlan = {
+        param($Context, $Dataset, $ManifestEntry, $ProfileId, $TenantPseudonym, $NetworkAbortState)
+        Invoke-PulsePolicyAssignmentPlan @PSBoundParameters
+    }
     $registry = @{
+        deviceCompliancePolicies                         = @{
+            Command = $policyAssignmentPlan
+            RequiresNetwork = $true
+            SupportsNetworkAbortState = $true
+            Operations = @(ConvertTo-PulseProviderPlanOperations -Dataset 'deviceCompliancePolicies' `
+                    -Operations $script:PulseCompositeChildOperations['deviceCompliancePolicies'])
+        }
+        deviceConfigurations                             = @{
+            Command = $policyAssignmentPlan
+            RequiresNetwork = $true
+            SupportsNetworkAbortState = $true
+            Operations = @(ConvertTo-PulseProviderPlanOperations -Dataset 'deviceConfigurations' `
+                    -Operations $script:PulseCompositeChildOperations['deviceConfigurations'])
+        }
         subscribedSkus                                    = @{
             Command = $subscribedSkuLicensePlan
             RequiresNetwork = $true

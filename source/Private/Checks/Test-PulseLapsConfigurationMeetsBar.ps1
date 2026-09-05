@@ -14,8 +14,8 @@
     four LAPS CSP criteria below. DatasetMap.psd1 names
     Invoke-PulseEndpointSecurityPolicyPlan directly; it returns the resolved per-policy shape
     ({policyId, policyName, backsUpToEntra, hasSufficientComplexity,
-    hasSufficientLength, hasPostAuthAction}) or explicit gaps. This rule does not re-implement
-    Maester's opaque CSP choice-value suffix-matching itself, for the same reason
+    hasSufficientLength, hasPostAuthAction, assignmentIntent}) or explicit gaps. This rule
+    does not re-implement Maester's opaque CSP choice-value suffix-matching itself, for the same reason
     Test-PulseBitLockerFullDiskEncryption.ps1 does not (schema-version-dependent,
     unverifiable without live tenant access from inside this task).
 

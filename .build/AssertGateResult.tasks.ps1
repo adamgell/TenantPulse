@@ -534,7 +534,15 @@
 # missing-policy-id fail-closed regressions. Existing first/middle-auth expansion cases
 # also gained exact gap-ledger assertions without increasing the discovered test count.
 # 2517 is the real, measured `./build.ps1 -Tasks test` discovery total before this ratchet changed.
-$script:tenantPulseGateMinimumTests = 2517
+# 2517 -> 2998 after the product-program integration and authoritative policy-assignment
+# closeout. The final +17 are ten relevance regressions for unknown policy types/assignment
+# intent/deadlines, three bounded-cardinality cases, three malformed-deadline-shape cases,
+# and one QA contract-sync assertion. 2998 is the measured package-first
+# discovery total before this ratchet changed.
+# 2998 -> 3006 after the Endpoint Security assignment-certainty closeout:
+# +2 provider-plan malformed-envelope/target regressions, +3 BitLocker assignment-
+# certainty cases, and +3 LAPS assignment-certainty cases. NotRun remains forbidden.
+$script:tenantPulseGateMinimumTests = 3006
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)
