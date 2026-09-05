@@ -542,7 +542,10 @@
 # 2998 -> 3006 after the Endpoint Security assignment-certainty closeout:
 # +2 provider-plan malformed-envelope/target regressions, +3 BitLocker assignment-
 # certainty cases, and +3 LAPS assignment-certainty cases. NotRun remains forbidden.
-$script:tenantPulseGateMinimumTests = 3006
+# 3006 -> 3258 after the Conditional Access certainty closeout: +252 regressions for
+# effective scope lower bounds, grant combinations, current Microsoft admin-role coverage,
+# privacy-safe exception correlation, and deterministic policy evidence identities.
+$script:tenantPulseGateMinimumTests = 3258
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

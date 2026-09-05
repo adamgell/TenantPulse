@@ -750,8 +750,10 @@ jobs:
           # assignment relevance/cardinality/deadline-shape/contract-sync regressions.
           # 2998 -> 3006 after Endpoint Security assignment-certainty closeout:
           # +2 provider-plan and +6 BitLocker/LAPS assignment-certainty regressions.
+          # 3006 -> 3258 after Conditional Access certainty closeout: +252 effective-
+          # scope, grant, admin-role, privacy-alias, and evidence-identity regressions.
           # NotRun remains forbidden.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3006 -AllowedSkips $allowedSkips -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3258 -AllowedSkips $allowedSkips -AllowNotRun 0
 
   secret-scan:
     name: Secret/PII scan (gitleaks)

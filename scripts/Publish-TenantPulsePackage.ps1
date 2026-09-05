@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 3006 / -AllowNotRun 0 (see
+    # MinimumTests 3258 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -302,13 +302,15 @@ else {
     # assignment relevance/cardinality/deadline-shape/contract-sync regressions.
     # 2998 -> 3006 after Endpoint Security assignment-certainty closeout:
     # +2 provider-plan and +6 BitLocker/LAPS assignment-certainty regressions.
+    # 3006 -> 3258 after Conditional Access certainty closeout: +252 effective-
+    # scope, grant, admin-role, privacy-alias, and evidence-identity regressions.
     # NotRun remains forbidden.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 3006 `
+        -MinimumTests 3258 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {
