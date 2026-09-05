@@ -42,7 +42,7 @@ BeforeAll {
         grantControls = @{
             operator                = 'OR'
             builtInControls         = @('mfa')
-            authenticationStrength  = @{ id = 'strength-1'; displayName = 'Phishing-resistant MFA' }
+            authenticationStrength  = @{ id = 'strength-1'; displayName = 'Phishing-resistant MFA'; requirementsSatisfied = 'mfa'; allowedCombinations = @('fido2') }
         }
         sessionControls = @{
             signInFrequency   = @{ value = 4; type = 'hours' }
@@ -102,6 +102,23 @@ BeforeAll {
         grantControls = @{ operator = 'OR'; builtInControls = @('mfa') }
     }
 
+    $script:betaConditionPolicyHashtable = @{
+        id          = 'policy-beta-conditions'
+        displayName = 'Beta conditions'
+        state       = 'enabled'
+        conditions  = [ordered]@{
+            '@odata.type'  = '#microsoft.graph.conditionalAccessConditionSet'
+            clientAppTypes = @('all')
+            users           = @{ includeUsers = @('All') }
+            applications    = @{
+                includeApplications                         = @()
+                includeAuthenticationContextClassReferences = @('c1')
+            }
+            times           = @{ daysOfWeek = @('monday'); startTime = '09:00:00'; endTime = '17:00:00' }
+            futureCondition = @{ mode = 'include' }
+        }
+    }
+
     # ---- Task 4.1 post-review: consolidated fixture registry (Finding 3 / Important) ----
     # Every distinct normalization path this file exercises, named once, reused by BOTH the
     # dedicated per-scenario It blocks above/below AND the single consolidated SHAPE
@@ -112,6 +129,7 @@ BeforeAll {
         'policy-missing-conditions'        = @{ Raw = $script:policyMissingConditionsHashtable }
         'policy-missing-grantControls'     = @{ Raw = $script:policyMissingGrantControlsHashtable }
         'policy-missing-sessionControls'   = @{ Raw = $script:policyMissingSessionControlsHashtable }
+        'beta-condition-fields'            = @{ Raw = $script:betaConditionPolicyHashtable }
         'reportOnly-state'                 = @{ Raw = (New-CaPolicyWithState -State 'enabledForReportingButNotEnforced') }
         'disabled-state'                   = @{ Raw = (New-CaPolicyWithState -State 'disabled') }
         'absent-state-throws'              = @{ Raw = @{ id = 'policy-no-state'; displayName = 'No State' }; ExpectThrow = $true }
@@ -238,7 +256,7 @@ Describe 'ConvertTo-PulseCaPolicyView' {
         $result.conditions.users.includeAll | Should -BeFalse
     }
 
-    It 'normalizes grantControls.authenticationStrength into {id;displayName}' {
+    It 'normalizes grantControls.authenticationStrength into {id;displayName;requirementsSatisfied}' {
         $result = InModuleScope TenantPulse -ArgumentList $script:rawPolicyHashtable {
             param($raw)
             ConvertTo-PulseCaPolicyView -Policies $raw
@@ -246,7 +264,23 @@ Describe 'ConvertTo-PulseCaPolicyView' {
 
         $result.grants.authenticationStrength.id | Should -Be 'strength-1'
         $result.grants.authenticationStrength.displayName | Should -Be 'Phishing-resistant MFA'
+        $result.grants.authenticationStrength.requirementsSatisfied | Should -Be 'mfa'
+        $result.grants.authenticationStrength.allowedCombinations | Should -Be @('fido2')
         $result.grants.builtInControls | Should -Contain 'mfa'
+    }
+
+    It 'preserves authentication-context targeting, time presence, and non-null unknown beta conditions in both shapes' {
+        foreach ($raw in @($script:betaConditionPolicyHashtable, (ConvertTo-PSObjectShape -Value $script:betaConditionPolicyHashtable))) {
+            $result = InModuleScope TenantPulse -ArgumentList $raw {
+                param($raw)
+                ConvertTo-PulseCaPolicyView -Policies $raw
+            }
+
+            $result.conditions.apps.includeAuthenticationContextClassReferences | Should -Be @('c1')
+            $result.conditions.timesPresent | Should -BeTrue
+            $result.conditions.unknownConditionPropertyNames | Should -Be @('futureCondition')
+            $result.conditions.unknownConditionPropertyCount | Should -Be 1
+        }
     }
 
     It 'authenticationStrength is null when grantControls has no authenticationStrength node' {
@@ -306,13 +340,22 @@ Describe 'ConvertTo-PulseCaPolicyView' {
         $result.session.signInFrequency | Should -Not -BeNullOrEmpty
     }
 
-    It 'flattens conditions.clientApplications (Task 4.4, TP.ENT.0024) into includeApplications/excludeApplications, distinct from conditions.apps, in both shapes (post-review F3: this is the genuine shape-neutrality coverage - the populated case previously only ever exercised the hashtable shape)' {
+    It 'flattens the documented workload-identity clientApplications shape, distinct from conditions.apps, in both shapes' {
+        $includedServicePrincipalId = [guid]::ParseExact(('6' * 32), 'N').ToString('D')
+        $excludedServicePrincipalId = [guid]::ParseExact(('7' * 32), 'N').ToString('D')
         $rawHashtable = @{
             id          = 'policy-workload'
             displayName = 'Workload Identity CA'
             state       = 'enabled'
             conditions  = @{
-                clientApplications = @{ includeApplications = @('11111111-1111-1111-1111-111111111111'); excludeApplications = @('22222222-2222-2222-2222-222222222222') }
+                clientApplications = @{
+                    includeServicePrincipals        = @($includedServicePrincipalId)
+                    excludeServicePrincipals        = @($excludedServicePrincipalId)
+                    includeAgentIdServicePrincipals = @($includedServicePrincipalId)
+                    excludeAgentIdServicePrincipals = @($excludedServicePrincipalId)
+                    agentIdServicePrincipalFilter = @{ mode = 'exclude'; rule = 'customSecurityAttributes.Project -eq \"Legacy\"' }
+                    servicePrincipalFilter   = @{ mode = 'include'; rule = 'customSecurityAttributes.Project -eq "Tier0"' }
+                }
             }
         }
         foreach ($raw in @($rawHashtable, (ConvertTo-PSObjectShape -Value $rawHashtable))) {
@@ -321,8 +364,14 @@ Describe 'ConvertTo-PulseCaPolicyView' {
                 ConvertTo-PulseCaPolicyView -Policies $raw
             }
 
-            $result.conditions.clientApplications.includeApplications | Should -Be @('11111111-1111-1111-1111-111111111111')
-            $result.conditions.clientApplications.excludeApplications | Should -Be @('22222222-2222-2222-2222-222222222222')
+            $result.conditions.clientApplications.includeServicePrincipals | Should -Be @($includedServicePrincipalId)
+            $result.conditions.clientApplications.excludeServicePrincipals | Should -Be @($excludedServicePrincipalId)
+            $result.conditions.clientApplications.servicePrincipalFilter.mode | Should -Be 'include'
+            $result.conditions.clientApplications.servicePrincipalFilter.rule | Should -Match 'Tier0'
+            $result.conditions.clientApplications.includeAgentIdServicePrincipals | Should -Be @($includedServicePrincipalId)
+            $result.conditions.clientApplications.excludeAgentIdServicePrincipals | Should -Be @($excludedServicePrincipalId)
+            $result.conditions.clientApplications.agentIdServicePrincipalFilter.mode | Should -Be 'exclude'
+            $result.conditions.clientApplications.agentIdServicePrincipalFilter.rule | Should -Match 'Legacy'
             $result.conditions.apps.includeApplications.Count | Should -Be 0
         }
     }
@@ -333,8 +382,49 @@ Describe 'ConvertTo-PulseCaPolicyView' {
                 param($raw)
                 ConvertTo-PulseCaPolicyView -Policies $raw
             }
-            ($null -eq $result.conditions.clientApplications.includeApplications) | Should -Be $false -Because 'the field itself must be a real (never-null) empty array, not $null'
-            @($result.conditions.clientApplications.includeApplications).Count | Should -Be 0
+            ($null -eq $result.conditions.clientApplications.includeServicePrincipals) | Should -Be $false -Because 'the field itself must be a real (never-null) empty array, not $null'
+            @($result.conditions.clientApplications.includeServicePrincipals).Count | Should -Be 0
+            @($result.conditions.clientApplications.excludeServicePrincipals).Count | Should -Be 0
+            $result.conditions.clientApplications.servicePrincipalFilter | Should -BeNullOrEmpty
+            @($result.conditions.clientApplications.includeAgentIdServicePrincipals).Count | Should -Be 0
+            @($result.conditions.clientApplications.excludeAgentIdServicePrincipals).Count | Should -Be 0
+            $result.conditions.clientApplications.agentIdServicePrincipalFilter | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'preserves current and deprecated beta device selectors plus agent identity risk in both shapes' {
+        $rawHashtable = @{
+            id          = 'policy-device-conditions'
+            displayName = 'Device conditions'
+            state       = 'enabled'
+            conditions  = @{
+                devices = @{
+                    includeDevices = @('All')
+                    excludeDevices = @('DomainJoined')
+                    includeDeviceStates = @('All')
+                    excludeDeviceStates = @('Compliant')
+                }
+                deviceStates = @{
+                    includeStates = @('All')
+                    excludeStates = @('Compliant')
+                }
+                agentIdRiskLevels = @('high')
+            }
+        }
+        foreach ($raw in @($rawHashtable, (ConvertTo-PSObjectShape -Value $rawHashtable))) {
+            $result = InModuleScope TenantPulse -ArgumentList $raw {
+                param($raw)
+                ConvertTo-PulseCaPolicyView -Policies $raw
+            }
+
+            $result.conditions.devices.includeDevices | Should -Be @('All')
+            $result.conditions.devices.excludeDevices | Should -Be @('DomainJoined')
+            $result.conditions.devices.includeDeviceStates | Should -Be @('All')
+            $result.conditions.devices.excludeDeviceStates | Should -Be @('Compliant')
+            $result.conditions.deviceStates.includeStates | Should -Be @('All')
+            $result.conditions.deviceStates.excludeStates | Should -Be @('Compliant')
+            $result.conditions.agentIdRisk | Should -Be @('high')
+            $result.conditions.agentIdRiskPresent | Should -BeTrue
         }
     }
 

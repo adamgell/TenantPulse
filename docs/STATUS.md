@@ -598,7 +598,9 @@ categories, arithmetic below matching the findings JSON exactly:
   `earned:6.0, possible:18.0, percent:33.3`.
 
 **Per-check status, all 28** (`status` / `reason`, `-Redact`ed evidence, tenant field
-`tp-5de2c5ec...` pseudonym, never the raw GUID):
+`tp-5de2c5ec...` pseudonym, never the raw GUID). The role counts below are preserved verbatim
+from this historical 2026-08-16 tenant run under Microsoft's then-recorded nine-role guidance;
+the current evaluator uses Microsoft's 14-role minimum-admin baseline:
 
 | Id | Status | Reason (verbatim, truncated where long) |
 |---|---|---|

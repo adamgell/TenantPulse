@@ -102,6 +102,7 @@ BeforeAll {
 
     $script:bg1Guid = '11111111-1111-1111-1111-111111111111'
     $script:bg2Guid = '22222222-2222-2222-2222-222222222222'
+    $script:bg3Guid = 'abcdefab-cdef-abcd-efab-cdefabcdefab'
 }
 
 Describe 'TP.ENT.0003 - Break-glass accounts exist and are excluded from Conditional Access' {
@@ -150,6 +151,18 @@ Describe 'TP.ENT.0003 - Break-glass accounts exist and are excluded from Conditi
         $finding.evidence[0].identity | Should -Be $script:bg1Guid
     }
 
+    It 'Fail with one evidence row when the same resolvable break-glass account is declared repeatedly' {
+        $policies = @(New-PulseCaPolicy -DisplayName 'MFA All Users' -IncludeUsers @('All') -ExcludeUsers @())
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0003' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = $policies }
+            @{ Name = 'directoryRoleAssignments'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
+        ) -Context @{ BreakGlassAccounts = @($script:bg3Guid, $script:bg3Guid.ToUpperInvariant()) }
+
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Be $script:bg3Guid
+    }
+
     It 'Pass: a disabled/report-only policy that does not exclude the break-glass account is ignored (only enabled policies count)' {
         $policies = @(
             New-PulseCaPolicy -DisplayName 'Report Only Policy' -State 'enabledForReportingButNotEnforced' -ExcludeUsers @()
@@ -177,15 +190,47 @@ Describe 'TP.ENT.0003 - Break-glass accounts exist and are excluded from Conditi
 
     It 'Warn: a declared break-glass account that is not GUID-shaped cannot be resolved against excludeUsers' {
         $policies = @(New-PulseCaPolicy -DisplayName 'Block Legacy Auth' -ExcludeUsers @())
+        $rawAccount = 'breakglass@contoso.onmicrosoft.com'
 
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0003' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = $policies }
             @{ Name = 'directoryRoleAssignments'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
-        ) -Context @{ BreakGlassAccounts = @('breakglass@contoso.onmicrosoft.com') }
+        ) -Context @{ BreakGlassAccounts = @($rawAccount) }
 
         $finding.status | Should -Be 'Warn'
         $finding.reason | Should -Match 'cannot be resolved'
+        $finding.evidence[0].identity | Should -Match '^malformed-declared-account:[0-9a-f]{24}$'
         $finding.evidence[0].detail.issue | Should -Match 'cannot resolve format'
+        ($finding | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape($rawAccount))
+    }
+
+    It 'Warn: whitespace around a canonical GUID remains malformed and cannot be normalized into an approved exclusion' {
+        $rawAccount = "  $($script:bg1Guid)  "
+        $policies = @(New-PulseCaPolicy -DisplayName 'Block Legacy Auth' -ExcludeUsers @($script:bg1Guid))
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0003' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = $policies }
+            @{ Name = 'directoryRoleAssignments'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
+        ) -Context @{ BreakGlassAccounts = @($rawAccount) }
+
+        $finding.status | Should -Be 'Warn'
+        $finding.reason | Should -Match 'not GUID-shaped'
+        $finding.evidence | Should -HaveCount 1
+        $finding.evidence[0].identity | Should -Match '^malformed-declared-account:[0-9a-f]{24}$'
+        ($finding | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape($rawAccount))
+    }
+
+    It 'Warn with one privacy alias when the same malformed account is declared repeatedly' {
+        $rawAccount = 'breakglass@contoso.onmicrosoft.com'
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0003' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseCaPolicy -DisplayName 'MFA All Users' -ExcludeUsers @()) }
+            @{ Name = 'directoryRoleAssignments'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @() }
+        ) -Context @{ BreakGlassAccounts = @($rawAccount, $rawAccount.ToUpperInvariant()) }
+
+        $finding.status | Should -Be 'Warn'
+        $finding.evidence.Count | Should -Be 1
+        $finding.evidence[0].identity | Should -Match '^malformed-declared-account:[0-9a-f]{24}$'
+        ($finding | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape($rawAccount))
     }
 
     It 'Fail (not Warn): a genuine exclusion gap on a resolvable GUID account wins over a format warning on a different malformed account' {
@@ -197,6 +242,7 @@ Describe 'TP.ENT.0003 - Break-glass accounts exist and are excluded from Conditi
         ) -Context @{ BreakGlassAccounts = @($script:bg1Guid, 'not-a-guid@contoso.com') }
 
         $finding.status | Should -Be 'Fail'
+        ($finding | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape('not-a-guid@contoso.com'))
     }
 
     # ---- post-review, M2: include-scope exemption ----

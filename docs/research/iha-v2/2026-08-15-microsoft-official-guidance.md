@@ -36,7 +36,7 @@ Cross-cutting note on app-only feasibility: everything below marked "checkable" 
 **Per-policy how-to pages** (each one is effectively a spec for one automated check):
 
 - Require MFA for admins: https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-old-require-mfa-admin (now points to phishing-resistant variant)
-- Require phishing-resistant MFA for admins: https://learn.microsoft.com/en-us/entra/identity/conditional-access/how-to-policy-phish-resistant-admin-mfa — names the minimum 9 roles to cover (Global Admin, Application Admin, Authentication Admin, Billing Admin, Cloud App Admin, CA Admin, Exchange Admin, Helpdesk Admin, Password Admin)
+- Require phishing-resistant MFA for admins: https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-admin-phish-resistant-mfa — names the current minimum 14 roles to cover (Global Admin, Application Admin, Authentication Admin, Billing Admin, Cloud App Admin, CA Admin, Exchange Admin, Helpdesk Admin, Password Admin, Privileged Authentication Admin, Privileged Role Admin, Security Admin, SharePoint Admin, User Admin)
 - Block legacy authentication: https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-block-legacy-authentication
 - Require MFA for all users: https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-all-users-mfa-strength
 - Require device compliance: https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-all-users-device-compliance
@@ -58,7 +58,7 @@ Cross-cutting note on app-only feasibility: everything below marked "checkable" 
 **Checkable claims (app-only, `Policy.Read.All`; v1.0):**
 
 - Enumerate policies: `GET v1.0/identity/conditionalAccess/policies` (https://learn.microsoft.com/en-us/graph/api/conditionalaccessroot-list-policies?view=graph-rest-1.0). From the returned objects you can automate:
-  - An enabled (`state == "enabled"`, not reportOnly) policy requires MFA (or authenticationStrength with phishing-resistant combos) for admin directory roles covering at least the 9 named role IDs.
+  - An enabled (`state == "enabled"`, not reportOnly) policy requires MFA (or authenticationStrength with phishing-resistant combos) for admin directory roles covering all 14 currently named role IDs.
   - An enabled policy with `conditions.clientAppTypes` including `exchangeActiveSync`/`other` and `grantControls.builtInControls == ["block"]` (block legacy auth).
   - MFA-for-all-users policy exists; device-compliance/hybrid-join grant exists; no enabled policy blocks all users + all apps without exclusions.
   - Break-glass hygiene (heuristic): at least one account/group excluded from every blocking policy; cross-reference with permanent Global Admins.

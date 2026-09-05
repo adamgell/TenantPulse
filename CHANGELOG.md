@@ -27,6 +27,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Conditional Access findings no longer promote policy presence to tenant-wide protection
+  without evaluating effective user, resource, client-app, platform, location, risk,
+  current and deprecated device, authentication-flow, workload/agent-identity, and grant
+  semantics. Legacy-auth requires both legacy client buckets without letting an unknown
+  ancillary condition broaden a recognized bucket. MFA checks distinguish mandatory grants
+  from OR alternatives; a custom strength establishes generic MFA only when Graph reports
+  `requirementsSatisfied=mfa`, and never establishes phishing resistance from that field alone.
+  Unknown/future controls and invalid MFA/strength, block-sibling, password-change, or risk-
+  remediation combinations remain indeterminate. Role checks use Microsoft's current 14-role
+  minimum-admin baseline and treat undeclared user, group, and guest/external carve-outs as
+  indeterminate, while canonical approved account exceptions remain explicit, deduplicated
+  evidence. Beta authentication-context targets and time conditions retain known narrow-scope
+  lower bounds, and any unrecognized non-null condition fails closed. Cross-tenant
+  defaults now validate singleton cardinality and distinguish a decisive full block or
+  scoped allowlist from a narrow denylist. Workload-identity awareness validates documented
+  service-principal and beta agent-identity selectors and filters, reports malformed policies
+  separately, and does not count the tenant-wide sentinel as one principal. Authentication-
+  flow `none` and unknown enum values retain distinct meanings; malformed operator-supplied
+  account values use operator-keyed privacy-safe evidence aliases rather than raw input.
 - Endpoint Security BitLocker and LAPS composites now retain complete assignment-intent
   classification. Malformed or unknown assignment targets produce a policy-scoped,
   sanitized `InvalidProviderData` gap and a `Partial` dataset, so unresolved targeting can

@@ -80,7 +80,8 @@ BeforeAll {
             state          = $State
             conditions     = [pscustomobject]@{
                 clientAppTypes = @('exchangeActiveSync', 'other')
-                users          = [pscustomobject]@{ excludeUsers = $ExcludeUsers }
+                users          = [pscustomobject]@{ includeUsers = @('All'); excludeUsers = $ExcludeUsers }
+                applications   = [pscustomobject]@{ includeApplications = @('All'); excludeApplications = @() }
             }
             grantControls  = [pscustomobject]@{ builtInControls = @('block') }
         }
@@ -104,12 +105,30 @@ Describe 'TP.ENT.0004 - Legacy authentication is blocked by an enforced Conditio
         $finding.evidence.Count | Should -Be 1
     }
 
+    It 'does not promote malformed or alternative block grants to enforced legacy protection' -ForEach @(
+        @{ Name = 'invalid operator'; GrantControls = [pscustomobject]@{ operator = 'XOR'; builtInControls = @('block') } }
+        @{ Name = 'OR sibling'; GrantControls = [pscustomobject]@{ operator = 'OR'; builtInControls = @('block', 'mfa') } }
+        @{ Name = 'missing-operator sibling'; GrantControls = [pscustomobject]@{ builtInControls = @('block', 'mfa') } }
+    ) {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.grantControls = $GrantControls
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable' -Because $Name
+    }
+
     It 'Pass (post-review, L1): clientAppTypes "all" covers legacy protocols too, not just itemized exchangeActiveSync/other' {
         $allAppsPolicy = [pscustomobject]@{
             id            = 'ca-all-apps-block'
             displayName   = 'Block All Client App Types'
             state         = 'enabled'
-            conditions    = [pscustomobject]@{ clientAppTypes = @('all') }
+            conditions    = [pscustomobject]@{
+                clientAppTypes = @('all')
+                users = [pscustomobject]@{ includeUsers = @('All') }
+                applications = [pscustomobject]@{ includeApplications = @('All'); excludeApplications = @() }
+            }
             grantControls = [pscustomobject]@{ builtInControls = @('block') }
         }
 
@@ -118,6 +137,93 @@ Describe 'TP.ENT.0004 - Legacy authentication is blocked by an enforced Conditio
         )
 
         $finding.status | Should -Be 'Pass'
+    }
+
+    It 'Fail: blocking only exchangeActiveSync leaves the other legacy-client bucket open' {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions.clientAppTypes = @('exchangeActiveSync')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: an unknown future client-app type cannot broaden a known EAS-only legacy block' {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions.clientAppTypes = @('exchangeActiveSync', 'futureClient')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'other'
+    }
+
+    It 'Fail: blocking only other leaves Exchange ActiveSync open' {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions.clientAppTypes = @('other')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'does not let an incomplete ancillary condition broaden a recognized legacy client bucket' -ForEach @(
+        @{ ClientType = 'exchangeActiveSync'; MissingBucket = 'other' }
+        @{ ClientType = 'other'; MissingBucket = 'exchangeActiveSync' }
+    ) {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions.clientAppTypes = @($ClientType)
+        $policy.conditions | Add-Member -NotePropertyName authenticationFlows -NotePropertyValue @{ transferMethods = 'futureTransferMethod' }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match $MissingBucket
+    }
+
+    It 'preserves unknown grant controls as incomplete candidate evidence' -ForEach @(
+        @{ Control = 'unknownFutureValue' }
+        @{ Control = 'futureGrantControl' }
+    ) {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.grantControls = [pscustomobject]@{ builtInControls = @($Control) }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.evidence[0].detail.blockRequirementReason | Should -Be 'unresolved-grant-control'
+    }
+
+    It 'Pass: separate complete policies may cover the two legacy-client buckets as a union' {
+        $eas = New-PulseLegacyAuthPolicy -DisplayName 'Block EAS'
+        $eas.conditions.clientAppTypes = @('exchangeActiveSync')
+        $other = New-PulseLegacyAuthPolicy -DisplayName 'Block Other'
+        $other.conditions.clientAppTypes = @('other')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($eas, $other) }
+        )
+        $finding.status | Should -Be 'Pass'
+    }
+
+    It 'Fail: an iOS-only legacy block does not establish universal legacy-client coverage' {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions | Add-Member -NotePropertyName platforms -NotePropertyValue @{ includePlatforms = @('iOS') }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'NotApplicable: absent clientAppTypes is incomplete evidence for legacy-client coverage' {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions.PSObject.Properties.Remove('clientAppTypes')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+        $finding.status | Should -Be 'NotApplicable'
     }
 
     It 'Fail: policy exists but is report-only, not enforced' {
@@ -135,6 +241,49 @@ Describe 'TP.ENT.0004 - Legacy authentication is blocked by an enforced Conditio
         )
 
         $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: a legacy-auth block scoped to one user and one application is not tenant-wide protection' {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions.users.includeUsers = @('11111111-1111-1111-1111-111111111111')
+        $policy.conditions.applications.includeApplications = @('22222222-2222-2222-2222-222222222222')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'tenant-wide'
+    }
+
+    It 'Fail: excluding one application leaves legacy authentication unblocked for that resource' {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions.applications.excludeApplications = @('33333333-3333-3333-3333-333333333333')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: an application filter narrows an otherwise all-resource legacy-auth block' {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions.applications | Add-Member -NotePropertyName applicationFilter -NotePropertyValue @{ mode = 'exclude'; rule = 'CustomSecurityAttribute.Apps_Project -eq "Legacy"' }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'NotApplicable: missing application scope cannot be promoted to tenant-wide protection or a known gap' {
+        $policy = New-PulseLegacyAuthPolicy
+        $policy.conditions.PSObject.Properties.Remove('applications')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'application scope'
     }
 
     It 'gate-degraded: NotApplicable when conditionalAccessPolicies was skipped (no EntraP1 data)' {
@@ -171,6 +320,27 @@ Describe 'TP.ENT.0004 - Legacy authentication is blocked by an enforced Conditio
         $exclusionEntry.detail.PSObject.Properties.Name | Should -Not -Contain 'reportOnlyProtectionWarning'
     }
 
+    It 'Fail: an active Global Administrator is not an accepted direct-user exception unless explicitly declared' {
+        $activeAdminId = [guid]::ParseExact(('4' * 32), 'N').ToString('D')
+        $policy = New-PulseLegacyAuthPolicy -ExcludeUsers @($activeAdminId)
+
+        $finding = InModuleScope TenantPulse -ArgumentList $policy, $activeAdminId {
+            param($policy, $activeAdminId)
+            Test-PulseLegacyAuthBlocked -Datasets @{
+                conditionalAccessPolicies = @($policy)
+                directoryRoleAssignments = @(
+                    @{
+                        roleDefinitionId = '62e90394-69f5-4237-9190-012177145e10'
+                        principalId      = $activeAdminId
+                    }
+                )
+            }
+        }
+
+        $finding.status | Should -Be 'Fail'
+        $finding.reason | Should -Match 'tenant-wide'
+    }
+
     It 'report-only exclusion is surfaced but distinguished from enforced honoring - never counted as protection' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseLegacyAuthPolicy -State 'enabledForReportingButNotEnforced' -ExcludeUsers @($script:bgGuid)) }
@@ -200,14 +370,46 @@ Describe 'TP.ENT.0004 - Legacy authentication is blocked by an enforced Conditio
     # ---- dual-review fix round: completeness fold-in hostile cases ----
 
     It 'a malformed (non-GUID) declared account is surfaced in evidence even though it can never match any policy' {
+        $rawAccount = 'not-a-guid@contoso.com'
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulseLegacyAuthPolicy) }
-        ) -Context @{ BreakGlassAccounts = @('not-a-guid@contoso.com') }
+        ) -Context @{ BreakGlassAccounts = @($rawAccount) }
 
         $finding.status | Should -Be 'Pass'
-        $malformedEntry = $finding.evidence | Where-Object { $_.identity -eq 'not-a-guid@contoso.com' }
+        $malformedEntry = $finding.evidence | Where-Object { $_.identity -like 'malformed-declared-account:*' }
         $malformedEntry | Should -Not -BeNullOrEmpty
         $malformedEntry.detail.issue | Should -Match 'not GUID-shaped'
+        ($finding | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape($rawAccount))
+    }
+
+    It 'Fail: a malformed declared account cannot legitimize the same malformed policy exclusion' {
+        $malformed = 'breakglass@contoso.com'
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                New-PulseLegacyAuthPolicy -ExcludeUsers @($malformed)
+            ) }
+        ) -Context @{ BreakGlassAccounts = @($malformed) }
+
+        $finding.status | Should -Be 'Fail'
+        $malformedEntry = @($finding.evidence | Where-Object { $_.identity -like 'malformed-declared-account:*' })
+        $malformedEntry.Count | Should -Be 1
+        $malformedEntry[0].detail.issue | Should -Match 'not GUID-shaped'
+        ($finding | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape($malformed))
+    }
+
+    It 'Fail: a parseable but noncanonical declared account cannot legitimize the same malformed policy exclusion' {
+        $nonCanonical = "{$($script:bgGuid)}"
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0004' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(
+                New-PulseLegacyAuthPolicy -ExcludeUsers @($nonCanonical)
+            ) }
+        ) -Context @{ BreakGlassAccounts = @($nonCanonical) }
+
+        $finding.status | Should -Be 'Fail'
+        $malformedEntry = @($finding.evidence | Where-Object { $_.identity -like 'malformed-declared-account:*' })
+        $malformedEntry.Count | Should -Be 1
+        $malformedEntry[0].detail.issue | Should -Match 'not GUID-shaped'
+        ($finding | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape($nonCanonical))
     }
 
     It 'a group-exclusion-resolution note is surfaced when the operator declared something and group exclusions are unresolved' {
@@ -261,9 +463,10 @@ Describe 'TP.ENT.0004 - Legacy authentication is blocked by an enforced Conditio
         # No-match identifier gets no evidence entry at all (unchanged prior behavior).
         ($finding.evidence | Where-Object { $_.identity -eq $noMatchGuid }) | Should -BeNullOrEmpty
 
-        $malformedEntry = $finding.evidence | Where-Object { $_.identity -eq $malformed }
+        $malformedEntry = $finding.evidence | Where-Object { $_.identity -like 'malformed-declared-account:*' }
         $malformedEntry | Should -Not -BeNullOrEmpty
         $malformedEntry.detail.issue | Should -Match 'not GUID-shaped'
+        ($finding | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape($malformed))
 
         $noteEntry = $finding.evidence | Where-Object { $_.identity -eq 'group-exclusion-resolution' }
         $noteEntry | Should -Not -BeNullOrEmpty

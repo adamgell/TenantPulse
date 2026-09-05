@@ -9,7 +9,7 @@ BeforeAll {
     }
     Import-Module (Join-Path $built.FullName 'TenantPulse.psd1') -Force
 
-    $script:allNineRoles = @(
+    $script:legacyNineRoles = @(
         '62e90394-69f5-4237-9190-012177145e10'
         '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
         'c4e39bd9-1100-46d3-8c65-fb160da0071f'
@@ -20,6 +20,15 @@ BeforeAll {
         '729827e3-9c14-49f7-bb1b-9608f156bbb8'
         '966707d0-3269-4727-9be2-8c3a10f19b9d'
     )
+    $script:allRequiredRoles = @(
+        $script:legacyNineRoles
+        '7be44c8a-adaf-4e2a-84d6-ab2649e08a13'
+        'e8611ab8-c189-46e8-94e1-60213ab1f814'
+        '194ae4cb-b126-40b2-bd5b-6091b380977d'
+        'f28a1f50-f6e7-4571-818b-6a12f2af6b6c'
+        'fe930be7-5e62-47db-91af-98c3a49a38b1'
+    )
+    $script:customStrengthId = @('11111111', '2222', '3333', '4444', '555555555555') -join '-'
 
     function script:ConvertTo-PSObjectShape {
         param($Value)
@@ -89,14 +98,18 @@ BeforeAll {
         param(
             [string] $DisplayName = 'Phishing-Resistant MFA For Admins',
             [string] $State = 'enabled',
-            [string[]] $IncludeRoles = $script:allNineRoles,
+            [string[]] $IncludeRoles = $script:allRequiredRoles,
             [string] $StrengthId = '00000000-0000-0000-0000-000000000004'
         )
         @{
             id            = "ca-$DisplayName"
             displayName   = $DisplayName
             state         = $State
-            conditions    = @{ users = @{ includeRoles = $IncludeRoles } }
+            conditions    = @{
+                clientAppTypes = @('all')
+                users = @{ includeRoles = $IncludeRoles }
+                applications = @{ includeApplications = @('All'); excludeApplications = @() }
+            }
             grantControls = @{ authenticationStrength = @{ id = $StrengthId; displayName = 'Phishing-resistant MFA' } }
         }
     }
@@ -108,12 +121,40 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
         ($catalog | Where-Object { $_.Id -eq 'TP.ENT.0018' }) | Should -Not -BeNullOrEmpty
     }
 
-    It 'Pass: an enforced policy on all 9 roles using the built-in phishing-resistant strength' {
+    It 'Pass: an enforced policy on all 14 roles using the built-in phishing-resistant strength' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulsePhishResistantPolicy) }
         )
 
         $finding.status | Should -Be 'Pass'
+    }
+
+    It 'uses the collection ordinal as evidence identity when a covering policy id is blank' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.id = ''
+        $serviceAccountId = [guid]::ParseExact(('6' * 32), 'N').ToString('D')
+        $policy.conditions.users.excludeUsers = @($serviceAccountId)
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        ) -Context @{ ServiceAccounts = @($serviceAccountId) }
+
+        $finding.status | Should -Be 'Pass'
+        $covering = @($finding.evidence | Where-Object { $_.detail.authenticationStrengthId -and -not $_.detail.classification })
+        $carveOut = @($finding.evidence | Where-Object { $_.detail.classification -eq 'role-scope-carve-outs' })
+        $covering | Should -HaveCount 1
+        $carveOut | Should -HaveCount 1
+        $covering[0].identity | Should -Be 'conditional-access-policy:0'
+        $carveOut[0].identity | Should -Be $covering[0].identity
+    }
+
+    It 'Fail: the superseded nine-role set does not satisfy Microsoft''s current 14-role minimum' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulsePhishResistantPolicy -IncludeRoles $script:legacyNineRoles) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence.Count | Should -Be 5
     }
 
     It 'exercises the same rule via a value that was PSObject-shaped before Write-PulseDataset (the fixture harness always re-materializes to hashtable before the rule runs - see ConvertTo-PulseCaPolicyView.Tests.ps1 for genuine shape-neutrality coverage at the view layer)' {
@@ -125,22 +166,68 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
         $finding.status | Should -Be 'Pass'
     }
 
-    It 'Fail (post-review, F1): a fabricated non-built-in strength id is never trusted as phishing-resistant, and is surfaced in evidence as custom-or-unrecognized' {
+    It 'NotApplicable (post-review, F1): a custom strength is not trusted as phishing-resistant until its combinations are collected' {
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulsePhishResistantPolicy -StrengthId '00000000-0000-0000-0000-000000000005') }
         )
 
-        $finding.status | Should -Be 'Fail'
-        # 9 missing-role evidence rows (nothing counts toward coverage) + 1
-        # custom-strength evidence row for the surfaced-but-not-trusted policy.
-        $finding.evidence.Count | Should -Be 10
+        $finding.status | Should -Be 'NotApplicable'
+        # The custom-strength policy could cover every role, so the result is indeterminate
+        # and only the unresolved policy is evidence; the roles are not asserted missing.
+        $finding.evidence.Count | Should -Be 1
         ($finding.evidence | Where-Object { $_.detail.classification -eq 'custom-or-unrecognized-strength' }).Count | Should -Be 1
         $finding.reason | Should -Match 'custom/unrecognized authentication strength'
     }
 
+    It 'correlates a blank-id custom-strength policy to its ordinal identity without duplicate incomplete-grant evidence' {
+        $policy = New-PulsePhishResistantPolicy -StrengthId $script:customStrengthId
+        $policy.id = ''
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.evidence | Should -HaveCount 1
+        $finding.evidence[0].detail.classification | Should -Be 'custom-or-unrecognized-strength'
+        $finding.evidence[0].identity | Should -Be 'conditional-access-policy:0'
+    }
+
+    It 'uses the same ordinal identity for blank-id custom-strength and independent incomplete-scope evidence' {
+        $policy = New-PulsePhishResistantPolicy -StrengthId $script:customStrengthId
+        $policy.id = ''
+        $policy.conditions.Remove('applications')
+
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $custom = @($finding.evidence | Where-Object { $_.detail.classification -eq 'custom-or-unrecognized-strength' })
+        $incomplete = @($finding.evidence | Where-Object { $_.detail.classification -eq 'incomplete-policy-evidence' })
+        $custom | Should -HaveCount 1
+        $incomplete | Should -HaveCount 1
+        $custom[0].identity | Should -Be 'conditional-access-policy:0'
+        $incomplete[0].identity | Should -Be $custom[0].identity
+    }
+
+    It 'NotApplicable with independent evidence when an unknown built-in grant control could hide coverage' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.grantControls = @{ builtInControls = @('futureGrantControl') }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $incomplete = @($finding.evidence | Where-Object { $_.detail.classification -eq 'incomplete-policy-evidence' })
+        $incomplete.Count | Should -Be 1
+        $incomplete[0].detail.grantReason | Should -Be 'unresolved-grant-control'
+        @($finding.evidence | Where-Object { $_.detail.classification -eq 'custom-or-unrecognized-strength' }).Count | Should -Be 0
+    }
+
     It 'Pass: a builtin policy completes coverage on its own; a sibling custom-strength policy is still surfaced in evidence, not silently omitted' {
-        $custom = New-PulsePhishResistantPolicy -DisplayName 'Custom Strength For Admins' -StrengthId '11111111-2222-3333-4444-555555555555'
-        $builtin = New-PulsePhishResistantPolicy -DisplayName 'Builtin For All 9 Roles'
+        $custom = New-PulsePhishResistantPolicy -DisplayName 'Custom Strength For Admins' -StrengthId $script:customStrengthId
+        $builtin = New-PulsePhishResistantPolicy -DisplayName 'Builtin For All 14 Roles'
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($custom, $builtin) }
         )
@@ -150,12 +237,45 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
         $finding.reason | Should -Match 'custom/unrecognized authentication strength'
     }
 
+    It 'Pass: an enforced custom-strength binding is surfaced even when its resource scope is known Narrow' {
+        $custom = New-PulsePhishResistantPolicy -DisplayName 'Narrow Custom Strength' -StrengthId $script:customStrengthId
+        $custom.conditions.applications.includeApplications = @('33333333-3333-3333-3333-333333333333')
+        $builtin = New-PulsePhishResistantPolicy -DisplayName 'Builtin Coverage'
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($custom, $builtin) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $customEvidence = @($finding.evidence | Where-Object { $_.detail.classification -eq 'custom-or-unrecognized-strength' })
+        $customEvidence.Count | Should -Be 1
+        $customEvidence[0].identity | Should -Be $custom.id
+        $customEvidence[0].detail.authenticationStrengthId | Should -Be $script:customStrengthId
+    }
+
+    It 'Pass: a disabled custom-strength binding is still surfaced as bounded dataset evidence without changing posture' {
+        $disabledCustom = New-PulsePhishResistantPolicy -DisplayName 'Disabled Custom Strength' -State 'disabled' -StrengthId $script:customStrengthId
+        $builtin = New-PulsePhishResistantPolicy -DisplayName 'Builtin Coverage'
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($disabledCustom, $builtin) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $customEvidence = @($finding.evidence | Where-Object { $_.detail.classification -eq 'custom-or-unrecognized-strength' })
+        $customEvidence.Count | Should -Be 1
+        $customEvidence[0].identity | Should -Be $disabledCustom.id
+        $customEvidence[0].detail.state | Should -Be 'disabled'
+    }
+
     It 'Fail: generic MFA (builtInControls) does not satisfy this higher bar even though it satisfies TP.ENT.0005' {
         $policy = @{
             id            = 'ca-generic-mfa'
             displayName   = 'MFA For Admins'
             state         = 'enabled'
-            conditions    = @{ users = @{ includeRoles = $script:allNineRoles } }
+            conditions    = @{
+                clientAppTypes = @('all')
+                users = @{ includeRoles = $script:allRequiredRoles }
+                applications = @{ includeApplications = @('All'); excludeApplications = @() }
+            }
             grantControls = @{ builtInControls = @('mfa') }
         }
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
@@ -174,8 +294,8 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
         $finding.status | Should -Be 'Fail'
     }
 
-    It 'Fail: one of the 9 roles is not covered' {
-        $partialRoles = @($script:allNineRoles | Select-Object -First 8)
+    It 'Fail: one of the 14 roles is not covered' {
+        $partialRoles = @($script:allRequiredRoles | Select-Object -First 13)
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @(New-PulsePhishResistantPolicy -IncludeRoles $partialRoles) }
         )
@@ -190,7 +310,11 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
             id            = 'ca-phish-all-minus-ga'
             displayName   = 'Phishing-Resistant MFA For All Users Except GA'
             state         = 'enabled'
-            conditions    = @{ users = @{ includeUsers = @('All'); excludeRoles = @($gaTemplateId) } }
+            conditions    = @{
+                clientAppTypes = @('all')
+                users = @{ includeUsers = @('All'); excludeRoles = @($gaTemplateId) }
+                applications = @{ includeApplications = @('All'); excludeApplications = @() }
+            }
             grantControls = @{ authenticationStrength = @{ id = '00000000-0000-0000-0000-000000000004' } }
         }
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
@@ -214,7 +338,7 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
         $finding.evidence.identity | Should -Contain $gaTemplateId
     }
 
-    It 'Pass, no undocumented-exclusion note: an excluded break-glass account declared in Context is not flagged' {
+    It 'Pass with structured carve-out evidence for an excluded break-glass account declared in Context' {
         $bg = '11111111-1111-1111-1111-111111111111'
         $policy = New-PulsePhishResistantPolicy
         $policy.conditions.users.excludeUsers = @($bg)
@@ -224,9 +348,14 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
 
         $finding.status | Should -Be 'Pass'
         $finding.reason | Should -Not -Match 'not in the operator-declared'
+        $carveOut = @($finding.evidence | Where-Object { $_.detail.classification -eq 'role-scope-carve-outs' })
+        $carveOut.Count | Should -Be 1
+        $carveOut[0].identity | Should -Be $policy.id
+        $carveOut[0].detail.excludedUserIds | Should -Contain $bg
+        @($carveOut[0].detail.undocumentedExcludedUserIds).Count | Should -Be 0
     }
 
-    It 'Pass, with undocumented-exclusion note: an excluded identifier not declared anywhere is surfaced but does not fail the check' {
+    It 'NotApplicable: an unaccepted direct-user exclusion cannot prove complete privileged-role coverage' {
         $undeclared = '22222222-2222-2222-2222-222222222222'
         $policy = New-PulsePhishResistantPolicy
         $policy.conditions.users.excludeUsers = @($undeclared)
@@ -234,8 +363,73 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
             @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
         )
 
+        $finding.status | Should -Be 'NotApplicable'
+        $incomplete = @($finding.evidence | Where-Object { $_.detail.classification -eq 'incomplete-policy-evidence' })
+        $incomplete.Count | Should -Be 1
+        $incomplete[0].detail.roleScopeReason | Should -Be 'unaccepted-excluded-user-id'
+        $incomplete[0].detail.roleScopeUnacceptedExcludedUserCount | Should -Be 1
+    }
+
+    It 'does not copy a malformed declared account into durable privileged-role evidence' {
+        $malformed = 'not-a-guid@contoso.com'
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.users.excludeUsers = @($malformed)
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        ) -Context @{ BreakGlassAccounts = @($malformed) }
+
+        $finding.status | Should -Be 'NotApplicable'
+        $malformedEntry = @($finding.evidence | Where-Object { $_.identity -like 'malformed-declared-account:*' })
+        $malformedEntry.Count | Should -Be 1
+        $malformedEntry[0].detail.issue | Should -Match 'not GUID-shaped'
+        ($finding | ConvertTo-Json -Depth 20 -Compress) | Should -Not -Match ([regex]::Escape($malformed))
+    }
+
+    It 'NotApplicable: a group exclusion cannot prove complete privileged-role coverage' {
+        $groupId = '33333333-3333-3333-3333-333333333333'
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.users.excludeGroups = @($groupId)
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $incomplete = @($finding.evidence | Where-Object { $_.detail.classification -eq 'incomplete-policy-evidence' })
+        $incomplete.Count | Should -Be 1
+        $incomplete[0].detail.roleScopeReason | Should -Be 'excluded-group-membership-unresolved'
+        $incomplete[0].detail.roleScopeExcludedGroupCount | Should -Be 1
+    }
+
+    It 'NotApplicable: a guest or external-user carve-out cannot prove complete privileged-role coverage' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.users.excludeGuestsOrExternalUsers = @{
+            guestOrExternalUserTypes = 'b2bCollaborationGuest'
+            externalTenants          = @{ membershipKind = 'all' }
+        }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $incomplete = @($finding.evidence | Where-Object { $_.detail.classification -eq 'incomplete-policy-evidence' })
+        $incomplete.Count | Should -Be 1
+        $incomplete[0].detail.roleScopeReason | Should -Be 'excluded-guests-or-external-users'
+        $incomplete[0].detail.roleScopeHasExcludedGuestsOrExternalUsers | Should -BeTrue
+    }
+
+    It 'Pass with structured carve-out evidence for an excluded service account declared in Context' {
+        $serviceAccountId = [guid]::ParseExact(('4' * 32), 'N').ToString('D')
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.users.excludeUsers = @($serviceAccountId)
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        ) -Context @{ ServiceAccounts = @($serviceAccountId) }
+
         $finding.status | Should -Be 'Pass'
-        $finding.reason | Should -Match 'not in the operator-declared'
+        $carveOut = @($finding.evidence | Where-Object { $_.detail.classification -eq 'role-scope-carve-outs' })
+        $carveOut.Count | Should -Be 1
+        $carveOut[0].detail.excludedUserIds | Should -Contain $serviceAccountId
+        @($carveOut[0].detail.undocumentedExcludedUserIds).Count | Should -Be 0
     }
 
     It 'Pass: an all-users-scoped phishing-resistant policy covers every admin role by definition' {
@@ -243,7 +437,11 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
             id            = 'ca-phish-all'
             displayName   = 'Phishing-Resistant MFA For All Users'
             state         = 'enabled'
-            conditions    = @{ users = @{ includeUsers = @('All') } }
+            conditions    = @{
+                clientAppTypes = @('all')
+                users = @{ includeUsers = @('All') }
+                applications = @{ includeApplications = @('All'); excludeApplications = @() }
+            }
             grantControls = @{ authenticationStrength = @{ id = '00000000-0000-0000-0000-000000000004' } }
         }
         $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
@@ -251,5 +449,95 @@ Describe 'TP.ENT.0018 - Phishing-resistant authentication strength required for 
         )
 
         $finding.status | Should -Be 'Pass'
+    }
+
+    It 'Fail: all 14 roles protected on one application do not establish all-resource phishing-resistant MFA' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.applications.includeApplications = @('application-1')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'Fail: an application filter narrows an otherwise all-resource phishing-resistant policy' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.applications.applicationFilter = @{ mode = 'include'; rule = 'CustomSecurityAttribute.Apps_Project -eq "Privileged"' }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'NotApplicable: missing application scope cannot settle all-resource coverage' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.Remove('applications')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.reason | Should -Match 'application scope'
+    }
+
+    It 'NotApplicable: MFA and authentication strength cannot coexist in one policy' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.grantControls.operator = 'OR'
+        $policy.grantControls.builtInControls = @('mfa')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+        $finding.status | Should -Be 'NotApplicable'
+        $finding.evidence[0].detail.grantReason | Should -Be 'invalid-grant-control-combination'
+    }
+
+    It 'Pass: AND with compliantDevice still requires phishing-resistant authentication' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.grantControls.operator = 'AND'
+        $policy.grantControls.builtInControls = @('compliantDevice')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+        $finding.status | Should -Be 'Pass'
+    }
+
+    It 'Fail: an iOS-only phishing-resistant policy does not establish universal sign-in coverage' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.platforms = @{ includePlatforms = @('iOS') }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+        $finding.status | Should -Be 'Fail'
+    }
+
+    It 'NotApplicable: missing clientAppTypes is incomplete universal sign-in evidence' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.Remove('clientAppTypes')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+        $finding.status | Should -Be 'NotApplicable'
+    }
+
+    It 'NotApplicable: missing user scope could hide privileged-role coverage' {
+        $policy = New-PulsePhishResistantPolicy
+        $policy.conditions.Remove('users')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+        $finding.status | Should -Be 'NotApplicable'
+    }
+
+    It 'Fail: an incomplete policy covering only one of two missing roles cannot hide the other definite gap' {
+        $knownTwelve = New-PulsePhishResistantPolicy -DisplayName 'Known Twelve' -IncludeRoles $script:allRequiredRoles[0..11]
+        $maybeThirteenth = New-PulsePhishResistantPolicy -DisplayName 'Maybe Thirteenth' -IncludeRoles @($script:allRequiredRoles[12])
+        $maybeThirteenth.conditions.Remove('applications')
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.ENT.0018' -Datasets @(
+            @{ Name = 'conditionalAccessPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($knownTwelve, $maybeThirteenth) }
+        )
+        $finding.status | Should -Be 'Fail'
+        $finding.evidence.identity | Should -Contain $script:allRequiredRoles[13]
     }
 }

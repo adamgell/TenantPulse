@@ -34,14 +34,45 @@ function Test-PulseWorkloadIdentityCaCoverage {
 
     $views = @(@($Datasets.conditionalAccessPolicies) | ConvertTo-PulseCaPolicyView)
 
-    $workloadIdentityPolicies = @($views | Where-Object {
-        $_.state -eq 'enforced' -and (@($_.conditions.clientApplications.includeApplications).Count -gt 0)
+    $classifiedPolicies = @(for ($policyOrdinal = 0; $policyOrdinal -lt $views.Count; $policyOrdinal++) {
+        $policy = $views[$policyOrdinal]
+        if ($policy.state -eq 'enforced' -and $policy.conditions.clientApplications.present) {
+            [pscustomobject]@{
+                Policy            = $policy
+                Scope             = Get-PulseCaWorkloadIdentityScope -ClientApplications $policy.conditions.clientApplications
+                CollectionOrdinal = $policyOrdinal
+            }
+        }
     })
 
-    if ($workloadIdentityPolicies.Count -eq 0) {
-        return New-PulseFinding -Status Pass -Reason '0 enforced Conditional Access policies scope conditions.clientApplications (workload-identity targeting). This is a practitioner awareness note, not a scored finding - consider whether any of this tenant''s service principals with privileged Graph permissions warrant a workload-identity CA policy. Requires Entra ID Workload ID Premium to act on.'
+    $validPolicies = @($classifiedPolicies | Where-Object { $_.Scope.State -eq 'Valid' })
+    $malformedPolicies = @($classifiedPolicies | Where-Object { $_.Scope.State -eq 'Malformed' })
+    $evidence = @($classifiedPolicies | ForEach-Object {
+        $policy = $_.Policy
+        $scope = $_.Scope
+        $policyIdentity = Get-PulseCaPolicyEvidenceIdentity -Policy $policy -CollectionOrdinal $_.CollectionOrdinal
+        @{ Identity = $policyIdentity; Detail = @{
+            displayName                            = $policy.displayName
+            classification                         = $scope.State
+            reasonCodes                            = @($scope.ReasonCodes)
+            includedServicePrincipalCount          = $scope.IncludedServicePrincipalCount
+            excludedServicePrincipalCount          = $scope.ExcludedServicePrincipalCount
+            includesAllServicePrincipals           = $scope.IncludesAllServicePrincipals
+            hasServicePrincipalFilter              = $scope.HasServicePrincipalFilter
+            includedAgentIdServicePrincipalCount   = $scope.IncludedAgentIdServicePrincipalCount
+            excludedAgentIdServicePrincipalCount   = $scope.ExcludedAgentIdServicePrincipalCount
+            includesAllAgentIdServicePrincipals    = $scope.IncludesAllAgentIdServicePrincipals
+            hasAgentIdServicePrincipalFilter       = $scope.HasAgentIdServicePrincipalFilter
+        } }
+    })
+
+    $reason = "$($validPolicies.Count) valid enforced Conditional Access polic$(if ($validPolicies.Count -eq 1) { 'y scopes' } else { 'ies scope' }) conditions.clientApplications; $($malformedPolicies.Count) malformed enforced polic$(if ($malformedPolicies.Count -eq 1) { 'y requires' } else { 'ies require' }) review. This is a practitioner awareness note, not a scored finding - it reports selector validity, not whether the right identities are covered."
+    if ($classifiedPolicies.Count -eq 0) {
+        $reason += ' Consider whether privileged service principals or agent identities warrant workload-identity Conditional Access. Requires Entra ID Workload ID Premium to act on.'
     }
 
-    $evidence = @($workloadIdentityPolicies | ForEach-Object { @{ Identity = $_.id; Detail = @{ displayName = $_.displayName; includedApplicationCount = @($_.conditions.clientApplications.includeApplications).Count } } })
-    return New-PulseFinding -Status Pass -Reason "$($workloadIdentityPolicies.Count) enforced Conditional Access polic$(if ($workloadIdentityPolicies.Count -eq 1) { 'y scopes' } else { 'ies scope' }) conditions.clientApplications (workload-identity targeting). This is a practitioner awareness note, not a scored finding - it confirms coverage EXISTS, not that it targets the right service principals." -Evidence $evidence
+    if ($evidence.Count -eq 0) {
+        return New-PulseFinding -Status Pass -Reason $reason
+    }
+    return New-PulseFinding -Status Pass -Reason $reason -Evidence $evidence
 }

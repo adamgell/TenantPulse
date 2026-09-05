@@ -133,6 +133,11 @@ BeforeAll {
         '29232cdf-9323-42fd-ade2-1d097af3e4de' # Exchange Administrator
         '729827e3-9c14-49f7-bb1b-9608f156bbb8' # Helpdesk Administrator
         '966707d0-3269-4727-9be2-8c3a10f19b9d' # Password Administrator
+        '7be44c8a-adaf-4e2a-84d6-ab2649e08a13' # Privileged Authentication Administrator
+        'e8611ab8-c189-46e8-94e1-60213ab1f814' # Privileged Role Administrator
+        '194ae4cb-b126-40b2-bd5b-6091b380977d' # Security Administrator
+        'f28a1f50-f6e7-4571-818b-6a12f2af6b6c' # SharePoint Administrator
+        'fe930be7-5e62-47db-91af-98c3a49a38b1' # User Administrator
         # Entra built-in DIRECTORY ROLE ids (public, tenant-stable, documented by
         # Microsoft's authorizationPolicy.guestUserRoleId reference) - Task 4.2,
         # source/Private/Checks/Test-PulseAuthorizationPolicyDefaults.ps1 (EIDSCA.AP07).
@@ -655,6 +660,26 @@ Describe 'Secret/PII scan gate logic' -Tag 'QA', 'SecretScan' {
                 -SafeDomainSuffix $script:safeDomainSuffixes)
 
             $violations | Should -BeNullOrEmpty
+        }
+
+        It 'allowlists every public role-template GUID added by the current 14-role Microsoft admin baseline' {
+            $currentRoleTemplateIds = @(
+                '7be44c8a-adaf-4e2a-84d6-ab2649e08a13'
+                'e8611ab8-c189-46e8-94e1-60213ab1f814'
+                '194ae4cb-b126-40b2-bd5b-6091b380977d'
+                'f28a1f50-f6e7-4571-818b-6a12f2af6b6c'
+                'fe930be7-5e62-47db-91af-98c3a49a38b1'
+            )
+
+            foreach ($roleTemplateId in $currentRoleTemplateIds) {
+                $violations = @(Get-PulseSecretScanViolations `
+                    -Content "role '$roleTemplateId' beside system.collections.generic.hashset" `
+                    -RelativePath 'source/Fake.ps1' `
+                    -AllowedGuid $script:allowedGuids `
+                    -SafeDomainSuffix $script:safeDomainSuffixes)
+
+                $violations | Should -BeNullOrEmpty -Because "$roleTemplateId is a public, tenant-stable Microsoft role-template id"
+            }
         }
 
         It 'catches a GUID near a small-gTLD real-looking domain a fixed TLD allowlist would have missed' {

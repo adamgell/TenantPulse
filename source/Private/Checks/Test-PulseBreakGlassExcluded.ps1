@@ -51,11 +51,37 @@ function Test-PulseBreakGlassExcluded {
         [hashtable] $Datasets,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [byte[]] $OperatorKey = @()
     )
 
     $exclusionContext = Get-PulseCaExclusionContext -Context $Context -Datasets $Datasets
-    $breakGlassAccounts = @($exclusionContext.BreakGlassAccounts)
+    $deduplicatedAccounts = [System.Collections.Generic.List[string]]::new()
+    $seenAccounts = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($declaredAccount in @($exclusionContext.BreakGlassAccounts)) {
+        $text = [string] $declaredAccount
+        $normalized = if ([string]::IsNullOrWhiteSpace($text)) {
+            ''
+        } else {
+            $parsed = [guid]::Empty
+            if ([guid]::TryParseExact($text, 'D', [ref] $parsed) -and
+                [string]::Equals($parsed.ToString('D'), $text, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $parsed.ToString('D').ToLowerInvariant()
+            } else {
+                # Keep format-significant whitespace so a value the shared exclusion
+                # context classified as malformed cannot become an accepted GUID here.
+                # Case folding still makes duplicate malformed declarations deterministic.
+                $text.ToLowerInvariant()
+            }
+        }
+        if ($seenAccounts.Add($normalized)) {
+            $deduplicatedAccounts.Add($normalized)
+        }
+    }
+    [string[]] $breakGlassAccounts = @($deduplicatedAccounts)
+    [System.Array]::Sort($breakGlassAccounts, [System.StringComparer]::Ordinal)
 
     if ($breakGlassAccounts.Count -eq 0) {
         return New-PulseFinding -Status Fail -Reason 'No break-glass accounts are declared in the assessment profile (BreakGlassAccounts) - emergency access cannot be verified to exist or to be protected from Conditional Access lockout.'
@@ -69,7 +95,12 @@ function Test-PulseBreakGlassExcluded {
     $enabledPolicies = @($Datasets.conditionalAccessPolicies | Where-Object { $_.state -eq 'enabled' })
 
     $formatEvidence = @($malformedAccounts | ForEach-Object {
-        @{ Identity = $_; Detail = @{ issue = 'cannot resolve format - Conditional Access excludeUsers holds GUID principal ids and this declared value is not GUID-shaped' } }
+        $alias = Get-PulseMalformedDeclaredAccountAlias -Value ([string] $_) -Key $OperatorKey
+        @{
+            Identity = $alias
+            SortKey  = $alias
+            Detail   = @{ issue = 'cannot resolve format - Conditional Access excludeUsers holds GUID principal ids and this declared value is not GUID-shaped' }
+        }
     })
 
     $gapEvidence = @()

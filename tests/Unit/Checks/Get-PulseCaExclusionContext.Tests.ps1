@@ -156,6 +156,76 @@ Describe 'Get-PulseCaExclusionContext' {
         @($result.MalformedDeclaredAccounts | Where-Object { $_ -eq 'dup-not-a-guid' }).Count | Should -Be 1
     }
 
+    It 'classifies blank and null declarations as one malformed value without accepting them as exclusions' {
+        $context = @{
+            BreakGlassAccounts = @($null, '', '   ')
+            ServiceAccounts    = @('', $null)
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            Get-PulseCaExclusionContext -Context $context
+        }
+
+        @($result.MalformedDeclaredAccounts).Count | Should -Be 1
+        [string]::IsNullOrEmpty([string] $result.MalformedDeclaredAccounts[0]) | Should -BeTrue
+        @($result.ExcludedIdentifiers).Count | Should -Be 0
+    }
+
+    It 'returns a sorted de-duplicated canonical set of only operator-approved account categories' {
+        $first = [guid]::ParseExact(('a' * 32), 'N').ToString('D')
+        $second = [guid]::ParseExact(('b' * 32), 'N').ToString('D')
+        $context = @{
+            BreakGlassAccounts = @($second, $first, $first, 'not-a-guid')
+            ServiceAccounts    = @($first, $second.ToUpperInvariant())
+        }
+        $datasets = @{
+            directoryRoleAssignments = @(
+                @{ roleDefinitionId = '62e90394-69f5-4237-9190-012177145e10'; principalId = [guid]::ParseExact(('c' * 32), 'N').ToString('D') }
+            )
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $context, $datasets {
+            param($context, $datasets)
+            $exclusionContext = Get-PulseCaExclusionContext -Context $context -Datasets $datasets
+            Get-PulseAcceptedCaExcludedIdentifiers -ExclusionContext $exclusionContext
+        }
+
+        $result | Should -Be @($first, $second)
+    }
+
+    It 'does not accept a whitespace-wrapped GUID even though its trimmed value is canonical' {
+        $canonical = [guid]::ParseExact(('d' * 32), 'N').ToString('D')
+        $wrapped = "  $canonical  "
+        $context = @{ BreakGlassAccounts = @($wrapped) }
+
+        $result = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            $exclusionContext = Get-PulseCaExclusionContext -Context $context
+            $accepted = Get-PulseAcceptedCaExcludedIdentifiers -ExclusionContext $exclusionContext
+            [pscustomobject]@{
+                Malformed    = @($exclusionContext.MalformedDeclaredAccounts)
+                AcceptedCount = @($accepted).Count
+            }
+        }
+
+        $result.Malformed | Should -Contain $wrapped
+        $result.AcceptedCount | Should -Be 0
+    }
+
+    It 'emits an accepted uppercase D-format GUID in canonical lowercase form' {
+        $canonical = [guid]::ParseExact(('abcdefab' + 'cdef' + 'abcd' + 'efab' + 'cdefabcdefab'), 'N').ToString('D')
+        $context = @{ BreakGlassAccounts = @($canonical.ToUpperInvariant()) }
+
+        $result = InModuleScope TenantPulse -ArgumentList $context {
+            param($context)
+            $exclusionContext = Get-PulseCaExclusionContext -Context $context
+            Get-PulseAcceptedCaExcludedIdentifiers -ExclusionContext $exclusionContext
+        }
+
+        $result | Should -BeExactly $canonical
+    }
+
     # ---- Task 4.1: resolved group exclusions (honest limitation, not silent) ----
 
     It 'GroupExclusionsResolved is $false and GroupExclusionNote is non-null when no groupMembers dataset was collected' {

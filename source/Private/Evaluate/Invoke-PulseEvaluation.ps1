@@ -245,7 +245,9 @@ function Invoke-PulseEvaluation {
     $findings = [System.Collections.Generic.List[pscustomobject]]::new()
 
     foreach ($check in $sortedChecks) {
-        $result = Invoke-PulseCheckEvaluation -Check $check -Store $Store -Manifest $manifest -DatasetCache $datasetCache -Context $Context -GateProvider $GateProvider
+        $result = Invoke-PulseCheckEvaluation -Check $check -Store $Store -Manifest $manifest `
+            -DatasetCache $datasetCache -Context $Context -OperatorKey $operatorKey `
+            -GateProvider $GateProvider
 
         # H2 fix: by the time control reaches here, $result.Evidence entries are guaranteed
         # (by Invoke-PulseCheckEvaluation's own try/catch around evidence normalization) to
@@ -561,6 +563,9 @@ function Invoke-PulseCheckEvaluation {
         [hashtable] $Context = @{},
 
         [Parameter()]
+        [byte[]] $OperatorKey = @(),
+
+        [Parameter()]
         [AllowNull()]
         $GateProvider = $null
     )
@@ -850,6 +855,7 @@ function Invoke-PulseCheckEvaluation {
             $ruleCommand = Get-Command -Name $ruleFunction -ErrorAction SilentlyContinue
             $ruleAcceptsContext = ($null -ne $ruleCommand) -and $ruleCommand.Parameters.ContainsKey('Context')
             $ruleAcceptsDatasetOutcomes = ($null -ne $ruleCommand) -and $ruleCommand.Parameters.ContainsKey('DatasetOutcomes')
+            $ruleAcceptsOperatorKey = ($null -ne $ruleCommand) -and $ruleCommand.Parameters.ContainsKey('OperatorKey')
 
             if ($partialAwarenessDeclared -and -not $ruleAcceptsDatasetOutcomes) {
                 return @{
@@ -884,17 +890,20 @@ function Invoke-PulseCheckEvaluation {
             $ruleContext = @{}
             foreach ($key in $Context.Keys) { $ruleContext[$key] = $Context[$key] }
 
-            $rawOutputs = if ($ruleAcceptsContext -and $partialAwarenessDeclared) {
-                @(& $ruleFunction -Datasets $clonedDatasets -Context $ruleContext `
-                    -DatasetOutcomes $clonedDatasetOutcomes 2>&1)
-            } elseif ($ruleAcceptsContext) {
-                @(& $ruleFunction -Datasets $clonedDatasets -Context $ruleContext 2>&1)
-            } elseif ($partialAwarenessDeclared) {
-                @(& $ruleFunction -Datasets $clonedDatasets `
-                    -DatasetOutcomes $clonedDatasetOutcomes 2>&1)
-            } else {
-                @(& $ruleFunction -Datasets $clonedDatasets 2>&1)
+            $ruleParameters = @{ Datasets = $clonedDatasets }
+            if ($ruleAcceptsContext) {
+                $ruleParameters.Context = $ruleContext
             }
+            if ($partialAwarenessDeclared) {
+                $ruleParameters.DatasetOutcomes = $clonedDatasetOutcomes
+            }
+            if ($ruleAcceptsOperatorKey) {
+                # A rule gets its own key byte array so it cannot mutate the evaluator's
+                # pseudonymization key or change later redaction-map output in the same run.
+                $ruleParameters.OperatorKey = [byte[]] $OperatorKey.Clone()
+            }
+
+            $rawOutputs = @(& $ruleFunction @ruleParameters 2>&1)
             $errorRecords = @($rawOutputs | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] })
             $outputs = @($rawOutputs | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
 

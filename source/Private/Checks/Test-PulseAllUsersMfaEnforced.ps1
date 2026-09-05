@@ -12,22 +12,23 @@
     policies in report-only by default - a tenant showing the policy "exists" but never
     switched On must Fail, not read as covered.
 
-    ALL-USERS SHAPE: a policy counts as "targets all users" when
-    conditions.users.includeAll is true (ConvertTo-PulseCaPolicyView's own normalized
-    includeUsers -contains 'All' flag) - role-scoped or group-scoped policies (even a very
-    broad group) do not satisfy this check; that is TP.ENT.0005's job, not this one's. A
-    policy's own conditions.users.excludeUsers/excludeGroups is expected content for a
-    genuinely all-users policy (break-glass/service-account exclusions), not disqualifying -
-    the shared exclusion context (Get-PulseCaExclusionContext, Task 4.1) is consulted so a
-    documented break-glass/service-account exclusion never registers as a coverage gap by
-    itself; an UNDOCUMENTED excluded identifier is surfaced as a Warn-tier note in Reason,
-    not a Fail, since this check's job is "does an enforced all-users MFA policy exist", not
-    re-litigating TP.ENT.0003's own exclusion-hygiene job.
+    EFFECTIVE SCOPE: a policy must explicitly include All users and All resources. Direct
+    excludeUsers entries are accepted only when they are canonical D-format GUIDs that
+    match the operator-declared break-glass or service-account set returned by
+    Get-PulseCaExclusionContext. A parseable noncanonical value is still malformed and can
+    never legitimize the same malformed policy exclusion. Undeclared users and all
+    group/role exclusions make the policy known Narrow. Application includes/exclusions,
+    user actions, and application filters likewise make it Narrow. Missing or malformed
+    user/application/sign-in scope is incomplete and never promoted to Pass. Known
+    platform, location, risk, device-filter, authentication-flow, or client-app narrowing
+    cannot support this universal claim. Whenever an accepted excludeUsers value is used by
+    an otherwise-qualifying enforced or report-only policy, structured evidence records the
+    identifier and the exact policy names whose universal-user claim depends on it.
 
-    MFA-SATISFACTION: identical mechanism union to TP.ENT.0005 - grants.builtInControls
-    contains 'mfa' OR grants.authenticationStrength is bound (any authentication strength,
-    not only phishing-resistant - the phishing-resistant BAR specifically is TP.ENT.0018's
-    job, not this one's; do not merge, per that check's own research entry Notes).
+    MFA-SATISFACTION: identical shared grant semantics to TP.ENT.0005. Graph's AND/OR
+    operator is honored; known built-in MFA-satisfying strengths count, OR alternatives do
+    not require MFA, and custom strengths remain indeterminate until their authoritative
+    requirementsSatisfied value is available.
 #>
 
 function Test-PulseAllUsersMfaEnforced {
@@ -38,55 +39,136 @@ function Test-PulseAllUsersMfaEnforced {
         [hashtable] $Datasets,
 
         [Parameter()]
-        [hashtable] $Context = @{}
+        [hashtable] $Context = @{},
+
+        [Parameter()]
+        [byte[]] $OperatorKey = @()
     )
 
     $views = @(@($Datasets.conditionalAccessPolicies) | ConvertTo-PulseCaPolicyView)
     $exclusionContext = Get-PulseCaExclusionContext -Context $Context -Datasets $Datasets
-    $documentedExclusions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($id in @($exclusionContext.ExcludedIdentifiers)) {
-        $documentedExclusions.Add([string] $id) | Out-Null
-    }
+    $acceptedExcludedIdentifiers = Get-PulseAcceptedCaExcludedIdentifiers -ExclusionContext $exclusionContext
 
-    $satisfiesMfa = {
-        param($view)
-        if (@($view.grants.builtInControls) -contains 'mfa') { return $true }
-        if ($null -ne $view.grants.authenticationStrength -and -not [string]::IsNullOrEmpty([string] $view.grants.authenticationStrength.id)) { return $true }
-        return $false
-    }
+    $coveringPolicies = @()
+    $reportOnlyCoveringPolicies = @()
+    $incompleteEnforcedPolicies = @()
 
-    $coveringPolicies = @($views | Where-Object {
-        $_.state -eq 'enforced' -and $_.conditions.users.includeAll -and (& $satisfiesMfa $_)
-    })
-
-    if ($coveringPolicies.Count -eq 0) {
-        $reportOnlyCandidates = @($views | Where-Object {
-            $_.state -eq 'reportOnly' -and $_.conditions.users.includeAll -and (& $satisfiesMfa $_)
-        })
-        if ($reportOnlyCandidates.Count -gt 0) {
-            $evidence = @($reportOnlyCandidates | ForEach-Object { @{ Identity = $_.id; Detail = @{ displayName = $_.displayName; state = $_.state } } })
-            return New-PulseFinding -Status Fail -Reason "$($reportOnlyCandidates.Count) all-users MFA-requiring Conditional Access policy/policies exist but are report-only, not enforced - report-only is functionally the same as not having the policy." -Evidence $evidence
+    $policyOrdinal = -1
+    foreach ($policy in $views) {
+        $policyOrdinal++
+        if ($policy.state -notin @('enforced', 'reportOnly')) { continue }
+        $grant = Get-PulseCaGrantRequirement -PolicyView $policy -Requirement Mfa
+        if ($grant.State -eq 'NotRequired') { continue }
+        $applicationScope = Get-PulseCaApplicationScope -PolicyView $policy
+        $userScope = Get-PulseCaAllUsersScope -PolicyView $policy -AcceptedExcludedIdentifiers $acceptedExcludedIdentifiers
+        $signInScope = Get-PulseCaSignInScope -PolicyView $policy -Mode Mfa
+        $record = [pscustomobject]@{
+            Policy = $policy
+            Grant = $grant
+            ApplicationScope = $applicationScope
+            UserScope = $userScope
+            SignInScope = $signInScope
+            CollectionOrdinal = $policyOrdinal
         }
-        return New-PulseFinding -Status Fail -Reason 'No enabled, enforced Conditional Access policy requires MFA (or a stronger authentication-strength grant) for all users.'
+
+        if ($grant.State -eq 'Required' -and $applicationScope.State -eq 'AllResources' -and
+            $userScope.State -eq 'AllIntendedUsers' -and $signInScope.State -eq 'Universal') {
+            if ($policy.state -eq 'enforced') { $coveringPolicies += $record }
+            else { $reportOnlyCoveringPolicies += $record }
+            continue
+        }
+
+        if ($policy.state -eq 'enforced' -and
+            $grant.State -ne 'NotRequired' -and $applicationScope.CouldBeAllResources -and
+            $userScope.CouldBeAllUsers -and $signInScope.State -ne 'Narrow' -and $signInScope.CouldBeUniversal -and
+            ($grant.State -eq 'Incomplete' -or $applicationScope.State -eq 'Incomplete' -or
+                $userScope.State -eq 'Incomplete' -or $signInScope.State -eq 'Incomplete')) {
+            $incompleteEnforcedPolicies += $record
+        }
     }
 
-    $undocumented = @()
-    foreach ($policy in $coveringPolicies) {
-        $excludeUsers = @($policy.conditions.users.excludeUsers)
-        foreach ($excludedId in $excludeUsers) {
-            if (-not $documentedExclusions.Contains([string] $excludedId)) {
-                $undocumented += [pscustomobject]@{ PolicyId = $policy.id; ExcludedId = $excludedId }
+    # Accepted exclusions are part of the policy witness, not invisible configuration.
+    # Emit one bounded row per accepted identifier and keep enforced/report-only policy
+    # names distinct because report-only never establishes protection.
+    $acceptedExclusionEvidence = @(
+        foreach ($identifier in @($acceptedExcludedIdentifiers)) {
+            $enforcedPolicyNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            $reportOnlyPolicyNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+
+            foreach ($record in @($coveringPolicies)) {
+                if (@($record.Policy.conditions.users.excludeUsers) -contains $identifier) {
+                    [void] $enforcedPolicyNames.Add([string] $record.Policy.displayName)
+                }
+            }
+            foreach ($record in @($reportOnlyCoveringPolicies)) {
+                if (@($record.Policy.conditions.users.excludeUsers) -contains $identifier) {
+                    [void] $reportOnlyPolicyNames.Add([string] $record.Policy.displayName)
+                }
+            }
+
+            [string[]] $enforcedNames = ConvertTo-PulseOrdinalStringArray -Values $enforcedPolicyNames
+            [string[]] $reportOnlyNames = ConvertTo-PulseOrdinalStringArray -Values $reportOnlyPolicyNames
+            if ($enforcedNames.Count -eq 0 -and $reportOnlyNames.Count -eq 0) { continue }
+
+            @{
+                Identity = [string] $identifier
+                SortKey  = "accepted-exclusion:$identifier"
+                Detail   = @{
+                    classification                         = 'accepted-all-users-mfa-exclusion'
+                    excludedFromEnforcedMfaPolicies        = $enforcedNames
+                    excludedFromReportOnlyMfaPolicies      = $reportOnlyNames
+                }
             }
         }
+    )
+    $malformedAccountEvidence = @(
+        foreach ($malformed in @($exclusionContext.MalformedDeclaredAccounts)) {
+            $alias = Get-PulseMalformedDeclaredAccountAlias -Value ([string] $malformed) -Key $OperatorKey
+            @{
+                Identity = $alias
+                SortKey  = $alias
+                Detail   = @{
+                    issue = 'not GUID-shaped - Conditional Access excludeUsers holds GUID principal ids, so this declared exclusion can never match any policy and cannot be honored, enforced or report-only.'
+                }
+            }
+        }
+    )
+
+    if ($coveringPolicies.Count -eq 0) {
+        if ($incompleteEnforcedPolicies.Count -gt 0) {
+            $evidence = @($incompleteEnforcedPolicies | ForEach-Object {
+                $policyIdentity = Get-PulseCaPolicyEvidenceIdentity -Policy $_.Policy -CollectionOrdinal $_.CollectionOrdinal
+                @{
+                    Identity = $policyIdentity
+                    Detail = @{
+                        displayName = $_.Policy.displayName
+                        grantState = $_.Grant.State
+                        grantReason = $_.Grant.ReasonCode
+                        applicationScope = $_.ApplicationScope.State
+                        applicationScopeReason = $_.ApplicationScope.ReasonCode
+                        userScope = $_.UserScope.State
+                        userScopeReason = $_.UserScope.ReasonCode
+                        signInScope = $_.SignInScope.State
+                        signInScopeReason = $_.SignInScope.ReasonCode
+                    }
+                }
+            })
+            return New-PulseFinding -Status NotApplicable -Reason "$($incompleteEnforcedPolicies.Count) enabled MFA policy/policies have incomplete grant, user scope, application scope, or sign-in scope evidence; TenantPulse cannot determine whether universal coverage exists." -Evidence ($evidence + $acceptedExclusionEvidence + $malformedAccountEvidence)
+        }
+        if ($reportOnlyCoveringPolicies.Count -gt 0) {
+            $evidence = @($reportOnlyCoveringPolicies | ForEach-Object {
+                $policyIdentity = Get-PulseCaPolicyEvidenceIdentity -Policy $_.Policy -CollectionOrdinal $_.CollectionOrdinal
+                @{ Identity = $policyIdentity; Detail = @{ displayName = $_.Policy.displayName; state = $_.Policy.state } }
+            })
+            return New-PulseFinding -Status Fail -Reason "$($reportOnlyCoveringPolicies.Count) all-intended-users, all-resource MFA-requiring Conditional Access policy/policies exist but are report-only, not enforced - report-only is functionally the same as not having the policy." -Evidence ($evidence + $acceptedExclusionEvidence + $malformedAccountEvidence)
+        }
+        return New-PulseFinding -Status Fail -Reason 'No enabled, enforced Conditional Access policy requires MFA (or a stronger authentication-strength grant) for all intended users across all resources.' -Evidence $malformedAccountEvidence
     }
 
     $evidence = @($coveringPolicies | ForEach-Object {
-        @{ Identity = $_.id; Detail = @{ displayName = $_.displayName; mfaMechanism = if (@($_.grants.builtInControls) -contains 'mfa') { 'builtInControls:mfa' } else { 'authenticationStrength' } } }
+        $policyIdentity = Get-PulseCaPolicyEvidenceIdentity -Policy $_.Policy -CollectionOrdinal $_.CollectionOrdinal
+        @{ Identity = $policyIdentity; Detail = @{ displayName = $_.Policy.displayName; mfaMechanism = $_.Grant.Mechanism } }
     })
 
-    if ($undocumented.Count -gt 0) {
-        return New-PulseFinding -Status Pass -Reason "An enabled, enforced Conditional Access policy requires MFA for all users; $($undocumented.Count) excluded identifier(s) on the covering policy/policies are not in the operator-declared break-glass/service-account list - confirm those exclusions are intentional." -Evidence $evidence
-    }
-
-    return New-PulseFinding -Status Pass -Reason 'An enabled, enforced Conditional Access policy requires MFA (or a stronger authentication-strength grant) for all users.' -Evidence $evidence
+    return New-PulseFinding -Status Pass -Reason 'An enabled, enforced Conditional Access policy requires MFA (or a stronger authentication-strength grant) for all intended users across all resources.' -Evidence ($evidence + $acceptedExclusionEvidence + $malformedAccountEvidence)
 }

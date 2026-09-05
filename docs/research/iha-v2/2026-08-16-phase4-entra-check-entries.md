@@ -265,14 +265,14 @@ method X) — every EIDSCA ID covered by a cluster is listed in that entry's Cla
 ### TP.ENT.0018 — Phishing-resistant authentication strength required for privileged roles
 - Claim: At least one enforced CA policy applies an `authenticationStrength` grant of a
   phishing-resistant combination (FIDO2, certificate-based auth, or Windows Hello for Business)
-  — not merely generic MFA — scoped to the minimum 9 Microsoft-named privileged roles.
-- Authority: https://learn.microsoft.com/en-us/entra/identity/conditional-access/how-to-policy-phish-resistant-admin-mfa ; ScuBA `MS.AAD.3.1v1` (SHALL, all users) and `MS.AAD.3.6v1` (SHALL, highly privileged roles specifically)
+  — not merely generic MFA — scoped to the current minimum 14 Microsoft-named privileged roles.
+- Authority: https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-admin-phish-resistant-mfa ; ScuBA `MS.AAD.3.1v1` (SHALL, all users) and `MS.AAD.3.6v1` (SHALL, highly privileged roles specifically)
 - Origin: none (practitioner judgment / fresh implementation — distinct from the seeded
   `TP.ENT.0005`, which only checks for *any* MFA grant, not an authentication-strength grant
   restricted to phishing-resistant methods)
 - Data: `v1.0/identity/conditionalAccess/policies` (same dataset), evaluating
   `grantControls.authenticationStrength.id` against the built-in phishing-resistant strength
-  GUID, cross-referenced against role-condition coverage of the 9 named roles; descriptor
+  GUID, cross-referenced against role-condition coverage of the 14 named roles; descriptor
   needed: none new — reuses `ConditionalAccessPolicies.List`; may need
   `Entra.AuthenticationStrengths.List` (`v1.0/policies/authenticationStrengthPolicies`) to
   resolve custom strength IDs if the tenant defines its own beyond the built-in one

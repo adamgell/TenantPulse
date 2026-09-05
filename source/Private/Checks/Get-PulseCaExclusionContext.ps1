@@ -213,8 +213,13 @@ function Get-PulseCaExclusionContext {
     # entry unchanged from the Task 1.9 stub's own contract; this is purely additive.
     $malformed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($id in (@($breakGlass) + @($serviceAccounts))) {
-        if ($id -and ([string] $id) -notmatch $guidPattern) {
-            $malformed.Add([string] $id) | Out-Null
+        $identifier = [string] $id
+        if ([string]::IsNullOrWhiteSpace($identifier)) {
+            # Collapse null/empty/whitespace-only declarations to one internal empty
+            # marker. Evidence rendering maps it to a fixed non-secret `blank` alias.
+            $malformed.Add('') | Out-Null
+        } elseif ($identifier -notmatch $guidPattern) {
+            $malformed.Add($identifier) | Out-Null
         }
     }
     $malformedDeclaredAccounts = [string[]] @($malformed)
@@ -284,8 +289,8 @@ function Get-PulseCaExclusionContext {
     }
 
     $union = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($id in $breakGlass) { if ($id) { $union.Add([string] $id) | Out-Null } }
-    foreach ($id in $serviceAccounts) { if ($id) { $union.Add([string] $id) | Out-Null } }
+    foreach ($id in $breakGlass) { if (-not [string]::IsNullOrWhiteSpace([string] $id)) { $union.Add([string] $id) | Out-Null } }
+    foreach ($id in $serviceAccounts) { if (-not [string]::IsNullOrWhiteSpace([string] $id)) { $union.Add([string] $id) | Out-Null } }
     foreach ($id in $activeGlobalAdmins) { if ($id) { $union.Add([string] $id) | Out-Null } }
     foreach ($id in $resolvedGroupExclusions) { if ($id) { $union.Add([string] $id) | Out-Null } }
 

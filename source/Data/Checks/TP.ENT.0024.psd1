@@ -14,7 +14,7 @@
         Function = 'Test-PulseWorkloadIdentityCaCoverage'
     }
     Consulting = @{
-        WhatItMeans  = 'Counts enforced Conditional Access policies that scope conditions.clientApplications (workload-identity targeting) rather than only interactive user sign-ins. This is an INFO-severity, non-scored practitioner awareness note - it cannot determine whether the tenant''s specific service principals actually warrant such a policy, only whether one exists at all.'
+        WhatItMeans  = 'Counts enforced Conditional Access policies whose documented service-principal or beta agent-identity selectors form a valid conditions.clientApplications scope. Malformed present selectors are reported separately rather than counted as coverage. This is an INFO-severity, non-scored practitioner awareness note - it cannot determine whether the tenant''s specific identities actually warrant such a policy, only whether a valid policy scope exists.'
         WhyItMatters = 'Workload identities (service principals, especially ones holding privileged Graph permissions) are increasingly targeted the same way user accounts are, but most tenants apply Conditional Access to users only. This is a judgment call, not an automatable pass/fail - the finding exists so the gap is not silently absent from the catalog, per the research entry''s own "an idea still needs a paper trail" rule.'
         Remediation  = @(
             'Inventory service principals holding privileged Microsoft Graph application permissions (e.g. Application.ReadWrite.All, RoleManagement.ReadWrite.Directory).'
