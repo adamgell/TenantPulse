@@ -53,12 +53,18 @@ package-first full gate passed 2,517/2,517 with zero failures, errors, skips, No
 containers. That proof remains historical evidence for that exact candidate; it does not prove the
 later six-check assignment-aware source described above.
 
-The current local package-first candidate is proven by run
-`2b032616-31ae-44c7-8734-d00a15be6f98`: 2,998/2,998 deterministic tests passed with zero
-failures, errors, skips, NotRun, or failed containers. The proof binds 62 shipped files and
-the candidate package SHA-256
-`36325a317f2be6377c0d7b1f41da10047a697f9455d078d881a78f7191f8d24c`. This is local
-package evidence only; it does not claim remote CI, merge, live-tenant behavior, or publication.
+The latest completed local package-first proof before the final ARM response-shape review fix is
+run `3c772026-971c-4420-be18-4fd9b40bdfec`: 3,323/3,323 deterministic tests passed with zero
+failures, errors, skips, NotRun, or failed containers. The proof binds 62 shipped files, package
+SHA-256 `db7a6e390c82cdc74a6f756266c597e8e42b1fffeda3f7f1d7af475c3a82fa29`, built-module
+SHA-256 `2750e7d721716b8776501835315f1e866fdb8c589bfc1719bc81693d1ab9e5fc`, built-manifest
+SHA-256 `b1e5e258080107c4ce2b093e3d9d80c55245019d9610964dfdc7cf5983a6166a`, NUnit-result
+SHA-256 `4c29a40684c5420fdd3afff1bdb797aabfe2a6707b8f591dd1f5ecd92c02e498`, Pester-object
+SHA-256 `99053001a9632ae84ef03bcf451837cbe041f7bd74c2f1eb82d243cfcf83091b`, and proof-file
+SHA-256 `6d9eecd8f90eec0097267a1092f718601697331481efa5cd131a0fe29c59ac61`. This is local
+package evidence for the exact pre-fix candidate only; it does not transfer to later source changes
+and does not claim remote CI, merge, live-tenant behavior, or publication. The ARM review fix has
+focused deterministic proof and needs a fresh package-first full run before it supersedes this record.
 
 Historical proof run `9ef9712e-bddc-4dc9-82f0-f085ab874656` binds all 59 shipped files and the exact
 result pair for an earlier candidate. That 418,518-byte local candidate archive SHA-256 is
@@ -404,10 +410,12 @@ formally evaluated (and **BLOCKED** at T3.2, not shipped; **DESCOPED** 2026-08-1
 `TP.INT.0010` - Maester's "Intune diagnostic settings -> Audit Logs" check is an ARM
 call (`GET providers/microsoft.intune/diagnosticSettings`),
 not a Graph call, so GraphKit's Graph-only transport can never surface it via the ordinary
-descriptor-Pending mechanism. Product decision 2026-08-18: DESCOPED until GraphKit ARM
-exists. The id is reserved (0009 then 0011). No `.psd1`, no Pending dataset, and no ARM
-auth path in TenantPulse now. This is a genuine architecture gap, not a missing-descriptor
-case. See
+descriptor-Pending mechanism. Product decision 2026-08-18: DESCOPED until the separate ARM
+authentication and live-service contract is proven. The id is reserved (0009 then 0011). Current
+source carries only a private, injection-only ARM adapter foundation: without an injected transport
+it records `Skipped` / `DependencyUnavailable` / `arm-live-contract-deferred`. There is no `.psd1`,
+no applied dataset entry, and no ARM authentication path in TenantPulse. This is a genuine
+architecture gap, not a missing-descriptor case. See
 `docs/research/iha-v2/2026-08-16-phase3-intune-check-entries.md`'s TP.INT.0010 numbering-gap
 note. Task 3.3 added twelve more Intune checks (TP.INT.0019-0030) and imported research entries
 for TP.INT.0016/0017/0018 for record-completeness without implementing them yet.
@@ -446,7 +454,8 @@ after which Phase 3 work continued on the merged tree:
   numbering-gap note referenced above (`bbef1d1`, current `main` HEAD).
 
 **Catalog state after TP.INT.0017/0018:** **53 checks total - 30 `TP.INT` + 23 `TP.ENT`.**
-`TP.INT.0010` is DESCOPED until GraphKit ARM exists (id reserved; no `.psd1`).
+`TP.INT.0010` is DESCOPED until the separate ARM authentication and live-service contract is proven
+(id reserved; no `.psd1`). The private injected adapter is foundation code, not live collection.
 `TP.INT.0017`/`0018` shipped against the live App Control schema.
 
 ### Task 3.6 - Phase 3 live gate: EXECUTED
@@ -737,6 +746,7 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    customer repointing, rollback-window operation, legacy-authentication retirement, and destructive
    directory cleanup are `NotApplicable` and must not be executed for closeout. Reopen those gates
    only if an adopter is later identified.
-9. **`TP.INT.0010`**, reserved until a separate GraphKit ARM provider exists and a protected
-   diagnostic-settings read proves its service contract. ARM must not enter the Microsoft Graph
+9. **`TP.INT.0010`**, reserved until the separate ARM authentication and provider contract exists
+   and a protected diagnostic-settings read proves its service behavior. The current private
+   injection-only adapter remains deferred foundation code. ARM must not enter the Microsoft Graph
    descriptor catalog.

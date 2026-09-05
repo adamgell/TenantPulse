@@ -698,18 +698,46 @@ Describe 'Invoke-PulseArmProvider deterministic transport' {
         @($outcome.Rows).Count | Should -Be 0
     }
 
-    It 'maps a malformed ARM body to Failed InvalidProviderData' {
-        Reset-ArmProviderTestState
-        $script:ArmResponseQueue.Enqueue((New-ArmTransportResult -Body 'not-an-arm-page'))
-        $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
-            param($Injections, $ApiVersion, $ResourceId)
-            Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
-                -ApiVersion $ApiVersion -Injections $Injections
+    It 'maps malformed ARM response shapes to Failed InvalidProviderData' {
+        $cases = @(
+            [pscustomobject]@{
+                Name      = 'page body'
+                Transport = New-ArmTransportResult -Body 'not-an-arm-page'
+            }
+            [pscustomobject]@{
+                Name      = 'StatusCode'
+                Transport = [pscustomobject]@{
+                    StatusCode       = 'not-an-integer'
+                    Body             = @{ value = @() }
+                    Headers          = @{}
+                    ResponseReceived = $true
+                }
+            }
+            [pscustomobject]@{
+                Name      = 'ResponseReceived'
+                Transport = [pscustomobject]@{
+                    StatusCode       = 200
+                    Body             = @{ value = @() }
+                    Headers          = @{}
+                    ResponseReceived = 'not-a-boolean'
+                }
+            }
+        )
+
+        foreach ($case in $cases) {
+            Reset-ArmProviderTestState
+            $script:ArmResponseQueue.Enqueue($case.Transport)
+            $outcome = InModuleScope TenantPulseArmAdapterTest -ArgumentList (Get-ArmTestInjections), $script:FixtureApiVersion, $script:IntuneResourceId {
+                param($Injections, $ApiVersion, $ResourceId)
+                Invoke-PulseArmProvider -Dataset 'intuneDiagnosticSettings' -ResourceId $ResourceId `
+                    -ApiVersion $ApiVersion -Injections $Injections
+            }
+            $outcome.Status | Should -Be 'Failed' -Because "$($case.Name) is untrusted provider metadata"
+            $outcome.FailureClass | Should -Be 'InvalidProviderData'
+            $outcome.ReasonCode | Should -Be 'invalid-provider-data'
+            @($outcome.Rows).Count | Should -Be 0
+            $script:ArmSendUris.Count | Should -Be 1
         }
-        $outcome.Status | Should -Be 'Failed'
-        $outcome.FailureClass | Should -Be 'InvalidProviderData'
-        $outcome.ReasonCode | Should -Be 'invalid-provider-data'
-        @($outcome.Rows).Count | Should -Be 0
     }
 
     It 'records truncation as Partial rather than a successful complete collection' {
@@ -875,6 +903,16 @@ Describe 'ARM page body parsing' {
         {
             InModuleScope TenantPulseArmAdapterTest { Get-PulseArmPageContent -Body ([hashtable]@{ value = $null }) }
         } | Should -Throw -ExpectedMessage '*value is null*'
+        {
+            InModuleScope TenantPulseArmAdapterTest {
+                Get-PulseArmPageContent -Body ([hashtable]@{ value = [pscustomobject]@{ id = 'scalar-row' } })
+            }
+        } | Should -Throw -ExpectedMessage '*value must be an array*'
+        {
+            InModuleScope TenantPulseArmAdapterTest {
+                Get-PulseArmPageContent -Body ([hashtable]@{ value = 'scalar-row' })
+            }
+        } | Should -Throw -ExpectedMessage '*value must be an array*'
     }
 
     It 'extracts rows and nextLink from a dictionary body' {

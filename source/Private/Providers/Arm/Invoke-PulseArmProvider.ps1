@@ -72,6 +72,9 @@ function Get-PulseArmPageContent {
     if ($null -eq $value) {
         throw 'ARM page value is null.'
     }
+    if ($value -isnot [System.Array] -and $value -isnot [System.Collections.IList]) {
+        throw 'ARM page value must be an array.'
+    }
 
     return [pscustomobject]@{
         Rows     = @($value)
@@ -334,16 +337,42 @@ function Invoke-PulseArmProvider {
             }
             $responseReceived = $true
             $statusCode = 0
+            $invalidTransportMetadata = $false
             if ($null -eq $transport) {
                 $responseReceived = $false
             }
             else {
                 if ($null -ne $transport.PSObject.Properties['ResponseReceived']) {
-                    $responseReceived = [bool] $transport.ResponseReceived
+                    if ($transport.ResponseReceived -isnot [bool]) {
+                        $invalidTransportMetadata = $true
+                    }
+                    else {
+                        $responseReceived = $transport.ResponseReceived
+                    }
                 }
                 if ($null -ne $transport.PSObject.Properties['StatusCode']) {
-                    $statusCode = [int] $transport.StatusCode
+                    if ($transport.StatusCode -isnot [int]) {
+                        $invalidTransportMetadata = $true
+                    }
+                    else {
+                        $statusCode = $transport.StatusCode
+                    }
                 }
+            }
+
+            if ($invalidTransportMetadata) {
+                # The injected transport is a trust boundary. PowerShell would coerce any
+                # non-empty string (including 'false') to $true and can throw while casting
+                # an arbitrary status value. Neither outcome may escape as collected data.
+                $transport = $null
+                $decision = [pscustomobject]@{
+                    ShouldRetry  = $false
+                    Outcome      = 'Failed'
+                    Certainty    = 'Known'
+                    ForceRefresh = $false
+                    FailureClass = 'InvalidProviderData'
+                }
+                break
             }
 
             $certainty = Get-PulseArmAttemptCertainty -StatusCode $statusCode -ResponseReceived $responseReceived

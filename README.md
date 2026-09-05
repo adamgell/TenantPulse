@@ -291,7 +291,9 @@ Intune device management `TP.INT.0001`-`0005`); Phase 3 then did two separate th
 conflate but not the same - the settings-catalog/typed-policy expansion engine (feeding
 richer data into checks that already existed, not new IDs) **and**, across Tasks 3.1-3.4, a
 23-check Intune wave (`TP.INT.0006`-`0009`, `0011`-`0016`, `0019`-`0031` - `TP.INT.0010`
-is DESCOPED until GraphKit ARM exists) that took `TP.INT` from 5 checks to 28, then
+is DESCOPED until a separate ARM authentication and live-service contract is proven; the current
+private injected adapter is deferred foundation code, not live collection) that took `TP.INT` from
+5 checks to 28, then
 `TP.INT.0017`/`0018` (App Control enforce + Managed Installer pairing) shipped against
 the live `applicationcontrolv2` schema and took `TP.INT` to 30; Phase
 4 then added the 23-check Entra core catalog - the EIDSCA port (`TP.ENT.0006`-`0011`),
