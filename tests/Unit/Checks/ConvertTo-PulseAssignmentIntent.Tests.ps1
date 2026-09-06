@@ -452,7 +452,14 @@ Describe 'ConvertTo-PulseAssignmentIntent' {
         $assignments = @(
             @{ intent = 'include'; targetType = 'group'; groupId = 'grp-include-norm' }
         )
+        $caseVariantAssignments = @(
+            @{ intent = 'INCLUDE'; targetType = 'GROUP'; groupId = 'grp-include-case' }
+        )
         $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+        $caseVariant = InModuleScope TenantPulse -ArgumentList @(, $caseVariantAssignments) {
             param($assignments)
             ConvertTo-PulseAssignmentIntent -Assignments $assignments
         }
@@ -460,19 +467,76 @@ Describe 'ConvertTo-PulseAssignmentIntent' {
         $result.IsAssigned | Should -BeTrue
         $result.IncludeGroupIds | Should -Contain 'grp-include-norm'
         $result.IncludeKinds | Should -Contain 'Group'
+        $caseVariant.State | Should -Be 'Include'
+        $caseVariant.IsAssigned | Should -BeTrue
+        $caseVariant.IncludeGroupIds | Should -Contain 'grp-include-case'
+    }
+
+    It 'derives normalized null intent from the authoritative targetType' {
+        $includeAssignments = @(
+            @{ intent = $null; targetType = 'group'; groupId = 'grp-null-intent' }
+        )
+        $excludeAssignments = @(
+            @{ intent = $null; targetType = 'exclusionGroup'; groupId = 'grp-null-exclusion' }
+        )
+
+        $include = InModuleScope TenantPulse -ArgumentList @(, $includeAssignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+        $exclude = InModuleScope TenantPulse -ArgumentList @(, $excludeAssignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+
+        $include.State | Should -Be 'Include'
+        $include.IsAssigned | Should -BeTrue
+        $include.IncludeGroupIds | Should -Contain 'grp-null-intent'
+        $exclude.State | Should -Be 'ExcludeOnly'
+        $exclude.IsAssigned | Should -BeFalse
+        $exclude.ExcludeGroupIds | Should -Contain 'grp-null-exclusion'
+    }
+
+    It 'rejects a normalized non-null intent that contradicts its targetType' {
+        $cases = @(
+            @{ intent = 'exclude'; targetType = 'group'; groupId = 'grp-conflicting-include' }
+            @{ intent = 'include'; targetType = 'exclusionGroup'; groupId = 'grp-conflicting-exclude' }
+        )
+
+        foreach ($assignment in $cases) {
+            $result = InModuleScope TenantPulse -ArgumentList $assignment {
+                param($assignment)
+                ConvertTo-PulseAssignmentIntent -Assignments @($assignment)
+            }
+
+            $result.State | Should -Be 'Malformed' -Because 'normalized intent must match target-derived row-schema intent'
+            $result.IsAssigned | Should -BeFalse
+            $result.Complete | Should -BeFalse
+            $result.MalformedReasons | Should -Contain 'unsupported-assignment-intent'
+        }
     }
 
     It 'classifies a normalized exclusionGroup target as ExcludeOnly (parity with raw graph shape)' {
         $assignments = @(
             @{ intent = 'exclude'; targetType = 'exclusionGroup'; groupId = 'grp-ex-norm' }
         )
+        $caseVariantAssignments = @(
+            @{ intent = 'EXCLUDE'; targetType = 'EXCLUSIONGROUP'; groupId = 'grp-ex-case' }
+        )
         $result = InModuleScope TenantPulse -ArgumentList @(, $assignments) {
+            param($assignments)
+            ConvertTo-PulseAssignmentIntent -Assignments $assignments
+        }
+        $caseVariant = InModuleScope TenantPulse -ArgumentList @(, $caseVariantAssignments) {
             param($assignments)
             ConvertTo-PulseAssignmentIntent -Assignments $assignments
         }
         $result.State | Should -Be 'ExcludeOnly'
         $result.IsAssigned | Should -BeFalse
         $result.ExcludeGroupIds | Should -Contain 'grp-ex-norm'
+        $caseVariant.State | Should -Be 'ExcludeOnly'
+        $caseVariant.IsAssigned | Should -BeFalse
+        $caseVariant.ExcludeGroupIds | Should -Contain 'grp-ex-case'
     }
 
     It 'classifies a normalized allLicensedUsers target as Include (parity with raw graph shape)' {

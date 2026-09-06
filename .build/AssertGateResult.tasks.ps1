@@ -591,10 +591,12 @@
 # nested Endpoint Security group proof, incoherent report-continuation retention,
 # reserved SessionId matrix columns, patch/diff secret scanning, and safe-share
 # provenance required before HTML warning suppression.
+# 3575 -> 3577 preserves nullable normalized row-schema intent while rejecting
+# non-null intent that contradicts the normalized target type.
 # An earlier all-tests discovery reported 3324 because it also included the four dedicated
 # tests/Perf assertions. The release workflow deliberately and explicitly runs tests/QA
-# plus tests/Unit only; its measured package-first total is therefore 3575.
-$script:tenantPulseGateMinimumTests = 3575
+# plus tests/Unit only; its measured package-first total is therefore 3577.
+$script:tenantPulseGateMinimumTests = 3577
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

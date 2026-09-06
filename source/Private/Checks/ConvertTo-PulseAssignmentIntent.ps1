@@ -22,8 +22,9 @@
     count as assigned. HasFilter is additive disclosure; a filter does not by itself assign.
     Every proof-relevant discriminator, intent, identity, and filter field must be a native
     string when present; implicit PowerShell coercion of arrays or scalars is never evidence.
-    A present intent outside include/exclude is Malformed rather than a future value being
-    treated as an include.
+    A present raw intent outside include/exclude is Malformed rather than a future value being
+    treated as an include. Row-schema-v1 normalized assignments may carry intent=null because
+    their targetType already defines inclusion or exclusion.
 #>
 
 function Get-PulseAssignmentStringField {
@@ -148,13 +149,16 @@ function ConvertTo-PulseAssignmentIntent {
             $malformedReasons.Add('missing-target-type') | Out-Null
             continue
         }
-        if ($intentField.IsPresent -and
-            ($null -eq $intentField.Value -or [string]::IsNullOrWhiteSpace($intentField.Value) -or
-                (-not [string]::Equals($intentField.Value, 'include', [System.StringComparison]::OrdinalIgnoreCase) -and
-                    -not [string]::Equals($intentField.Value, 'exclude', [System.StringComparison]::OrdinalIgnoreCase)))) {
-            $hasMalformed = $true
-            $malformedReasons.Add('unsupported-assignment-intent') | Out-Null
-            continue
+        if ($intentField.IsPresent) {
+            $isNormalizedNullIntent = $normalizedTargetTypeField.IsPresent -and $null -eq $intentField.Value
+            $isSupportedIntent = $isNormalizedNullIntent -or
+                [string]::Equals($intentField.Value, 'include', [System.StringComparison]::OrdinalIgnoreCase) -or
+                [string]::Equals($intentField.Value, 'exclude', [System.StringComparison]::OrdinalIgnoreCase)
+            if (-not $isSupportedIntent) {
+                $hasMalformed = $true
+                $malformedReasons.Add('unsupported-assignment-intent') | Out-Null
+                continue
+            }
         }
 
         # Extract intent - both shapes carry it at the top level.
@@ -167,6 +171,20 @@ function ConvertTo-PulseAssignmentIntent {
                 'allLicensedUsers'         { $typeName = 'allLicensedUsersAssignmentTarget' }
                 'allDevices'               { $typeName = 'allDevicesAssignmentTarget' }
                 default                    { $typeName = $null }
+            }
+            if ($null -ne $typeName) {
+                $expectedIntent = if ([string]::Equals(
+                        $normalizedTargetType,
+                        'exclusionGroup',
+                        [System.StringComparison]::OrdinalIgnoreCase
+                    )) { 'exclude' } else { 'include' }
+                if ($null -eq $intent) {
+                    $intent = $expectedIntent
+                } elseif (-not [string]::Equals($intent, $expectedIntent, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $hasMalformed = $true
+                    $malformedReasons.Add('unsupported-assignment-intent') | Out-Null
+                    continue
+                }
             }
             $groupIdField = Get-PulseAssignmentStringField -Node $assignment -PropertyName 'groupId'
             $filterIdField = Get-PulseAssignmentStringField -Node $assignment -PropertyName 'filterId'
