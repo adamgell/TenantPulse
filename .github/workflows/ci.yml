@@ -127,15 +127,18 @@ jobs:
           }
 
           $graphKitSource = Join-Path $graphKitRoot 'output/module/GraphKit/0.3.1'
-          # ModuleBuilder emits the two generated module files with the host OS
-          # newline convention. Canonicalize those generated files so the staged
-          # dependency has one byte identity across the six CI matrix rows.
+          # Git and ModuleBuilder can emit text assets with the host OS newline
+          # convention. Canonicalize every text asset in the staged module so the
+          # dependency has one byte identity across all six CI matrix rows.
           $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-          foreach ($generatedName in @('GraphKit.psm1', 'GraphKit.psd1')) {
-              $generatedPath = Join-Path $graphKitSource $generatedName
-              $generatedText = [System.IO.File]::ReadAllText($generatedPath)
-              $canonicalText = $generatedText.Replace("`r`n", "`n").Replace("`r", "`n")
-              [System.IO.File]::WriteAllText($generatedPath, $canonicalText, $utf8NoBom)
+          $textExtensions = @('.psm1', '.psd1', '.ps1xml', '.txt')
+          foreach ($textFile in Get-ChildItem -LiteralPath $graphKitSource -File -Recurse) {
+              if ($textFile.Extension -notin $textExtensions) {
+                  continue
+              }
+              $text = [System.IO.File]::ReadAllText($textFile.FullName)
+              $canonicalText = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+              [System.IO.File]::WriteAllText($textFile.FullName, $canonicalText, $utf8NoBom)
           }
 
           $graphKitTarget = Join-Path $PWD 'output/RequiredModules/GraphKit/0.3.1'

@@ -38,8 +38,11 @@ Describe 'CI workflow revision identity' -Tag 'QA' {
         $graphKitBlock.IndexOf('config core.autocrlf false') |
             Should -BeLessThan $graphKitBlock.IndexOf('checkout --detach')
         $graphKitBlock | Should -Match 'GraphKit checkout revision mismatch'
-        $graphKitBlock | Should -Match 'GraphKit\.psm1'
-        $graphKitBlock | Should -Match 'GraphKit\.psd1'
+        $graphKitBlock | Should -Match "'\.psm1'"
+        $graphKitBlock | Should -Match "'\.psd1'"
+        $graphKitBlock | Should -Match "'\.ps1xml'"
+        $graphKitBlock | Should -Match "'\.txt'"
+        $graphKitBlock | Should -Match 'Get-ChildItem.*-File.*-Recurse'
         $graphKitBlock | Should -Match 'Replace\("`r`n", "`n"\)\.Replace\("`r", "`n"\)'
         $graphKitBlock | Should -Match 'UTF8Encoding.*false'
         $graphKitBlock | Should -Match 'Get-PulseModuleTreeDigest'
