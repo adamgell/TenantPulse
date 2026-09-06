@@ -139,7 +139,7 @@ jobs:
               $text = [System.IO.File]::ReadAllText($textFile.FullName)
               $canonicalText = $text.Replace("`r`n", "`n").Replace("`r", "`n")
               if ($textFile.Name -eq 'GraphKit.psm1') {
-                  $lines = @($canonicalText -split "`n", -1)
+                  $lines = @($canonicalText.Split([char]10))
                   for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
                       if ($lines[$lineIndex].StartsWith("#Region '", [System.StringComparison]::Ordinal) -or
                           $lines[$lineIndex].StartsWith("#EndRegion '", [System.StringComparison]::Ordinal)) {

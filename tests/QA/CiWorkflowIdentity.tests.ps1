@@ -46,6 +46,8 @@ Describe 'CI workflow revision identity' -Tag 'QA' {
         $graphKitBlock | Should -Match 'Replace\("`r`n", "`n"\)\.Replace\("`r", "`n"\)'
         $graphKitBlock | Should -Match "#Region '"
         $graphKitBlock | Should -Match "#EndRegion '"
+        $graphKitBlock | Should -Match '\$canonicalText\.Split\(\[char\]10\)'
+        $graphKitBlock | Should -Not -Match '-split\s+"`n",\s*-1'
         $graphKitBlock | Should -Match ([regex]::Escape("Replace('\', '/')"))
         $graphKitBlock | Should -Match 'UTF8Encoding.*false'
         $graphKitBlock | Should -Match 'Get-PulseModuleTreeDigest'
