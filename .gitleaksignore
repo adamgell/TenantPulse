@@ -1,0 +1,5 @@
+# Synthetic JWT-shaped canaries used only to prove TenantPulse redaction.
+# Each exception is pinned to its introducing commit, file, rule, and line so
+# any changed or additional secret-like value remains a blocking finding.
+dcf3de4c736c4aa337be3f8afa970140eab70a6c:tests/QA/RedactedArtifactMutation.tests.ps1:generic-api-key:21
+dcf3de4c736c4aa337be3f8afa970140eab70a6c:tests/QA/PrivacyClassification.tests.ps1:generic-api-key:20

@@ -83,6 +83,13 @@ against that archive and reported `Nothing was published`. This remains local de
 evidence only; it does not claim remote CI, merge, live-tenant behavior, PSGallery publication, or
 customer acceptance.
 
+The integration head after that proof changes only this evidence record and the CI secret-scan
+gate (`.github/workflows/ci.yml` plus two exact synthetic-canary fingerprints in
+`.gitleaksignore`). It does not change module or package-producing source. The repaired gate scans
+the explicit pull-request or push commit range rather than relying on the prior action's 30-commit
+API window; a local Linux Gitleaks 8.24.3 reproduction found exactly the two deliberate canaries
+without those fingerprints and zero findings across the full pre-repair 50-commit range with them.
+
 Historical proof run `9ef9712e-bddc-4dc9-82f0-f085ab874656` binds all 59 shipped files and the exact
 result pair for an earlier candidate. That 418,518-byte local candidate archive SHA-256 is
 `386d79effd65afbf1deaca17d57ab3c08a6b63111144ff6a59fc3ed4726a994f`; the tested-release-proof
@@ -711,8 +718,8 @@ exactly 28 (`CheckCatalog.Tests.ps1`).
    partial-aware evaluation, but they are not serialized through a versioned findings/renderer
    contract as the governing R1a criterion requires; that product decision remains open. No current
    verified evidence establishes the candidate's reviewed exact remote head, remote matrix/gitleaks
-   result, merge, or merged-main CI. The docs-only reconciliation after that runtime tree does not
-   alter the frozen candidate's package-producing bytes.
+   result, merge, or merged-main CI. The evidence and CI-gate reconciliation after that runtime tree
+   does not alter the frozen candidate's package-producing bytes.
 2. **R1b protected-live acceptance — open; deterministic implementation complete.** Settings Catalog
    assignments, typed include/exclude intent, Administrative Template expansion, and the governing
    expansion-summary artifact are implemented. Shared authentication abort is a no-send gate,
