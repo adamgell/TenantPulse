@@ -1,7 +1,8 @@
 # Managed device report data contract v1
 
-TenantPulse `-ReportData Devices` publishes one neutral, hash-verified JSONL expansion named
-`managed-device-inventory`. It is the machine-data replacement for the six active IHA report
+TenantPulse `-ReportData Devices` requests one neutral JSONL expansion named
+`managed-device-inventory`; its manifest records the actual outcome, and a successfully published
+artifact is hash-verified. It is the machine-data replacement for the six active IHA report
 definitions that all read `managedDevices`:
 
 | IHA report | Successor derivation |
@@ -27,7 +28,10 @@ For Windows devices the public collection path requests `ManagedDevice.GetBeta`,
 includes hardware and health-attestation detail. `baseSourceColumns`, `detailSourceColumns`, and the
 merged `sourceColumns` preserve the exact inputs. Non-Windows detail is `NotApplicable`; a denied,
 failed, invalid, or authentication-suppressed detail read remains `Partial` with a gap rather than
-falling back to collection-shaped hardware defaults. Tenant identifiers are recursively pseudonymized before publication.
+falling back to collection-shaped hardware defaults. Singleton enrichment is bounded to the first
+1,000 unique Windows device ids in ordinal order. Remaining rows are retained with
+`detailResolutionState = "NotEvaluated"` and one `detail-cap-reached` gap; they are never silently
+presented as fully enriched. Tenant identifiers are recursively pseudonymized before publication.
 The snapshot and expansion remain local-only evidence and may contain user/device identifiers.
 
 That singleton route requires exact GraphKit `0.3.1`. The dependency is package- and

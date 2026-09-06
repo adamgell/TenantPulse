@@ -314,12 +314,12 @@ public sealed class PulseMutatingConfirmationHostUi : PSHostUserInterface
 
         # A fabricated but gate-passing NUnit result + sibling PesterObject CLIXML, so
         # Assert-GateResult.ps1's whole-result checks pass without running the real full suite.
-        # total="3649" tracks scripts/Publish-TenantPulsePackage.ps1's own -MinimumTests
+        # total="3650" tracks scripts/Publish-TenantPulsePackage.ps1's own -MinimumTests
         # value (see this file's own header docstring) - bump both together.
         $resultPath = Join-Path $testResultsDir "NUnitXml_TenantPulse_v$Version.Fixture.xml"
         $nunitXml = @"
 <?xml version="1.0" encoding="utf-8"?>
-<test-results name="TenantPulse $Version" total="3649" failures="0" errors="0" skipped="0">
+<test-results name="TenantPulse $Version" total="3650" failures="0" errors="0" skipped="0">
   <test-suite type="TestFixture" name="Fixture" result="Passed">
     <results>
       <test-case name="fixture test" result="Success" />

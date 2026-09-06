@@ -144,7 +144,7 @@ function Invoke-PulseComplianceReportCollection {
                 assignments        = @($assignments | ForEach-Object { ConvertTo-PulseReportSourceMap -InputObject $_ })
                 passcodeRequired   = Get-PulseReportValue -InputObject $policy -Name @('passwordRequired', 'passcodeRequired')
                 minimumPasscodeLength = Get-PulseReportValue -InputObject $policy -Name @('passwordMinimumLength', 'passcodeMinimumLength')
-                encryptionRequired = Get-PulseReportValue -InputObject $policy -Name @('storageRequireEncryption', 'deviceThreatProtectionEnabled', 'encryptionRequired')
+                encryptionRequired = Get-PulseReportValue -InputObject $policy -Name @('storageRequireEncryption', 'encryptionRequired')
                 sourceColumns      = ConvertTo-PulseReportSourceMap -InputObject $policy
             })
     }

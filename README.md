@@ -110,7 +110,7 @@ self-contained `./out/tenantpulse-report.html` renderer.
 
 | Command | What it does |
 |---|---|
-| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. `-ReportData All` guarantees the neutral audit source set plus all versioned report-data artifacts for downstream builders. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
+| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. `-ReportData All` selects the neutral audit source set and every versioned report-data artifact for downstream builders; each source and artifact records its actual outcome, including unavailable or failed states. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
 | `Get-PulseCheckCatalog` | Lists every check descriptor in the catalog (id, title, category, severity, authorities) as a lightweight, read-only view - useful for discovering what `-IncludeCategory`/`-IncludeCheck` values exist before running an assessment. |
 | `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render canonical JSON. `-ReportData All` passes every neutral report profile to fresh collection; `-Format Html` also writes a self-contained HTML report; `-Redact` remains the local-only compatibility pseudonymization path. |
 | `Invoke-PulseCheck` | Runs a scoped subset of checks (by id or category) against a fresh or existing snapshot - the same pipeline as `Invoke-PulseAssessment`, narrowed to exactly the checks you name. |
@@ -479,10 +479,11 @@ shared root twice. Add `-ExpandSettings` when the run also needs the successor c
 artifacts. The exact dataset set, GraphKit bindings, and sensitivity boundary are documented in
 [`docs/contracts/audit-inventory-v1.md`](docs/contracts/audit-inventory-v1.md).
 
-`-ReportData Reports` publishes six additional schema-v1 artifacts for Apple enrollment profiles,
+`-ReportData Reports` requests six additional schema-v1 artifacts for Apple enrollment profiles,
 compliance policy assignments, Conditional Access policy overview, connectors and tokens, directory
 roles, and groups. The Apple artifact uses one read-only GraphKit child collection per stored DEP
-token; the other five are snapshot-only projections. `-ReportData All` selects `Applications`,
+token; the other five are snapshot-only projections. Each artifact records its actual outcome, and
+only successfully published artifacts carry a content hash. `-ReportData All` selects `Applications`,
 `Devices`, `Inventory`, and `Reports` while deduplicating shared datasets. These artifacts preserve
 structured ids, source columns, hashes,
 and explicit gaps; they do not compute approval, severity, expiration status, or Office display

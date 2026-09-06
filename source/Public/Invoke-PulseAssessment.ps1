@@ -175,8 +175,9 @@
         managed-device inventory artifact that is sufficient for the external Office
         layer to reproduce IHA's active device worksheets without placing Excel logic in
         TenantPulse. 'Inventory' guarantees the neutral IHA-migration source datasets
-        independently of check selection. 'Reports' publishes six snapshot-only audit
-        report artifacts, and 'All' selects every report-data profile. Only accepted on the
+        independently of check selection. 'Reports' requests five snapshot-only audit
+        artifacts plus the Graph-backed Apple enrollment-profile artifact, which reads once
+        per stored DEP token. 'All' selects every report-data profile. Only accepted on the
         'Collect' parameter set.
 #>
 function Invoke-PulseAssessment {

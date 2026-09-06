@@ -136,7 +136,8 @@
         six active device reports. 'Inventory' guarantees the neutral source datasets needed
         by the IHA migration inventory, independently of check selection; it preserves raw
         service fields and explicit collection certainty without creating presentation rows.
-        'Reports' publishes six snapshot-only audit report artifacts. 'All' selects
+        'Reports' requests five snapshot-only audit artifacts plus the Graph-backed Apple
+        enrollment-profile artifact, which reads once per stored DEP token. 'All' selects
         Applications, Devices, Inventory, and Reports together. No profile renders
         DOCX/XLSX, applies branding, or evaluates approval state.
 

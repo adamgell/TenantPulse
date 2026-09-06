@@ -11,6 +11,9 @@
     public collection path also uses GraphKit's beta singleton read because Microsoft
     documents that real hardwareInformation values require a device-id GET with that field
     selected; collection-shaped defaults are not treated as authoritative hardware detail.
+    Singleton enrichment is bounded to 1,000 unique Windows device ids per run. The ids are
+    selected in ordinal order, and any remainder stays in the artifact with
+    detailResolutionState=NotEvaluated plus one explicit detail-cap-reached gap.
 
     The projection retains every source property in sourceColumns and promotes the stable
     fields required by the six IHA definitions. It makes no health/severity judgment. The
@@ -200,7 +203,11 @@ function Invoke-PulseDeviceReportCollection {
 
         [Parameter()]
         [AllowNull()]
-        [pscustomobject] $NetworkAbortState
+        [pscustomobject] $NetworkAbortState,
+
+        [Parameter()]
+        [ValidateRange(1, 10000)]
+        [int] $MaxDetailReads = 1000
     )
 
     $artifactName = 'managed-device-inventory'
@@ -260,27 +267,47 @@ function Invoke-PulseDeviceReportCollection {
             $windowsDevices = @($devices | Where-Object {
                     [string]::Equals([string] (Get-PulseReportValue -InputObject $_ -Name @('operatingSystem')), 'Windows', [System.StringComparison]::OrdinalIgnoreCase)
                 })
-            if ($null -ne $detailBlockReason -and $windowsDevices.Count -gt 0) {
+            $seenWindowsDeviceIds = [System.Collections.Generic.HashSet[string]]::new(
+                [System.StringComparer]::OrdinalIgnoreCase
+            )
+            $validWindowsDeviceIds = [System.Collections.Generic.List[string]]::new()
+            foreach ($device in $windowsDevices) {
+                $id = [string] (Get-PulseReportValue -InputObject $device -Name @('id', 'managedDeviceId'))
+                if ([string]::IsNullOrWhiteSpace($id)) {
+                    $gaps.Add((New-PulseReportGap -Scope 'managed-device-detail-without-id' -ReasonCode 'invalid-provider-data' -Operation 'ManagedDevice.GetBeta')) | Out-Null
+                    continue
+                }
+                if ($seenWindowsDeviceIds.Add($id)) {
+                    $validWindowsDeviceIds.Add($id) | Out-Null
+                }
+            }
+            [string[]] $orderedWindowsDeviceIds = $validWindowsDeviceIds.ToArray()
+            [System.Array]::Sort($orderedWindowsDeviceIds, [System.StringComparer]::OrdinalIgnoreCase)
+
+            if ($null -ne $detailBlockReason -and $orderedWindowsDeviceIds.Count -gt 0) {
                 $gaps.Add((New-PulseReportGap -Scope 'managed-device-detail' -ReasonCode $detailBlockReason -Operation 'ManagedDevice.GetBeta')) | Out-Null
-                foreach ($device in $windowsDevices) {
-                    $id = [string] (Get-PulseReportValue -InputObject $device -Name @('id', 'managedDeviceId'))
-                    if (-not [string]::IsNullOrWhiteSpace($id)) {
-                        $detailByDeviceId[$id] = [pscustomobject]@{ State = 'NotEvaluated'; Device = $null }
-                    }
+                foreach ($id in $orderedWindowsDeviceIds) {
+                    $detailByDeviceId[$id] = [pscustomobject]@{ State = 'NotEvaluated'; Device = $null }
                 }
             } else {
-                foreach ($device in $windowsDevices) {
-                    $id = [string] (Get-PulseReportValue -InputObject $device -Name @('id', 'managedDeviceId'))
-                    if ([string]::IsNullOrWhiteSpace($id)) {
-                        $gaps.Add((New-PulseReportGap -Scope 'managed-device-detail-without-id' -ReasonCode 'invalid-provider-data' -Operation 'ManagedDevice.GetBeta')) | Out-Null
-                        continue
-                    }
+                $detailReadCount = 0
+                $detailCapRecorded = $false
+                foreach ($id in $orderedWindowsDeviceIds) {
                     if ($NetworkAbortState.AuthenticationAborted) {
                         $detailByDeviceId[$id] = [pscustomobject]@{ State = 'NotEvaluated'; Device = $null }
                         $gaps.Add((New-PulseReportGap -Scope $id -ReasonCode 'authentication-failed' -Operation 'ManagedDevice.GetBeta')) | Out-Null
                         continue
                     }
+                    if ($detailReadCount -ge $MaxDetailReads) {
+                        $detailByDeviceId[$id] = [pscustomobject]@{ State = 'NotEvaluated'; Device = $null }
+                        if (-not $detailCapRecorded) {
+                            $gaps.Add((New-PulseReportGap -Scope 'managed-device-detail' -ReasonCode 'detail-cap-reached' -Operation 'ManagedDevice.GetBeta')) | Out-Null
+                            $detailCapRecorded = $true
+                        }
+                        continue
+                    }
 
+                    $detailReadCount++
                     $outcome = Invoke-PulseReportGraphOperation -Context $Context -Spec $spec `
                         -Dataset 'managed-device-inventory' -Parameters @{ id = $id }
                     if ($outcome.FailureClass -eq 'AuthenticationFailed') {

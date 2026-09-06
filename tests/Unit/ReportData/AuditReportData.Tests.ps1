@@ -71,14 +71,26 @@ Describe 'TenantPulse snapshot-only audit report contract' {
     It 'deduplicates the Reports source set inside All and marks every artifact when authentication fails' {
         $root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $script:roots.Add($root)
-        $script:capturedManifest = @()
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @() }
         Mock Get-PulseOperatorKey -ModuleName TenantPulse { [byte[]] (0..31) }
         Mock Get-GraphContext -ModuleName TenantPulse { throw 'fixture profile unavailable' }
-        Mock Invoke-PulseCollection -ModuleName TenantPulse { $script:capturedManifest = @($Manifest) }
 
         $store = Get-PulseTenantSnapshot -ProfileId fixture -OutputPath $root -ReportData All
         $manifest = Get-Content -LiteralPath $store.ManifestPath -Raw | ConvertFrom-Json
+        $expectedDatasets = @(
+            'androidEnrollmentProfiles', 'appProtectionPolicies', 'authenticationMethodsPolicy',
+            'conditionalAccessPolicies', 'depOnboardingSettings', 'deviceCategories',
+            'deviceCompliancePolicies', 'deviceConfigurations', 'deviceEnrollmentConfigurations',
+            'deviceManagementScripts', 'deviceManagementSettings', 'directoryRoleAssignments',
+            'directoryRoleDefinitions', 'domainConnectors', 'domains', 'groups',
+            'managedDeviceCleanupRules', 'managedDevices', 'mobileAppCategories',
+            'mobileAppConfigurations', 'ndesConnectors', 'roleAssignmentScheduleInstances',
+            'roleEligibilityScheduleInstances', 'subscribedSkus', 'vppTokens',
+            'windowsAutopilotDeviceIdentities', 'windowsUpdateCatalogItems'
+        ) | Sort-Object
+        $datasetNames = @($manifest.datasets.PSObject.Properties.Name | Sort-Object)
+        $datasetNames | Should -Be $expectedDatasets
+        @($datasetNames | Select-Object -Unique).Count | Should -Be 27
         @($manifest.expansions.PSObject.Properties.Name) | Should -Contain 'compliance-policy-assignments'
         @($manifest.expansions.PSObject.Properties.Name) | Should -Contain 'conditional-access-policies'
         @($manifest.expansions.PSObject.Properties.Name) | Should -Contain 'connectors-and-tokens'
@@ -90,7 +102,6 @@ Describe 'TenantPulse snapshot-only audit report contract' {
         foreach ($entry in @($manifest.expansions.PSObject.Properties.Value)) {
             $entry.status | Should -Be 'NotExpanded'
         }
-        Should-Invoke Invoke-PulseCollection -ModuleName TenantPulse -Times 0 -Exactly
     }
 
     It 'selects the exact report source datasets once independently of checks' {
@@ -132,17 +143,24 @@ Describe 'TenantPulse snapshot-only audit report contract' {
             assignments = @([pscustomobject]@{ id = 'assignment-1'; target = [pscustomobject]@{ groupId = 'group-1' } })
             futureField = 'preserved'
         }
-        $store = New-AuditReportStore -Root $root -Datasets @{ deviceCompliancePolicies = @($policy) }
+        $threatOnlyPolicy = [pscustomobject]@{
+            id = 'compliance-2'; displayName = 'Threat protection only'
+            '@odata.type' = '#microsoft.graph.windows10CompliancePolicy'
+            deviceThreatProtectionEnabled = $true
+            assignments = @()
+        }
+        $store = New-AuditReportStore -Root $root -Datasets @{ deviceCompliancePolicies = @($policy, $threatOnlyPolicy) }
 
         $result = InModuleScope TenantPulse -ArgumentList $store {
             param($snapshotStore)
             Invoke-PulseComplianceReportCollection -Store $snapshotStore
         }
         $result.Status | Should -Be 'Expanded'
-        $row = InModuleScope TenantPulse -ArgumentList $store {
+        $reportRows = InModuleScope TenantPulse -ArgumentList $store {
             param($snapshotStore)
-            @(Get-PulseExpansionRows -Store $snapshotStore -Name 'compliance-policy-assignments')[0]
+            @(Get-PulseExpansionRows -Store $snapshotStore -Name 'compliance-policy-assignments')
         }
+        $row = @($reportRows | Where-Object policyId -EQ 'compliance-1')[0]
         $row.platform | Should -Be 'Windows'
         $row.assignmentCount | Should -Be 1
         $row.assignments[0].target.groupId | Should -Be 'group-1'
@@ -151,6 +169,8 @@ Describe 'TenantPulse snapshot-only audit report contract' {
         $row.encryptionRequired | Should -BeTrue
         $row.sourceColumns.futureField | Should -Be 'preserved'
         @($row.PSObject.Properties.Name) | Should -Not -Contain 'severity'
+        $threatOnlyRow = @($reportRows | Where-Object policyId -EQ 'compliance-2')[0]
+        $threatOnlyRow.encryptionRequired | Should -BeNullOrEmpty
     }
 
     It 'publishes normalized Conditional Access overview fields and gaps unrecognized state' {
@@ -215,8 +235,10 @@ Describe 'TenantPulse snapshot-only audit report contract' {
         @($rows.recordType) | Should -Contain 'AppleVppToken'
         @($rows | Where-Object recordType -EQ 'AppleVppToken')[0].recordId |
             Should -Match '^vppTokens-[0-9a-f]{64}$'
-        @($rows.PSObject.Properties.Name) | Should -Not -Contain 'daysUntilExpiration'
-        @($rows.PSObject.Properties.Name) | Should -Not -Contain 'severity'
+        foreach ($row in $rows) {
+            @($row.PSObject.Properties.Name) | Should -Not -Contain 'daysUntilExpiration'
+            @($row.PSObject.Properties.Name) | Should -Not -Contain 'severity'
+        }
     }
 
     It 'joins role definitions to permanent, active, and eligible assignment evidence by id' {

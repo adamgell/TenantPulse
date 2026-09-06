@@ -12,11 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Neutral `-ReportData` profiles on both collection surfaces: `Applications`, `Devices`, and
-  `Reports` publish nine hash-verified machine-data artifacts; `Inventory` guarantees the
-  25-source IHA migration set; and `All` selects every profile. Raw columns and explicit certainty
-  are preserved, overlapping roots are deduplicated, and Office rendering, branding, approvals,
-  current-clock status, and derived severity stay outside.
+- `Applications`, `Devices`, and `Reports` request nine artifacts; each records its outcome,
+  including unavailable/failed, and published data is hash-verified. `Inventory` selects 25 IHA
+  sources; `All` selects every profile. Raw columns and certainty remain; shared roots are
+  deduplicated. Office rendering, branding, approvals, current-clock status, and derived severity
+  stay outside.
 - Complete the IHA machine-data successor with per-token Apple enrollment profiles, authoritative
   per-Windows-device hardware/health detail, and a versioned recovery/import replacement contract.
   Fuzzy group-name guesses, credential-like activation-lock bypass codes, opaque next-link replay,

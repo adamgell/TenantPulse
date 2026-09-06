@@ -226,6 +226,62 @@ Describe 'TenantPulse managed-device report-data contract' {
         Should-Invoke Invoke-PulseReportGraphOperation -ModuleName TenantPulse -Times 1 -Exactly
     }
 
+    It 'caps deterministic Windows detail reads and marks every remaining device NotEvaluated' {
+        $rootA = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $rootB = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:roots.Add($rootA)
+        $script:roots.Add($rootB)
+        $sourceRows = @(
+            [pscustomobject]@{ id = 'device-c'; deviceName = 'Charlie'; operatingSystem = 'Windows' }
+            [pscustomobject]@{ id = 'device-a'; deviceName = 'Alpha'; operatingSystem = 'Windows' }
+            [pscustomobject]@{ id = 'device-b'; deviceName = 'Bravo'; operatingSystem = 'Windows' }
+        )
+        $storeA = New-DeviceReportStore -Root $rootA -Rows $sourceRows
+        $storeB = New-DeviceReportStore -Root $rootB -Rows @($sourceRows[2], $sourceRows[0], $sourceRows[1])
+        $context = [pscustomobject]@{ TenantId = '11111111-1111-1111-1111-111111111111' }
+        $authorization = [pscustomobject]@{
+            Decisions = [ordered]@{
+                'ManagedDevice/GetBeta' = [pscustomobject]@{ Decision = 'Granted'; ReasonCode = 'granted' }
+            }
+        }
+        $script:requestedDetailIds = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-PulseReportGraphOperation -ModuleName TenantPulse {
+            $script:requestedDetailIds.Add([string] $Parameters.id) | Out-Null
+            [pscustomobject]@{
+                Status = 'Collected'; FailureClass = $null; ReasonCode = 'collected'
+                Rows = @([pscustomobject]@{ id = $Parameters.id; hardwareInformation = [pscustomobject]@{ tpmVersion = '2.0' } })
+            }
+        }
+
+        $resultA = InModuleScope TenantPulse -ArgumentList $storeA, $context, $authorization {
+            param($snapshotStore, $ctx, $auth)
+            Invoke-PulseDeviceReportCollection -Store $snapshotStore -Context $ctx `
+                -AuthorizationDecision $auth -ProfileId fixture -Pseudonym tp-fixture `
+                -MaxDetailReads 1
+        }
+        $resultB = InModuleScope TenantPulse -ArgumentList $storeB, $context, $authorization {
+            param($snapshotStore, $ctx, $auth)
+            Invoke-PulseDeviceReportCollection -Store $snapshotStore -Context $ctx `
+                -AuthorizationDecision $auth -ProfileId fixture -Pseudonym tp-fixture `
+                -MaxDetailReads 1
+        }
+        @($resultA.Status, $resultB.Status) | Should -Be @('Partial', 'Partial')
+        @($resultA.Gaps.reason) | Should -Be @('category:detail-cap-reached;operation:ManagedDevice.GetBeta')
+        @($resultB.Gaps.reason) | Should -Be @('category:detail-cap-reached;operation:ManagedDevice.GetBeta')
+        $rows = InModuleScope TenantPulse -ArgumentList $storeA {
+            param($snapshotStore)
+            @(Get-PulseExpansionRows -Store $snapshotStore -Name 'managed-device-inventory')
+        }
+        @($rows.deviceId) | Should -Be @('device-a', 'device-b', 'device-c')
+        @($rows.detailResolutionState) | Should -Be @('Resolved', 'NotEvaluated', 'NotEvaluated')
+        @($script:requestedDetailIds) | Should -Be @('device-a', 'device-a')
+        $manifestA = Get-Content -LiteralPath $storeA.ManifestPath -Raw | ConvertFrom-Json
+        $manifestB = Get-Content -LiteralPath $storeB.ManifestPath -Raw | ConvertFrom-Json
+        $manifestA.expansions.'managed-device-inventory'.sha256 |
+            Should -Be $manifestB.expansions.'managed-device-inventory'.sha256
+        Should-Invoke Invoke-PulseReportGraphOperation -ModuleName TenantPulse -Times 2 -Exactly
+    }
+
     It 'is byte-deterministic across source order' {
         $rootA = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
         $rootB = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())

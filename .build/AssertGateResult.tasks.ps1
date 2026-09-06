@@ -599,10 +599,11 @@
 # 3615 -> 3648 completes the IHA successor report surface, including audit,
 # Apple enrollment-profile, managed-device detail, and migration gates.
 # 3648 -> 3649 adds the real-catalog gate for both GraphKit 0.3.1 IHA bridge operations.
+# 3649 -> 3650 proves the deterministic 1,000-device detail-expansion cap.
 # An earlier all-tests discovery reported 3324 because it also included the four dedicated
 # tests/Perf assertions. The release workflow deliberately and explicitly runs tests/QA
-# plus tests/Unit only; its measured package-first total is therefore 3649.
-$script:tenantPulseGateMinimumTests = 3649
+# plus tests/Unit only; its measured package-first total is therefore 3650.
+$script:tenantPulseGateMinimumTests = 3650
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)
