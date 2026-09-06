@@ -268,6 +268,40 @@ Describe 'TP10A: fragment-and-merge expansion' {
         } | Should -Throw -ExpectedMessage '*missing*'
     }
 
+    It 'ignores whitespace-only fragment lines instead of publishing null rows' {
+        $result = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            $fragmentId = '000000-000000-whitespace'
+            $row = [pscustomobject]@{
+                policyId     = 'policy-a'
+                settingPath  = 'setting-a'
+                instanceId   = '0'
+                nameResolved = $true
+                redacted     = $false
+            }
+            $null = Write-PulseExpansionFragment -Store $store -Name 'settingsCatalog' -FragmentId $fragmentId -Rows @($row)
+            $fragmentPath = Get-PulseExpansionFragmentPath -Store $store -Name 'settingsCatalog' -FragmentId $fragmentId
+            [System.IO.File]::AppendAllText($fragmentPath, "   `n`t`r`n")
+
+            $fragmentRows = Read-PulseExpansionFragmentRows -Path $fragmentPath
+            $merged = Merge-PulseExpansionFragments -Store $store -Name 'settingsCatalog' -FragmentIds @($fragmentId) -Gaps @() -PolicyCount 1
+            $publishedRows = Get-PulseExpansionRows -Store $store -Name 'settingsCatalog'
+            [pscustomobject]@{
+                FragmentCount = @($fragmentRows).Count
+                FragmentId    = $fragmentRows[0].policyId
+                MergedCount   = $merged.RowCount
+                PublishedCount = @($publishedRows).Count
+                PublishedId   = $publishedRows[0].policyId
+            }
+        }
+
+        $result.FragmentCount | Should -Be 1
+        $result.FragmentId | Should -Be 'policy-a'
+        $result.MergedCount | Should -Be 1
+        $result.PublishedCount | Should -Be 1
+        $result.PublishedId | Should -Be 'policy-a'
+    }
+
     It 'flushes 65 policies as three non-overlapping 32-policy fragments' {
         $policies = 0..64 | ForEach-Object {
             [pscustomobject]@{ id = ('policy-{0:D3}' -f $_) }

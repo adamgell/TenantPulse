@@ -56,6 +56,12 @@ function Get-PulseExpansionRows {
     } else {
         $manifest = Get-PulseSnapshotManifest -Store $Store
     }
+
+    if ($manifest -isnot [System.Collections.IDictionary] -or
+        -not $manifest.Contains('expansions') -or
+        $manifest['expansions'] -isnot [System.Collections.IDictionary]) {
+        throw 'Get-PulseExpansionRows: loaded manifest has no valid expansions dictionary.'
+    }
     $expansions = $manifest['expansions']
 
     if (-not $expansions.Contains($Name)) {

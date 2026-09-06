@@ -50,6 +50,15 @@ function New-PulseArmRequest {
     $uri = $builder.Uri
     $null = Test-PulseArmAuthority -Uri $uri -Cloud $Cloud
 
+    # UriBuilder canonicalizes dot segments and some escaped path content. The
+    # raw resource-ID validator is the first boundary; this comparison is the
+    # independent post-construction boundary that prevents canonicalization of
+    # either the resource path or child path from retargeting the request.
+    $canonicalPath = [System.Uri]::UnescapeDataString($uri.AbsolutePath)
+    if (-not [string]::Equals($canonicalPath, $relative, [System.StringComparison]::Ordinal)) {
+        throw "ARM request path changed during URI canonicalization; refusing to target '$canonicalPath'."
+    }
+
     return [pscustomobject][ordered]@{
         Provider       = 'ARM'
         Cloud          = $Cloud

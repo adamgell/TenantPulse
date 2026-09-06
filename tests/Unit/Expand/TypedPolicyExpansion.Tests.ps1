@@ -685,6 +685,39 @@ Describe 'Invoke-PulseTypedPolicyExpansion' {
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
     }
 
+    It 'isolates an embedded-assignment persistence failure to its policy and continues later policies' {
+        $badPolicy = New-TestCompliancePolicy -Id 'embedded-bad'
+        $badPolicy | Add-Member -NotePropertyName assignments -NotePropertyValue (New-TestAssignmentResponse -GroupId 'bad-group')
+        $goodPolicy = New-TestCompliancePolicy -Id 'embedded-good'
+        $goodPolicy | Add-Member -NotePropertyName assignments -NotePropertyValue (New-TestAssignmentResponse -GroupId 'good-group')
+
+        # A directory at the intended dataset-file path produces a real, policy-specific
+        # atomic-publish failure without replacing the persistence implementation with a mock.
+        $blockedDatasetPath = Join-Path $script:store.DatasetsPath 'complianceAssignments-embedded-bad.json'
+        New-Item -Path $blockedDatasetPath -ItemType Directory | Out-Null
+
+        $script:embeddedPersistenceResult = $null
+        {
+            $script:embeddedPersistenceResult = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $badPolicy, $goodPolicy, $script:typedPolicyMaps.compliance {
+                param($store, $context, $badPolicy, $goodPolicy, $typeMap)
+                Invoke-PulseTypedPolicyExpansion -Store $store -Context $context -Policies @($badPolicy, $goodPolicy) -PolicyType 'compliance' `
+                    -TypeMap $typeMap -AssignmentType 'DeviceCompliancePolicyAssignment' -Name 'compliance'
+            }
+        } | Should -Not -Throw
+
+        $script:embeddedPersistenceResult.Status | Should -Be 'Partial'
+        $script:embeddedPersistenceResult.PolicyCount | Should -Be 2
+        @($script:embeddedPersistenceResult.Gaps).Count | Should -Be 1
+        $script:embeddedPersistenceResult.Gaps[0].policyId | Should -Be 'embedded-bad'
+        $script:embeddedPersistenceResult.Gaps[0].reason | Should -Be 'category:AssignmentPersistenceFailed'
+
+        $jsonlPath = Get-PulseExpandedJsonlPath -Store $script:store -Name 'compliance'
+        $rows = @(Get-Content -LiteralPath $jsonlPath | ForEach-Object { $_ | ConvertFrom-Json })
+        @($rows.policyId | Select-Object -Unique) | Should -Be @('embedded-good')
+        @($rows.assignments[0].groupId | Select-Object -Unique) | Should -Be @('good-group')
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 0 -Exactly
+    }
+
     It 'preserves authoritative embedded zero assignments without falling back to Graph' {
         $policy = New-TestCompliancePolicy -Id 'embedded-empty'
         $policy | Add-Member -NotePropertyName assignments -NotePropertyValue @()

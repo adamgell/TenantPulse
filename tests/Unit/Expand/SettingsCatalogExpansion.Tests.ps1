@@ -1179,6 +1179,80 @@ Describe 'Invoke-PulseSettingsCatalogExpansion' {
         # no expansion entry was ever written for a corrupt/incomplete artifact
         $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
         ($manifest.expansions.PSObject.Properties.Name -contains 'settingsCatalog') | Should -BeFalse
+        ($manifest.datasets.PSObject.Properties.Name -contains 'configurationPolicySettings-policy-fault') | Should -BeTrue
+        ($manifest.datasets.PSObject.Properties.Name -contains 'configurationPolicyAssignments-policy-fault') | Should -BeTrue
+
+        $rawDatasets = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            $settings = Read-PulseDataset -Store $store -Name 'configurationPolicySettings-policy-fault'
+            $assignments = Read-PulseDataset -Store $store -Name 'configurationPolicyAssignments-policy-fault'
+            [pscustomobject]@{
+                SettingsCount = @($settings).Count
+                AssignmentCount = @($assignments).Count
+            }
+        }
+        $rawDatasets.SettingsCount | Should -Be 1
+        $rawDatasets.AssignmentCount | Should -Be 0
+    }
+
+    It 'preserves both the fragment failure and the manifest-batch failure when cleanup also fails' {
+        $policy = New-TestPolicy -Id 'policy-dual-fault'
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse -Value 'dual-fault'
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
+        Mock Write-PulseExpansionFragment -ModuleName TenantPulse { throw 'fragment-failure-marker' }
+        Mock Set-PulseManifestEntry -ModuleName TenantPulse { throw 'manifest-failure-marker' }
+
+        $caught = $null
+        try {
+            InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
+                param($store, $context, $policy, $index)
+                Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
+            }
+        } catch {
+            $caught = $_
+        }
+
+        $caught | Should -Not -BeNullOrEmpty
+        $caught.Exception | Should -BeOfType ([System.AggregateException])
+        @($caught.Exception.InnerExceptions).Count | Should -Be 2
+        $caught.Exception.InnerExceptions[0].Message | Should -Match 'fragment-failure-marker'
+        $caught.Exception.InnerExceptions[1].Message | Should -Match 'manifest-failure-marker'
+        Should-Invoke Write-PulseExpansionFragment -ModuleName TenantPulse -Times 1 -Exactly
+        Should-Invoke Set-PulseManifestEntry -ModuleName TenantPulse -Times 1 -Exactly
+    }
+
+    It 'preserves the <Fault> failure when it is the only publication failure' -ForEach @(
+        @{ Fault = 'fragment'; ExpectedMessage = 'fragment-only-marker' }
+        @{ Fault = 'manifest'; ExpectedMessage = 'manifest-only-marker' }
+    ) {
+        $policy = New-TestPolicy -Id "policy-$Fault-only"
+        $index = New-TestDefinitionIndex
+        $settingsResponse = New-TestSettingsResponse -Value "$Fault-only"
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ConfigurationPolicySetting' } {
+            New-PulseTestGraphEnvelope -Data @($settingsResponse)
+        }
+        if ($Fault -eq 'fragment') {
+            Mock Write-PulseExpansionFragment -ModuleName TenantPulse { throw 'fragment-only-marker' }
+        } else {
+            Mock Set-PulseManifestEntry -ModuleName TenantPulse { throw 'manifest-only-marker' }
+        }
+
+        $caught = $null
+        try {
+            InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $policy, $index {
+                param($store, $context, $policy, $index)
+                Invoke-PulseSettingsCatalogExpansion -Store $store -Context $context -Policies @($policy) -DefinitionIndex $index
+            }
+        } catch {
+            $caught = $_
+        }
+
+        $caught | Should -Not -BeNullOrEmpty
+        $caught.Exception | Should -Not -BeOfType ([System.AggregateException])
+        $caught.Exception.Message | Should -Match $ExpectedMessage
     }
 }
 

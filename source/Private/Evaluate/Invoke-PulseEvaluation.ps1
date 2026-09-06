@@ -269,13 +269,33 @@ function Invoke-PulseEvaluation {
             $rawReasonCode = $null
         }
 
-        $resultPrivacyComplete = $false
+        # PrivacyComplete is derived here from the final normalized result; a Function
+        # rule's similarly named property is untrusted compatibility metadata. In
+        # particular, PowerShell casts every non-empty string (including 'false') to
+        # $true, and a caller-supplied $false must not veto privacy classes supplied by
+        # the descriptor after the rule returned. Recomputing here also gives Expression
+        # and engine-produced results the same evidence/reason contract.
+        $resultReason = $null
         if ($result -is [System.Collections.IDictionary]) {
-            if ($result.ContainsKey('PrivacyComplete') -and $result.PrivacyComplete -is [bool]) {
-                $resultPrivacyComplete = [bool] $result.PrivacyComplete
+            if ($result.ContainsKey('Reason')) { $resultReason = $result.Reason }
+        } elseif ($result.PSObject.Properties.Name -contains 'Reason') {
+            $resultReason = $result.Reason
+        }
+
+        $resultPrivacyComplete = [string]::IsNullOrEmpty([string] $resultReason)
+        if (-not $resultPrivacyComplete) {
+            $resultPrivacyComplete = -not [string]::IsNullOrEmpty($rawReasonCode) -and
+                (Test-PulseValueFitsPrivacyClass -Class 'BoundedReviewedText' -Value $resultReason)
+        }
+
+        if ($resultPrivacyComplete) {
+            foreach ($item in @($result.Evidence)) {
+                if (@($item.RedactDetailKeys).Count -gt 0 -or
+                    -not (Test-PulseClassifiedEvidenceComplete -Entry $item)) {
+                    $resultPrivacyComplete = $false
+                    break
+                }
             }
-        } elseif ($result.PSObject.Properties.Name -contains 'PrivacyComplete' -and $result.PrivacyComplete -is [bool]) {
-            $resultPrivacyComplete = [bool] $result.PrivacyComplete
         }
         $allFindingsPrivacyComplete = $allFindingsPrivacyComplete -and $resultPrivacyComplete
 
@@ -1023,20 +1043,27 @@ function Invoke-PulseCheckEvaluation {
                 $reasonCode = [string] $ruleOutput.ReasonCode
             }
 
-            $privacyComplete = $false
-            if ($ruleOutput.PSObject.Properties.Name -contains 'PrivacyComplete') {
-                $privacyComplete = [bool] $ruleOutput.PrivacyComplete
-            }
-
             if ($null -ne $Check.Privacy -and $null -ne $Check.Privacy.EvidenceFields) {
                 $declared = $Check.Privacy.EvidenceFields
+                $declaredIsDictionary = $declared -is [System.Collections.IDictionary]
+                $declaredNames = if ($declaredIsDictionary) {
+                    @($declared.Keys)
+                } else {
+                    @($declared.PSObject.Properties.Name)
+                }
                 foreach ($item in @($evidence)) {
                     if ($null -eq $item.FieldClasses) {
                         $item | Add-Member -NotePropertyName FieldClasses -NotePropertyValue @{} -Force
                     }
-                    foreach ($fieldName in @($declared.Keys)) {
+                    foreach ($fieldName in $declaredNames) {
+                        if ([string]::IsNullOrWhiteSpace([string] $fieldName)) { continue }
+                        $declaredClass = if ($declaredIsDictionary) {
+                            $declared[$fieldName]
+                        } else {
+                            $declared.PSObject.Properties[[string] $fieldName].Value
+                        }
                         if (-not $item.FieldClasses.ContainsKey([string] $fieldName)) {
-                            $item.FieldClasses[[string] $fieldName] = [string] $declared[$fieldName]
+                            $item.FieldClasses[[string] $fieldName] = [string] $declaredClass
                         }
                     }
                 }
@@ -1047,7 +1074,6 @@ function Invoke-PulseCheckEvaluation {
                 Evidence         = $evidence
                 Reason           = $reason
                 ReasonCode       = $reasonCode
-                PrivacyComplete  = $privacyComplete
             }
         }
 

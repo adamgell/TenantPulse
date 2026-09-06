@@ -79,8 +79,9 @@ function Test-PulseUpdateRingDeadlines {
 
     $configurations = @($Datasets.deviceConfigurations)
     $allUpdateRings = [System.Collections.Generic.List[object]]::new()
-    $configurationRowsById = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
-    $duplicateConfigurationIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $configurationRowsById = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $duplicateConfigurationIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $ringRelevantConfigurationIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $potentialQualifyingKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $configurationOrdinal = 0
     foreach ($configuration in $configurations) {
@@ -105,12 +106,31 @@ function Test-PulseUpdateRingDeadlines {
             $intent = ConvertTo-PulseAssignmentIntent -Assignments (Get-PulseSettingsCatalogValueProperty -Node $configuration -PropertyName 'assignments')
             if (($intent.IsAssigned -or -not $intent.Complete) -and (& $hasDeadline $configuration)) {
                 [void] $potentialQualifyingKeys.Add($configurationKey)
+                if (-not [string]::IsNullOrWhiteSpace($configurationId)) {
+                    [void] $ringRelevantConfigurationIds.Add($configurationId)
+                }
             }
             continue
         }
         if ([string]::Equals($odataType, '#microsoft.graph.windowsUpdateForBusinessConfiguration', [System.StringComparison]::OrdinalIgnoreCase)) {
             $allUpdateRings.Add([pscustomobject]@{ Row = $configuration; Key = $configurationKey })
+            $intent = ConvertTo-PulseAssignmentIntent -Assignments (Get-PulseSettingsCatalogValueProperty -Node $configuration -PropertyName 'assignments')
+            if (($intent.IsAssigned -or -not $intent.Complete) -and (& $hasDeadline $configuration) -and
+                -not [string]::IsNullOrWhiteSpace($configurationId)) {
+                [void] $ringRelevantConfigurationIds.Add($configurationId)
+            }
         }
+    }
+
+    $hasRingRelevantDuplicate = $false
+    foreach ($duplicateConfigurationId in $duplicateConfigurationIds) {
+        if ($ringRelevantConfigurationIds.Contains($duplicateConfigurationId)) {
+            $hasRingRelevantDuplicate = $true
+            break
+        }
+    }
+    if ($hasRingRelevantDuplicate) {
+        throw 'Duplicate configuration ids were returned in deviceConfigurations; update-ring deadlines cannot be evaluated from conflicting rows.'
     }
 
     $updateRings = [System.Collections.Generic.List[object]]::new()
@@ -143,7 +163,8 @@ function Test-PulseUpdateRingDeadlines {
                 continue
             }
 
-            if (-not $configurationRowsById.ContainsKey($gapConfigurationId) -or $duplicateConfigurationIds.Contains($gapConfigurationId)) {
+            if (-not $configurationRowsById.ContainsKey($gapConfigurationId) -or
+                ($duplicateConfigurationIds.Contains($gapConfigurationId) -and $ringRelevantConfigurationIds.Contains($gapConfigurationId))) {
                 $hasBroadPartialUncertainty = $true
                 continue
             }

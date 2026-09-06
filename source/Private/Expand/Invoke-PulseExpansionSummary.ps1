@@ -117,13 +117,13 @@ function Invoke-PulseExpansionSummary {
                 $familyGapCount++
                 $summaryGaps.Add([pscustomobject][ordered]@{
                         family   = $familyName
-                        policyId = [string] $gap.policyId
-                        reason   = [string] $gap.reason
+                        policyId = Protect-PulseReason -Message ([string] $gap.policyId) -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+                        reason   = Protect-PulseReason -Message ([string] $gap.reason) -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
                     }) | Out-Null
             }
             if ($familyGapCount -eq 0 -and $status -ne 'Expanded') {
                 $familyReason = if ($null -ne $entry.reason -and -not [string]::IsNullOrWhiteSpace([string] $entry.reason)) {
-                    [string] $entry.reason
+                    Protect-PulseReason -Message ([string] $entry.reason) -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
                 } else {
                     "family:$familyName status $status"
                 }

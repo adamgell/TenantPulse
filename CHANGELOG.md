@@ -74,6 +74,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Graph collection now fails closed unless `Get-GraphObject -PassThruResult` returns exactly one complete `GraphKit.OperationResult`; null, rows-only, multiple, type-spoofed, and malformed results can no longer be persisted as `Collected`, while bounded partial rows retain indeterminate, truncation, and page-cap detail.
 - Review finding 6 is implemented: Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta`, `ConfigurationPolicySetting.ListBeta`, and `ConfigurationPolicyAssignment.ListBeta`, independent of tenant policy count; setting and assignment gaps name their respective primitives explicitly.
 - Direct, composite, and expansion collection paths now use one canonical Graph failure mapper. A request-time `403` is recorded as `Failed` / `PermissionDenied`; only `AuthenticationFailed` aborts subsequent network collection, while deadline expiration, cancellation, indeterminate certainty, permission denial, and provider failure remain explicit and isolated.
+- Final review hardening now derives finding privacy from final classified evidence; rejects
+  malformed or duplicate group closure, case-variant duplicate update-ring identities,
+  contradictory BitLocker/LAPS values, malformed expansion rows, and non-canonical ARM paths;
+  and preserves exact gap attribution plus both errors when expansion and manifest persistence
+  fail together.
+- Release CI now uses a base-controlled `pull_request_target` gate that checksum-pins its
+  scanner and reviewed `.gitleaksignore`, fetches PR heads only as passive Git objects, blocks
+  PR changes to both trust-root files, and scans the full PR or push comparison range.
 
 ### Changed
 

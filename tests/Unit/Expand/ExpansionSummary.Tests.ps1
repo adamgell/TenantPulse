@@ -68,4 +68,35 @@ Describe 'Invoke-PulseExpansionSummary' {
         $document.caps | Should -Not -BeNullOrEmpty
         $document.hashes | Should -Not -BeNullOrEmpty
     }
+
+    It 'redacts copied source gaps and fallback reasons before publishing the summary' {
+        $profileId = 'profile-id-summary-canary'
+        $tenantId = 'tenant-id-summary-canary'
+        $pseudonym = 'tp-summary-safe'
+        $result = InModuleScope TenantPulse -ArgumentList $script:store, $profileId, $tenantId, $pseudonym {
+            param($store, $profileId, $tenantId, $pseudonym)
+            Set-PulseExpansionEntry -Store $store -Name 'compliance' -Status 'NotExpanded' `
+                -Reason 'source family unavailable' -Gaps @([pscustomobject]@{
+                    policyId = "policy-$profileId"
+                    reason   = "source gap for $tenantId"
+                })
+            Set-PulseExpansionEntry -Store $store -Name 'deviceConfiguration' -Status 'NotExpanded' `
+                -Reason "fallback for $profileId and $tenantId"
+
+            Invoke-PulseExpansionSummary -Store $store -Requested -ProfileId $profileId `
+                -Pseudonym $pseudonym -TenantId $tenantId
+        }
+
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $summaryPath = Join-Path $script:store.Root $manifest.expansions.expansionSummary.path
+        $summaryText = Get-Content -LiteralPath $summaryPath -Raw
+        $returnedGapText = $result.Gaps | ConvertTo-Json -Depth 16 -Compress
+        $manifestGapText = $manifest.expansions.expansionSummary.gaps | ConvertTo-Json -Depth 16 -Compress
+
+        foreach ($publishedText in @($returnedGapText, $summaryText, $manifestGapText)) {
+            $publishedText | Should -Not -Match ([regex]::Escape($profileId))
+            $publishedText | Should -Not -Match ([regex]::Escape($tenantId))
+            $publishedText | Should -Match ([regex]::Escape($pseudonym))
+        }
+    }
 }

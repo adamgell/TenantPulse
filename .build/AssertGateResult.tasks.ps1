@@ -560,10 +560,17 @@
 # 3323 -> 3328 adds fail-closed null Graph-envelope elements, permission-baseline
 # coherence, malformed group-member accounting, and bounded artifact-fingerprint
 # failure publication.
+# 3328 -> 3372 is the measured final-review regression wave: fail-closed expansion
+# parsing and persistence, derived privacy completeness, malformed/duplicate group
+# closure, case-insensitive update-ring identity, contradictory BitLocker/LAPS values,
+# administrative-template abort attribution, ARM canonicalization, and the approved
+# Gitleaks-ignore binding. NotRun remains forbidden.
+# 3372 -> 3380 adds dictionary-shape and native-ID closure coverage, case-variant
+# compatibility-group union in both orders, and the irrelevant duplicate-ring control.
 # An earlier all-tests discovery reported 3324 because it also included the four dedicated
 # tests/Perf assertions. The release workflow deliberately and explicitly runs tests/QA
-# plus tests/Unit only; its measured package-first total is therefore 3328.
-$script:tenantPulseGateMinimumTests = 3328
+# plus tests/Unit only; its measured package-first total is therefore 3380.
+$script:tenantPulseGateMinimumTests = 3380
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

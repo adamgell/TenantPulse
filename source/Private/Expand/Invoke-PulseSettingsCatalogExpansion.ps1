@@ -495,62 +495,84 @@ function Invoke-PulseSettingsCatalogExpansion {
         $fragmentState.ChunkStart = $EndInclusive + 1
     }
 
-    for ($eligibleIndex = 0; $eligibleIndex -lt $eligiblePolicies.Count; $eligibleIndex++) {
-        $eligible = $eligiblePolicies[$eligibleIndex]
-        $policy = $eligible.Policy
-        $rawDatasetName = "$rawDatasetPrefix$($eligible.PolicyId)"
-        $rawAssignmentDatasetName = "$rawAssignmentDatasetPrefix$($eligible.PolicyId)"
-        $result = $null
-        try {
-            $policyParameters = @{
-                Store                    = $Store
-                Policy                   = $policy
-                Context                  = $Context
-                DefinitionIndex          = $DefinitionIndex
-                FromCapturedPayloads     = $FromCapturedPayloads.IsPresent
-                RawDatasetName           = $rawDatasetName
-                RawAssignmentDatasetName = $rawAssignmentDatasetName
-                TenantId                 = $TenantId
-                Pseudonym                = $Pseudonym
-                NetworkAbortState        = $NetworkAbortState
-                ManifestBatch            = $manifestBatch
+    $expansionError = $null
+    $manifestError = $null
+    try {
+        for ($eligibleIndex = 0; $eligibleIndex -lt $eligiblePolicies.Count; $eligibleIndex++) {
+            $eligible = $eligiblePolicies[$eligibleIndex]
+            $policy = $eligible.Policy
+            $rawDatasetName = "$rawDatasetPrefix$($eligible.PolicyId)"
+            $rawAssignmentDatasetName = "$rawAssignmentDatasetPrefix$($eligible.PolicyId)"
+            $result = $null
+            try {
+                $policyParameters = @{
+                    Store                    = $Store
+                    Policy                   = $policy
+                    Context                  = $Context
+                    DefinitionIndex          = $DefinitionIndex
+                    FromCapturedPayloads     = $FromCapturedPayloads.IsPresent
+                    RawDatasetName           = $rawDatasetName
+                    RawAssignmentDatasetName = $rawAssignmentDatasetName
+                    TenantId                 = $TenantId
+                    Pseudonym                = $Pseudonym
+                    NetworkAbortState        = $NetworkAbortState
+                    ManifestBatch            = $manifestBatch
+                }
+                if ($null -ne $capturedManifestSnapshot) {
+                    $policyParameters['ManifestSnapshot'] = $capturedManifestSnapshot
+                }
+                $result = Invoke-PulseSettingsCatalogPolicy @policyParameters
+            } catch {
+                Write-Verbose "Invoke-PulseSettingsCatalogExpansion: unexpected exception processing policy '$($eligible.PolicyId)': $($_.Exception.Message)"
+                $gapEntries.Add([pscustomobject]@{ policyId = $eligible.PolicyId; reason = 'category:WorkerException' }) | Out-Null
             }
-            if ($null -ne $capturedManifestSnapshot) {
-                $policyParameters['ManifestSnapshot'] = $capturedManifestSnapshot
+            if ($null -ne $result) {
+                foreach ($row in $result.Rows) { $fragmentRows.Add($row) | Out-Null }
+                if ($result.Gap) {
+                    $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+                    $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
+                }
             }
-            $result = Invoke-PulseSettingsCatalogPolicy @policyParameters
-        } catch {
-            Write-Verbose "Invoke-PulseSettingsCatalogExpansion: unexpected exception processing policy '$($eligible.PolicyId)': $($_.Exception.Message)"
-            $gapEntries.Add([pscustomobject]@{ policyId = $eligible.PolicyId; reason = 'category:WorkerException' }) | Out-Null
-        }
-        if ($null -ne $result) {
-            foreach ($row in $result.Rows) { $fragmentRows.Add($row) | Out-Null }
-            if ($result.Gap) {
-                $reason = Protect-PulseReason -Message $result.Gap -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
-                $gapEntries.Add([pscustomobject]@{ policyId = $result.PolicyId; reason = $reason }) | Out-Null
-            }
-        }
-        $isChunkEnd = (($eligibleIndex - $fragmentState.ChunkStart + 1) -ge $fragmentPolicyCount) -or ($eligibleIndex -eq ($eligiblePolicies.Count - 1))
-        if ($isChunkEnd) {
-            & $flushExpansionFragment $eligibleIndex
-        }
-        if ($NetworkAbortState.AuthenticationAborted) {
-            if ($fragmentRows.Count -gt 0) {
+            $isChunkEnd = (($eligibleIndex - $fragmentState.ChunkStart + 1) -ge $fragmentPolicyCount) -or ($eligibleIndex -eq ($eligiblePolicies.Count - 1))
+            if ($isChunkEnd) {
                 & $flushExpansionFragment $eligibleIndex
             }
-            for ($remainingIndex = $eligibleIndex + 1; $remainingIndex -lt $eligiblePolicies.Count; $remainingIndex++) {
-                $gapEntries.Add([pscustomobject]@{
-                        policyId = $eligiblePolicies[$remainingIndex].PolicyId
-                        reason   = 'category:NotAttemptedAfterAuthenticationFailure'
-                    }) | Out-Null
+            if ($NetworkAbortState.AuthenticationAborted) {
+                if ($fragmentRows.Count -gt 0) {
+                    & $flushExpansionFragment $eligibleIndex
+                }
+                for ($remainingIndex = $eligibleIndex + 1; $remainingIndex -lt $eligiblePolicies.Count; $remainingIndex++) {
+                    $gapEntries.Add([pscustomobject]@{
+                            policyId = $eligiblePolicies[$remainingIndex].PolicyId
+                            reason   = 'category:NotAttemptedAfterAuthenticationFailure'
+                        }) | Out-Null
+                }
+                break
             }
-            break
+        }
+    } catch {
+        # A fragment publication failure must remain the primary failure even when the
+        # mandatory manifest-batch flush below also fails. Capture it here so the cleanup
+        # attempt cannot replace it with a confident but incomplete diagnosis.
+        $expansionError = $_
+    } finally {
+        if ($manifestBatch.Count -gt 0) {
+            try {
+                Set-PulseManifestEntry -Store $Store -DatasetEntries $manifestBatch.ToArray()
+            } catch {
+                $manifestError = $_
+            }
         }
     }
 
-    if ($manifestBatch.Count -gt 0) {
-        Set-PulseManifestEntry -Store $Store -DatasetEntries $manifestBatch.ToArray()
+    if ($null -ne $expansionError -and $null -ne $manifestError) {
+        throw [System.AggregateException]::new(
+            'Settings Catalog expansion and manifest persistence both failed.',
+            [System.Exception[]] @($expansionError.Exception, $manifestError.Exception)
+        )
     }
+    if ($null -ne $expansionError) { throw $expansionError }
+    if ($null -ne $manifestError) { throw $manifestError }
 
     $sortedGaps = $gapEntries.ToArray()
     $gapComparison = [System.Comparison[object]] {

@@ -1255,6 +1255,7 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
             (Join-Path $projectPath 'README.md')
             (Join-Path $projectPath 'CHANGELOG.md')
             (Join-Path $projectPath '.github/workflows/ci.yml')
+            (Join-Path $projectPath '.gitleaksignore')
             # Phase 3 whole-phase review, security walk finding 8 (MINOR): these root
             # files were never in the explicit list (only the recursed source/tests/
             # scripts/docs/.build roots were covered) - closing that gap so a planted
@@ -1264,7 +1265,7 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
             (Join-Path $projectPath 'Resolve-Dependency.ps1')
             (Join-Path $projectPath 'Resolve-Dependency.psd1')
             (Join-Path $projectPath 'LICENSE')
-        ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object { Get-Item -LiteralPath $_ }
+        ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | ForEach-Object { Get-Item -Force -LiteralPath $_ }
 
         $scanFiles = @(
             (Get-ChildItem -Path $recurseRoots -Recurse -File |
@@ -1343,5 +1344,49 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
 
         $violations.Count | Should -Be 1
         $violations[0] | Should -Match 'possessive-name-shaped'
+    }
+
+    It 'pins the approved fingerprints and the ordered base-controlled Gitleaks trust boundary' {
+        $projectPath = "$($PSScriptRoot)\..\.." | Convert-Path
+        $ignorePath = Join-Path $projectPath '.gitleaksignore'
+        $workflowPath = Join-Path $projectPath '.github/workflows/protected-secret-scan.yml'
+        $expectedFingerprintLines = @(
+            'dcf3de4c736c4aa337be3f8afa970140eab70a6c:tests/QA/RedactedArtifactMutation.tests.ps1:generic-api-key:21'
+            'dcf3de4c736c4aa337be3f8afa970140eab70a6c:tests/QA/PrivacyClassification.tests.ps1:generic-api-key:20'
+        )
+        $expectedSha256 = 'c3730150f9d81d6712b86dab11679c0619fa49540f2947a144cf8f523d104886'
+
+        $effectiveLines = @(Get-Content -LiteralPath $ignorePath | Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_) -and -not $_.TrimStart().StartsWith('#')
+            })
+        $effectiveLines | Should -Be $expectedFingerprintLines
+        # CI validates repository bytes on Linux. Canonicalize checkout line endings here
+        # so the same contract remains testable in the Windows matrix as well.
+        $canonicalIgnore = (Get-Content -LiteralPath $ignorePath -Raw).Replace("`r`n", "`n")
+        $canonicalHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes($canonicalIgnore))
+        ).ToLowerInvariant()
+        $canonicalHash | Should -Be $expectedSha256
+
+        $workflow = Get-Content -LiteralPath $workflowPath -Raw
+        $workflow | Should -Match '(?m)^\s*pull_request_target:\s*$'
+        $workflow | Should -Match 'permissions:\s*\r?\n\s+contents:\s+read'
+        $workflow | Should -Match 'actions/checkout@[0-9a-f]{40}\s+#\s+v4\.4\.0'
+        $workflow | Should -Match 'persist-credentials:\s+false'
+        $workflow | Should -Match 'git diff --quiet --no-ext-diff --no-textconv'
+        $workflow | Should -Match '\.gitleaksignore \.github/workflows/protected-secret-scan\.yml'
+        $workflow | Should -Match ([regex]::Escape("approved_ignore_sha256='$expectedSha256'"))
+        $workflow | Should -Match 'actual_ignore_sha256="\$\(sha256sum \.gitleaksignore'
+        $workflow | Should -Match '"\$actual_ignore_sha256" != "\$approved_ignore_sha256"'
+        $workflow | Should -Match '--gitleaks-ignore-path\s+"\$GITHUB_WORKSPACE/\.gitleaksignore"'
+
+        $actualHashIndex = $workflow.IndexOf('actual_ignore_sha256="$(sha256sum .gitleaksignore', [StringComparison]::Ordinal)
+        $hashGatePattern = '(?ms)if \[\[ "\$actual_ignore_sha256" != "\$approved_ignore_sha256" \]\]; then\s+printf .*?\s+exit 1\s+fi'
+        $hashGate = [regex]::Match($workflow, $hashGatePattern)
+        $scannerIndex = $workflow.IndexOf('"$binary_dir/gitleaks" git', [StringComparison]::Ordinal)
+        $actualHashIndex | Should -BeGreaterOrEqual 0
+        $hashGate.Success | Should -BeTrue
+        $hashGate.Index | Should -BeGreaterThan $actualHashIndex
+        $scannerIndex | Should -BeGreaterThan ($hashGate.Index + $hashGate.Length)
     }
 }

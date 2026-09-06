@@ -198,6 +198,95 @@ Describe 'Invoke-PulseAdministrativeTemplateExpansion' {
         @($result.Gaps | ForEach-Object { $_.reason }) | Should -Match 'GroupPolicy'
     }
 
+    It 'accounts for unattempted configurations after <FailedOperation> authentication aborts' -ForEach @(
+        @{
+            FailedOperation = 'definition retrieval'
+            FailedType = 'GroupPolicyDefinitionValue'
+            ExpectedGapOperation = 'GroupPolicyDefinitionValue.ListBeta'
+            ExpectedStatus = 'NotExpanded'
+            ExpectedDefinitionCalls = 1
+            ExpectedPresentationCalls = 0
+        }
+        @{
+            FailedOperation = 'presentation retrieval'
+            FailedType = 'GroupPolicyPresentationValue'
+            ExpectedGapOperation = 'GroupPolicyPresentationValue.ListBeta'
+            ExpectedStatus = 'Partial'
+            ExpectedDefinitionCalls = 1
+            ExpectedPresentationCalls = 1
+        }
+    ) {
+        $target = [pscustomobject]@{
+            PSTypeName = 'GraphKit.OperationResult'
+            Outcome    = 'Failed'
+            Certainty  = 'Known'
+            Telemetry  = @([pscustomobject]@{ Attempt = 1; StatusCode = 401 })
+        }
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new('authentication failed'),
+            'GraphKit.OperationFailed.401',
+            [System.Management.Automation.ErrorCategory]::AuthenticationError,
+            $target)
+        $abortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:store, $record, $abortState, $FailedType {
+            param($store, $record, $abortState, $failedType)
+            $script:AdminDefinitionCalls = 0
+            $script:AdminPresentationCalls = 0
+            Mock Assert-PulseReadOnlyDescriptor -ModuleName TenantPulse { }
+            Mock Get-GraphObject -ModuleName TenantPulse {
+                param($Context, $Type, $Operation, $Parameters)
+                if ($Type -eq 'GroupPolicyConfiguration') {
+                    return New-PulseTestGraphEnvelope -Data @(
+                        [pscustomobject]@{ id = 'gp-1'; displayName = 'One' }
+                        [pscustomobject]@{ id = 'gp-2'; displayName = 'Two' }
+                        [pscustomobject]@{ id = 'gp-3'; displayName = 'Three' }
+                    )
+                }
+                if ($Type -eq 'GroupPolicyDefinitionValue') {
+                    $script:AdminDefinitionCalls++
+                    if ($failedType -eq $Type) { throw $record }
+                    return New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
+                        id = 'dv-1'
+                        enabled = $true
+                        definition = [pscustomobject]@{ id = 'def-1'; displayName = 'Setting'; categoryPath = 'Windows' }
+                    })
+                }
+                if ($Type -eq 'GroupPolicyPresentationValue') {
+                    $script:AdminPresentationCalls++
+                    if ($failedType -eq $Type) { throw $record }
+                    return New-PulseTestGraphEnvelope
+                }
+                throw "Unexpected Graph call '$Type/$Operation'."
+            }
+
+            $result = Invoke-PulseAdministrativeTemplateExpansion -Store $store `
+                -Context ([pscustomobject]@{ ProfileId = 'fixture'; TenantId = 'tenant' }) `
+                -Requested -ProfileId 'fixture' -Pseudonym 'tp-test' -TenantId 'tenant' `
+                -NetworkAbortState $abortState
+            [pscustomobject]@{
+                Result = $result
+                DefinitionCalls = $script:AdminDefinitionCalls
+                PresentationCalls = $script:AdminPresentationCalls
+            }
+        }
+
+        $outcome.Result.Status | Should -Be $ExpectedStatus
+        $outcome.Result.PolicyCount | Should -Be 3
+        ($outcome.Result.ExpandedCount + $outcome.Result.PartialCount + $outcome.Result.NotExpandedCount) | Should -Be 3
+        @($outcome.Result.Gaps.policyId) | Should -Be @('gp-1', 'gp-2', 'gp-3')
+        @($outcome.Result.Gaps | Where-Object reason -Match 'NotAttemptedAfterAuthenticationFailure' | ForEach-Object policyId) |
+            Should -Be @('gp-2', 'gp-3')
+        @($outcome.Result.Gaps | Where-Object reason -Match 'NotAttemptedAfterAuthenticationFailure' | ForEach-Object reason) |
+            Should -Be @(
+                "category:NotAttemptedAfterAuthenticationFailure;operation:$ExpectedGapOperation"
+                "category:NotAttemptedAfterAuthenticationFailure;operation:$ExpectedGapOperation"
+            )
+        $outcome.DefinitionCalls | Should -Be $ExpectedDefinitionCalls
+        $outcome.PresentationCalls | Should -Be $ExpectedPresentationCalls
+        $abortState.AuthenticationAborted | Should -BeTrue
+    }
+
     It 'marks a presentation value with no stable id as Partial instead of fabricating a random evidence identity' {
         $result = InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)

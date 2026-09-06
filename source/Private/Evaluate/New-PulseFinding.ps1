@@ -141,14 +141,21 @@ function New-PulseFinding {
     }
 
     $evidenceComplete = $true
+    $compatibilityRedactionUsed = $false
     foreach ($entry in @($normalized)) {
+        if (@($entry.RedactDetailKeys).Count -gt 0) {
+            $compatibilityRedactionUsed = $true
+        }
         if (-not (Test-PulseClassifiedEvidenceComplete -Entry $entry)) {
             $evidenceComplete = $false
             break
         }
     }
 
-    $privacyComplete = $reasonComplete -and $evidenceComplete
+    # RedactDetailKeys is a compatibility mechanism, not a complete field-level
+    # classification contract. Keep those findings local-only even though the
+    # normalization layer maps each named key to Identity for safe redaction.
+    $privacyComplete = $reasonComplete -and $evidenceComplete -and -not $compatibilityRedactionUsed
 
     if ($RequireClassification -and -not $privacyComplete) {
         throw 'New-PulseFinding: unclassified tenant-derived field. Every 1.0 field must declare a privacy class.'

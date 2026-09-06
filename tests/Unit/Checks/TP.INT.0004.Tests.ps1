@@ -114,6 +114,60 @@ Describe 'TP.INT.0004 - At least 2 Windows Update rings have deadlines configure
         $finding.status | Should -Be 'Pass'
     }
 
+    It 'Error: duplicate configuration ids cannot produce a result from conflicting rows' {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseUpdateRing -Id 'duplicate-ring' -FeatureDeadline 3)
+                (New-PulseUpdateRing -Id 'DUPLICATE-RING')
+                (New-PulseUpdateRing -Id 'unique-ring' -FeatureDeadline 7)
+            ) }
+        )
+
+        $finding.status | Should -Be 'Error'
+        $finding.reason | Should -Match 'duplicate.*configuration'
+        $finding.reason | Should -Not -Match 'duplicate-ring|unique-ring'
+    }
+
+    It 'Pass: duplicate ids on known non-ring configurations do not invalidate proven update-ring evidence' {
+        $nonRingRows = @(
+            [pscustomobject]@{
+                id = 'duplicate-non-ring'; '@odata.type' = '#microsoft.graph.windows10CustomConfiguration'; assignments = @()
+            }
+            [pscustomobject]@{
+                id = 'duplicate-non-ring'; '@odata.type' = '#microsoft.graph.windows10CustomConfiguration'; assignments = @()
+            }
+        )
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseUpdateRing -Id 'pilot' -FeatureDeadline 3)
+                (New-PulseUpdateRing -Id 'broad' -FeatureDeadline 14)
+                $nonRingRows[0]
+                $nonRingRows[1]
+            ) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $finding.evidence.Count | Should -Be 2
+    }
+
+    It 'Pass: duplicate unassigned no-deadline ring rows cannot affect two distinct qualifying rings' {
+        $irrelevantOne = New-PulseUpdateRing -Id 'irrelevant-duplicate'
+        $irrelevantOne.assignments = @()
+        $irrelevantTwo = New-PulseUpdateRing -Id 'IRRELEVANT-DUPLICATE'
+        $irrelevantTwo.assignments = @()
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0004' -Datasets @(
+            @{ Name = 'deviceConfigurations'; ApiVersion = 'v1.0'; Status = 'Collected'; Data = @(
+                (New-PulseUpdateRing -Id 'pilot' -FeatureDeadline 3)
+                (New-PulseUpdateRing -Id 'broad' -FeatureDeadline 14)
+                $irrelevantOne
+                $irrelevantTwo
+            ) }
+        )
+
+        $finding.status | Should -Be 'Pass'
+        $finding.evidence.Count | Should -Be 2
+    }
+
     It 'Error: a persisted <Shape> deadline value cannot be coerced into a qualifying ring' -ForEach @(
         @{ Shape = 'string'; InvalidValue = 'not-a-number' }
         @{ Shape = 'boolean'; InvalidValue = $true }

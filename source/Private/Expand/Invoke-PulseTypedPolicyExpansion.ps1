@@ -237,8 +237,13 @@ function Invoke-PulseTypedPolicyExpansion {
                 $assignmentGap = New-PulseTypedGapReason -Category 'AssignmentEvidenceUnavailable'
             } else {
                 $rawAssignments = @($embeddedAssignments.Value)
-                Write-PulseDataset -Store $Store -Name $rawDatasetName -Data $rawAssignments -ApiVersion 'v1.0' -Status 'Collected' `
-                    -TenantId $TenantId -Pseudonym $Pseudonym
+                try {
+                    Write-PulseDataset -Store $Store -Name $rawDatasetName -Data $rawAssignments -ApiVersion 'v1.0' -Status 'Collected' `
+                        -TenantId $TenantId -Pseudonym $Pseudonym
+                } catch {
+                    Write-Verbose "Invoke-PulseTypedPolicyExpansion: embedded assignment persistence failed for policy '$policyId': $($_.Exception.Message)"
+                    $assignmentGap = New-PulseTypedGapReason -Category 'AssignmentPersistenceFailed'
+                }
             }
         } elseif ($FromCapturedPayloads) {
             try {

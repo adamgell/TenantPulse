@@ -13,7 +13,8 @@ function Resolve-PulseBitLockerPolicyValue {
     $settingRows = @(Get-PulseEndpointSecuritySettingTokens -Settings $Settings)
     $childRows = @($settingRows | Where-Object {
             [string]::Equals([string] $_.DefinitionId, $definitionId, [System.StringComparison]::OrdinalIgnoreCase) -or
-            [string]::Equals([string] $_.DefinitionId, $fullOption, [System.StringComparison]::OrdinalIgnoreCase)
+            [string]::Equals([string] $_.DefinitionId, $fullOption, [System.StringComparison]::OrdinalIgnoreCase) -or
+            [string]::Equals([string] $_.DefinitionId, $usedSpaceOption, [System.StringComparison]::OrdinalIgnoreCase)
         })
 
     if ($childRows.Count -eq 0) {
@@ -26,7 +27,11 @@ function Resolve-PulseBitLockerPolicyValue {
     $tokenCount = 0
     foreach ($row in $childRows) {
         if ([string]::Equals([string] $row.DefinitionId, $fullOption, [System.StringComparison]::OrdinalIgnoreCase)) {
-            return [bool] $true
+            $tokenCount++
+            $sawKnownTrue = $true
+        } elseif ([string]::Equals([string] $row.DefinitionId, $usedSpaceOption, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $tokenCount++
+            $sawKnownFalse = $true
         }
         foreach ($token in @($row.Tokens)) {
             $tokenCount++
@@ -42,10 +47,12 @@ function Resolve-PulseBitLockerPolicyValue {
         }
     }
 
-    if ($sawKnownTrue) { return [bool] $true }
-    if ($tokenCount -eq 0 -or $sawUnknown) {
+    # Unknown or contradictory values take precedence over a positive token: mixed
+    # evidence cannot become an authoritative policy result.
+    if ($tokenCount -eq 0 -or $sawUnknown -or ($sawKnownTrue -and $sawKnownFalse)) {
         throw "BitLocker child setting value is unknown."
     }
+    if ($sawKnownTrue) { return [bool] $true }
     if ($sawKnownFalse) { return [bool] $false }
     throw "BitLocker child setting value is unknown."
 }

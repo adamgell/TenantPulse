@@ -187,6 +187,95 @@ BeforeAll {
                 }
             }
 
+            function Test-PulseFixtureDuckTypedCompatibilityClaimsCompleteRule {
+                param($Datasets)
+                return [pscustomobject]@{
+                    PSTypeName      = 'TenantPulse.RuleResult'
+                    Status          = 'Warn'
+                    Evidence        = @([pscustomobject]@{
+                            Identity         = 'legacy-row-1'
+                            SortKey          = 'legacy-row-1'
+                            Detail           = [pscustomobject]@{ upn = 'alice@contoso.example' }
+                            RedactDetailKeys = @('upn')
+                            FieldClasses     = @{
+                                Identity = 'Identity'
+                                SortKey  = 'Identity'
+                                upn      = 'Identity'
+                            }
+                        })
+                    Reason          = 'Reviewed compatibility evidence'
+                    ReasonCode      = 'compatibility-evidence'
+                    PrivacyComplete = $true
+                }
+            }
+
+            function Test-PulseFixtureDuckTypedUnclassifiedClaimsCompleteRule {
+                param($Datasets)
+                return [pscustomobject]@{
+                    PSTypeName      = 'TenantPulse.RuleResult'
+                    Status          = 'Warn'
+                    Evidence        = @([pscustomobject]@{
+                            Identity = 'row-1'
+                            Detail   = [pscustomobject]@{ count = 1 }
+                        })
+                    Reason          = $null
+                    PrivacyComplete = $true
+                }
+            }
+
+            function Test-PulseFixtureDuckTypedStringPrivacyRule {
+                param($Datasets)
+                return [pscustomobject]@{
+                    PSTypeName      = 'TenantPulse.RuleResult'
+                    Status          = 'Warn'
+                    Evidence        = @([pscustomobject]@{
+                            Identity     = 'row-1'
+                            SortKey      = 'row-1'
+                            FieldClasses = @{
+                                Identity = 'Identity'
+                                SortKey  = 'Identity'
+                            }
+                        })
+                    Reason          = 'Compatibility free text'
+                    PrivacyComplete = 'false'
+                }
+            }
+
+            function Test-PulseFixtureDuckTypedClassifiedWithoutPrivacyFlagRule {
+                param($Datasets)
+                return [pscustomobject]@{
+                    PSTypeName = 'TenantPulse.RuleResult'
+                    Status     = 'Warn'
+                    Evidence   = @([pscustomobject]@{
+                            Identity     = 'row-1'
+                            SortKey      = 'row-1'
+                            Detail       = [pscustomobject]@{ count = 1 }
+                            FieldClasses = @{
+                                Identity = 'Identity'
+                                SortKey  = 'Identity'
+                                count    = 'SafeTechnical'
+                            }
+                        })
+                    Reason     = 'One row needs review'
+                    ReasonCode = 'row-review'
+                }
+            }
+
+            function Test-PulseFixtureDuckTypedDescriptorCompletesPrivacyRule {
+                param($Datasets)
+                return [pscustomobject]@{
+                    PSTypeName      = 'TenantPulse.RuleResult'
+                    Status          = 'Warn'
+                    Evidence        = @([pscustomobject]@{
+                            Identity = 'row-1'
+                            SortKey  = 'row-1'
+                            Detail   = [pscustomobject]@{ count = 1 }
+                        })
+                    Reason          = $null
+                    PrivacyComplete = $false
+                }
+            }
+
             function Test-PulseFixtureDuplicateEvidenceRule {
                 param($Datasets)
                 return New-PulseFinding -Status Warn -Evidence @(
@@ -240,7 +329,8 @@ BeforeAll {
             # "unmarked stays raw" at once.
             function Test-PulseFixtureDetailRedactionRule {
                 param($Datasets)
-                return New-PulseFinding -Status Warn -Reason 'identity-bearing detail present' -Evidence @(
+                return New-PulseFinding -Status Warn -ReasonCode 'identity-bearing-detail' `
+                    -Reason 'Identity-bearing detail is present' -Evidence @(
                     @{
                         Identity         = 'detail-redaction-row-1'
                         Detail           = @{ upn = 'alice@contoso.example'; deviceName = 'DESKTOP-FIXTURE' }
@@ -757,6 +847,8 @@ Describe 'Invoke-PulseEvaluation' {
         $evaluation.RedactionMap.Keys | Should -Contain 'alice@contoso.example'
         $evaluation.RedactionMap.Keys | Should -Not -Contain 'DESKTOP-FIXTURE'
         $evaluation.RedactionMap['alice@contoso.example'] | Should -Match '^tp-[0-9a-f]{64}$'
+        $evaluation.Document.privacy.complete | Should -BeFalse
+        $evaluation.Document.privacy.boundary | Should -Be 'local-only'
 
         # Deterministic, and drawn from the SAME per-evaluation operator key as the
         # Identity pseudonym - not a second, differently-keyed mechanism.
@@ -894,6 +986,61 @@ Describe 'Invoke-PulseEvaluation' {
         $mixedEvaluation.Document.privacy.compatLayer | Should -BeTrue
     }
 
+    It 'keeps duck-typed RedactDetailKeys evidence local-only even when the rule claims privacy completeness' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuckTypedCompatibilityClaimsCompleteRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].status | Should -Be 'Warn'
+        $evaluation.Document.privacy.complete | Should -BeFalse
+        $evaluation.Document.privacy.boundary | Should -Be 'local-only'
+        $evaluation.RedactionMap.Keys | Should -Contain 'alice@contoso.example'
+    }
+
+    It 'ignores a duck-typed true privacy claim when evidence remains unclassified' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuckTypedUnclassifiedClaimsCompleteRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].status | Should -Be 'Warn'
+        $evaluation.Document.privacy.complete | Should -BeFalse
+        $evaluation.Document.privacy.boundary | Should -Be 'local-only'
+    }
+
+    It 'does not coerce a duck-typed string privacy claim into a classified boundary' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuckTypedStringPrivacyRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].status | Should -Be 'Warn' -Because $evaluation.Document.findings[0].reason
+        $evaluation.Document.privacy.complete | Should -BeFalse
+        $evaluation.Document.privacy.boundary | Should -Be 'local-only'
+    }
+
+    It 'derives a classified boundary without requiring a rule PrivacyComplete property' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuckTypedClassifiedWithoutPrivacyFlagRule' }
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].status | Should -Be 'Warn'
+        $evaluation.Document.privacy.complete | Should -BeTrue
+        $evaluation.Document.privacy.boundary | Should -Be 'classified'
+    }
+
+    It 'recomputes privacy after descriptor evidence classes complete a duck-typed result' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuckTypedDescriptorCompletesPrivacyRule' }
+        $check | Add-Member -NotePropertyName Privacy -NotePropertyValue ([pscustomobject]@{
+                EvidenceFields = [pscustomobject]@{ count = 'SafeTechnical' }
+            })
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $evaluation.Document.findings[0].status | Should -Be 'Warn'
+        $evaluation.Document.findings[0].evidence[0].fieldClasses.count | Should -Be 'SafeTechnical'
+        $evaluation.Document.privacy.complete | Should -BeTrue
+        $evaluation.Document.privacy.boundary | Should -Be 'classified'
+    }
+
     It 'carries classified evidence metadata into the document so safe-share can protect it' {
         $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureClassifiedEvidenceRule' }
         $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
@@ -912,6 +1059,23 @@ Describe 'Invoke-PulseEvaluation' {
         $shared.findings[0].evidence[0].PSObject.Properties.Name | Should -Not -Contain 'fieldClasses'
         $shared.collectionOutcomes.datasetFailed.reasonCode | Should -BeNullOrEmpty
         $shared.collectionOutcomes.datasetSkipped.reasonCode | Should -BeNullOrEmpty
+    }
+
+    It 'applies PSCustomObject-shaped Privacy.EvidenceFields without turning the check into Error' {
+        $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureClassifiedEvidenceRule' }
+        $check | Add-Member -NotePropertyName Privacy -NotePropertyValue ([pscustomobject]@{
+                EvidenceFields = [pscustomobject]@{
+                    descriptorOnly = 'SafeTechnical'
+                }
+            })
+
+        $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
+
+        $finding = $evaluation.Document.findings[0]
+        $finding.status | Should -Be 'Warn'
+        $finding.evidence[0].fieldClasses.descriptorOnly | Should -Be 'SafeTechnical'
+        @($finding.evidence[0].fieldClasses.PSObject.Properties.Name) | Should -Not -Contain ''
+        $evaluation.Document.privacy.complete | Should -BeTrue
     }
 
     It 'degrades a check to Error when its evidence has a duplicate (SortKey, Identity) pair' {

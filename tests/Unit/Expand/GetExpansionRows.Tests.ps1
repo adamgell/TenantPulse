@@ -29,6 +29,21 @@ Describe 'Get-PulseExpansionRows' {
         }
     }
 
+    It 'rejects a loaded manifest whose expansions namespace is <Case>' -ForEach @(
+        @{ Case = 'missing'; ManifestJson = '{"schemaVersion":"1.0.0","createdUtc":"2026-01-01T00:00:00.000Z","producer":{},"datasets":{}}' }
+        @{ Case = 'null'; ManifestJson = '{"schemaVersion":"2.0.0","createdUtc":"2026-01-01T00:00:00.000Z","producer":{},"datasets":{},"references":{},"expansions":null}' }
+        @{ Case = 'not an object'; ManifestJson = '{"schemaVersion":"2.0.0","createdUtc":"2026-01-01T00:00:00.000Z","producer":{},"datasets":{},"references":{},"expansions":"invalid"}' }
+    ) {
+        Set-Content -LiteralPath $script:store.ManifestPath -Value $ManifestJson -NoNewline -Encoding utf8NoBOM
+
+        {
+            InModuleScope TenantPulse -ArgumentList $script:store {
+                param($store)
+                Get-PulseExpansionRows -Store $store -Name 'settingsCatalog'
+            }
+        } | Should -Throw -ExpectedMessage '*no valid expansions dictionary*'
+    }
+
     It 'throws naming the status when the expansion is NotExpanded' {
         InModuleScope TenantPulse -ArgumentList $script:store {
             param($store)

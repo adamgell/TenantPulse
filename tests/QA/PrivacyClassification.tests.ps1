@@ -232,6 +232,23 @@ Describe 'New-PulseFinding classification contract' {
         $result.Evidence[0].FieldClasses['upn'] | Should -Be 'Identity'
     }
 
+    It 'keeps RedactDetailKeys compatibility evidence local-only even when every normalized field has a class' {
+        $result = InModuleScope TenantPulse {
+            New-PulseFinding -Status Warn -ReasonCode 'legacy-identity-detail' -Evidence @(
+                @{
+                    Identity         = 'admin@contoso.example'
+                    Detail           = @{ upn = 'alice@contoso.example' }
+                    RedactDetailKeys = @('upn')
+                }
+            )
+        }
+
+        $result.PrivacyComplete | Should -BeFalse
+        $result.Evidence[0].FieldClasses['Identity'] | Should -Be 'Identity'
+        $result.Evidence[0].FieldClasses['SortKey'] | Should -Be 'Identity'
+        $result.Evidence[0].FieldClasses['upn'] | Should -Be 'Identity'
+    }
+
     It 'is complete when reason code and field classes cover every tenant-derived field' {
         $result = InModuleScope TenantPulse {
             New-PulseFinding -Status Fail -ReasonCode 'stale-device-count' -Reason '3 stale devices need review' -Evidence @(

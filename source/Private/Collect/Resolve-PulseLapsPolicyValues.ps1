@@ -73,7 +73,9 @@ function Resolve-PulseLapsPolicyValues {
             }
         }
 
-        if ($tokenCount -eq 0 -or $sawUnknown) {
+        # Unknown or contradictory values take precedence over a positive token: mixed
+        # evidence cannot become an authoritative policy result.
+        if ($tokenCount -eq 0 -or $sawUnknown -or ($sawKnownTrue -and $sawKnownFalse)) {
             throw "LAPS $Criterion setting value is unknown."
         }
         if ($sawKnownTrue) { return [bool] $true }

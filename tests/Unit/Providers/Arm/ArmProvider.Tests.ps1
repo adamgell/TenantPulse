@@ -252,6 +252,8 @@ Describe 'ARM resource ID validation' {
             "providers/$ns"
             '/v1.0/deviceManagement/diagnosticSettings'
             "$($script:IntuneResourceId)/../subscriptions/$($script:BoundSubscriptionId)"
+            "$($script:IntuneResourceId)/%2e%2e/%2E%2E/subscriptions/$($script:BoundSubscriptionId)"
+            "$($script:IntuneResourceId)/."
             "$($script:IntuneResourceId)?api-version=2021-05-01-preview"
             "$($script:IntuneResourceId)\providers/contoso.invalid"
             "//providers/$ns"
@@ -392,6 +394,16 @@ Describe 'ARM request, result, and provenance adapter' {
         $request.PSObject.Properties.Name | Should -Not -Contain 'Operation'
         $request.PSObject.Properties.Name | Should -Not -Contain 'Token'
         $request.PSObject.Properties.Name | Should -Not -Contain 'Bearer'
+    }
+
+    It 'rejects a child path whose URI canonicalization would retarget the validated resource' {
+        {
+            InModuleScope TenantPulseArmAdapterTest -ArgumentList $script:IntuneResourceId, $script:FixtureApiVersion {
+                param($ResourceId, $ApiVersion)
+                New-PulseArmRequest -ResourceId $ResourceId -ApiVersion $ApiVersion -Cloud 'Global' `
+                    -ChildProvider '..' -ChildType 'diagnosticSettings'
+            }
+        } | Should -Throw -ExpectedMessage '*changed during URI canonicalization*'
     }
 
     It 'keeps ARM snapshot provenance distinguishable from GraphKit provenance' {

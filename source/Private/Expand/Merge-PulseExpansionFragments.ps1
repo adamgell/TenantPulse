@@ -23,7 +23,7 @@ function Read-PulseExpansionFragmentRows {
     $lines = $content -split "`n"
     $rows = [System.Collections.Generic.List[object]]::new()
     foreach ($line in $lines) {
-        if ([string]::IsNullOrEmpty($line)) { continue }
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
         $rows.Add((ConvertFrom-Json -InputObject $line -Depth 64)) | Out-Null
     }
     return , [object[]] @($rows.ToArray())

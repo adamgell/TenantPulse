@@ -175,7 +175,9 @@ Describe 'Invoke-PulseAssessment' {
         Mock Import-PulseCheckCatalog -ModuleName TenantPulse { @($inScope) }
         Mock Get-GraphContext -ModuleName TenantPulse { [pscustomobject]@{ ProfileId = 'contoso-tenant-id' } }
         Mock Get-GraphOperation -ModuleName TenantPulse { @{ ThrottleClass = 'Read'; ReplayPolicy = 'Safe'; ApiVersion = 'beta'; RequiredPermissions = @(@{ Type = 'Application'; Value = 'Policy.Read.All' }) } }
-        Mock Get-GraphObject -ModuleName TenantPulse { @([pscustomobject]@{ id = 'p1' }) }
+        Mock Get-GraphObject -ModuleName TenantPulse {
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{ id = 'p1' })
+        }
 
         $summary = Invoke-TestPulseAssessment -Params @{ ProfileId = 'contoso-tenant-id'; OutputPath = $script:outputRoot; Format = 'Html' }
 

@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 3328 / -AllowNotRun 0 (see
+    # MinimumTests 3380 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -316,15 +316,21 @@ else {
     # 3323 -> 3328 adds fail-closed null Graph-envelope elements,
     # permission-baseline coherence, malformed group-member accounting, and
     # bounded artifact-fingerprint failure publication.
+    # 3328 -> 3372 is the measured final-review regression wave: fail-closed
+    # expansion/persistence, derived privacy, malformed group closure,
+    # case-insensitive ring identity, contradictory BitLocker/LAPS values,
+    # abort attribution, ARM canonicalization, and Gitleaks-ignore binding.
+    # 3372 -> 3380 adds dictionary-shape/native-ID closure coverage,
+    # case-variant compatibility-group union, and an irrelevant-ring control.
     # The four tests/Perf assertions are deliberately outside the QA+Unit release
-    # workflow and are not included in its measured 3328-test floor.
+    # workflow and are not included in its measured 3380-test floor.
     # NotRun remains forbidden.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 3328 `
+        -MinimumTests 3380 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {

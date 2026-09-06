@@ -220,6 +220,60 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $resolved.hasPostAuthAction | Should -Be $Expected
     }
 
+    It 'rejects contradictory known LAPS <Criterion> values' -ForEach @(
+        @{ Criterion = 'Backup' }
+        @{ Criterion = 'Complexity' }
+        @{ Criterion = 'Length' }
+        @{ Criterion = 'PostAuthentication' }
+    ) {
+        $settings = switch ($Criterion) {
+            'Backup' {
+                @(
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_0')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_1')
+                )
+            }
+            'Complexity' {
+                @(
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_3')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_1')
+                )
+            }
+            'Length' {
+                @(
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '8' -Kind simple)
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_1')
+                )
+            }
+            'PostAuthentication' {
+                @(
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_1')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_0')
+                )
+            }
+        }
+
+        $fixture = [pscustomobject]@{ Settings = $settings }
+        {
+            InModuleScope TenantPulse -ArgumentList $fixture {
+                param($fixture)
+                Resolve-PulseLapsPolicyValues -Settings $fixture.Settings
+            }
+        } | Should -Throw '*setting value is unknown*'
+    }
+
     It 'collects BitLocker full and used-space-only policies with native booleans and one settings read per policy' {
         $full = New-EndpointPolicy -Id 'bitlocker-full' -Name 'Full encryption' -Family 'endpointSecurityDiskEncryption'
         $used = New-EndpointPolicy -Id 'bitlocker-used' -Name 'Used-space-only' -Family 'endpointSecurityDiskEncryption'
@@ -229,7 +283,7 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
             -Policies @($used, $full) `
             -SettingsByPolicy @{
                 'bitlocker-full' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
-                'bitlocker-used' = @(New-EndpointSetting -DefinitionId $child -Value ($child + '_2'))
+                'bitlocker-used' = @(New-EndpointSetting -DefinitionId ($child + '_2') -Value ($child + '_2'))
             }
 
         $result.Outcome.Status | Should -Be 'Collected'
@@ -309,6 +363,32 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $result.Outcome.Status | Should -Be 'Collected'
         @($result.Outcome.Rows).Count | Should -Be 0
         @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicySetting' }).Count | Should -Be 0
+    }
+
+    It 'ignores every documented non-target template family without downgrading the endpoint-security dataset' {
+        $families = @(
+            'enrollmentConfiguration'
+            'appQuietTime'
+            'deviceConfigurationScripts'
+            'deviceConfigurationPolicies'
+            'windowsOsRecoveryPolicies'
+            'companyPortal'
+        )
+        $policies = @(
+            for ($index = 0; $index -lt $families.Count; $index++) {
+                New-EndpointPolicy -Id "unrelated-$index" -Name "Unrelated $index" -Family $families[$index]
+            }
+        )
+
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies $policies `
+            -SettingsByPolicy @{}
+
+        $result.Outcome.Status | Should -Be 'Collected'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 0
+        @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -ne 'ConfigurationPolicy' }).Count | Should -Be 0
     }
 
     It 'surfaces absent or unrecognized template metadata instead of publishing an authoritative empty endpoint-security result' -ForEach @(
@@ -738,11 +818,50 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
             Should -Be $result.Outcome.Detail.enumeratedCount
     }
 
-    It 'keeps an unparseable LAPS criterion unknown instead of Boolean-coercing it' {
-        $policy = New-EndpointPolicy -Id 'laps-unknown' -Name 'Unknown LAPS' -Family 'endpointSecurityAccountProtection' -TemplateId 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796'
+    It 'keeps mixed or contradictory BitLocker evidence indeterminate across supported representations' {
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $fullOption = $child + '_1'
+        $usedSpaceOption = $child + '_2'
+        $policies = @(
+            (New-EndpointPolicy -Id 'bitlocker-direct-option-mixed' -Name 'Direct option mixed' -Family 'endpointSecurityDiskEncryption')
+            (New-EndpointPolicy -Id 'bitlocker-direct-option-unknown-value' -Name 'Direct option unknown value' -Family 'endpointSecurityDiskEncryption')
+            (New-EndpointPolicy -Id 'bitlocker-token-mixed' -Name 'Token mixed' -Family 'endpointSecurityDiskEncryption')
+            (New-EndpointPolicy -Id 'bitlocker-known-contradiction' -Name 'Known contradiction' -Family 'endpointSecurityDiskEncryption')
+        )
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies $policies `
+            -SettingsByPolicy @{
+                'bitlocker-direct-option-mixed' = @(
+                    (New-EndpointSetting -DefinitionId $fullOption -Value $fullOption)
+                    (New-EndpointSetting -DefinitionId $child -Value 'not-a-known-encryption-type')
+                )
+                'bitlocker-direct-option-unknown-value' = @(
+                    (New-EndpointSetting -DefinitionId $fullOption -Value 'not-a-known-encryption-type')
+                )
+                'bitlocker-token-mixed' = @(
+                    (New-EndpointSetting -DefinitionId $child -Value $fullOption)
+                    (New-EndpointSetting -DefinitionId $child -Value 'not-a-known-encryption-type')
+                )
+                'bitlocker-known-contradiction' = @(
+                    (New-EndpointSetting -DefinitionId $child -Value $fullOption)
+                    (New-EndpointSetting -DefinitionId $child -Value $usedSpaceOption)
+                )
+            }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 4
+        @($result.Outcome.Gaps | ForEach-Object ReasonCode) | Should -Be @('unknown-setting', 'unknown-setting', 'unknown-setting', 'unknown-setting')
+    }
+
+    It 'keeps an unparseable or contradictory LAPS criterion unknown instead of Boolean-coercing it' {
+        $templateId = 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796'
+        $unknown = New-EndpointPolicy -Id 'laps-unknown' -Name 'Unknown LAPS' -Family 'endpointSecurityAccountProtection' -TemplateId $templateId
+        $contradictory = New-EndpointPolicy -Id 'laps-contradictory' -Name 'Contradictory LAPS' -Family 'endpointSecurityAccountProtection' -TemplateId $templateId
         $result = Invoke-EndpointPlanFixture `
             -Dataset 'endpointSecurityLapsPolicies' `
-            -Policies @($policy) `
+            -Policies @($unknown, $contradictory) `
             -SettingsByPolicy @{
                 'laps-unknown' = @(
                     (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
@@ -750,12 +869,20 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
                     (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
                     (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_1')
                 )
+                'laps-contradictory' = @(
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_0')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4')
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
+                    (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_1')
+                )
             }
 
         $result.Outcome.Status | Should -Be 'Failed'
         @($result.Outcome.Rows).Count | Should -Be 0
-        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
-        $result.Outcome.Gaps[0].ReasonCode | Should -Be 'unknown-setting'
+        @($result.Outcome.Gaps).Count | Should -Be 2
+        @($result.Outcome.Gaps | ForEach-Object FailureClass) | Should -Be @('InvalidProviderData', 'InvalidProviderData')
+        @($result.Outcome.Gaps | ForEach-Object ReasonCode) | Should -Be @('unknown-setting', 'unknown-setting')
         ($result.Outcome.Detail.expandedCount + $result.Outcome.Detail.partialCount + $result.Outcome.Detail.notExpandedCount) |
             Should -Be $result.Outcome.Detail.enumeratedCount
     }

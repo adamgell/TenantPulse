@@ -202,7 +202,8 @@ function Invoke-PulseAdministrativeTemplateExpansion {
         'GroupPolicyPresentationValue.ListBeta'
     )
 
-    foreach ($configuration in $configurations) {
+    for ($configurationIndex = 0; $configurationIndex -lt $configurations.Count; $configurationIndex++) {
+        $configuration = $configurations[$configurationIndex]
         $policyIdRaw = Get-PulseSettingsCatalogValueProperty -Node $configuration -PropertyName 'id'
         $policyId = if ($null -ne $policyIdRaw) { [string] $policyIdRaw } else { '' }
         if ([string]::IsNullOrWhiteSpace($policyId)) {
@@ -232,7 +233,18 @@ function Invoke-PulseAdministrativeTemplateExpansion {
             $reason = Protect-PulseReason -Message (New-AdminTemplateGapReason -Category 'DefinitionValueFetchFailed' -Operation 'GroupPolicyDefinitionValue.ListBeta' -StatusCode $failure.StatusCode) `
                 -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
             $gapEntries.Add([pscustomobject]@{ policyId = $policyId; reason = $reason }) | Out-Null
-            if ($NetworkAbortState.AuthenticationAborted) { break }
+            if ($NetworkAbortState.AuthenticationAborted) {
+                for ($remainingIndex = $configurationIndex + 1; $remainingIndex -lt $configurations.Count; $remainingIndex++) {
+                    $remainingIdRaw = Get-PulseSettingsCatalogValueProperty -Node $configurations[$remainingIndex] -PropertyName 'id'
+                    $remainingId = if ($null -ne $remainingIdRaw) { [string] $remainingIdRaw } else { '' }
+                    $notExpandedCount++
+                    $gapEntries.Add([pscustomobject]@{
+                            policyId = $remainingId
+                            reason   = (New-AdminTemplateGapReason -Category 'NotAttemptedAfterAuthenticationFailure' -Operation 'GroupPolicyDefinitionValue.ListBeta')
+                        }) | Out-Null
+                }
+                break
+            }
             continue
         }
 
@@ -329,7 +341,18 @@ function Invoke-PulseAdministrativeTemplateExpansion {
             $expandedCount++
             foreach ($row in $policyRows) { $allRows.Add($row) | Out-Null }
         }
-        if ($NetworkAbortState.AuthenticationAborted) { break }
+        if ($NetworkAbortState.AuthenticationAborted) {
+            for ($remainingIndex = $configurationIndex + 1; $remainingIndex -lt $configurations.Count; $remainingIndex++) {
+                $remainingIdRaw = Get-PulseSettingsCatalogValueProperty -Node $configurations[$remainingIndex] -PropertyName 'id'
+                $remainingId = if ($null -ne $remainingIdRaw) { [string] $remainingIdRaw } else { '' }
+                $notExpandedCount++
+                $gapEntries.Add([pscustomobject]@{
+                        policyId = $remainingId
+                        reason   = (New-AdminTemplateGapReason -Category 'NotAttemptedAfterAuthenticationFailure' -Operation 'GroupPolicyPresentationValue.ListBeta')
+                    }) | Out-Null
+            }
+            break
+        }
     }
 
     $policyCount = $expandedCount + $partialCount + $notExpandedCount

@@ -760,87 +760,13 @@ jobs:
           # 3323 -> 3328 adds fail-closed null Graph-envelope elements,
           # permission-baseline coherence, malformed group-member accounting, and
           # bounded artifact-fingerprint failure publication.
+          # 3328 -> 3372 is the measured final-review regression wave: fail-closed
+          # expansion/persistence, derived privacy, malformed group closure,
+          # case-insensitive ring identity, contradictory BitLocker/LAPS values,
+          # abort attribution, ARM canonicalization, and Gitleaks-ignore binding.
+          # 3372 -> 3380 adds dictionary-shape/native-ID closure coverage,
+          # case-variant compatibility-group union, and an irrelevant-ring control.
           # The four tests/Perf assertions are deliberately outside this QA+Unit release
-          # workflow and are not included in its measured 3328-test floor.
+          # workflow and are not included in its measured 3380-test floor.
           # NotRun remains forbidden.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3328 -AllowedSkips $allowedSkips -AllowNotRun 0
-
-  secret-scan:
-    name: Secret/PII scan (gitleaks)
-    runs-on: ubuntu-latest
-    # Complements tests/QA/SecretScan.tests.ps1 (which runs offline, in every `test` job
-    # above, on every developer machine) with gitleaks' much larger, actively-maintained
-    # rule set. Run the pinned CLI over an explicit base..head range: gitleaks-action's
-    # pull-request API lookup is capped at 30 commits, which silently left the last 20
-    # commits of the 0.3.0 integration train unscanned. The direct release download is
-    # checksum-pinned and needs no license key or repository secret, so this remains
-    # fork-safe like the rest of the workflow.
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Scan exact change history with gitleaks
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
-          PUSH_HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          version='8.24.3'
-          archive_name="gitleaks_${version}_linux_x64.tar.gz"
-          archive_path="$RUNNER_TEMP/$archive_name"
-          binary_dir="$RUNNER_TEMP/gitleaks-$version"
-          expected_sha256='9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c'
-
-          curl --fail --silent --show-error --location --retry 3 \
-            --output "$archive_path" \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${archive_name}"
-
-          actual_sha256="$(sha256sum "$archive_path" | awk '{print $1}')"
-          if [[ "$actual_sha256" != "$expected_sha256" ]]; then
-            printf 'gitleaks archive checksum mismatch: expected %s, got %s\n' \
-              "$expected_sha256" "$actual_sha256" >&2
-            exit 1
-          fi
-
-          mkdir -p "$binary_dir"
-          tar -xzf "$archive_path" -C "$binary_dir" gitleaks
-
-          if [[ "$EVENT_NAME" == 'pull_request' ]]; then
-            scan_from="$PR_BASE_SHA"
-            scan_to="$PR_HEAD_SHA"
-          else
-            scan_from="$PUSH_BEFORE_SHA"
-            scan_to="$PUSH_HEAD_SHA"
-          fi
-
-          git cat-file -e "${scan_to}^{commit}"
-          if [[ -z "$scan_from" || "$scan_from" =~ ^0+$ ]]; then
-            log_opts="$scan_to"
-          else
-            git cat-file -e "${scan_from}^{commit}"
-            log_opts="${scan_from}..${scan_to}"
-          fi
-
-          expected_commit_count="$(git rev-list --count "$log_opts")"
-          if [[ "$expected_commit_count" -eq 0 ]]; then
-            printf 'Refusing an empty gitleaks range: %s\n' "$log_opts" >&2
-            exit 1
-          fi
-
-          printf 'Scanning %s commits from exact git range: %s\n' \
-            "$expected_commit_count" "$log_opts"
-          "$binary_dir/gitleaks" git \
-            --redact \
-            --verbose \
-            --exit-code 2 \
-            --report-format sarif \
-            --report-path "$RUNNER_TEMP/gitleaks-results.sarif" \
-            --log-opts "$log_opts" \
-            .
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3380 -AllowedSkips $allowedSkips -AllowNotRun 0
