@@ -807,7 +807,8 @@ jobs:
           # audit-inventory profile, descriptor bindings, and privacy/read-only gates.
           # 3615 -> 3648 completes the IHA successor report surface, including audit,
           # Apple enrollment-profile, managed-device detail, and migration gates.
+          # 3648 -> 3649 adds the real-catalog gate for both GraphKit 0.3.1 IHA bridge operations.
           # The four tests/Perf assertions are deliberately outside this QA+Unit release
-          # workflow and are not included in its measured 3648-test floor.
+          # workflow and are not included in its measured 3649-test floor.
           # NotRun remains forbidden.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3648 -AllowedSkips $allowedSkips -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3649 -AllowedSkips $allowedSkips -AllowNotRun 0

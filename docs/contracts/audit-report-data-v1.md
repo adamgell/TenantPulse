@@ -22,6 +22,10 @@ datasets through their recorded hashes. The Apple producer validates its read/sa
 participates in the same one-time permission preflight and authentication-abort state, and sends no
 request when the token dataset, descriptor, or permission decision is unavailable.
 
+The Apple child route requires exact GraphKit `0.3.1`. Its catalog, paging route, and result-shape
+contract are deterministic package evidence; live Graph permission/response proof and PSGallery
+publication remain separate.
+
 TenantPulse ends at machine data. It does not render DOCX/XLSX, carry CDW or customer branding,
 judge whether work is approved, or overwrite customer-maintained response, owner, date,
 prerequisite, or approval fields.

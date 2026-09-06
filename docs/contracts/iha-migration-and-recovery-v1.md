@@ -83,9 +83,11 @@ remain outside GraphKit and TenantPulse.
 
 ## Release and live-evidence gates
 
-The Apple enrollment-profile and managed-device-detail implementations require the paired GraphKit
-descriptors introduced on the same IHA completion branch. Until that exact GraphKit package is merged,
-released, and selected by TenantPulse, the stable GraphKit 0.3.0 dependency causes those child
-artifacts to fail closed as `NotExpanded`/`Partial`; it never falls back to an unowned HTTP call.
-Microsoft Graph live permission and response-shape verification is separate evidence and must not be
-inferred from these deterministic contracts.
+The Apple enrollment-profile and managed-device-detail implementations require exact GraphKit
+`0.3.1`. That maintenance source is merged on GraphKit's `release/0.3.x` line, its package is sealed
+to the passing all-file proof, and this TenantPulse source selects it exactly. The earlier dependency
+block is therefore closed for deterministic source/package verification. Distribution still requires
+the verified local package or an internal channel until a separately authorized PSGallery publish;
+TenantPulse never falls back to an unowned HTTP call. Microsoft Graph live permission and
+response-shape verification is separate evidence and must not be inferred from these deterministic
+contracts.

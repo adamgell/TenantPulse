@@ -51,8 +51,8 @@ Describe 'Windows data processor provider disposition' {
         $outcome.Detail.PSObject.Properties.Name | Should -Not -Contain 'Method'
         $outcome.Detail.PSObject.Properties.Name | Should -Not -Contain 'Path'
         $outcome.Detail.PSObject.Properties.Name | Should -Not -Contain 'ApiVersion'
-        $outcome.Detail.GraphKit.PackageVersion | Should -Be '0.3.0'
-        $outcome.Detail.GraphKit.Descriptor | Should -Be 'Absent from released catalog'
+        $outcome.Detail.GraphKit.PackageVersion | Should -Be '0.3.1'
+        $outcome.Detail.GraphKit.Descriptor | Should -Be 'Absent from exact required catalog'
         $outcome.Detail.GraphKit.PSObject.Properties.Name | Should -Not -Contain 'DescriptorLookup'
         $outcome.Detail.LiveProbe.Outcome | Should -Be 'Succeeded'
         $outcome.Detail.LiveProbe.ReadOnly | Should -BeTrue

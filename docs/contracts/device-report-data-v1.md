@@ -30,6 +30,10 @@ failed, invalid, or authentication-suppressed detail read remains `Partial` with
 falling back to collection-shaped hardware defaults. Tenant identifiers are recursively pseudonymized before publication.
 The snapshot and expansion remain local-only evidence and may contain user/device identifiers.
 
+That singleton route requires exact GraphKit `0.3.1`. The dependency is package- and
+catalog-verified; this contract does not promote deterministic shape tests into live Graph evidence
+or a PSGallery publication claim.
+
 A usable row needs a Graph managed-device id, an Entra device id, or a device name. A null row or
 row with none of those identities is excluded with an explicit gap. A source dataset with status
 `Partial` always creates a `Partial` artifact; failed, skipped, missing, corrupt, or wholly unusable

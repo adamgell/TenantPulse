@@ -15,7 +15,7 @@
     predicate through Test-PulseReadOnlyDatasetMap below, a small non-throwing walker local
     to this file, so every dataset gets its own reported result.
 
-    Unlike a unit test, this file deliberately imports the REAL GraphKit module (0.3.0,
+    Unlike a unit test, this file deliberately imports the REAL GraphKit module (0.3.1,
     installed as TenantPulse's own RequiredModules dependency) and calls its REAL
     Get-GraphOperation - metadata-catalog lookups only, never a network call, never a live
     tenant - to prove every RELEASED dataset entry resolves to an actual Read/Safe
@@ -97,9 +97,9 @@ BeforeAll {
     $script:datasetMapPath = Join-Path -Path $projectPath -ChildPath 'source/Data/DatasetMap.psd1'
     $script:fixtureDatasetMapPath = Join-Path -Path $projectPath -ChildPath 'tests/Fixtures/DatasetMap/mutation-write-op.psd1'
 
-    # Real GraphKit (0.3.0), deliberately NOT stubbed in this file - see the file-level
+    # Real GraphKit (0.3.1), deliberately NOT stubbed in this file - see the file-level
     # docstring above for why this is the one QA test allowed to import it for real.
-    Import-Module -FullyQualifiedName @{ ModuleName = 'GraphKit'; RequiredVersion = '0.3.0' } -Force -ErrorAction Stop
+    Import-Module -FullyQualifiedName @{ ModuleName = 'GraphKit'; RequiredVersion = '0.3.1' } -Force -ErrorAction Stop
 
     <#
         Walks a DatasetMap.psd1-shaped hashtable and returns every read-only-predicate
@@ -251,7 +251,7 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         }
     }
 
-    It 'resolves managed-device cleanup rules through the exact GraphKit 0.3.0 Read/Safe descriptor' {
+    It 'resolves managed-device cleanup rules through the exact GraphKit 0.3.1 Read/Safe descriptor' {
         $map = Import-PowerShellDataFile -Path $script:datasetMapPath
         $entry = $map['managedDeviceCleanupRules']
 
@@ -273,6 +273,22 @@ Describe 'Static read-only gate' -Tag 'QA', 'ReadOnly' {
         @($descriptor.RequiredPermissions).Count | Should -Be 1
         $descriptor.RequiredPermissions[0].Type | Should -Be 'Application'
         $descriptor.RequiredPermissions[0].Value | Should -Be 'DeviceManagementManagedDevices.Read.All'
+    }
+
+    It 'resolves both IHA successor operations through the exact GraphKit 0.3.1 catalog' {
+        $expected = @(
+            @{ Type = 'AppleEnrollmentProfile'; Operation = 'ListByToken'; Kind = 'Collection'; ApiVersion = 'beta' }
+            @{ Type = 'ManagedDevice'; Operation = 'GetBeta'; Kind = 'Singleton'; ApiVersion = 'beta' }
+        )
+
+        foreach ($operation in $expected) {
+            $descriptor = Get-GraphOperation -Type $operation.Type -Operation $operation.Operation -ErrorAction Stop
+            $descriptor | Should -Not -BeNullOrEmpty
+            $descriptor.OperationKind | Should -BeExactly $operation.Kind
+            $descriptor.ApiVersion | Should -BeExactly $operation.ApiVersion
+            $descriptor.ThrottleClass | Should -BeExactly 'Read'
+            $descriptor.ReplayPolicy | Should -BeExactly 'Safe'
+        }
     }
 
     Context 'the whole-map walker (Test-PulseReadOnlyDatasetMap) agrees with the per-dataset assertions above' {

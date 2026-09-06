@@ -21,6 +21,14 @@ in released schema 1.0.0/1.1.0 manifests remains rejected: those writers emitted
 `Failed`, and `Skipped`; migration fails closed without modifying the manifest. Schema 2.0.0 is
 the first writer contract that introduced `Partial`.
 
+The current source requires exact GraphKit `0.3.1` for the IHA successor report bridge.
+GraphKit PR #5 merged commit `158c9a0152e25f30153e4d6a310dc5357ea6a80d`; exact-head CI run
+`34061975066` passed all six Windows, Ubuntu, and macOS PowerShell 7.4/7.6 jobs. TenantPulse uses
+the two new Read/Safe beta descriptors `AppleEnrollmentProfile.ListByToken` and
+`ManagedDevice.GetBeta`, and its build binds the staged producer tree to a tracked SHA-256 digest.
+This is deterministic source/package and remote producer evidence only: GraphKit `0.3.1` is not
+claimed as published, and no new live-tenant service behavior is claimed.
+
 The current unreleased source also implements the R1a outcome-fidelity tranche. One canonical
 mapper preserves Graph failure outcomes across direct, composite, and expansion collection. A
 request-time `403` is persisted as `Failed` / `PermissionDenied`; only `AuthenticationFailed`

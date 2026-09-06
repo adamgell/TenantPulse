@@ -55,7 +55,7 @@ RequiredModules = @(
     # TenantPulse reads the tenant exclusively through GraphKit's read-class descriptors.
     # RequiredVersion is deliberate: a newer GraphKit catalog is a different producer
     # contract and must be re-verified before TenantPulse consumes it.
-    @{ ModuleName = 'GraphKit'; RequiredVersion = '0.3.0' }
+    @{ ModuleName = 'GraphKit'; RequiredVersion = '0.3.1' }
 )
 
 # Assemblies that must be loaded prior to importing this module
@@ -208,6 +208,7 @@ PrivateData = @{
 ### Changed
 
 - The approved product-program completion work uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
+- Unreleased TenantPulse 0.3.0 requires exact GraphKit 0.3.1 for IHA report collection; this adds no live-service or PSGallery claim.
 - `Data.PartialDatasets` is a strict Function-only opt-in that requires `DatasetOutcomes`. Exactly six checks opt in: assignment-scoped checks `TP.INT.0002` and `TP.INT.0004` use authoritative assignment evidence and scope gaps by policy; universal checks `TP.INT.0013` and `TP.INT.0029` may Fail on a known offender but cannot Pass with gaps; existential checks `TP.INT.0014` and `TP.INT.0015` may Pass on a known witness but cannot Fail with gaps. BitLocker and LAPS witnesses require native Boolean values.
 - The other 47 checks remain `NotApplicable` when their dataset status is `Partial`. For the six opt-ins, structurally valid non-decisive Partial evidence is `NotApplicable`; zero usable Partial rows, malformed outcomes or gaps, and rule-invalid rows remain `Error`.
 - Findings schema `1.0`, snapshot schema `2.0.0`, and scoring model `1.0` are unchanged. This deterministic source/package tranche makes no new live-service or publication claim.

@@ -17,12 +17,16 @@ The profile includes these source datasets:
   `roleEligibilityScheduleInstances`, `subscribedSkus`, `vppTokens`,
   `windowsAutopilotDeviceIdentities`, and `windowsUpdateCatalogItems`.
 
-The direct dataset entries added for the IHA port bind to the released GraphKit 0.3.0 operations
+The direct dataset entries added for the IHA port bind to the exact GraphKit 0.3.1 maintenance catalog
 `AndroidEnrollmentProfile.List`, `AppConfigurationPolicy.List`, `DeviceCategory.ListBeta`,
 `DeviceManagementScript.List`, `DomainConnector.List`, `Group.ListBeta`,
 `MobileAppCategory.List`, and `WindowsUpdateCatalogItem.List`. The normal static read-only gate
 resolves every entry and requires GraphKit to declare `ThrottleClass = Read` and
 `ReplayPolicy = Safe`.
+
+GraphKit `0.3.1` is a tested maintenance package dependency for this unreleased source line; this
+contract does not claim that the package has been published to PSGallery or live-verified for every
+operation.
 
 `Inventory` intentionally does not duplicate specialized artifact producers. Use
 `-ReportData Inventory,Applications,Devices -ExpandSettings` when a run needs the complete current

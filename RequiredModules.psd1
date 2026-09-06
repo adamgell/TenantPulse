@@ -25,14 +25,14 @@
     Sampler                     = '0.120.1'
 
     # GraphKit is a runtime dependency (see source/TenantPulse.psd1 RequiredModules),
-    # and this restore pin matches that exact published runtime dependency. Local or
+    # and this restore pin matches the exact verified maintenance dependency. Local or
     # offline validation may stage the already-tested GraphKit package under
     # output/RequiredModules.
-    GraphKit                    = '0.3.0'
+    GraphKit                    = '0.3.1'
 
-    # Resolve-Dependency does not walk transitive requirements. GraphKit 0.3.0 still uses
+    # Resolve-Dependency does not walk transitive requirements. GraphKit 0.3.1 still uses
     # Microsoft.Graph.Authentication as its MSAL delivery vehicle, so stage it explicitly.
-    # SecretManagement is intentionally absent: GraphKit 0.3.0 resolves that optional
+    # SecretManagement is intentionally absent: GraphKit 0.3.1 resolves that optional
     # boundary lazily only when a persisted-vault operation is invoked.
     'Microsoft.Graph.Authentication' = '2.38.1'
 }

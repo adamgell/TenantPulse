@@ -1,6 +1,6 @@
 <#
     TenantPulse intentionally declares only GraphKit as a runtime dependency. GraphKit
-    0.3.0, in turn, declares Microsoft.Graph.Authentication as a real package dependency.
+    0.3.1, in turn, declares Microsoft.Graph.Authentication as a real package dependency.
 
     Sampler's package_module_nupkg task publishes only TenantPulse's direct dependencies
     into its temporary local repository. PowerShellGet therefore cannot publish GraphKit
@@ -16,7 +16,7 @@ BeforeAll {
     $script:sourceManifest = Import-PowerShellDataFile -Path (Join-Path $script:repoRoot 'source/TenantPulse.psd1')
     $script:releaseVersion = [string] $script:sourceManifest.ModuleVersion
     $script:restoreDependencies = Import-PowerShellDataFile -Path (Join-Path $script:repoRoot 'RequiredModules.psd1')
-    $script:graphKitManifestPath = Join-Path $script:repoRoot 'output/RequiredModules/GraphKit/0.3.0/GraphKit.psd1'
+    $script:graphKitManifestPath = Join-Path $script:repoRoot 'output/RequiredModules/GraphKit/0.3.1/GraphKit.psd1'
     $script:graphKitManifest = Import-PowerShellDataFile -Path $script:graphKitManifestPath
     $script:dependencyIntegrityHelper = Join-Path $script:repoRoot '.build/RuntimeDependencyIntegrity.ps1'
     $script:dependencyDigestPath = Join-Path $script:repoRoot '.build/RuntimeDependencyDigests.psd1'
@@ -192,17 +192,17 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
         $ciWorkflow | Should -Not -Match '(?m)pwsh -File \./build\.ps1 -Tasks pack\s*$'
     }
 
-    It 'keeps TenantPulse dependent only on exact GraphKit 0.3.0 at runtime' {
+    It 'keeps TenantPulse dependent only on exact GraphKit 0.3.1 at runtime' {
         $requirements = @($script:sourceManifest.RequiredModules)
         $requirements.Count | Should -Be 1
         [string] $requirements[0].ModuleName | Should -Be 'GraphKit'
-        [string] $requirements[0].RequiredVersion | Should -Be '0.3.0'
+        [string] $requirements[0].RequiredVersion | Should -Be '0.3.1'
         @($requirements.ModuleName) | Should -Not -Contain 'Microsoft.Graph.Authentication'
         @($requirements.ModuleName) | Should -Not -Contain 'Microsoft.PowerShell.SecretManagement'
     }
 
     It 'pins the hard transitive dependency for deterministic restore without restoring SecretManagement' {
-        [string] $script:restoreDependencies.GraphKit | Should -Be '0.3.0'
+        [string] $script:restoreDependencies.GraphKit | Should -Be '0.3.1'
         [string] $script:restoreDependencies.'Microsoft.Graph.Authentication' | Should -Be '2.38.1'
         $script:restoreDependencies.ContainsKey('Microsoft.PowerShell.SecretManagement') | Should -BeFalse
 
@@ -224,7 +224,7 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
 
         $expectedDigests = Import-PowerShellDataFile -LiteralPath $script:dependencyDigestPath
         foreach ($dependency in @(
-            @{ Name = 'GraphKit'; Version = '0.3.0' },
+            @{ Name = 'GraphKit'; Version = '0.3.1' },
             @{ Name = 'Microsoft.Graph.Authentication'; Version = '2.38.1' }
         )) {
             $moduleBase = Join-Path $script:repoRoot (
@@ -303,7 +303,7 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
     It 'creates all three packages needed by the local dependency chain' {
         Test-Path -LiteralPath (Join-Path $script:repoRoot 'output/Microsoft.Graph.Authentication.2.38.1.nupkg') -PathType Leaf |
             Should -BeTrue
-        Test-Path -LiteralPath (Join-Path $script:repoRoot 'output/GraphKit.0.3.0.nupkg') -PathType Leaf |
+        Test-Path -LiteralPath (Join-Path $script:repoRoot 'output/GraphKit.0.3.1.nupkg') -PathType Leaf |
             Should -BeTrue
         Test-Path -LiteralPath (Join-Path $script:repoRoot "output/TenantPulse.$script:releaseVersion.nupkg") -PathType Leaf |
             Should -BeTrue
@@ -319,10 +319,10 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
         ))
         $tenantPulseDependencies.Count | Should -Be 1
         $tenantPulseDependencies[0].Id | Should -Be 'GraphKit'
-        $tenantPulseDependencies[0].Version | Should -Be '[0.3.0]'
+        $tenantPulseDependencies[0].Version | Should -Be '[0.3.1]'
 
         $graphKitDependencies = @(Get-NuGetDependency -PackagePath (
-            Join-Path $script:repoRoot 'output/GraphKit.0.3.0.nupkg'
+            Join-Path $script:repoRoot 'output/GraphKit.0.3.1.nupkg'
         ))
         $graphKitDependencies.Count | Should -Be 1
         $graphKitDependencies[0].Id | Should -Be 'Microsoft.Graph.Authentication'
@@ -331,7 +331,7 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
 
     It 'contains no duplicate archive entry names caused by nested NuGet wrappers' {
         foreach ($packagePath in @(
-            (Join-Path $script:repoRoot 'output/GraphKit.0.3.0.nupkg'),
+            (Join-Path $script:repoRoot 'output/GraphKit.0.3.1.nupkg'),
             (Join-Path $script:repoRoot "output/TenantPulse.$script:releaseVersion.nupkg")
         )) {
             $archive = [System.IO.Compression.ZipFile]::OpenRead($packagePath)
@@ -375,7 +375,7 @@ Describe 'Transitive runtime dependency packaging' -Tag 'QA' {
 
         Test-Path -LiteralPath (Join-Path $installRoot "TenantPulse/$script:releaseVersion/TenantPulse.psd1") -PathType Leaf |
             Should -BeTrue
-        Test-Path -LiteralPath (Join-Path $installRoot 'GraphKit/0.3.0/GraphKit.psd1') -PathType Leaf |
+        Test-Path -LiteralPath (Join-Path $installRoot 'GraphKit/0.3.1/GraphKit.psd1') -PathType Leaf |
             Should -BeTrue
         Test-Path -LiteralPath (Join-Path $installRoot 'Microsoft.Graph.Authentication/2.38.1/Microsoft.Graph.Authentication.psd1') -PathType Leaf |
             Should -BeTrue
@@ -431,7 +431,7 @@ Import-Module TenantPulse -RequiredVersion __TENANTPULSE_VERSION__ -Force
         $childExitCode | Should -Be 0
         $probe = $childOutput[-1] | ConvertFrom-Json
         $probe.TenantPulse | Should -Be $script:releaseVersion
-        $probe.GraphKit | Should -Be '0.3.0'
+        $probe.GraphKit | Should -Be '0.3.1'
         # The build/feed assertions above pin the restored package to 2.38.1.
         # GraphKit's runtime ModuleVersion constraint is a minimum, so a compatible
         # version already loaded in the process must remain valid rather than being

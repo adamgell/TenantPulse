@@ -60,7 +60,7 @@ BuildWorkflow:
   pack:
     - build
 
-    # Sampler's PowerShellGet pack task stages direct dependencies only. GraphKit 0.3.0
+    # Sampler's PowerShellGet pack task stages direct dependencies only. GraphKit 0.3.1
     # has a real Microsoft.Graph.Authentication package dependency, so publish that hard
     # transitive requirement into the ephemeral local output feed before Sampler tries
     # to publish GraphKit. The custom task resolves only exact RequiredModules.psd1 pins.

@@ -263,10 +263,11 @@ constitute a claim of CIS Benchmark compliance."*
 ## Operator prerequisites
 
 - PowerShell 7.4 or later
-- [GraphKit](https://www.powershellgallery.com/packages/GraphKit/0.3.0) exactly `0.3.0`.
-  Published TenantPulse `0.2.0` and the unreleased `0.3.0` source line both declare this with
-  `RequiredVersion`, so a different GraphKit version does not satisfy the runtime contract.
-  Installing TenantPulse `0.2.0` from PSGallery resolves the exact published GraphKit `0.3.0`
+- GraphKit exactly `0.3.1` for the unreleased TenantPulse `0.3.0` source line. It is declared with
+  `RequiredVersion`, so a different GraphKit version does not satisfy the runtime contract. The
+  tested `0.3.1` maintenance package must be staged from the verified GraphKit maintenance source
+  or an internal package channel until separately published. Published TenantPulse `0.2.0`
+  continues to resolve its immutable published [GraphKit `0.3.0`](https://www.powershellgallery.com/packages/GraphKit/0.3.0)
   dependency.
 - A GraphKit profile already registered for the tenant you want to assess (see GraphKit's
   own documentation - profile registration, credential setup, and Graph app-registration
@@ -276,7 +277,8 @@ constitute a claim of CIS Benchmark compliance."*
   permissions** above) - most commonly `Policy.Read.All` for the Conditional-Access-backed
   checks (`TP.ENT.0003`-`0005`), plus whichever Intune/device permissions the datasets you
   collect require
-- PSGallery access (or an internal mirror) to install TenantPulse and GraphKit
+- PSGallery access for published dependencies, plus the verified local/internal GraphKit `0.3.1`
+  package while that maintenance version is not yet on PSGallery
 
 GraphKit `0.3.0` and TenantPulse `0.2.0` are the immutable current PSGallery releases.
 The `0.2.0` release was greenfield, pre-adoption work: there was no installed TenantPulse user
@@ -398,7 +400,7 @@ What the current catalog does **not** cover, honestly:
   effective members. `TP.ENT.0022` must continue to count one permanent group assignment as one
   violation; future expansion is bounded blast-radius evidence, not multiplication of that finding.
 - **Application registrations.** `TP.ENT.0019` reads only `servicePrincipal` credentials because
-  GraphKit `0.3.0` and the current successor tree have no `Application.List` operation. Ordinary app
+  GraphKit `0.3.1` and the current successor tree have no `Application.List` operation. Ordinary app
   registration secrets/certificates are invisible. An all-unparseable credential population can
   also currently reach Pass; R4 must make that result `NotApplicable` unless a proven offender
   already establishes Fail.
@@ -456,8 +458,9 @@ does not carry CDW or customer branding, and does not interpret approval fields.
 harness-independent Office builder can consume the versioned rows and preserve customer-owned
 workbook/document regions. The exact row and failure contract is documented in
 [`docs/contracts/application-report-data-v1.md`](docs/contracts/application-report-data-v1.md).
-The stable TenantPulse `0.3.0` dependency remains immutable GraphKit `0.3.0`; it does not treat a
-locally staged GraphKit `0.4.0-r8` prerelease as a distributable customer dependency.
+Published TenantPulse `0.2.0` retains immutable GraphKit `0.3.0`. The unreleased TenantPulse
+`0.3.0` successor tree requires the exact tested GraphKit `0.3.1` maintenance package; it does not
+treat a locally staged GraphKit `0.4.0-r8` prerelease as a distributable customer dependency.
 
 `-ReportData Devices` guarantees one ordinary `managedDevices` read, performs the documented beta
 singleton detail read for each Windows device, and publishes one `managed-device-inventory`
@@ -586,11 +589,12 @@ a resolved API key (via `-NuGetApiKeySecure` or the `TENANTPULSE_NUGET_API_KEY`
 environment variable - there is no plain-string API key parameter), and confirmed through
 the normal `ShouldProcess` confirmation boundary.
 
-`source/TenantPulse.psd1` declares GraphKit `0.3.0` with `RequiredVersion`, the exact runtime
-contract. `RequiredModules.psd1` separately pins `GraphKit = '0.3.0'` for build-time staging.
+`source/TenantPulse.psd1` declares GraphKit `0.3.1` with `RequiredVersion`, the exact runtime
+contract. `RequiredModules.psd1` separately pins `GraphKit = '0.3.1'` for build-time staging.
 These two files intentionally use different schemas but must resolve the same version. For the
-unreleased TenantPulse `0.3.0` source line, validation stages the already-tested published
-GraphKit `0.3.0` package locally; it must not silently fall back to any other GraphKit version.
+unreleased TenantPulse `0.3.0` source line, validation stages the already-tested GraphKit `0.3.1`
+maintenance package locally; it must not silently fall back to any other GraphKit version. This
+source dependency is not a claim that GraphKit `0.3.1` has been published to PSGallery.
 
 Unit tests never import real GraphKit: every GraphKit command TenantPulse calls
 (`Get-GraphContext`, `Get-GraphObject`, `Invoke-GraphOperation`, `Get-GraphOperation`) is

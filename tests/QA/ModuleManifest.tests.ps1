@@ -100,6 +100,7 @@ BeforeAll {
 ### Changed
 
 - The approved product-program completion work uses a unique successor identity. Published TenantPulse 0.2.0 and its exact GraphKit 0.3.0 dependency remain immutable.
+- Unreleased TenantPulse 0.3.0 requires exact GraphKit 0.3.1 for IHA report collection; this adds no live-service or PSGallery claim.
 - `Data.PartialDatasets` is a strict Function-only opt-in that requires `DatasetOutcomes`. Exactly six checks opt in: assignment-scoped checks `TP.INT.0002` and `TP.INT.0004` use authoritative assignment evidence and scope gaps by policy; universal checks `TP.INT.0013` and `TP.INT.0029` may Fail on a known offender but cannot Pass with gaps; existential checks `TP.INT.0014` and `TP.INT.0015` may Pass on a known witness but cannot Fail with gaps. BitLocker and LAPS witnesses require native Boolean values.
 - The other 47 checks remain `NotApplicable` when their dataset status is `Partial`. For the six opt-ins, structurally valid non-decisive Partial evidence is `NotApplicable`; zero usable Partial rows, malformed outcomes or gaps, and rule-invalid rows remain `Error`.
 - Findings schema `1.0`, snapshot schema `2.0.0`, and scoring model `1.0` are unchanged. This deterministic source/package tranche makes no new live-service or publication claim.
@@ -118,7 +119,7 @@ BeforeAll {
 
         $requirements = @($Manifest.RequiredModules | Where-Object { $_.ModuleName -eq 'GraphKit' })
         $requirements.Count | Should -Be 1
-        [string] $requirements[0].RequiredVersion | Should -Be '0.3.0'
+        [string] $requirements[0].RequiredVersion | Should -Be '0.3.1'
         $requirements[0].ContainsKey('ModuleVersion') | Should -BeFalse
         $requirements[0].ContainsKey('MaximumVersion') | Should -BeFalse
     }
@@ -143,7 +144,7 @@ Describe 'TenantPulse package identity and GraphKit dependency' -Tag 'QA' {
         $script:releaseVersion | Should -Be '0.3.0'
     }
 
-    It 'requires exact GraphKit 0.3.0 and the intended release notes in the source manifest' {
+    It 'requires exact GraphKit 0.3.1 and the intended release notes in the source manifest' {
         Assert-ExactGraphKitRequirement -Manifest $script:sourceManifest
         $script:sourceReleaseNotes | Should -Be $script:expectedReleaseNotes
     }
@@ -153,19 +154,19 @@ Describe 'TenantPulse package identity and GraphKit dependency' -Tag 'QA' {
         $crlfReleaseNotes.Length | Should -BeLessOrEqual 10000
     }
 
-    It 'keeps the independent restore-time GraphKit pin at 0.3.0' {
+    It 'keeps the independent restore-time GraphKit pin at 0.3.1' {
         $restoreDependencies = Import-PowerShellDataFile -Path (Join-Path $script:repoRoot 'RequiredModules.psd1')
-        [string] $restoreDependencies.GraphKit | Should -Be '0.3.0'
+        [string] $restoreDependencies.GraphKit | Should -Be '0.3.1'
     }
 
-    It 'preserves exact GraphKit 0.3.0 and source release notes in the built manifest' {
+    It 'preserves exact GraphKit 0.3.1 and source release notes in the built manifest' {
         Test-Path -LiteralPath $script:builtManifestPath -PathType Leaf | Should -BeTrue
         $builtManifest = Import-PowerShellDataFile -Path $script:builtManifestPath
         Assert-ExactGraphKitRequirement -Manifest $builtManifest
         Assert-ExactUnreleasedReleaseNotes -ReleaseNotes ([string] $builtManifest.PrivateData.PSData.ReleaseNotes)
     }
 
-    It 'preserves exact GraphKit 0.3.0 and source release notes in the 0.3.0 nupkg manifest' {
+    It 'preserves exact GraphKit 0.3.1 and source release notes in the 0.3.0 nupkg manifest' {
         Test-Path -LiteralPath $script:packagePath -PathType Leaf | Should -BeTrue
         $extractRoot = Join-Path $TestDrive 'package'
         if (Test-Path -LiteralPath $extractRoot) {

@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 3648 / -AllowNotRun 0 (see
+    # MinimumTests 3649 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -349,15 +349,16 @@ else {
     # audit-inventory profile, descriptor bindings, and privacy/read-only gates.
     # 3615 -> 3648 completes the IHA successor report surface, including audit,
     # Apple enrollment-profile, managed-device detail, and migration gates.
+    # 3648 -> 3649 adds the real-catalog gate for both GraphKit 0.3.1 IHA bridge operations.
     # The four tests/Perf assertions are deliberately outside the QA+Unit release
-    # workflow and are not included in its measured 3648-test floor.
+    # workflow and are not included in its measured 3649-test floor.
     # NotRun remains forbidden.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 3648 `
+        -MinimumTests 3649 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {

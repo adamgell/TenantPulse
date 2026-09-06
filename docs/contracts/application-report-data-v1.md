@@ -92,12 +92,13 @@ Every row carries `schemaVersion = "1"` and these stable fields:
 | Target | `targetType`, `targetDisplayName`, `isExclusion`, `filterId`, `filterType` |
 | Group | `groupId`, `groupName`, `groupDescription`, `groupMemberCount`, `groupResolutionState`, `memberResolutionState` |
 
-TenantPulse `0.3.0` keeps its reproducible exact dependency on immutable GraphKit `0.3.0`.
+TenantPulse `0.3.0` keeps its reproducible exact dependency on the tested GraphKit `0.3.1`
+maintenance package.
 That producer's `Group.Get` descriptor selects group identity and display name but not
 `description`, so `groupDescription` is normally `null` under the stable dependency. The schema
 reserves and safely preserves the field when a later verified GraphKit release selects it; this
-unreleased source does not claim that a local GraphKit `0.4.0-r8` prerelease is a customer-installable
-dependency.
+unreleased source does not claim that GraphKit `0.3.1` is published or that a local GraphKit
+`0.4.0-r8` prerelease is a customer-installable dependency.
 
 An application with no assignments still produces one row with
 `assignmentResolutionState = NoAssignments`; it is never silently discarded. Supported target

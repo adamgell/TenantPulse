@@ -14,9 +14,9 @@ Describe 'TenantPulse current release truth' -Tag 'QA' {
         $readme | Should -Match 'a0d5ff793b92753ab3efb4db20cf5bcf8b953e3cf81bf1a776c96a3d992417bd'
     }
 
-    It 'records the exact GraphKit 0.3.0 producer release' {
+    It 'records the immutable GraphKit 0.3.0 producer release and exact 0.3.1 successor dependency' {
         $readme | Should -Match 'GraphKit `0\.3\.0`'
-        $manifest.RequiredModules[0].RequiredVersion | Should -Be '0.3.0'
+        $manifest.RequiredModules[0].RequiredVersion | Should -Be '0.3.1'
         [string] $manifest.ModuleVersion | Should -Be '0.3.0'
     }
 
