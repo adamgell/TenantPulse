@@ -14,6 +14,10 @@ BeforeAll {
   app-install-error JSONL artifacts. The contract preserves raw report columns, assignment
   targets/settings, group resolution and member-count certainty, and explicit partial/failure
   gaps without adding Office rendering, branding, approval workflow, or derived severity.
+- Neutral `-ReportData Devices` collection on the same surfaces, producing one schema-v1,
+  hash-verified managed-device inventory from the ordinary `managedDevices` dataset. It
+  preserves IHA's active device-report fields and all source columns, carries partial/failure
+  certainty forward, and explicitly refuses to mislabel encryption or compliance as TPM state.
 - Self-contained HTML findings reports through `Export-PulseReport -Format Html` and
   `Invoke-PulseAssessment -Format Html`. JSON remains canonical and is always written by the
   assessment path; HTML is a second findings-only renderer with inline CSS, no scripts, no

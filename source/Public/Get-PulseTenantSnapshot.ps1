@@ -130,8 +130,11 @@
     .PARAMETER ReportData
         Optional neutral report-data profiles collected independently of check selection.
         'Applications' writes versioned, hash-verified application-assignment and app-
-        install-error JSONL artifacts into the snapshot. It does not render DOCX/XLSX,
-        apply branding, or evaluate approval state.
+        install-error JSONL artifacts into the snapshot. 'Devices' guarantees collection
+        of managedDevices and writes a versioned, hash-verified managed-device-inventory
+        artifact that preserves every source column plus the stable fields needed by IHA's
+        six active device reports. Neither profile renders DOCX/XLSX, applies branding, or
+        evaluates approval state.
 
     .PARAMETER ProviderPlanRegistry
         Optional dataset-name keyed overrides for TenantPulse-owned provider plans.
@@ -196,7 +199,7 @@ function Get-PulseTenantSnapshot {
         [switch] $ExpandSettings,
 
         [Parameter()]
-        [ValidateSet('Applications')]
+        [ValidateSet('Applications', 'Devices')]
         [string[]] $ReportData,
 
         # Optional declared-operation overrides for TenantPulse-owned composite plans,
@@ -228,7 +231,21 @@ function Get-PulseTenantSnapshot {
 
     $checks = @(Select-PulseCheck @selectParams)
 
-    $manifest = @(Get-PulseCollectionManifest -Checks $checks -DatasetMap $datasetMap)
+    # Report profiles are independent of check selection. A Devices request therefore
+    # contributes managedDevices to the same deduped collection manifest even when the
+    # selected checks need no device data. It is intentionally represented as a synthetic
+    # manifest-only consumer rather than a second direct Graph call: collection, preflight,
+    # auth-abort, partial-outcome, and integrity behavior remain owned by the ordinary
+    # dataset pipeline exactly once.
+    $reportChecks = @()
+    if (@($ReportData) -contains 'Devices') {
+        $reportChecks += [pscustomobject]@{
+            Id   = 'ReportData.Devices'
+            Data = [pscustomobject]@{ Datasets = @('managedDevices'); Gates = @() }
+        }
+    }
+
+    $manifest = @(Get-PulseCollectionManifest -Checks @($checks + $reportChecks) -DatasetMap $datasetMap)
 
     $resolvedProviderPlanRegistry = Resolve-PulseProviderPlanRegistry -Overrides $ProviderPlanRegistry
 
@@ -279,6 +296,9 @@ function Get-PulseTenantSnapshot {
                 Set-PulseExpansionEntry -Store $store -Name $reportArtifact -Status NotExpanded -Reason $failureReason
             }
         }
+        if (@($ReportData) -contains 'Devices') {
+            Set-PulseExpansionEntry -Store $store -Name 'managed-device-inventory' -Status NotExpanded -Reason $failureReason
+        }
 
         Set-PulseManifestEntry -Store $store -CollectionFailure $failureReason
 
@@ -325,6 +345,11 @@ function Get-PulseTenantSnapshot {
         $null = Invoke-PulseApplicationReportCollection -Store $store -Context $context `
             -AuthorizationDecision $authorizationDecision -NetworkAbortState $networkAbortState `
             -ProfileId $ProfileId -Pseudonym $tenantPseudonym
+    }
+
+    if (@($ReportData) -contains 'Devices') {
+        $null = Invoke-PulseDeviceReportCollection -Store $store -ProfileId $ProfileId `
+            -Pseudonym $tenantPseudonym -TenantId $contextTenantId
     }
 
     if ($ExpandSettings) {

@@ -97,7 +97,7 @@ Register-GraphTenant -ProfileId 'contoso' -TenantId '<tenant-id>' -ClientId '<ap
 Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out'
 
 # Also capture neutral inputs for a future customer workbook/document pipeline
-Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out' -ReportData Applications
+Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out' -ReportData Applications,Devices
 ```
 
 This collects a snapshot, evaluates every check in the catalog, scores the result, and
@@ -110,9 +110,9 @@ self-contained `./out/tenantpulse-report.html` renderer.
 
 | Command | What it does |
 |---|---|
-| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. `-ReportData Applications` independently captures versioned application-assignment and install-error artifacts for downstream report builders. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
+| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. `-ReportData Applications,Devices` independently captures versioned application and managed-device artifacts for downstream report builders. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
 | `Get-PulseCheckCatalog` | Lists every check descriptor in the catalog (id, title, category, severity, authorities) as a lightweight, read-only view - useful for discovering what `-IncludeCategory`/`-IncludeCheck` values exist before running an assessment. |
-| `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render canonical JSON. `-ReportData Applications` passes the neutral application-report profile to fresh collection; `-Format Html` also writes a self-contained HTML report; `-Redact` remains the local-only compatibility pseudonymization path. |
+| `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render canonical JSON. `-ReportData Applications,Devices` passes neutral report profiles to fresh collection; `-Format Html` also writes a self-contained HTML report; `-Redact` remains the local-only compatibility pseudonymization path. |
 | `Invoke-PulseCheck` | Runs a scoped subset of checks (by id or category) against a fresh or existing snapshot - the same pipeline as `Invoke-PulseAssessment`, narrowed to exactly the checks you name. |
 | `Export-PulseReport` | Re-renders an already-scored findings JSON file as canonical JSON or self-contained HTML. Render-only - no Graph, snapshot read, re-evaluation, or re-scoring, and (deliberately) no `-Redact`: see its own help for why. |
 
@@ -458,6 +458,15 @@ workbook/document regions. The exact row and failure contract is documented in
 [`docs/contracts/application-report-data-v1.md`](docs/contracts/application-report-data-v1.md).
 The stable TenantPulse `0.3.0` dependency remains immutable GraphKit `0.3.0`; it does not treat a
 locally staged GraphKit `0.4.0-r8` prerelease as a distributable customer dependency.
+
+`-ReportData Devices` similarly guarantees one ordinary `managedDevices` read and publishes one
+`managed-device-inventory` artifact. It carries normalized identity, user, hardware, OS,
+encryption, compliance, ownership, enrollment, and sync fields plus every original source column.
+This single artifact replaces the six active IHA device-report inputs; the Office layer owns their
+worksheet filters and records the stale-device UTC cutoff. TenantPulse does not claim TPM state
+because IHA's TPM-named definition never collected authoritative TPM evidence. The exact schema,
+certainty rules, and IHA mapping are documented in
+[`docs/contracts/device-report-data-v1.md`](docs/contracts/device-report-data-v1.md).
 
 ## Settings expansion (Phase 2)
 
