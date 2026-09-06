@@ -44,8 +44,12 @@ Describe 'CI workflow revision identity' -Tag 'QA' {
         $graphKitBlock | Should -Match "'\.txt'"
         $graphKitBlock | Should -Match 'Get-ChildItem.*-File.*-Recurse'
         $graphKitBlock | Should -Match 'Replace\("`r`n", "`n"\)\.Replace\("`r", "`n"\)'
+        $graphKitBlock | Should -Match "#Region '"
+        $graphKitBlock | Should -Match "#EndRegion '"
+        $graphKitBlock | Should -Match ([regex]::Escape("Replace('\', '/')"))
         $graphKitBlock | Should -Match 'UTF8Encoding.*false'
         $graphKitBlock | Should -Match 'Get-PulseModuleTreeDigest'
+        $graphKitBlock | Should -Match 'Get-FileHash.*SHA256'
         $graphKitBlock | Should -Match "GraphKit\|0\.3\.1"
     }
 

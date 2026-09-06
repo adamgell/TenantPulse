@@ -138,6 +138,16 @@ jobs:
               }
               $text = [System.IO.File]::ReadAllText($textFile.FullName)
               $canonicalText = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+              if ($textFile.Name -eq 'GraphKit.psm1') {
+                  $lines = @($canonicalText -split "`n", -1)
+                  for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
+                      if ($lines[$lineIndex].StartsWith("#Region '", [System.StringComparison]::Ordinal) -or
+                          $lines[$lineIndex].StartsWith("#EndRegion '", [System.StringComparison]::Ordinal)) {
+                          $lines[$lineIndex] = $lines[$lineIndex].Replace('\', '/')
+                      }
+                  }
+                  $canonicalText = $lines -join "`n"
+              }
               [System.IO.File]::WriteAllText($textFile.FullName, $canonicalText, $utf8NoBom)
           }
 
@@ -150,6 +160,14 @@ jobs:
           $expectedDigest = [string] $expectedDigests['GraphKit|0.3.1']
           $actualDigest = Get-PulseModuleTreeDigest -ModuleBase $graphKitTarget
           if (-not $actualDigest.Equals($expectedDigest, [System.StringComparison]::OrdinalIgnoreCase)) {
+              Write-Host 'Staged GraphKit file hashes:'
+              Get-ChildItem -LiteralPath $graphKitTarget -File -Recurse |
+                  Sort-Object FullName |
+                  ForEach-Object {
+                      $relativePath = [System.IO.Path]::GetRelativePath($graphKitTarget, $_.FullName).Replace('\', '/')
+                      $fileHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                      Write-Host "$relativePath|$($_.Length)|$fileHash"
+                  }
               throw "GraphKit 0.3.1 staged tree digest mismatch: expected $expectedDigest, got $actualDigest."
           }
           Write-Host "Staged exact GraphKit 0.3.1 from merged revision $actualGraphKitSha."
