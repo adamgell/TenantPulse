@@ -978,7 +978,7 @@ Describe 'Invoke-PulseEvaluation' {
 
         $completeEvaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($complete)
         $completeEvaluation.Document.privacy.complete | Should -BeTrue
-        $completeEvaluation.Document.privacy.boundary | Should -Be 'classified'
+        $completeEvaluation.Document.privacy.boundary | Should -Be 'local-only'
 
         $mixedEvaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($complete, $compat)
         $mixedEvaluation.Document.privacy.complete | Should -BeFalse
@@ -1017,14 +1017,14 @@ Describe 'Invoke-PulseEvaluation' {
         $evaluation.Document.privacy.boundary | Should -Be 'local-only'
     }
 
-    It 'derives a classified boundary without requiring a rule PrivacyComplete property' {
+    It 'derives complete classification metadata without treating an unprotected document as share-safe' {
         $check = New-PulseFixtureCheck -Id 'TP.INT.0001' -Rule @{ Type = 'Function'; Function = 'Test-PulseFixtureDuckTypedClassifiedWithoutPrivacyFlagRule' }
 
         $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
 
         $evaluation.Document.findings[0].status | Should -Be 'Warn'
         $evaluation.Document.privacy.complete | Should -BeTrue
-        $evaluation.Document.privacy.boundary | Should -Be 'classified'
+        $evaluation.Document.privacy.boundary | Should -Be 'local-only'
     }
 
     It 'recomputes privacy after descriptor evidence classes complete a duck-typed result' {
@@ -1038,7 +1038,7 @@ Describe 'Invoke-PulseEvaluation' {
         $evaluation.Document.findings[0].status | Should -Be 'Warn'
         $evaluation.Document.findings[0].evidence[0].fieldClasses.count | Should -Be 'SafeTechnical'
         $evaluation.Document.privacy.complete | Should -BeTrue
-        $evaluation.Document.privacy.boundary | Should -Be 'classified'
+        $evaluation.Document.privacy.boundary | Should -Be 'local-only'
     }
 
     It 'carries classified evidence metadata into the document so safe-share can protect it' {
@@ -1046,13 +1046,17 @@ Describe 'Invoke-PulseEvaluation' {
         $evaluation = Invoke-PulseFixtureEvaluation -Store $script:store -KeyPath $script:keyPath -Checks @($check)
 
         $evaluation.Document.privacy.complete | Should -BeTrue
+        $evaluation.Document.privacy.boundary | Should -Be 'local-only'
         $evaluation.Document.findings[0].evidence[0].fieldClasses.upn | Should -Be 'Identity'
+        $evaluation.Document.findings[0].evidence[0].identity | Should -Be 'alice@contoso.example'
 
         $shared = InModuleScope TenantPulse -ArgumentList $evaluation.Document, $evaluation.RedactionMap, $script:keyPath {
             param($document, $redactionMap, $keyPath)
             $key = [System.IO.File]::ReadAllBytes($keyPath)
             ConvertTo-PulseSafeShareDocument -Document $document -RedactionMap $redactionMap -OperatorKey $key
         }
+        $shared.privacy.complete | Should -BeTrue
+        $shared.privacy.boundary | Should -Be 'classified'
         $shared.findings[0].evidence[0].identity | Should -Match '^tp-[a-f0-9]{64}$'
         $shared.findings[0].evidence[0].detail.upn | Should -Match '^tp-[a-f0-9]{64}$'
         $shared.findings[0].evidence[0].detail.count | Should -Be 1

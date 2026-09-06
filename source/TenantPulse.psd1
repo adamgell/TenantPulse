@@ -172,7 +172,9 @@ PrivateData = @{
   inventing random evidence identities. App Control wording now matches its confirmed-
   assignment behavior.
 - Application report collection now request-body pages the Intune install summary through
-  `TotalRowCount`, records incomplete totals and partial group metadata as gaps, stops every
+  `TotalRowCount`, binds continuation pages to a native, nonblank service-returned `SessionId`,
+  and discards missing, mismatched, or shape-switched continuations without persisting session
+  metadata. It records incomplete totals and partial group metadata as gaps, stops every
   later report read on authentication failure, recursively scrubs tenant identifiers before
   persistence, rejects semantically unknown report matrices, and uses a canonical total-order
   tie-breaker for content-addressed rows.
@@ -180,13 +182,30 @@ PrivateData = @{
 - Review finding 6 is implemented: Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta`, `ConfigurationPolicySetting.ListBeta`, and `ConfigurationPolicyAssignment.ListBeta`, independent of tenant policy count; setting and assignment gaps name their respective primitives explicitly.
 - Direct, composite, and expansion collection paths now use one canonical Graph failure mapper. A request-time `403` is recorded as `Failed` / `PermissionDenied`; only `AuthenticationFailed` aborts subsequent network collection, while deadline expiration, cancellation, indeterminate certainty, permission denial, and provider failure remain explicit and isolated.
 - Final review hardening now derives finding privacy from final classified evidence; rejects
-  malformed or duplicate group closure, case-variant duplicate update-ring identities,
+  malformed or duplicate group closure and case-variant, mixed-type, or split-evidence
+  duplicate update-ring identities; requires native nonblank update-ring ids and schema-valid
+  native-string assignment discriminators, intents, identities, filters, imported composite states,
+  and schema-native Endpoint Security policy, template, setting, and value fields;
+  deduplicates update-ring counts by identity, emits deterministic duplicate evidence, and
+  validates every scoped duplicate row before accepting a possible qualifying ring while
+  allowing two independent qualifying witnesses to prove Pass despite unrelated malformed candidates; rejects
   contradictory BitLocker/LAPS values, malformed expansion rows, and non-canonical ARM paths;
   and preserves exact gap attribution plus both errors when expansion and manifest persistence
   fail together.
+- Privacy completeness is now independent from the sharing boundary: ordinary evaluation
+  documents remain `local-only`, only protected safe-share clones become `classified`, and HTML
+  retains a prominent local-only warning unless the classification, native Boolean flags,
+  classified boundary, and `safe-share-v1` protection provenance are exact. HTML publication now
+  uses same-directory atomic replacement so a failed write preserves the prior good report.
 - Release CI now uses a base-controlled `pull_request_target` gate that checksum-pins its
   scanner and reviewed `.gitleaksignore`, fetches PR heads only as passive Git objects, blocks
-  PR changes to both trust-root files, and scans the full PR or push comparison range.
+  PR changes to both trust-root files, and scans the full PR or push comparison range. The
+  offline release gate also scans that protected workflow, every tracked content root including
+  `.patch` and `.diff` handoffs, and root control files including `.gitignore`, for secret-shaped
+  content and raw control bytes.
+- Normal CI checks out and asserts the exact event commit before building: pull requests test the
+  pull-request head SHA and pushes test `github.sha`, preventing a moving ref from being mistaken
+  for exact-revision evidence.
 
 ### Changed
 

@@ -310,6 +310,29 @@ Describe 'Assert-PulsePrivacyClassification' {
 }
 
 Describe 'ConvertTo-PulseSafeShareDocument' {
+    It 'reserves the safe-share protection marker for completed document conversion' {
+        $key = $script:KeyGen1
+        $result = InModuleScope TenantPulse -ArgumentList (, $key) {
+            param($Key)
+            $unprotectedComplete = ConvertTo-PulsePrivacyEnvelope -Complete $true
+            $unstampedClassified = ConvertTo-PulsePrivacyEnvelope -Complete $true -ProtectedForSharing
+            $shared = ConvertTo-PulseSafeShareDocument -Document ([pscustomobject]@{
+                    schemaVersion = '1.0'
+                    findings      = @()
+                }) -OperatorKey $Key
+
+            [pscustomobject]@{
+                UnprotectedComplete = $unprotectedComplete
+                UnstampedClassified = $unstampedClassified
+                Shared              = $shared
+            }
+        }
+
+        $result.UnprotectedComplete.PSObject.Properties.Name | Should -Not -Contain 'protection'
+        $result.UnstampedClassified.PSObject.Properties.Name | Should -Not -Contain 'protection'
+        $result.Shared.privacy.protection | Should -BeExactly 'safe-share-v1'
+    }
+
     It 'fails closed when evidence detail is unclassified' {
         $key = $script:KeyGen1
         {
@@ -388,12 +411,13 @@ Describe 'ConvertTo-PulseSafeShareDocument' {
         $json | Should -Match 'stale-device-count'
         $shared.privacy.complete | Should -BeTrue
         $shared.privacy.boundary | Should -Be 'classified'
+        $shared.privacy.protection | Should -BeExactly 'safe-share-v1'
         $shared.findings[0].evidence[0].identity | Should -Match '^tp-[a-f0-9]{64}$'
         $shared.findings[0].evidence[0].detail.secret.redacted | Should -BeTrue
         $shared.findings[0].evidence[0].detail.guidance | Should -Be $markup
     }
 
-    It 'refuses an evaluation document already labeled local-only' {
+    It 'refuses a document whose classification metadata is incomplete, independent of its local-only boundary' {
         $key = $script:KeyGen1
         {
             InModuleScope TenantPulse -ArgumentList (, $key) {
@@ -405,7 +429,7 @@ Describe 'ConvertTo-PulseSafeShareDocument' {
                 }
                 ConvertTo-PulseSafeShareDocument -Document $document -OperatorKey $Key | Out-Null
             }
-        } | Should -Throw -ExpectedMessage '*local-only*'
+        } | Should -Throw -ExpectedMessage '*classification metadata is incomplete*'
     }
 
     It 'rejects a hand-built finding whose reasonCode is not a lowercase hyphenated token' {

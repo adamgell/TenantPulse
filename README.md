@@ -192,10 +192,19 @@ secret-sensitive values are irreversibly replaced, safe technical values and int
 retained operator labels remain useful, and reviewed text stays bounded and must be HTML-encoded.
 Missing, unknown, or value-incompatible classifications fail closed.
 
+Classification completeness is not the same as safe-share protection. `privacy.complete = true`
+means all required fields have classification metadata, but an ordinary evaluation document may
+still contain raw classified values and therefore remains `privacy.boundary = "local-only"`.
+HTML rendering treats missing, malformed, incomplete, non-classified, or unstamped privacy
+metadata as local-only and displays a prominent not-safe-to-share warning.
+
 `ConvertTo-PulseSafeShareDocument`, reached by the private JSON exporter's
 `-RequireClassification` path, is the fail-closed classified JSON boundary. It emits
-`privacy.classification = "1.0"`, `privacy.complete = true`, and
-`privacy.boundary = "classified"` only after every required field has passed classification.
+`privacy.classification = "1.0"`, `privacy.complete = true`,
+`privacy.boundary = "classified"`, `privacy.compatLayer = false`, and the exact
+`privacy.protection = "safe-share-v1"` provenance marker only after every required field has
+passed classification and protection. Older or hand-built classified/complete envelopes without
+that marker remain warning-bearing when rendered.
 The public safe-share workflow remains undecided under C0 D6, so TenantPulse does not currently
 expose `-RequireClassification` as a public assessment/export switch. Catalog checks are not yet
 fully migrated to classified construction; do not infer that an ordinary findings file is a

@@ -310,13 +310,15 @@ Describe 'TenantPulse application report-data contract' {
         $firstValues[1] = [object[]]@('app-2', 'Beta', 0, 0, 4)
         $secondValues = [object[]]::new(1)
         $secondValues[0] = [object[]]@('app-3', 'Gamma', 7, 2, 0)
+        $script:installReportBodies = [System.Collections.Generic.List[object]]::new()
         $script:installReportPages = @{
-            0 = [pscustomobject]@{ Schema = $script:installReportSchema; Values = $firstValues; TotalRowCount = 3 }
-            2 = [pscustomobject]@{ Schema = $script:installReportSchema; Values = $secondValues; TotalRowCount = 3 }
+            0 = [pscustomobject]@{ Schema = $script:installReportSchema; Values = $firstValues; TotalRowCount = 3; SessionId = 'session-stable' }
+            2 = [pscustomobject]@{ Schema = $script:installReportSchema; Values = $secondValues; TotalRowCount = 3; SessionId = 'session-stable' }
         }
 
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            $script:installReportBodies.Add($Parameters.Body) | Out-Null
             $Parameters.Body.top | Should -Be 200
             @($Parameters.Body.orderBy) | Should -Be @('ApplicationId asc')
             @($Parameters.Body.select).Count | Should -Be 0
@@ -339,6 +341,11 @@ Describe 'TenantPulse application report-data contract' {
         ($rows | Where-Object appId -eq 'app-3').deviceCount | Should -Be 7
         ($rows | Where-Object appId -eq 'app-3').userCount | Should -Be 2
         ($rows | Where-Object appId -eq 'app-1').sourceColumns.PendingInstallDeviceCount | Should -Be 2
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $artifactPath = Join-Path $script:store.Root $manifest.expansions.'app-install-errors'.path
+        [IO.File]::ReadAllText($artifactPath) | Should -Not -Match ([regex]::Escape('session-stable'))
+        $script:installReportBodies[0].Contains('sessionId') | Should -BeFalse
+        $script:installReportBodies[1].sessionId | Should -BeExactly 'session-stable'
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } -Times 2 -Exactly
     }
 
@@ -354,8 +361,8 @@ Describe 'TenantPulse application report-data contract' {
         $secondValues[0] = [object[]]@('app-2', 'Beta', 2)
         $script:shortPageBodies = [System.Collections.Generic.List[object]]::new()
         $script:shortPages = @{
-            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2 }
-            1 = [pscustomobject]@{ Schema = $schema; Values = $secondValues; TotalRowCount = 2 }
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2; SessionId = 'session-short' }
+            1 = [pscustomobject]@{ Schema = $schema; Values = $secondValues; TotalRowCount = 2; SessionId = 'session-short' }
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
             $script:shortPageBodies.Add($Parameters.Body) | Out-Null
@@ -378,6 +385,252 @@ Describe 'TenantPulse application report-data contract' {
             $body.top | Should -Be 200
             @($body.orderBy) | Should -Be @('ApplicationId asc')
         }
+        $script:shortPageBodies[0].Contains('sessionId') | Should -BeFalse
+        $script:shortPageBodies[1].sessionId | Should -BeExactly 'session-short'
+    }
+
+    It 'stops Partial before continuing when the first report paging session is <Shape>' -ForEach @(
+        @{ Shape = 'missing'; IncludeSession = $false; Session = $null }
+        @{ Shape = 'null'; IncludeSession = $true; Session = $null }
+        @{ Shape = 'blank'; IncludeSession = $true; Session = '   ' }
+        @{ Shape = 'array'; IncludeSession = $true; Session = [object[]] @('session-coercible') }
+        @{ Shape = 'numeric'; IncludeSession = $true; Session = 42 }
+        @{ Shape = 'boolean'; IncludeSession = $true; Session = $true }
+    ) {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(1)
+        $firstValues[0] = [object[]]@('app-a', 'Alpha', 1)
+        $secondValues = [object[]]::new(1)
+        $secondValues[0] = [object[]]@('app-b', 'Beta', 2)
+        $firstPage = [ordered]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2 }
+        if ($IncludeSession) { $firstPage.SessionId = $Session }
+        $script:invalidSessionPages = @{
+            0 = [pscustomobject] $firstPage
+            1 = [pscustomobject]@{ Schema = $schema; Values = $secondValues; TotalRowCount = 2; SessionId = $Session }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data @($script:invalidSessionPages[[int] $Parameters.Body.skip])
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        $outcome.CollectedRowCount | Should -Be 1
+        @($outcome.PayloadRows).Count | Should -Be 1
+        @($outcome.Gaps.reason) | Should -Contain 'category:paging-session-missing;operation:AppInstallSummaryReport.Get'
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } -Times 1 -Exactly
+    }
+
+    It 'discards a later page when its paging session is <Shape>' -ForEach @(
+        @{ Shape = 'missing'; IncludeSession = $false; Session = $null; ExpectedReason = 'paging-session-missing' }
+        @{ Shape = 'changed'; IncludeSession = $true; Session = 'session-two'; ExpectedReason = 'paging-session-mismatch' }
+    ) {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(2)
+        $firstValues[0] = [object[]]@('app-a', 'Alpha', 1)
+        $firstValues[1] = [object[]]@('app-b', 'Beta', 2)
+        $secondValues = [object[]]::new(2)
+        $secondValues[0] = [object[]]@('app-d', 'Delta', 3)
+        $secondValues[1] = [object[]]@('app-e', 'Echo', 4)
+        $secondPage = [ordered]@{ Schema = $schema; Values = $secondValues; TotalRowCount = 4 }
+        if ($IncludeSession) { $secondPage.SessionId = $Session }
+        $script:shiftedSessionBodies = [System.Collections.Generic.List[object]]::new()
+        $script:shiftedSessionPages = @{
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 4; SessionId = 'session-one' }
+            2 = [pscustomobject] $secondPage
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            $script:shiftedSessionBodies.Add($Parameters.Body) | Out-Null
+            New-PulseTestGraphEnvelope -Data @($script:shiftedSessionPages[[int] $Parameters.Body.skip])
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        $outcome.CollectedRowCount | Should -Be 2
+        @($outcome.PayloadRows).Count | Should -Be 1
+        @($outcome.Gaps.reason) | Should -Contain "category:$ExpectedReason;operation:AppInstallSummaryReport.Get"
+        $script:shiftedSessionBodies[0].Contains('sessionId') | Should -BeFalse
+        $script:shiftedSessionBodies[1].sessionId | Should -BeExactly 'session-one'
+    }
+
+    It 'discards a direct named-record response returned as a matrix continuation' {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(1)
+        $firstValues[0] = [object[]]@('app-a', 'Alpha', 1)
+        $script:mixedShapeBodies = [System.Collections.Generic.List[object]]::new()
+        $script:mixedShapePages = @{
+            0 = [pscustomobject]@{
+                Schema = $schema; Values = $firstValues; TotalRowCount = 2; SessionId = 'session-mixed-shape'
+            }
+            1 = [pscustomobject]@{
+                ApplicationId = 'app-b'; DisplayName = 'Beta'; FailedDeviceCount = 2; SessionId = 'session-mixed-shape'
+            }
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            $script:mixedShapeBodies.Add($Parameters.Body) | Out-Null
+            New-PulseTestGraphEnvelope -Data @($script:mixedShapePages[[int] $Parameters.Body.skip])
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        $outcome.CollectedRowCount | Should -Be 1
+        @($outcome.PayloadRows).Count | Should -Be 1
+        @($outcome.Gaps).Count | Should -Be 1
+        $outcome.Gaps[0].reason | Should -BeExactly 'category:invalid-provider-data;operation:AppInstallSummaryReport.Get'
+        $script:mixedShapeBodies[0].Contains('sessionId') | Should -BeFalse
+        $script:mixedShapeBodies[1].sessionId | Should -BeExactly 'session-mixed-shape'
+    }
+
+    It 'discards a multi-row matrix continuation containing missing and mismatched paging sessions' {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(1)
+        $firstValues[0] = [object[]]@('app-a', 'Alpha', 1)
+        $missingSessionValues = [object[]]::new(1)
+        $missingSessionValues[0] = [object[]]@('app-b', 'Beta', 2)
+        $mismatchedSessionValues = [object[]]::new(1)
+        $mismatchedSessionValues[0] = [object[]]@('app-c', 'Charlie', 3)
+        $script:multiRowSessionPages = @{
+            0 = @([pscustomobject]@{
+                    Schema = $schema; Values = $firstValues; TotalRowCount = 3; SessionId = 'session-one'
+                })
+            1 = @(
+                [pscustomobject]@{
+                    Schema = $schema; Values = $missingSessionValues; TotalRowCount = 3
+                }
+                [pscustomobject]@{
+                    Schema = $schema; Values = $mismatchedSessionValues; TotalRowCount = 3; SessionId = 'session-two'
+                }
+            )
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data $script:multiRowSessionPages[[int] $Parameters.Body.skip]
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        $outcome.CollectedRowCount | Should -Be 1
+        @($outcome.PayloadRows).Count | Should -Be 1
+        @($outcome.Gaps.reason) | Should -Contain 'category:invalid-provider-data;operation:AppInstallSummaryReport.Get'
+    }
+
+    It 'discards a mixed direct-and-matrix multi-row continuation as one unverified response' {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(1)
+        $firstValues[0] = [object[]]@('app-a', 'Alpha', 1)
+        $matrixContinuationValues = [object[]]::new(1)
+        $matrixContinuationValues[0] = [object[]]@('app-b', 'Beta', 2)
+        $script:mixedMultiRowPages = @{
+            0 = @([pscustomobject]@{
+                    Schema = $schema; Values = $firstValues; TotalRowCount = 3; SessionId = 'session-mixed-multi'
+                })
+            1 = @(
+                [pscustomobject]@{
+                    Schema = $schema; Values = $matrixContinuationValues; TotalRowCount = 3; SessionId = 'session-mixed-multi'
+                }
+                [pscustomobject]@{
+                    ApplicationId = 'app-c'; DisplayName = 'Charlie'; FailedDeviceCount = 3; SessionId = 'session-mixed-multi'
+                }
+            )
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data $script:mixedMultiRowPages[[int] $Parameters.Body.skip]
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Partial'
+        $outcome.CollectedRowCount | Should -Be 1
+        @($outcome.PayloadRows).Count | Should -Be 1
+        @($outcome.Gaps.reason) | Should -Contain 'category:invalid-provider-data;operation:AppInstallSummaryReport.Get'
+    }
+
+    It 'rejects an ambiguous multi-row matrix first response without retaining any payload' {
+        $schema = @(
+            [pscustomobject]@{ Column = 'ApplicationId' }
+            [pscustomobject]@{ Column = 'DisplayName' }
+            [pscustomobject]@{ Column = 'FailedDeviceCount' }
+        )
+        $firstValues = [object[]]::new(1)
+        $firstValues[0] = [object[]]@('app-a', 'Alpha', 1)
+        $secondValues = [object[]]::new(1)
+        $secondValues[0] = [object[]]@('app-b', 'Beta', 2)
+        $script:ambiguousFirstResponse = @(
+            [pscustomobject]@{
+                Schema = $schema; Values = $firstValues; TotalRowCount = 2; SessionId = 'session-ambiguous'
+            }
+            [pscustomobject]@{
+                Schema = $schema; Values = $secondValues; TotalRowCount = 2; SessionId = 'session-ambiguous'
+            }
+        )
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data $script:ambiguousFirstResponse
+        }
+        $spec = InModuleScope TenantPulse {
+            @(Get-PulseApplicationReportOperations | Where-Object Type -eq 'AppInstallSummaryReport')[0]
+        }
+
+        $outcome = InModuleScope TenantPulse -ArgumentList $script:context, $spec {
+            param($context, $operationSpec)
+            Invoke-PulseAppInstallReportPages -Context $context -Spec $operationSpec
+        }
+
+        $outcome.Status | Should -Be 'Failed'
+        $outcome.CollectedRowCount | Should -Be 0
+        @($outcome.PayloadRows).Count | Should -Be 0
+        @($outcome.Gaps.reason) | Should -Contain 'category:invalid-provider-data;operation:AppInstallSummaryReport.Get'
     }
 
     It 'fails closed when reordered report pages overlap on application identity' {
@@ -392,8 +645,8 @@ Describe 'TenantPulse application report-data contract' {
         $overlapValues[0] = [object[]]@('app-same', 'After reorder', 2)
         $script:overlapBodies = [System.Collections.Generic.List[object]]::new()
         $script:overlapPages = @{
-            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2 }
-            1 = [pscustomobject]@{ Schema = $schema; Values = $overlapValues; TotalRowCount = 2 }
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2; SessionId = 'session-overlap' }
+            1 = [pscustomobject]@{ Schema = $schema; Values = $overlapValues; TotalRowCount = 2; SessionId = 'session-overlap' }
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
             $script:overlapBodies.Add($Parameters.Body) | Out-Null
@@ -429,8 +682,8 @@ Describe 'TenantPulse application report-data contract' {
         $overlapValues = [object[]]::new(1)
         $overlapValues[0] = [object[]]@('app-same', 'After reorder', 2)
         $script:missingTotalOverlapPages = @{
-            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 3 }
-            1 = [pscustomobject]@{ Schema = $schema; Values = $overlapValues }
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 3; SessionId = 'session-missing-total' }
+            1 = [pscustomobject]@{ Schema = $schema; Values = $overlapValues; SessionId = 'session-missing-total' }
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
             New-PulseTestGraphEnvelope -Data @($script:missingTotalOverlapPages[[int] $Parameters.Body.skip])
@@ -489,8 +742,8 @@ Describe 'TenantPulse application report-data contract' {
         $secondValues = [object[]]::new(1)
         $secondValues[0] = [object[]]@('app-2', 'Beta', 2)
         $script:changingTotalPages = @{
-            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2 }
-            1 = [pscustomobject]@{ Schema = $schema; Values = $secondValues; TotalRowCount = 3 }
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 2; SessionId = 'session-total' }
+            1 = [pscustomobject]@{ Schema = $schema; Values = $secondValues; TotalRowCount = 3; SessionId = 'session-total' }
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
             New-PulseTestGraphEnvelope -Data @($script:changingTotalPages[[int] $Parameters.Body.skip])
@@ -515,8 +768,8 @@ Describe 'TenantPulse application report-data contract' {
         $firstValues = [object[]]::new(1)
         $firstValues[0] = [object[]]@('app-1', 'Alpha', 3)
         $script:incompleteReportPages = @{
-            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 3 }
-            1 = [pscustomobject]@{ Schema = $schema; Values = @(); TotalRowCount = 3 }
+            0 = [pscustomobject]@{ Schema = $schema; Values = $firstValues; TotalRowCount = 3; SessionId = 'session-incomplete' }
+            1 = [pscustomobject]@{ Schema = $schema; Values = @(); TotalRowCount = 3; SessionId = 'session-incomplete' }
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
@@ -543,6 +796,7 @@ Describe 'TenantPulse application report-data contract' {
             Schema = @([pscustomobject]@{ Column = 'ApplicationId' }, [pscustomobject]@{ Column = 'DisplayName' }, [pscustomobject]@{ Column = 'FailedDeviceCount' })
             Values = $values
             TotalRowCount = 2
+            SessionId = 'session-later-failure'
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' -and $Parameters.Body.skip -eq 0 } {
@@ -600,6 +854,7 @@ Describe 'TenantPulse application report-data contract' {
                     )
                     Values = $values
                     TotalRowCount = 1000
+                    SessionId = 'session-bounded'
                 })
         }
         $spec = InModuleScope TenantPulse {
@@ -628,6 +883,7 @@ Describe 'TenantPulse application report-data contract' {
             )
             Values = $values
             TotalRowCount = 2
+            SessionId = 'session-repeat'
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
             New-PulseTestGraphEnvelope -Data @($script:repeatedReportPage)
@@ -664,8 +920,14 @@ Describe 'TenantPulse application report-data contract' {
 
     It 'accepts a complete direct named-record response without a matrix wrapper' {
         $script:namedReportRows = @(
-            [pscustomobject]@{ ApplicationId = 'app-1'; DisplayName = 'First'; FailedDeviceCount = 0; FailedUserCount = 0 }
-            [pscustomobject]@{ ApplicationId = 'app-2'; DisplayName = 'Second'; FailedDeviceCount = 3; FailedUserCount = 1 }
+            [pscustomobject]@{
+                ApplicationId = 'app-1'; DisplayName = 'First'; FailedDeviceCount = 0; FailedUserCount = 0
+                SessionId = 'session-pscustom-canary'; CustomDimension = 'preserve-first'
+            }
+            [ordered]@{
+                ApplicationId = 'app-2'; DisplayName = 'Second'; FailedDeviceCount = 3; FailedUserCount = 1
+                sEsSiOnId = 'session-dictionary-canary'; CustomDimension = 'preserve-second'
+            }
         )
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
@@ -685,7 +947,64 @@ Describe 'TenantPulse application report-data contract' {
             @(Get-PulseExpansionRows -Store $store -Name 'app-install-errors')
         }
         @($rows | ForEach-Object appId) | Should -Be @('app-1', 'app-2')
+        @($rows | ForEach-Object { $_.sourceColumns.CustomDimension }) | Should -Be @('preserve-first', 'preserve-second')
+        foreach ($row in $rows) {
+            @($row.sourceColumns.PSObject.Properties.Name | Where-Object {
+                    [string]::Equals([string] $_, 'SessionId', [System.StringComparison]::OrdinalIgnoreCase)
+                }).Count | Should -Be 0
+        }
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $artifactPath = Join-Path $script:store.Root $manifest.expansions.'app-install-errors'.path
+        $artifactText = [IO.File]::ReadAllText($artifactPath)
+        $artifactText | Should -Not -Match ([regex]::Escape('session-pscustom-canary'))
+        $artifactText | Should -Not -Match ([regex]::Escape('session-dictionary-canary'))
         Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } -Times 1 -Exactly
+    }
+
+    It 'excludes a case-insensitive SessionId matrix column from persisted report rows' {
+        $script:matrixSessionColumnCanary = 'session-matrix-column-canary'
+        $matrixValues = [object[]]::new(1)
+        $matrixValues[0] = [object[]]@('app-matrix', 'Matrix App', 11, $script:matrixSessionColumnCanary, 'preserve-me')
+        $script:matrixSessionColumnPayload = [pscustomobject]@{
+            Schema = @(
+                [pscustomobject]@{ Column = 'ApplicationId' }
+                [pscustomobject]@{ Column = 'DisplayName' }
+                [pscustomobject]@{ Column = 'FailedDeviceCount' }
+                [pscustomobject]@{ Column = 'SeSsIoNiD' }
+                [pscustomobject]@{ Column = 'CustomDimension' }
+            )
+            Values = $matrixValues
+            TotalRowCount = 1
+            SessionId = 'session-page-metadata-canary'
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'MobileApp' } { New-PulseTestGraphEnvelope }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'AppInstallSummaryReport' } {
+            New-PulseTestGraphEnvelope -Data @($script:matrixSessionColumnPayload)
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $script:store, $script:context, $script:authorization, $script:abortState {
+            param($store, $context, $authorization, $abortState)
+            Invoke-PulseApplicationReportCollection -Store $store -Context $context -AuthorizationDecision $authorization `
+                -NetworkAbortState $abortState -ProfileId 'fixture' -Pseudonym 'tp-fixture'
+        }
+
+        $result.AppInstallErrors.Status | Should -Be 'Expanded'
+        $result.AppInstallErrors.RowCount | Should -Be 1
+        $rows = InModuleScope TenantPulse -ArgumentList $script:store {
+            param($store)
+            @(Get-PulseExpansionRows -Store $store -Name 'app-install-errors')
+        }
+        $rows[0].appId | Should -Be 'app-matrix'
+        $rows[0].deviceCount | Should -Be 11
+        $rows[0].sourceColumns.CustomDimension | Should -Be 'preserve-me'
+        @($rows[0].sourceColumns.PSObject.Properties.Name | Where-Object {
+                [string]::Equals([string] $_, 'SessionId', [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count | Should -Be 0
+        $manifest = Get-Content -LiteralPath $script:store.ManifestPath -Raw | ConvertFrom-Json
+        $artifactPath = Join-Path $script:store.Root $manifest.expansions.'app-install-errors'.path
+        $artifactText = [IO.File]::ReadAllText($artifactPath)
+        $artifactText | Should -Not -Match ([regex]::Escape($script:matrixSessionColumnCanary))
+        $artifactText | Should -Not -Match ([regex]::Escape('session-page-metadata-canary'))
     }
 
     It 'reports the terminal row count for a complete direct named-record response' {
@@ -1051,7 +1370,42 @@ Describe 'TenantPulse application report-data contract' {
         @($manifest.expansions.'application-assignments'.gaps.reason) | Should -Contain 'category:invalid-provider-data;operation:Group.Get'
     }
 
-    It 'normalizes direct named install records while retaining every source column unchanged' {
+    It 'excludes reserved paging metadata from <Shape> direct records while retaining report columns' -ForEach @(
+        @{
+            Shape = 'PSCustomObject mixed-case SessionId'
+            SessionCanary = 'session-converter-pscustom'
+            Record = [pscustomobject][ordered]@{
+                AppDisplayName = 'Named App'; ApplicationId = 'app-named'; FailedDeviceCount = 11
+                SeSsIoNiD = 'session-converter-pscustom'; CustomDimension = 'preserve-me'
+            }
+        }
+        @{
+            Shape = 'IDictionary upper-case SessionId'
+            SessionCanary = 'session-converter-dictionary'
+            Record = [ordered]@{
+                AppDisplayName = 'Named App'; ApplicationId = 'app-named'; FailedDeviceCount = 11
+                SESSIONID = 'session-converter-dictionary'; CustomDimension = 'preserve-me'
+            }
+        }
+    ) {
+        $converted = InModuleScope TenantPulse -ArgumentList (, @($Record)) {
+            param($rows)
+            ConvertTo-PulseAppInstallErrorRows -PayloadRows $rows
+        }
+
+        @($converted.Gaps).Count | Should -Be 0
+        @($converted.Rows).Count | Should -Be 1
+        $converted.Rows[0].appName | Should -Be 'Named App'
+        $converted.Rows[0].appId | Should -Be 'app-named'
+        $converted.Rows[0].deviceCount | Should -Be 11
+        $converted.Rows[0].sourceColumns.CustomDimension | Should -Be 'preserve-me'
+        @($converted.Rows[0].sourceColumns.Keys | Where-Object {
+                [string]::Equals([string] $_, 'SessionId', [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count | Should -Be 0
+        ($converted.Rows[0] | ConvertTo-Json -Depth 10 -Compress) | Should -Not -Match ([regex]::Escape($SessionCanary))
+    }
+
+    It 'normalizes direct named install records while retaining every report source column unchanged' {
         $named = [pscustomobject][ordered]@{
             AppDisplayName   = 'Named App'
             ApplicationId    = 'app-named'

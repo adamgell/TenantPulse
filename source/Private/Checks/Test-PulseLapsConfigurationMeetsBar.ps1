@@ -67,8 +67,9 @@ function Test-PulseLapsConfigurationMeetsBar {
     $malformedReason = $null
     $hasUnresolvedQualifyingAssignment = $false
     foreach ($policy in $policies) {
-        $policyId = [string] $policy.policyId
-        if ([string]::IsNullOrWhiteSpace($policyId)) {
+        $policyIdField = Get-PulseAssignmentStringField -Node $policy -PropertyName 'policyId'
+        $policyId = if ($policyIdField.IsValid) { $policyIdField.Value } else { $null }
+        if (-not $policyIdField.IsValid -or [string]::IsNullOrWhiteSpace($policyId)) {
             if ($null -eq $malformedReason) {
                 $malformedReason = 'Test-PulseLapsConfigurationMeetsBar: a LAPS policy has no usable policyId value - every row must have a stable identity.'
             }
@@ -99,8 +100,13 @@ function Test-PulseLapsConfigurationMeetsBar {
             ([bool] $policy.hasSufficientLength) -and
             ([bool] $policy.hasPostAuthAction)
         if ($criteriaMeetBar) {
-            $assignmentIntentText = [string] (Get-PulseSettingsCatalogValueProperty -Node $policy -PropertyName 'assignmentIntent')
-            if (-not [string]::IsNullOrWhiteSpace($assignmentIntentText)) {
+            $assignmentIntentField = Get-PulseAssignmentStringField -Node $policy -PropertyName 'assignmentIntent'
+            if ($assignmentIntentField.IsPresent) {
+                $assignmentIntentText = $assignmentIntentField.Value
+                if (-not $assignmentIntentField.IsValid -or $null -eq $assignmentIntentText) {
+                    $hasUnresolvedQualifyingAssignment = $true
+                    continue
+                }
                 if ($assignmentIntentText -notin @('Include', 'Empty', 'ExcludeOnly')) {
                     $hasUnresolvedQualifyingAssignment = $true
                     continue

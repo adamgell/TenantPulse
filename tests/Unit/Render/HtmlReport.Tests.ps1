@@ -268,6 +268,179 @@ Describe 'Export-PulseHtmlReport' {
         $html | Should -Match 'bounded-reviewed-text'
     }
 
+    It 'prominently warns that a local-only document is not safe to share' {
+        $document = New-PulseHtmlAllOutcomeDocument
+        $document | Add-Member -NotePropertyName privacy -NotePropertyValue ([pscustomobject]@{
+                classification = '1.0'
+                complete       = $true
+                boundary       = 'local-only'
+                compatLayer    = $false
+            })
+
+        $reportPath = Invoke-PulseHtmlRender -Document $document -OutputPath $script:outputRoot
+        $html = Get-Content -LiteralPath $reportPath -Raw
+
+        $html | Should -Match 'id="privacy-warning"'
+        $html | Should -Match 'Local-only audit material'
+        $html | Should -Match 'not safe to share'
+    }
+
+    It 'fails closed with a not-safe-to-share warning for <Case>' -ForEach @(
+        @{ Case = 'an absent privacy envelope'; Shape = 'Absent' }
+        @{ Case = 'a null privacy envelope'; Shape = 'NullPrivacy' }
+        @{ Case = 'an absent boundary'; Shape = 'Privacy'; Complete = $true; BoundaryShape = 'Absent' }
+        @{ Case = 'a null boundary'; Shape = 'Privacy'; Complete = $true; BoundaryShape = 'Value'; Boundary = $null }
+        @{ Case = 'an unknown boundary'; Shape = 'Privacy'; Complete = $true; BoundaryShape = 'Value'; Boundary = 'reviewed' }
+        @{ Case = 'a non-string boundary'; Shape = 'Privacy'; Complete = $true; BoundaryShape = 'Value'; Boundary = 42 }
+        @{ Case = 'a classified boundary with absent completeness'; Shape = 'Privacy'; BoundaryShape = 'Value'; Boundary = 'classified' }
+        @{ Case = 'a classified boundary with non-Boolean completeness'; Shape = 'Privacy'; Complete = 'true'; BoundaryShape = 'Value'; Boundary = 'classified' }
+    ) {
+        $document = New-PulseHtmlAllOutcomeDocument
+        if ($Shape -eq 'NullPrivacy') {
+            $document | Add-Member -NotePropertyName privacy -NotePropertyValue $null
+        } elseif ($Shape -eq 'Privacy') {
+            $privacy = [pscustomobject]@{
+                classification = '1.0'
+                compatLayer    = $false
+                protection     = 'safe-share-v1'
+            }
+            if ($null -ne $Complete) {
+                $privacy | Add-Member -NotePropertyName complete -NotePropertyValue $Complete
+            }
+            if ($BoundaryShape -eq 'Value') {
+                $privacy | Add-Member -NotePropertyName boundary -NotePropertyValue $Boundary
+            }
+            $document | Add-Member -NotePropertyName privacy -NotePropertyValue $privacy
+        }
+
+        $reportPath = Invoke-PulseHtmlRender -Document $document -OutputPath $script:outputRoot
+        $html = Get-Content -LiteralPath $reportPath -Raw
+
+        $html | Should -Match 'id="privacy-warning"'
+        $html | Should -Match 'Local-only audit material - not safe to share\.'
+    }
+
+    It 'fails closed for <Case>' -ForEach @(
+        @{
+            Case = 'the prior ambiguous classified envelope without a safe-share marker'
+            Privacy = [pscustomobject]@{
+                classification = '1.0'
+                complete       = $true
+                boundary       = 'classified'
+                compatLayer    = $false
+            }
+        }
+        @{
+            Case = 'an absent classification version'
+            Privacy = [pscustomobject]@{
+                complete    = $true
+                boundary    = 'classified'
+                compatLayer = $false
+                protection  = 'safe-share-v1'
+            }
+        }
+        @{
+            Case = 'an unknown classification version'
+            Privacy = [pscustomobject]@{
+                classification = '2.0'
+                complete       = $true
+                boundary       = 'classified'
+                compatLayer    = $false
+                protection     = 'safe-share-v1'
+            }
+        }
+        @{
+            Case = 'a non-string classification version'
+            Privacy = [pscustomobject]@{
+                classification = 1.0
+                complete       = $true
+                boundary       = 'classified'
+                compatLayer    = $false
+                protection     = 'safe-share-v1'
+            }
+        }
+        @{
+            Case = 'an absent compatibility flag'
+            Privacy = [pscustomobject]@{
+                classification = '1.0'
+                complete       = $true
+                boundary       = 'classified'
+                protection     = 'safe-share-v1'
+            }
+        }
+        @{
+            Case = 'an enabled compatibility layer'
+            Privacy = [pscustomobject]@{
+                classification = '1.0'
+                complete       = $true
+                boundary       = 'classified'
+                compatLayer    = $true
+                protection     = 'safe-share-v1'
+            }
+        }
+        @{
+            Case = 'a non-Boolean compatibility flag'
+            Privacy = [pscustomobject]@{
+                classification = '1.0'
+                complete       = $true
+                boundary       = 'classified'
+                compatLayer    = 'false'
+                protection     = 'safe-share-v1'
+            }
+        }
+        @{
+            Case = 'an unknown protection marker'
+            Privacy = [pscustomobject]@{
+                classification = '1.0'
+                complete       = $true
+                boundary       = 'classified'
+                compatLayer    = $false
+                protection     = 'safe-share-v2'
+            }
+        }
+        @{
+            Case = 'a non-string protection marker'
+            Privacy = [pscustomobject]@{
+                classification = '1.0'
+                complete       = $true
+                boundary       = 'classified'
+                compatLayer    = $false
+                protection     = 1
+            }
+        }
+    ) {
+        $document = New-PulseHtmlAllOutcomeDocument
+        $document | Add-Member -NotePropertyName privacy -NotePropertyValue $Privacy
+
+        $reportPath = Invoke-PulseHtmlRender -Document $document -OutputPath $script:outputRoot
+        $html = Get-Content -LiteralPath $reportPath -Raw
+
+        $html | Should -Match 'id="privacy-warning"'
+        $html | Should -Match 'Local-only audit material - not safe to share\.'
+    }
+
+    It 'omits the warning for the exact marker produced by current safe-share conversion' {
+        $document = New-PulseHtmlFixtureDocument -Findings @()
+        $shared = InModuleScope TenantPulse -ArgumentList $document {
+            param($Document)
+            ConvertTo-PulseSafeShareDocument -Document $Document -OperatorKey ([byte[]] (1 .. 32))
+        }
+
+        $shared.privacy.classification | Should -BeExactly '1.0'
+        $shared.privacy.complete | Should -BeOfType [bool]
+        $shared.privacy.complete | Should -BeTrue
+        $shared.privacy.boundary | Should -BeExactly 'classified'
+        $shared.privacy.compatLayer | Should -BeOfType [bool]
+        $shared.privacy.compatLayer | Should -BeFalse
+        $shared.privacy.protection | Should -BeExactly 'safe-share-v1'
+
+        $reportPath = Invoke-PulseHtmlRender -Document $shared -OutputPath $script:outputRoot
+        $html = Get-Content -LiteralPath $reportPath -Raw
+
+        $html | Should -Not -Match 'id="privacy-warning"'
+        $html | Should -Not -Match 'not safe to share'
+    }
+
     It 'is CSP-safe, uses inline CSS/assets only, and contains no network-loading URLs, scripts, or event handlers' {
         $document = New-PulseHtmlAllOutcomeDocument -WithCis -InjectMarkup
         $reportPath = Invoke-PulseHtmlRender -Document $document -OutputPath $script:outputRoot
@@ -423,6 +596,41 @@ Describe 'Export-PulseHtmlReport' {
         Invoke-PulseHtmlRender -Document $document -OutputPath $script:outputRoot | Out-Null
         [string] $document.findings[3].title | Should -Be $beforeTitle
         @($document.findings).Count | Should -Be $beforeCount
+    }
+
+    It 'atomically replaces an existing report with valid UTF-8 bytes and no BOM or temp residue' {
+        $reportPath = Join-Path $script:outputRoot 'tenantpulse-report.html'
+        Set-Content -LiteralPath $reportPath -Value 'prior-good-html' -NoNewline -Encoding utf8NoBOM
+
+        $returnedPath = Invoke-PulseHtmlRender -Document (New-PulseHtmlAllOutcomeDocument) -OutputPath $script:outputRoot
+        $bytes = [System.IO.File]::ReadAllBytes($returnedPath)
+        $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+
+        $returnedPath | Should -Be $reportPath
+        $bytes.Length | Should -BeGreaterThan 3
+        @($bytes[0], $bytes[1], $bytes[2]) | Should -Not -Be @(0xEF, 0xBB, 0xBF)
+        { $strictUtf8.GetString($bytes) } | Should -Not -Throw
+        $strictUtf8.GetString($bytes) | Should -Match '^<!DOCTYPE html>'
+        Test-Path -LiteralPath "$reportPath.tmp" | Should -BeFalse
+    }
+
+    It 'preserves a prior good report when atomic HTML publication fails without leaking report content' {
+        $reportPath = Join-Path $script:outputRoot 'tenantpulse-report.html'
+        $priorContent = 'prior-good-html'
+        Set-Content -LiteralPath $reportPath -Value $priorContent -NoNewline -Encoding utf8NoBOM
+        Mock Publish-PulseAtomicStreamFile -ModuleName TenantPulse {
+            throw [System.IO.IOException]::new('injected-atomic-html-publication-failure')
+        }
+
+        {
+            Invoke-PulseHtmlRender -Document (New-PulseHtmlAllOutcomeDocument) -OutputPath $script:outputRoot
+        } | Should -Throw -ExpectedMessage '*injected-atomic-html-publication-failure*'
+
+        (Get-Content -LiteralPath $reportPath -Raw) | Should -BeExactly $priorContent
+        Test-Path -LiteralPath "$reportPath.tmp" | Should -BeFalse
+        Should-Invoke Publish-PulseAtomicStreamFile -ModuleName TenantPulse -Times 1 -Exactly -ParameterFilter {
+            $Path -eq $reportPath
+        }
     }
 }
 

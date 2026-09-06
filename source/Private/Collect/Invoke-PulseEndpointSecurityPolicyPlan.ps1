@@ -37,6 +37,10 @@ function ConvertTo-PulseEndpointSecurityAssignmentGapReasons {
             '^unsupported-scope-tag-target-type(?::.*)?$' { 'unsupported-scope-tag-target-type'; break }
             '^missing-entra-object-id$'                { 'missing-entra-object-id'; break }
             '^missing-group-id$'                       { 'missing-group-id'; break }
+            '^non-string-assignment-field$'            { 'non-string-assignment-field'; break }
+            '^unsupported-assignment-intent$'          { 'unsupported-assignment-intent'; break }
+            '^invalid-assignment-filter-shape$'        { 'invalid-assignment-filter-shape'; break }
+            '^unexpected-group-id$'                    { 'unexpected-group-id'; break }
             '^unknown-target-type(?::.*)?$'            { 'unknown-target-type'; break }
             default                                    { 'unrecognized-assignment-shape' }
         }
@@ -170,11 +174,13 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
                     -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta')) | Out-Null
             continue
         }
-        $policyId = [string] (Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'id')
+        $policyIdField = Get-PulseEndpointSecurityNativeStringField -Node $policy -PropertyName 'id'
+        $policyId = if ($policyIdField.IsValid) { $policyIdField.Value } else { $null }
         $scope = if ([string]::IsNullOrWhiteSpace($policyId)) { 'policy:unknown' } else { "policy:$policyId" }
         $templateReference = Get-PulseEndpointSecurityNodeProperty -Node $policy -PropertyName 'templateReference'
-        $templateFamily = [string] (Get-PulseEndpointSecurityNodeProperty -Node $templateReference -PropertyName 'templateFamily')
-        if ($null -eq $templateReference -or [string]::IsNullOrWhiteSpace($templateFamily)) {
+        $templateFamilyField = Get-PulseEndpointSecurityNativeStringField -Node $templateReference -PropertyName 'templateFamily'
+        $templateFamily = if ($templateFamilyField.IsValid) { $templateFamilyField.Value } else { $null }
+        if ($null -eq $templateReference -or -not $templateFamilyField.IsValid -or [string]::IsNullOrWhiteSpace($templateFamily)) {
             $notExpandedCount++
             $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
                     -ReasonCode 'missing-template-metadata' -Detail @{ missing = 'templateReference.templateFamily' } `
@@ -192,12 +198,21 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             if (-not [string]::Equals($templateFamily, 'endpointSecurityDiskEncryption', [System.StringComparison]::OrdinalIgnoreCase)) {
                 continue
             }
+            $templateIdField = Get-PulseEndpointSecurityNativeStringField -Node $templateReference -PropertyName 'templateId'
+            if (-not $templateIdField.IsValid) {
+                $notExpandedCount++
+                $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
+                        -ReasonCode 'missing-template-metadata' -Detail @{ missing = 'templateReference.templateId' } `
+                        -Operation 'ConfigurationPolicy.ListBeta' -ApiVersion 'beta')) | Out-Null
+                continue
+            }
         } else {
-            $templateId = [string] (Get-PulseEndpointSecurityNodeProperty -Node $templateReference -PropertyName 'templateId')
             if (-not [string]::Equals($templateFamily, 'endpointSecurityAccountProtection', [System.StringComparison]::OrdinalIgnoreCase)) {
                 continue
             }
-            if ([string]::IsNullOrWhiteSpace($templateId)) {
+            $templateIdField = Get-PulseEndpointSecurityNativeStringField -Node $templateReference -PropertyName 'templateId'
+            $templateId = if ($templateIdField.IsValid) { $templateIdField.Value } else { $null }
+            if (-not $templateIdField.IsValid -or [string]::IsNullOrWhiteSpace($templateId)) {
                 $notExpandedCount++
                 $gaps.Add((New-PulseCollectionGap -Scope $scope -FailureClass 'InvalidProviderData' `
                         -ReasonCode 'missing-template-metadata' -Detail @{ missing = 'templateReference/templateId' } `
@@ -209,7 +224,7 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
             }
         }
 
-        if ([string]::IsNullOrWhiteSpace($policyId)) {
+        if (-not $policyIdField.IsValid -or [string]::IsNullOrWhiteSpace($policyId)) {
             $notExpandedCount++
             $gaps.Add((New-PulseCollectionGap -Scope 'policy:unknown' -FailureClass 'InvalidProviderData' `
                     -ReasonCode 'missing-policy-id' -Detail @{ missing = 'id' } `
@@ -349,7 +364,13 @@ function Invoke-PulseEndpointSecurityPolicyPlan {
                 $partialCount++
             }
         } catch {
-            $reasonCode = if ($_.Exception.Message -match '(?i)unknown') { 'unknown-setting' } else { 'missing-setting' }
+            $reasonCode = if ($_.Exception.Message -match '(?i)invalid native shape') {
+                'invalid-setting-shape'
+            } elseif ($_.Exception.Message -match '(?i)unknown') {
+                'unknown-setting'
+            } else {
+                'missing-setting'
+            }
             $partialCount++
             $gaps.Add((New-PulseCollectionGap -Scope "policy:$policyId" -FailureClass 'InvalidProviderData' `
                     -ReasonCode $reasonCode -Detail @{ policyId = $policyId } `

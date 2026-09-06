@@ -22,7 +22,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0  # full history: the hygiene digest test recovers its plant from history at run time
+          persist-credentials: false
+
+      - name: Assert checkout revision
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSha = (git rev-parse HEAD).Trim()
+          if (-not [string]::Equals($actualSha, $env:EXPECTED_SHA, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "Checkout revision mismatch: expected $($env:EXPECTED_SHA), got $actualSha."
+          }
+          Write-Host "Checkout revision asserted: $actualSha"
 
       # Each row installs its exact PowerShell version rather than trusting the
       # runner image, then asserts the running version matches before doing work.
@@ -766,7 +780,27 @@ jobs:
           # abort attribution, ARM canonicalization, and Gitleaks-ignore binding.
           # 3372 -> 3380 adds dictionary-shape/native-ID closure coverage,
           # case-variant compatibility-group union, and an irrelevant-ring control.
+          # 3380 -> 3382 adds duplicate update-ring split-evidence coverage in both
+          # row orders. 3382 -> 3384 adds offline secret/PII and raw-control-byte scan
+          # coverage for the base-controlled protected-secret-scan workflow.
+          # 3384 -> 3387 adds mixed-type duplicate-ring coverage in both row orders
+          # and case-insensitive distinct-identity count/evidence coverage.
+          # 3387 -> 3391 adds proven-witness precedence and duplicate scoped-gap
+          # coverage in both row orders.
+          # 3391 -> 3401 adds malformed-candidate witness precedence across both
+          # candidate paths/all row positions and native nonblank ring-ID coverage.
+          # 3401 -> 3403 adds offline secret/PII and raw-control-byte scan coverage
+          # for the tracked root .gitignore control file.
+          # 3403 -> 3440 adds fail-closed native-string assignment proof coverage,
+          # deterministic duplicate-ring evidence, and full duplicate-gap validation.
+          # 3440 -> 3448 adds blank/whitespace assignment-intent fail-closed coverage.
+          # 3448 -> 3556 adds final update-ring, handoff-patch hygiene, Endpoint
+          # Security native-shape, report-session/privacy, atomic HTML, and exact-SHA
+          # workflow evidence coverage.
+          # 3556 -> 3575 closes explicit-null assignment fallback, nested Endpoint
+          # Security group proof, continuation/session-column retention, patch/diff
+          # secret scanning, and safe-share provenance warning coverage.
           # The four tests/Perf assertions are deliberately outside this QA+Unit release
-          # workflow and are not included in its measured 3380-test floor.
+          # workflow and are not included in its measured 3575-test floor.
           # NotRun remains forbidden.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3380 -AllowedSkips $allowedSkips -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3575 -AllowedSkips $allowedSkips -AllowNotRun 0

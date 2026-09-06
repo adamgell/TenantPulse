@@ -2,8 +2,9 @@
     Private: render a scored findings document to a self-contained HTML file
     (TP7 findings-only HTML renderer).
 
-    Always writes <OutputPath>/tenantpulse-report.html. The file is a single HTML
-    document: inline CSS only, no scripts, no external stylesheets/fonts/images, and a
+    Always writes <OutputPath>/tenantpulse-report.html through the shared same-directory
+    atomic publication primitive. The file is a single UTF-8-without-BOM HTML document:
+    inline CSS only, no scripts, no external stylesheets/fonts/images, and a
     Content-Security-Policy that sets default-src 'none', img-src data:, style-src
     'unsafe-inline', base-uri 'none', form-action 'none', and frame-ancestors 'none'.
     Portal links and authority URLs are emitted as escaped text, never as href/src
@@ -300,6 +301,24 @@ function Export-PulseHtmlReport {
 
     $tenant = ConvertTo-PulseHtmlEncoded (Get-PulseHtmlMemberValue -Node $Document -Name 'tenant')
     $generatedUtc = ConvertTo-PulseHtmlEncoded (Get-PulseHtmlMemberValue -Node $Document -Name 'generatedUtc')
+    $privacy = Get-PulseHtmlMemberValue -Node $Document -Name 'privacy'
+    $privacyClassification = Get-PulseHtmlMemberValue -Node $privacy -Name 'classification'
+    $privacyBoundary = Get-PulseHtmlMemberValue -Node $privacy -Name 'boundary'
+    $privacyComplete = Get-PulseHtmlMemberValue -Node $privacy -Name 'complete'
+    $privacyCompatLayer = Get-PulseHtmlMemberValue -Node $privacy -Name 'compatLayer'
+    $privacyProtection = Get-PulseHtmlMemberValue -Node $privacy -Name 'protection'
+    $isClassifiedForSharing = (
+        $privacyClassification -is [string] -and
+        [string]::Equals([string] $privacyClassification, '1.0', [System.StringComparison]::Ordinal) -and
+        $privacyBoundary -is [string] -and
+        [string]::Equals([string] $privacyBoundary, 'classified', [System.StringComparison]::Ordinal) -and
+        $privacyComplete -is [bool] -and
+        $privacyComplete -and
+        $privacyCompatLayer -is [bool] -and
+        -not $privacyCompatLayer -and
+        $privacyProtection -is [string] -and
+        [string]::Equals([string] $privacyProtection, 'safe-share-v1', [System.StringComparison]::Ordinal)
+    )
     $producer = Get-PulseHtmlMemberValue -Node $Document -Name 'producer'
     $tenantPulseVersion = ConvertTo-PulseHtmlEncoded (Get-PulseHtmlMemberValue -Node $producer -Name 'tenantPulse')
     $graphKitVersion = ConvertTo-PulseHtmlEncoded (Get-PulseHtmlMemberValue -Node $producer -Name 'graphKit')
@@ -334,12 +353,20 @@ function Export-PulseHtmlReport {
     & $append '.sev-medium{border-left-color:#a16207}'
     & $append '.sev-low{border-left-color:#1d4ed8}'
     & $append '.sev-info{border-left-color:#4b5563}'
+    & $append '.privacy-warning{margin:1rem 0;padding:1rem;border:3px solid #991b1b;background:#fef2f2;color:#7f1d1d}'
+    & $append '.privacy-warning strong{display:block;font-size:1.15rem}'
     & $append 'footer{margin-top:2rem;font-size:0.95rem}'
     & $append '</style>'
     & $append '</head>'
     & $append '<body>'
     & $append '<header>'
     & $append '<h1>TenantPulse assessment report</h1>'
+    if (-not $isClassifiedForSharing) {
+        & $append '<aside id="privacy-warning" class="privacy-warning" role="alert">'
+        & $append '<strong>Local-only audit material - not safe to share.</strong>'
+        & $append '<span>This report may contain unprotected tenant identifiers or other sensitive values. Create a classified safe-share document before distribution.</span>'
+        & $append '</aside>'
+    }
     & $append '<section id="executive-summary">'
     & $append '<h2>Executive summary</h2>'
     & $append ("<p>Tenant: {0}</p>" -f $tenant)
@@ -586,6 +613,10 @@ function Export-PulseHtmlReport {
     $resolvedOutputPath = (Resolve-Path -LiteralPath $OutputPath).ProviderPath
     $reportPath = Join-Path $resolvedOutputPath 'tenantpulse-report.html'
     $html = $builder.ToString().TrimEnd("`n")
-    Set-Content -LiteralPath $reportPath -Value $html -NoNewline -Encoding utf8NoBOM
+    $htmlBytes = [System.Text.Encoding]::UTF8.GetBytes($html)
+    $null = Publish-PulseAtomicStreamFile -Path $reportPath -WriteAction {
+        param($fileStream)
+        $fileStream.Write($htmlBytes, 0, $htmlBytes.Length)
+    }
     return $reportPath
 }

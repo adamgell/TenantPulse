@@ -260,6 +260,33 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
         }
     }
 
+    It 'rejects a <Shape> imported policyId in both Collected and qualifying Partial inputs' -ForEach @(
+        @{ Shape = 'one-element array'; Value = [object[]] @('p-array') }
+        @{ Shape = 'number'; Value = 16 }
+        @{ Shape = 'boolean'; Value = $true }
+    ) {
+        $row = [pscustomobject]@{
+            policyId = $Value; policyName = 'Full but malformed'
+            isFullDiskEncryption = $true; assignmentIntent = 'Include'
+        }
+
+        $collected = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($row) }
+        )
+        $collected.status | Should -Be 'Error'
+        $collected.reason | Should -Match 'policyId'
+
+        $partial = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{
+                Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Partial'; Data = @($row)
+                FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('ConfigurationPolicySettings.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
+            }
+        )
+        $partial.status | Should -Be 'Error'
+        $partial.reason | Should -Match 'policyId'
+    }
+
     It 'Complete and non-decisive Partial reject a non-witness row without a usable policyId' {
         $row = [pscustomobject]@{ policyName = 'Used space only'; isFullDiskEncryption = $false }
 
@@ -438,6 +465,45 @@ Describe 'TP.INT.0014 - BitLocker full-disk encryption enforced via Endpoint Sec
 
         $finding.status | Should -Be 'NotApplicable'
         $finding.status | Should -Not -Be 'Fail'
+        $finding.reason | Should -Match 'assignment'
+    }
+
+    It 'NotApplicable: non-string <Shape> imported assignment intent cannot prove a full-disk policy is assigned' -ForEach @(
+        @{ Shape = 'array'; Value = [object[]] @('Include') }
+        @{ Shape = 'numeric'; Value = 42 }
+        @{ Shape = 'boolean'; Value = $true }
+    ) {
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{
+                Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'
+                Data = @([pscustomobject]@{
+                        policyId = 'p-malformed'; policyName = 'Full but malformed'
+                        isFullDiskEncryption = $true; assignmentIntent = $Value
+                    })
+            }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        @($finding.evidence).Count | Should -Be 0
+        $finding.reason | Should -Match 'assignment'
+    }
+
+    It 'NotApplicable: a present <Shape> imported assignment intent cannot fall back to raw include evidence' -ForEach @(
+        @{ Shape = 'null'; Value = $null }
+        @{ Shape = 'empty string'; Value = '' }
+        @{ Shape = 'whitespace string'; Value = '   ' }
+    ) {
+        $policy = [pscustomobject]@{
+            policyId = 'p-malformed'; policyName = 'Full but malformed'
+            isFullDiskEncryption = $true; assignmentIntent = $Value
+            assignments = @(@{ target = @{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget' } })
+        }
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0014' -Datasets @(
+            @{ Name = 'endpointSecurityDiskEncryptionPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        @($finding.evidence).Count | Should -Be 0
         $finding.reason | Should -Match 'assignment'
     }
 

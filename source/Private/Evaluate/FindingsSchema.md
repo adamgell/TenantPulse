@@ -40,6 +40,15 @@ a `Document` (no fresh `RedactionMap`) cannot redact.
 > remains Proposed; this contract is the recommended working default, not an
 > owner-locked public command. ReportBundle/XLSX classification is TP9B.
 
+`privacy.complete` reports classification-metadata completeness only; it is not a safe-share
+claim. Ordinary evaluation documents remain `privacy.boundary = "local-only"` even when
+`privacy.complete = true`, because their classified Identity or SecretSensitive values have not
+yet necessarily been protected. HTML rendering fails closed and shows a not-safe-to-share warning
+unless the complete privacy envelope has the exact supported classification version, native
+Boolean flags, `classified` boundary, and the `safe-share-v1` protection marker. Only
+`ConvertTo-PulseSafeShareDocument`, after protecting a cloned document, may emit that marker.
+Earlier or hand-built classified/complete envelopes without it remain local-only for rendering.
+
 Classified / safe-share documents add:
 
 ```text
@@ -47,7 +56,8 @@ privacy = {
   classification: "1.0",
   complete: true,
   boundary: "classified",
-  compatLayer: false
+  compatLayer: false,
+  protection: "safe-share-v1"
 }
 ```
 

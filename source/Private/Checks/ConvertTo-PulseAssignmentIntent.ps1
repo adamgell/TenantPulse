@@ -20,20 +20,51 @@
 
     IsAssigned is true only for Include. Empty, ExcludeOnly, Unknown, and Malformed never
     count as assigned. HasFilter is additive disclosure; a filter does not by itself assign.
+    Every proof-relevant discriminator, intent, identity, and filter field must be a native
+    string when present; implicit PowerShell coercion of arrays or scalars is never evidence.
+    A present intent outside include/exclude is Malformed rather than a future value being
+    treated as an include.
 #>
+
+function Get-PulseAssignmentStringField {
+    param(
+        $Node,
+        [string] $PropertyName
+    )
+
+    $isPresent = if ($null -eq $Node) {
+        $false
+    } elseif ($Node -is [System.Collections.IDictionary]) {
+        $Node.Contains($PropertyName)
+    } else {
+        $null -ne $Node.PSObject.Properties[$PropertyName]
+    }
+    $rawValue = Get-PulseSettingsCatalogValueProperty -Node $Node -PropertyName $PropertyName
+    return [pscustomobject]@{
+        IsPresent = $isPresent
+        IsValid   = $null -eq $rawValue -or $rawValue -is [string]
+        Value     = if ($rawValue -is [string]) { $rawValue } else { $null }
+    }
+}
 
 function Get-PulseAssignmentODataType {
     param($Node)
 
-    $raw = Get-PulseSettingsCatalogValueProperty -Node $Node -PropertyName '@odata.type'
-    if ([string]::IsNullOrWhiteSpace([string] $raw)) {
-        $raw = Get-PulseSettingsCatalogValueProperty -Node $Node -PropertyName 'odata.type'
+    $field = Get-PulseAssignmentStringField -Node $Node -PropertyName '@odata.type'
+    if (-not $field.IsValid) {
+        return $null
     }
-    if ([string]::IsNullOrWhiteSpace([string] $raw)) {
+    if (-not $field.IsPresent) {
+        $field = Get-PulseAssignmentStringField -Node $Node -PropertyName 'odata.type'
+    }
+    if (-not $field.IsPresent -or -not $field.IsValid) {
+        return $null
+    }
+    if ([string]::IsNullOrWhiteSpace($field.Value)) {
         return $null
     }
 
-    $text = ([string] $raw).Trim()
+    $text = $field.Value.Trim()
     if ($text.StartsWith('#', [System.StringComparison]::Ordinal)) {
         $text = $text.Substring(1)
     }
@@ -101,9 +132,34 @@ function ConvertTo-PulseAssignmentIntent {
         $scopeTagTargetType = $null
         $entraObjectId = $null
 
+        # Every proof-relevant text field must remain a native string. PowerShell turns a
+        # one-element array into that element when cast to [string], which can otherwise
+        # transform malformed persisted evidence into a valid include assignment.
+        $intentField = Get-PulseAssignmentStringField -Node $assignment -PropertyName 'intent'
+        $normalizedTargetTypeField = Get-PulseAssignmentStringField -Node $assignment -PropertyName 'targetType'
+        if (-not $intentField.IsValid -or -not $normalizedTargetTypeField.IsValid) {
+            $hasMalformed = $true
+            $malformedReasons.Add('non-string-assignment-field') | Out-Null
+            continue
+        }
+        if ($normalizedTargetTypeField.IsPresent -and
+            [string]::IsNullOrWhiteSpace($normalizedTargetTypeField.Value)) {
+            $hasMalformed = $true
+            $malformedReasons.Add('missing-target-type') | Out-Null
+            continue
+        }
+        if ($intentField.IsPresent -and
+            ($null -eq $intentField.Value -or [string]::IsNullOrWhiteSpace($intentField.Value) -or
+                (-not [string]::Equals($intentField.Value, 'include', [System.StringComparison]::OrdinalIgnoreCase) -and
+                    -not [string]::Equals($intentField.Value, 'exclude', [System.StringComparison]::OrdinalIgnoreCase)))) {
+            $hasMalformed = $true
+            $malformedReasons.Add('unsupported-assignment-intent') | Out-Null
+            continue
+        }
+
         # Extract intent - both shapes carry it at the top level.
-        $intent = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'intent')
-        $normalizedTargetType = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'targetType')
+        $intent = $intentField.Value
+        $normalizedTargetType = $normalizedTargetTypeField.Value
         if (-not [string]::IsNullOrWhiteSpace($normalizedTargetType)) {
             switch ($normalizedTargetType) {
                 'group'                    { $typeName = 'groupAssignmentTarget' }
@@ -112,21 +168,72 @@ function ConvertTo-PulseAssignmentIntent {
                 'allDevices'               { $typeName = 'allDevicesAssignmentTarget' }
                 default                    { $typeName = $null }
             }
-            $groupId = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'groupId')
-            $filterId = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'filterId')
-            $filterType = [string] (Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'filterType')
+            $groupIdField = Get-PulseAssignmentStringField -Node $assignment -PropertyName 'groupId'
+            $filterIdField = Get-PulseAssignmentStringField -Node $assignment -PropertyName 'filterId'
+            $filterTypeField = Get-PulseAssignmentStringField -Node $assignment -PropertyName 'filterType'
+            if (-not $groupIdField.IsValid -or -not $filterIdField.IsValid -or -not $filterTypeField.IsValid) {
+                $hasMalformed = $true
+                $malformedReasons.Add('non-string-assignment-field') | Out-Null
+                continue
+            }
+            $groupId = $groupIdField.Value
+            $filterId = $filterIdField.Value
+            $filterType = $filterTypeField.Value
         } else {
+            $targetIsPresent = if ($assignment -is [System.Collections.IDictionary]) {
+                $assignment.Contains('target')
+            } else {
+                $null -ne $assignment.PSObject.Properties['target']
+            }
             $target = Get-PulseSettingsCatalogValueProperty -Node $assignment -PropertyName 'target'
             if ($null -eq $target) {
+                if ($targetIsPresent) {
+                    $hasMalformed = $true
+                    $malformedReasons.Add('missing-target') | Out-Null
+                    continue
+                }
                 $target = $assignment
             }
             $typeName = Get-PulseAssignmentODataType -Node $target
-            $groupId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'groupId')
-            $filterId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId')
-            $filterType = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType')
-            $scopeTagTargetType = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'targetType')
-            $entraObjectId = [string] (Get-PulseSettingsCatalogValueProperty -Node $target -PropertyName 'entraObjectId')
+            $groupIdField = Get-PulseAssignmentStringField -Node $target -PropertyName 'groupId'
+            $filterIdField = Get-PulseAssignmentStringField -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterId'
+            $filterTypeField = Get-PulseAssignmentStringField -Node $target -PropertyName 'deviceAndAppManagementAssignmentFilterType'
+            $scopeTagTargetTypeField = Get-PulseAssignmentStringField -Node $target -PropertyName 'targetType'
+            $entraObjectIdField = Get-PulseAssignmentStringField -Node $target -PropertyName 'entraObjectId'
+            if (-not $groupIdField.IsValid -or -not $filterIdField.IsValid -or
+                -not $filterTypeField.IsValid -or -not $scopeTagTargetTypeField.IsValid -or
+                -not $entraObjectIdField.IsValid) {
+                $hasMalformed = $true
+                $malformedReasons.Add('non-string-assignment-field') | Out-Null
+                continue
+            }
+            $groupId = $groupIdField.Value
+            $filterId = $filterIdField.Value
+            $filterType = $filterTypeField.Value
+            $scopeTagTargetType = $scopeTagTargetTypeField.Value
+            $entraObjectId = $entraObjectIdField.Value
         }
+
+        # Keep filter semantics aligned with the normalized expansion schemas. The only
+        # valid unfiltered forms are both values null/omitted or exact lowercase `none`
+        # with a null id. Exact lowercase include/exclude require a native nonblank id.
+        # Any other pairing is malformed evidence and must not mutate the result summary.
+        $filterShapeValid = if ($null -eq $filterType) {
+            $null -eq $filterId
+        } elseif ([string]::Equals($filterType, 'none', [System.StringComparison]::Ordinal)) {
+            $null -eq $filterId
+        } elseif ([string]::Equals($filterType, 'include', [System.StringComparison]::Ordinal) -or
+            [string]::Equals($filterType, 'exclude', [System.StringComparison]::Ordinal)) {
+            -not [string]::IsNullOrWhiteSpace($filterId)
+        } else {
+            $false
+        }
+        if (-not $filterShapeValid) {
+            $hasMalformed = $true
+            $malformedReasons.Add('invalid-assignment-filter-shape') | Out-Null
+            continue
+        }
+
         if (-not [string]::IsNullOrWhiteSpace($filterId)) {
             $result.HasFilter = $true
             [void] $filterIds.Add($filterId)
@@ -170,6 +277,12 @@ function ConvertTo-PulseAssignmentIntent {
         } else {
             $hasMalformed = $true
             $malformedReasons.Add("unknown-target-type:$typeName") | Out-Null
+        }
+
+        if (($kind -eq 'AllUsers' -or $kind -eq 'AllDevices') -and $null -ne $groupId) {
+            $hasMalformed = $true
+            $malformedReasons.Add('unexpected-group-id') | Out-Null
+            continue
         }
 
         if ($kind -eq 'Group' -or $kind -eq 'ExclusionGroup') {
@@ -241,9 +354,12 @@ function Test-PulseCompositeRowIsAssigned {
     )
 
     if ($null -eq $Row) { return $false }
-    $intentText = [string] (Get-PulseSettingsCatalogValueProperty -Node $Row -PropertyName 'assignmentIntent')
-    if (-not [string]::IsNullOrWhiteSpace($intentText)) {
-        return [string]::Equals($intentText, 'Include', [System.StringComparison]::OrdinalIgnoreCase)
+    $intentField = Get-PulseAssignmentStringField -Node $Row -PropertyName 'assignmentIntent'
+    if ($intentField.IsPresent) {
+        if (-not $intentField.IsValid -or $null -eq $intentField.Value) {
+            return $false
+        }
+        return [string]::Equals($intentField.Value, 'Include', [System.StringComparison]::OrdinalIgnoreCase)
     }
     $intent = ConvertTo-PulseAssignmentIntent -Assignments (Get-PulseSettingsCatalogValueProperty -Node $Row -PropertyName 'assignments')
     return [bool] $intent.IsAssigned

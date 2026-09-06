@@ -141,6 +141,24 @@ BeforeAll {
 
 
 Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
+    It 'preserves the bounded native-shape assignment reasons without exposing raw values' {
+        $reasons = InModuleScope TenantPulse {
+            @(ConvertTo-PulseEndpointSecurityAssignmentGapReasons -State Malformed -MalformedReasons @(
+                    'unsupported-assignment-intent'
+                    'non-string-assignment-field'
+                    'invalid-assignment-filter-shape'
+                    'unexpected-group-id'
+                ))
+        }
+
+        $reasons | Should -Be @(
+            'invalid-assignment-filter-shape'
+            'non-string-assignment-field'
+            'unexpected-group-id'
+            'unsupported-assignment-intent'
+        )
+    }
+
     It 'keeps extracted setting tokens scoped to their source setting' {
         $settings = @(
             (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
@@ -164,6 +182,89 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
             'device_vendor_msft_laps_postauthenticationactions'
         )
         $rows[3].Tokens[0] | Should -Be 'device_vendor_msft_laps_postauthenticationactions_0'
+    }
+
+    It 'does not coerce a <Shape> settingDefinitionId into a native definition token' -ForEach @(
+        @{ Shape = 'one-element array'; Value = [object[]] @('device_vendor_msft_laps_backupdirectory') }
+        @{ Shape = 'number'; Value = 16 }
+        @{ Shape = 'boolean'; Value = $true }
+    ) {
+        $setting = [pscustomobject]@{
+            settingInstance = [pscustomobject]@{
+                settingDefinitionId = $Value
+                choiceSettingValue  = [pscustomobject]@{ value = 'safe-native-token'; children = @() }
+            }
+        }
+        $fixture = [pscustomobject]@{ Setting = $setting }
+        {
+            InModuleScope TenantPulse -ArgumentList $fixture {
+                param($fixture)
+                Get-PulseEndpointSecuritySettingTokens -Settings @($fixture.Setting)
+            }
+        } | Should -Throw '*invalid native shape*'
+    }
+
+    It 'does not coerce a <Shape> into a native choice value token' -ForEach @(
+        @{ Shape = 'one-element array'; Value = [object[]] @('device_vendor_msft_laps_backupdirectory_1') }
+        @{ Shape = 'number'; Value = 16 }
+        @{ Shape = 'boolean'; Value = $true }
+    ) {
+        $setting = [pscustomobject]@{
+            settingInstance = [pscustomobject]@{
+                settingDefinitionId = 'device_vendor_msft_laps_backupdirectory'
+                choiceSettingValue  = [pscustomobject]@{ value = $Value; children = @() }
+            }
+        }
+        $fixture = [pscustomobject]@{ Setting = $setting }
+        {
+            InModuleScope TenantPulse -ArgumentList $fixture {
+                param($fixture)
+                Get-PulseEndpointSecuritySettingTokens -Settings @($fixture.Setting)
+            }
+        } | Should -Throw '*invalid native shape*'
+    }
+
+    It 'does not coerce a <Shape> into a simple value token' -ForEach @(
+        @{ Shape = 'one-element array'; Value = [object[]] @(16) }
+        @{ Shape = 'boolean'; Value = $true }
+        @{ Shape = 'dictionary'; Value = @{ value = 16 } }
+        @{ Shape = 'object'; Value = [pscustomobject]@{ value = 16 } }
+        @{ Shape = 'floating-point number'; Value = [double] 16 }
+    ) {
+        $setting = [pscustomobject]@{
+            settingInstance = [pscustomobject]@{
+                settingDefinitionId = 'device_vendor_msft_laps_passwordlength'
+                simpleSettingValue  = [pscustomobject]@{ value = $Value }
+            }
+        }
+        $fixture = [pscustomobject]@{ Setting = $setting }
+        {
+            InModuleScope TenantPulse -ArgumentList $fixture {
+                param($fixture)
+                Get-PulseEndpointSecuritySettingTokens -Settings @($fixture.Setting)
+            }
+        } | Should -Throw '*invalid native shape*'
+    }
+
+    It 'normalizes a native integer simple value invariantly and resolves it as a valid LAPS length' {
+        $settings = @(
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4')
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value ([int32] 16) -Kind simple)
+            (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_3')
+        )
+        $fixture = [pscustomobject]@{ Settings = $settings }
+        $tokens = InModuleScope TenantPulse -ArgumentList $fixture {
+            param($fixture)
+            @(Get-PulseEndpointSecuritySettingTokens -Settings $fixture.Settings)
+        }
+        $resolved = InModuleScope TenantPulse -ArgumentList $fixture {
+            param($fixture)
+            Resolve-PulseLapsPolicyValues -Settings $fixture.Settings
+        }
+
+        @($tokens | Where-Object DefinitionId -eq 'device_vendor_msft_laps_passwordlength').Tokens | Should -Be @('16')
+        $resolved.hasSufficientLength | Should -BeTrue
     }
 
     It 'resolves LAPS criteria nested under groupSettingCollectionValue children' {
@@ -298,6 +399,34 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -eq 'ConfigurationPolicySetting' }).Count | Should -Be 2
     }
 
+    It 'resolves BitLocker proof from a matching group parent child without treating the parent as unknown' {
+        $definitionId = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $fullOption = $definitionId + '_1'
+        $settings = @(
+            [pscustomobject]@{
+                id = 'bitlocker-matching-group'
+                settingInstance = [pscustomobject]@{
+                    settingDefinitionId = $definitionId
+                    groupSettingCollectionValue = @(
+                        [pscustomobject]@{
+                            children = @(
+                                (New-EndpointSetting -DefinitionId $definitionId -Value $fullOption).settingInstance
+                            )
+                        }
+                    )
+                }
+            }
+        )
+
+        $fixture = [pscustomobject]@{ Settings = $settings }
+        $resolved = InModuleScope TenantPulse -ArgumentList $fixture {
+            param($fixture)
+            Resolve-PulseBitLockerPolicyValue -Settings $fixture.Settings
+        }
+
+        $resolved | Should -BeTrue
+    }
+
     It 'never infers full encryption from the parent enablement option when the child setting is absent' {
         $policy = New-EndpointPolicy -Id 'bitlocker-parent-only' -Name 'Parent only' -Family 'endpointSecurityDiskEncryption'
         $result = Invoke-EndpointPlanFixture `
@@ -314,6 +443,113 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
         @($result.Outcome.Gaps[0].Detail.Keys) | Should -Be @('policyId')
         $result.Outcome.Gaps[0].Detail.ContainsKey('message') | Should -BeFalse
+    }
+
+    It 'fails closed when a relevant <Label> setting field is not a native string' -ForEach @(
+        @{ Label = 'BitLocker definition'; Dataset = 'endpointSecurityDiskEncryptionPolicies'; Field = 'definition'; Value = [object[]] @('device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'); ExpectedReason = 'invalid-setting-shape' }
+        @{ Label = 'BitLocker value'; Dataset = 'endpointSecurityDiskEncryptionPolicies'; Field = 'value'; Value = [object[]] @('device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name_1'); ExpectedReason = 'invalid-setting-shape' }
+    ) {
+        $policyId = if ($Dataset -eq 'endpointSecurityLapsPolicies') { 'laps-native-shape' } else { 'bitlocker-native-shape' }
+        $policy = if ($Dataset -eq 'endpointSecurityLapsPolicies') {
+            New-EndpointPolicy -Id $policyId -Name $Label -Family 'endpointSecurityAccountProtection' -TemplateId 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796'
+        } else {
+            New-EndpointPolicy -Id $policyId -Name $Label -Family 'endpointSecurityDiskEncryption'
+        }
+
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $setting = New-EndpointSetting -DefinitionId $child -Value ($child + '_1')
+        if ($Field -eq 'definition') {
+            $setting.settingInstance.settingDefinitionId = $Value
+        } elseif ($Field -eq 'value') {
+            $setting.settingInstance.choiceSettingValue.value = $Value
+        }
+        $settings = @($setting)
+
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset $Dataset `
+            -Policies @($policy) `
+            -SettingsByPolicy @{ $policyId = $settings }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be "policy:$policyId"
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be $ExpectedReason
+    }
+
+    It 'fails closed when valid BitLocker proof is mixed with a malformed <Shape>' -ForEach @(
+        @{ Shape = 'choice collection value' }
+        @{ Shape = 'missing choice collection value' }
+        @{ Shape = 'missing value container' }
+        @{ Shape = 'null singular container' }
+        @{ Shape = 'one-element-array singular container' }
+        @{ Shape = 'empty choice collection' }
+        @{ Shape = 'choice collection null member' }
+        @{ Shape = 'peer definition' }
+        @{ Shape = 'missing peer definition' }
+    ) {
+        $policyId = 'bitlocker-mixed-shape'
+        $policy = New-EndpointPolicy -Id $policyId -Name 'Mixed setting shape' -Family 'endpointSecurityDiskEncryption'
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $fullOption = $child + '_1'
+        $valid = New-EndpointSetting -DefinitionId $child -Value $fullOption
+        $malformed = New-EndpointSetting -DefinitionId $child -Value $fullOption
+        switch ($Shape) {
+            'choice collection value' {
+                $malformed.settingInstance.PSObject.Properties.Remove('choiceSettingValue')
+                $malformed.settingInstance | Add-Member -NotePropertyName choiceSettingCollectionValue -NotePropertyValue @(
+                    [pscustomobject]@{ value = $fullOption; children = @() }
+                    [pscustomobject]@{ value = [object[]] @($fullOption); children = @() }
+                )
+            }
+            'missing choice collection value' {
+                $malformed.settingInstance.PSObject.Properties.Remove('choiceSettingValue')
+                $malformed.settingInstance | Add-Member -NotePropertyName choiceSettingCollectionValue -NotePropertyValue @(
+                    [pscustomobject]@{ value = $fullOption; children = @() }
+                    [pscustomobject]@{ children = @() }
+                )
+            }
+            'missing value container' {
+                $malformed.settingInstance.PSObject.Properties.Remove('choiceSettingValue')
+            }
+            'null singular container' {
+                $malformed.settingInstance.choiceSettingValue = $null
+            }
+            'one-element-array singular container' {
+                $malformed.settingInstance.choiceSettingValue = [object[]] @($malformed.settingInstance.choiceSettingValue)
+            }
+            'empty choice collection' {
+                $malformed.settingInstance.PSObject.Properties.Remove('choiceSettingValue')
+                $malformed.settingInstance | Add-Member -NotePropertyName choiceSettingCollectionValue -NotePropertyValue @()
+            }
+            'choice collection null member' {
+                $malformed.settingInstance.PSObject.Properties.Remove('choiceSettingValue')
+                $malformed.settingInstance | Add-Member -NotePropertyName choiceSettingCollectionValue -NotePropertyValue @(
+                    [pscustomobject]@{ value = $fullOption; children = @() }
+                    $null
+                )
+            }
+            'peer definition' {
+                $malformed.settingInstance.settingDefinitionId = [object[]] @($child)
+            }
+            'missing peer definition' {
+                $malformed.settingInstance.PSObject.Properties.Remove('settingDefinitionId')
+            }
+        }
+        $settings = @($valid, $malformed)
+
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset 'endpointSecurityDiskEncryptionPolicies' `
+            -Policies @($policy) `
+            -SettingsByPolicy @{ $policyId = $settings }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be "policy:$policyId"
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be 'invalid-setting-shape'
     }
 
     It 'keeps all LAPS criteria on each policy instead of combining near-miss policies' {
@@ -431,6 +667,59 @@ Describe 'Invoke-PulseEndpointSecurityPolicyPlan' {
         $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
         $result.Outcome.Gaps[0].ReasonCode | Should -Be $ExpectedReason
         $result.Outcome.Gaps[0].Operation | Should -Be 'ConfigurationPolicy.ListBeta'
+        @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -ne 'ConfigurationPolicy' }).Count | Should -Be 0
+    }
+
+    It 'fails closed without child reads when <Field> is a <Shape> instead of a native string' -ForEach @(
+        @{ Field = 'policy id'; Property = 'id'; Shape = 'one-element array'; Value = [object[]] @('policy-id-canary'); Dataset = 'endpointSecurityDiskEncryptionPolicies'; ExpectedReason = 'missing-policy-id' }
+        @{ Field = 'policy id'; Property = 'id'; Shape = 'number'; Value = 16; Dataset = 'endpointSecurityDiskEncryptionPolicies'; ExpectedReason = 'missing-policy-id' }
+        @{ Field = 'policy id'; Property = 'id'; Shape = 'boolean'; Value = $true; Dataset = 'endpointSecurityDiskEncryptionPolicies'; ExpectedReason = 'missing-policy-id' }
+        @{ Field = 'templateFamily'; Property = 'templateFamily'; Shape = 'one-element array'; Value = [object[]] @('endpointSecurityDiskEncryption'); Dataset = 'endpointSecurityDiskEncryptionPolicies'; ExpectedReason = 'missing-template-metadata' }
+        @{ Field = 'templateFamily'; Property = 'templateFamily'; Shape = 'number'; Value = 16; Dataset = 'endpointSecurityDiskEncryptionPolicies'; ExpectedReason = 'missing-template-metadata' }
+        @{ Field = 'templateFamily'; Property = 'templateFamily'; Shape = 'boolean'; Value = $true; Dataset = 'endpointSecurityDiskEncryptionPolicies'; ExpectedReason = 'missing-template-metadata' }
+        @{ Field = 'templateId'; Property = 'templateId'; Shape = 'one-element array'; Value = [object[]] @('adc46e5a-f4aa-4ff6-aeff-4f27bc525796'); Dataset = 'endpointSecurityLapsPolicies'; ExpectedReason = 'missing-template-metadata' }
+        @{ Field = 'templateId'; Property = 'templateId'; Shape = 'number'; Value = 16; Dataset = 'endpointSecurityLapsPolicies'; ExpectedReason = 'missing-template-metadata' }
+        @{ Field = 'templateId'; Property = 'templateId'; Shape = 'boolean'; Value = $true; Dataset = 'endpointSecurityLapsPolicies'; ExpectedReason = 'missing-template-metadata' }
+    ) {
+        $policyProperties = [ordered]@{
+            id   = 'policy-native-shape'
+            name = "Malformed $Field"
+            templateReference = [pscustomobject]@{
+                templateFamily = if ($Dataset -eq 'endpointSecurityLapsPolicies') { 'endpointSecurityAccountProtection' } else { 'endpointSecurityDiskEncryption' }
+                templateId     = if ($Dataset -eq 'endpointSecurityLapsPolicies') { 'adc46e5a-f4aa-4ff6-aeff-4f27bc525796' } else { '' }
+            }
+        }
+        if ($Property -eq 'id') {
+            $policyProperties.id = $Value
+        } else {
+            $policyProperties.templateReference.$Property = $Value
+        }
+
+        $policy = [pscustomobject] $policyProperties
+        $coercedPolicyId = [string] $policyProperties.id
+        $child = 'device_vendor_msft_bitlocker_systemdrivesencryptiontype_osencryptiontypedropdown_name'
+        $settings = if ($Dataset -eq 'endpointSecurityLapsPolicies') {
+            @(
+                (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_backupdirectory' -Value 'device_vendor_msft_laps_backupdirectory_1')
+                (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordcomplexity' -Value 'device_vendor_msft_laps_passwordcomplexity_4')
+                (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_passwordlength' -Value '16' -Kind simple)
+                (New-EndpointSetting -DefinitionId 'device_vendor_msft_laps_postauthenticationactions' -Value 'device_vendor_msft_laps_postauthenticationactions_3')
+            )
+        } else {
+            @(New-EndpointSetting -DefinitionId $child -Value ($child + '_1'))
+        }
+
+        $result = Invoke-EndpointPlanFixture `
+            -Dataset $Dataset `
+            -Policies @($policy) `
+            -SettingsByPolicy @{ $coercedPolicyId = $settings }
+
+        $result.Outcome.Status | Should -Be 'Failed'
+        @($result.Outcome.Rows).Count | Should -Be 0
+        @($result.Outcome.Gaps).Count | Should -Be 1
+        $result.Outcome.Gaps[0].Scope | Should -Be $(if ($Property -eq 'id') { 'policy:unknown' } else { 'policy:policy-native-shape' })
+        $result.Outcome.Gaps[0].FailureClass | Should -Be 'InvalidProviderData'
+        $result.Outcome.Gaps[0].ReasonCode | Should -Be $ExpectedReason
         @($result.Calls | Where-Object { $_.Kind -eq 'Graph' -and $_.Type -ne 'ConfigurationPolicy' }).Count | Should -Be 0
     }
 

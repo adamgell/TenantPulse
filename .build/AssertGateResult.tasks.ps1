@@ -567,10 +567,34 @@
 # Gitleaks-ignore binding. NotRun remains forbidden.
 # 3372 -> 3380 adds dictionary-shape and native-ID closure coverage, case-variant
 # compatibility-group union in both orders, and the irrelevant duplicate-ring control.
+# 3380 -> 3382 adds duplicate update-ring split-evidence coverage in both row orders.
+# 3382 -> 3384 adds offline secret/PII and raw-control-byte scan coverage for the
+# base-controlled protected-secret-scan workflow.
+# 3384 -> 3387 adds mixed-type duplicate-ring coverage in both row orders and
+# case-insensitive distinct-identity count/evidence coverage.
+# 3387 -> 3391 adds proven-witness precedence and duplicate scoped-gap coverage
+# in both row orders.
+# 3391 -> 3401 adds malformed-candidate witness precedence across both candidate
+# paths and all row positions, plus native nonblank update-ring ID coverage.
+# 3401 -> 3403 adds offline secret/PII and raw-control-byte scan coverage for the
+# tracked root .gitignore control file.
+# 3403 -> 3440 adds fail-closed native-string assignment proof coverage, including
+# discriminator aliases, intent/identity/filter fields, imported composite intent,
+# deterministic duplicate-ring evidence, and full duplicate-gap row validation.
+# 3440 -> 3448 adds present blank/whitespace assignment-intent coverage across the
+# shared parser, composite helper, and BitLocker/LAPS imported-policy consumers.
+# 3448 -> 3556 is the final audit wave: order-independent update-ring evidence,
+# tracked handoff-patch hygiene, native Endpoint Security proof/container shapes,
+# session-bound application-report paging and metadata exclusion, privacy-boundary
+# and atomic HTML publication checks, plus exact-revision CI checkout proof.
+# 3556 -> 3575 closes final whole-diff findings: explicit-null assignment fail-open,
+# nested Endpoint Security group proof, incoherent report-continuation retention,
+# reserved SessionId matrix columns, patch/diff secret scanning, and safe-share
+# provenance required before HTML warning suppression.
 # An earlier all-tests discovery reported 3324 because it also included the four dedicated
 # tests/Perf assertions. The release workflow deliberately and explicitly runs tests/QA
-# plus tests/Unit only; its measured package-first total is therefore 3380.
-$script:tenantPulseGateMinimumTests = 3380
+# plus tests/Unit only; its measured package-first total is therefore 3575.
+$script:tenantPulseGateMinimumTests = 3575
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

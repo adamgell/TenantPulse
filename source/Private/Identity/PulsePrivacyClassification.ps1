@@ -22,6 +22,14 @@
     is the supported 1.0 classified path. C0 D6 (safe-share UX) remains Proposed; this is
     the recommended working default, not an owner-locked operator command.
 
+    Classification completeness and safe-share protection are separate states.
+    privacy.complete = true means the document carries complete classification metadata; it
+    does not mean raw classified values have been protected. Ordinary evaluation documents
+    therefore remain privacy.boundary = 'local-only'. Only ConvertTo-PulseSafeShareDocument,
+    after protecting the cloned document, emits privacy.boundary = 'classified' together with
+    privacy.protection = 'safe-share-v1'. The marker distinguishes completed protection from
+    older or hand-built envelopes that happen to claim classified/complete.
+
     ReportBundle / XLSX classification is TP9B and is out of scope here.
 #>
 
@@ -441,13 +449,20 @@ function ConvertTo-PulsePrivacyEnvelope {
     [OutputType([pscustomobject])]
     param(
         [Parameter()]
-        [bool] $Complete = $false
+        [bool] $Complete = $false,
+
+        [Parameter()]
+        [switch] $ProtectedForSharing
     )
+
+    if ($ProtectedForSharing -and -not $Complete) {
+        throw 'ConvertTo-PulsePrivacyEnvelope: a protected sharing boundary requires complete classification metadata.'
+    }
 
     return [pscustomobject][ordered]@{
         classification = '1.0'
         complete       = [bool] $Complete
-        boundary       = if ($Complete) { 'classified' } else { 'local-only' }
+        boundary       = if ($ProtectedForSharing) { 'classified' } else { 'local-only' }
         compatLayer    = -not [bool] $Complete
     }
 }
@@ -627,7 +642,7 @@ function ConvertTo-PulseSafeShareDocument {
             $null
         }
         if ($complete -isnot [bool] -or -not $complete) {
-            throw 'ConvertTo-PulseSafeShareDocument: document privacy boundary is local-only or incomplete.'
+            throw 'ConvertTo-PulseSafeShareDocument: document classification metadata is incomplete.'
         }
     }
 
@@ -892,7 +907,12 @@ function ConvertTo-PulseSafeShareDocument {
 
     $clone = Convert-SafeShareNode -Node $clone -FieldClasses $documentFieldClasses -NodePath 'document'
 
-    $clone | Add-Member -NotePropertyName privacy -NotePropertyValue (ConvertTo-PulsePrivacyEnvelope -Complete $true) -Force
+    # Stamp provenance only after the complete cloned document has survived protection.
+    # Older complete envelopes used the same classified/true pair before protection, so
+    # boundary and completeness alone cannot authorize warning-free HTML rendering.
+    $protectedPrivacy = ConvertTo-PulsePrivacyEnvelope -Complete $true -ProtectedForSharing
+    $protectedPrivacy | Add-Member -NotePropertyName protection -NotePropertyValue 'safe-share-v1'
+    $clone | Add-Member -NotePropertyName privacy -NotePropertyValue $protectedPrivacy -Force
     return $clone
 }
 

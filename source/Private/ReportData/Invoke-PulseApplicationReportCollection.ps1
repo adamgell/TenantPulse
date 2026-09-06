@@ -84,13 +84,19 @@ function ConvertTo-PulseReportSourceMap {
     if ($InputObject -is [System.Collections.IDictionary]) {
         $names = [string[]] @($InputObject.Keys | ForEach-Object { [string] $_ })
         [Array]::Sort($names, [System.StringComparer]::Ordinal)
-        foreach ($name in $names) { $result[$name] = Get-PulseReportValue -InputObject $InputObject -Name @($name) }
+        foreach ($name in $names) {
+            if ([string]::Equals($name, 'SessionId', [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+            $result[$name] = Get-PulseReportValue -InputObject $InputObject -Name @($name)
+        }
         return $result
     }
 
     $names = [string[]] @($InputObject.PSObject.Properties.Name)
     [Array]::Sort($names, [System.StringComparer]::Ordinal)
-    foreach ($name in $names) { $result[$name] = $InputObject.PSObject.Properties[$name].Value }
+    foreach ($name in $names) {
+        if ([string]::Equals($name, 'SessionId', [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        $result[$name] = $InputObject.PSObject.Properties[$name].Value
+    }
     return $result
 }
 
@@ -318,7 +324,13 @@ function ConvertTo-PulseAppInstallErrorRows {
                 }
 
                 $record = [ordered]@{}
-                for ($i = 0; $i -lt $columnNames.Count; $i++) { $record[$columnNames[$i]] = $cells[$i] }
+                for ($i = 0; $i -lt $columnNames.Count; $i++) {
+                    # SessionId is paging metadata even when a provider exposes it as a
+                    # matrix column. Keep the cell aligned with the schema, but never copy
+                    # the opaque session witness into normalized rows or persisted artifacts.
+                    if ([string]::Equals($columnNames[$i], 'SessionId', [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+                    $record[$columnNames[$i]] = $cells[$i]
+                }
                 if (-not (Test-PulseAppInstallSourceMap -SourceColumns $record)) {
                     $gaps.Add([pscustomobject]@{ policyId = "report-$sourceIndex-row-$valueIndex"; reason = 'category:invalid-provider-data;operation:AppInstallSummaryReport.Get' }) | Out-Null
                     continue
@@ -535,6 +547,7 @@ function Invoke-PulseAppInstallReportPages {
     $pageFingerprints = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $seenApplicationIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $expectedTotal = $null
+    $expectedSessionId = $null
     $collectedRowCount = 0
     $skip = 0
     $pageCount = 0
@@ -543,18 +556,25 @@ function Invoke-PulseAppInstallReportPages {
 
     while ($pageCount -lt $MaxPages) {
         $pageCount++
+        $requestBody = [ordered]@{
+            filter = ''
+            # The Graph report action accepts orderBy. ApplicationId is the
+            # summary row's stable identity, so pin it to reduce page drift; the
+            # cross-page identity check below still fails closed if the live
+            # dataset changes or the service ignores the requested order.
+            orderBy = @('ApplicationId asc')
+            select = @()
+            skip = $skip
+            top = $PageSize
+        }
+        if ($pageCount -gt 1 -and $null -ne $expectedSessionId) {
+            # SessionId is an opaque service-issued snapshot witness. Never
+            # manufacture, normalize, persist, or log it; return it only to the
+            # report endpoint on continuation requests.
+            $requestBody['sessionId'] = $expectedSessionId
+        }
         $outcome = Invoke-PulseReportGraphOperation -Context $Context -Spec $Spec -Dataset 'app-install-errors' `
-            -Parameters @{ Body = [ordered]@{
-                    filter = ''
-                    # The Graph report action accepts orderBy. ApplicationId is the
-                    # summary row's stable identity, so pin it to reduce page drift; the
-                    # cross-page identity check below still fails closed if the live
-                    # dataset changes or the service ignores the requested order.
-                    orderBy = @('ApplicationId asc')
-                    select = @()
-                    skip = $skip
-                    top = $PageSize
-                } }
+            -Parameters @{ Body = $requestBody }
 
         if ($outcome.FailureClass) { $failureClass = $outcome.FailureClass }
         if ($outcome.Status -eq 'Failed') {
@@ -601,17 +621,50 @@ function Invoke-PulseAppInstallReportPages {
             }
         }
         if (-not $matrixShaped) {
+            if ($pageCount -gt 1) {
+                # Direct named records are accepted only as a complete first response.
+                # Switching away from the matrix shape during continuation bypasses the
+                # session and total witnesses, so discard that response and retain only
+                # the already verified matrix pages.
+                $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'invalid-provider-data' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
+                break
+            }
             foreach ($responseRow in $responseRows) { $payloadRows.Add($responseRow) | Out-Null }
             $collectedRowCount += $responseRows.Count
             break
         }
         if ($responseRows.Count -ne 1) {
+            # One report action response must contain exactly one matrix body. With multiple
+            # objects, no individual SessionId, total, or matrix cardinality can witness the
+            # response as a coherent page, so none of its rows are safe to retain.
             $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'invalid-provider-data' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
-            foreach ($responseRow in $responseRows) { $payloadRows.Add($responseRow) | Out-Null }
             break
         }
 
         $payload = $responseRows[0]
+        $sessionProperty = Get-PulseReportProperty -InputObject $payload -Name @('sessionId', 'SessionId')
+        $sessionId = if ($sessionProperty.Success -and $sessionProperty.Value -is [string] -and
+            -not [string]::IsNullOrWhiteSpace([string] $sessionProperty.Value)) {
+            [string] $sessionProperty.Value
+        } else {
+            $null
+        }
+        if ($pageCount -gt 1) {
+            if ($null -eq $sessionId) {
+                # A continuation page without the service's snapshot witness may
+                # belong to a shifted dataset. Discard it rather than claiming a
+                # complete report from unprovably related pages.
+                $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'paging-session-missing' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
+                break
+            }
+            if (-not [string]::Equals($expectedSessionId, $sessionId, [System.StringComparison]::Ordinal)) {
+                $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'paging-session-mismatch' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
+                break
+            }
+        } elseif ($null -ne $sessionId) {
+            $expectedSessionId = $sessionId
+        }
+
         $pageFingerprint = ConvertTo-PulseCanonicalJsonLine -InputObject $payload
         if (-not $pageFingerprints.Add($pageFingerprint)) {
             $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'repeated-page' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
@@ -686,6 +739,13 @@ function Invoke-PulseAppInstallReportPages {
             # paging without a unique application identity could count reordered or
             # overlapping data as complete, so retain this page as Partial and stop.
             $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'stable-row-identity-missing' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
+            break
+        }
+        if ($null -eq $expectedSessionId) {
+            # A complete single page does not need a session witness. Once the
+            # declared total requires a continuation, however, proceeding without
+            # one could silently combine different report snapshots.
+            $gaps.Add((New-PulseReportGap -Scope "install-report-skip-$skip" -ReasonCode 'paging-session-missing' -Operation 'AppInstallSummaryReport.Get')) | Out-Null
             break
         }
         if ($pageCount -ge $MaxPages) {

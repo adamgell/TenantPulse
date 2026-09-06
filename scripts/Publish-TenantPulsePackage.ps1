@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 3380 / -AllowNotRun 0 (see
+    # MinimumTests 3575 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -322,15 +322,35 @@ else {
     # abort attribution, ARM canonicalization, and Gitleaks-ignore binding.
     # 3372 -> 3380 adds dictionary-shape/native-ID closure coverage,
     # case-variant compatibility-group union, and an irrelevant-ring control.
+    # 3380 -> 3382 adds duplicate update-ring split-evidence coverage in both
+    # row orders. 3382 -> 3384 adds offline secret/PII and raw-control-byte scan
+    # coverage for the base-controlled protected-secret-scan workflow.
+    # 3384 -> 3387 adds mixed-type duplicate-ring coverage in both row orders
+    # and case-insensitive distinct-identity count/evidence coverage.
+    # 3387 -> 3391 adds proven-witness precedence and duplicate scoped-gap
+    # coverage in both row orders.
+    # 3391 -> 3401 adds malformed-candidate witness precedence across both
+    # candidate paths/all row positions and native nonblank ring-ID coverage.
+    # 3401 -> 3403 adds offline secret/PII and raw-control-byte scan coverage
+    # for the tracked root .gitignore control file.
+    # 3403 -> 3440 adds fail-closed native-string assignment proof coverage,
+    # deterministic duplicate-ring evidence, and full duplicate-gap validation.
+    # 3440 -> 3448 adds blank/whitespace assignment-intent fail-closed coverage.
+    # 3448 -> 3556 adds final update-ring, handoff-patch hygiene, Endpoint
+    # Security native-shape, report-session/privacy, atomic HTML, and exact-SHA
+    # workflow evidence coverage.
+    # 3556 -> 3575 closes explicit-null assignment fallback, nested Endpoint
+    # Security group proof, continuation/session-column retention, patch/diff
+    # secret scanning, and safe-share provenance warning coverage.
     # The four tests/Perf assertions are deliberately outside the QA+Unit release
-    # workflow and are not included in its measured 3380-test floor.
+    # workflow and are not included in its measured 3575-test floor.
     # NotRun remains forbidden.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 3380 `
+        -MinimumTests 3575 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {

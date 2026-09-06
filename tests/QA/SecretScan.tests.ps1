@@ -1,11 +1,11 @@
 <#
     QA gate: repo-local, offline secret/PII scan. Complements (does not replace) gitleaks
-    running in CI (see .github/workflows/ci.yml) - this file exists so the same checks run
+    running in CI (see .github/workflows/protected-secret-scan.yml) - this file exists so the same checks run
     on every developer machine via `./build.ps1 -Tasks test`, with no network access and no
     third-party binary required.
 
-    Scans source/, tests/, scripts/, docs/, .build/, and a fixed set of repo-root files
-    (text-shaped files: .ps1/.psm1/.psd1/.psc1/.pssc/.md/.txt/.json/.csv/.xml/.yml/.yaml -
+    Scans source/, tests/, scripts/, docs/, .build/, patches/, and a fixed set of workflow/repo-root files
+    (text-shaped files: .ps1/.psm1/.psd1/.psc1/.pssc/.md/.txt/.json/.csv/.xml/.yml/.yaml/.patch/.diff -
     see "ROOTS" below for the full root list and its own history) for:
         1. a GUID-looking id sitting near a real-looking (non-Microsoft/GitHub) domain -
            the classic "leaked real tenant id + tenant domain" shape.
@@ -81,7 +81,7 @@
     reviewed by hand, not by this scanner.
 
     ACCEPTED RESIDUALS - this is a repo-local, offline, regex-shaped gate, not a general
-    secret scanner; gitleaks (wired into CI, see .github/workflows/ci.yml) is the real
+    secret scanner; gitleaks (wired into CI, see .github/workflows/protected-secret-scan.yml) is the real
     defense-in-depth backstop for everything below:
         - Non-canonical JWTs: the bearer-token check requires the literal 'eyJ' header
           prefix (the base64url encoding of '{"'); a JWT with an atypical header, or one
@@ -106,6 +106,25 @@
           costs a moment's review; a false negative here would defeat the check's entire
           purpose) rather than being suppressed for convenience.
 #>
+
+function Get-PulseSecretScanTextExtensions {
+    @(
+        '.ps1'
+        '.psm1'
+        '.psd1'
+        '.psc1'
+        '.pssc'
+        '.md'
+        '.txt'
+        '.json'
+        '.csv'
+        '.xml'
+        '.yml'
+        '.yaml'
+        '.patch'
+        '.diff'
+    )
+}
 
 BeforeAll {
     $projectPath = "$($PSScriptRoot)\..\.." | Convert-Path
@@ -1205,7 +1224,7 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
 
     BeforeDiscovery {
         $projectPath = "$($PSScriptRoot)\..\.." | Convert-Path
-        $textExtensions = @('.ps1', '.psm1', '.psd1', '.psc1', '.pssc', '.md', '.txt', '.json', '.csv', '.xml', '.yml', '.yaml')
+        $textExtensions = @(Get-PulseSecretScanTextExtensions)
 
         # ROOTS (post-review fix, item 28; extended again Task 3.2 fix-round finding 7;
         # docs/ added again independently by Task 4.5 fix round, NEW-2 - both lineages
@@ -1220,9 +1239,9 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
         # pasted real device/tenant name is most likely to land) and .build/ (the
         # Sampler/Invoke-Build task files under .build/*.tasks.ps1 - committed automation
         # code, same risk class as scripts/) were STILL missing after that pass; this is
-        # every currently-committed top-level content root except .github/ (covered via
-        # its one explicit ci.yml file only, not recursively - the rest of .github/ has no
-        # content today) and output/ (build artifacts, gitignored, never hand-authored).
+        # every currently-committed top-level content root except .github/ (committed
+        # workflow files are covered through explicit entries below rather than recursively)
+        # and output/ (build artifacts, gitignored, never hand-authored).
         #
         # docs/ ADDED (Task 4.5 fix round, NEW-2, independently on the phase4 branch):
         # docs/gates/phase4-ivy24-findings.redacted.json - a committed live-tenant
@@ -1237,7 +1256,7 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
         # these roots (main added .build/ in its own item-28-followup pass; phase4 added
         # docs/ plus the docs/gates/_qa-fixtures/ exclusion in its own Task 4.5 fix round).
         # Neither implementation is a strict subset of the other, so this merge takes the
-        # union of both: source/, tests/, scripts/, docs/, and .build/ as recurse roots,
+        # union of both: source/, tests/, scripts/, docs/, .build/, and patches/ as recurse roots,
         # plus the docs/gates/_qa-fixtures/ exclusion below and both sides' planted
         # self-tests (the person-name device heuristic's own Its above, and the
         # possessive-name-shaped planted-PII proof below).
@@ -1247,6 +1266,7 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
             (Join-Path $projectPath 'scripts')
             (Join-Path $projectPath 'docs')
             (Join-Path $projectPath '.build')
+            (Join-Path $projectPath 'patches')
         ) | Where-Object { Test-Path -LiteralPath $_ -PathType Container }
 
         $explicitRootFiles = @(
@@ -1255,6 +1275,8 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
             (Join-Path $projectPath 'README.md')
             (Join-Path $projectPath 'CHANGELOG.md')
             (Join-Path $projectPath '.github/workflows/ci.yml')
+            (Join-Path $projectPath '.github/workflows/protected-secret-scan.yml')
+            (Join-Path $projectPath '.gitignore')
             (Join-Path $projectPath '.gitleaksignore')
             # Phase 3 whole-phase review, security walk finding 8 (MINOR): these root
             # files were never in the explicit list (only the recursed source/tests/
@@ -1326,6 +1348,40 @@ Describe 'Secret/PII scan gate' -Tag 'QA', 'SecretScan' {
         $violations = @(Get-PulseControlByteViolations -Bytes $bytes -RelativePath $RelativePath)
 
         $violations | Should -BeNullOrEmpty -Because ($violations -join "`n")
+    }
+
+    It 'discovers patch and diff handoffs as secret-scanned text without narrowing control-byte coverage' -ForEach @(
+        @{ TextExtensions = $textExtensions }
+    ) {
+        $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("tenantpulse-secret-scan-{0}" -f [guid]::NewGuid().ToString('N'))
+        [void](New-Item -ItemType Directory -Path $tempRoot -Force)
+
+        try {
+            $patchPath = Join-Path $tempRoot 'handoff.patch'
+            $diffPath = Join-Path $tempRoot 'review.diff'
+            $binaryPath = Join-Path $tempRoot 'opaque.bin'
+            Set-Content -LiteralPath $patchPath -Value '+ device = JDoeAdmin' -Encoding utf8NoBOM
+            Set-Content -LiteralPath $diffPath -Value '+ device = JSmith-Laptop' -Encoding utf8NoBOM
+            [IO.File]::WriteAllBytes($binaryPath, [byte[]] @(0x61, 0x00, 0x62))
+
+            $secretCandidates = @(Get-ChildItem -LiteralPath $tempRoot -File | Where-Object {
+                    $TextExtensions -contains $_.Extension
+                })
+            $secretCandidates.Name | Sort-Object | Should -Be @('handoff.patch', 'review.diff')
+
+            foreach ($candidate in $secretCandidates) {
+                $content = Get-Content -LiteralPath $candidate.FullName -Raw
+                $violations = @(Get-PulseSecretScanViolations -Content $content -RelativePath "patches/$($candidate.Name)" -AllowedGuid @() -SafeDomainSuffix @())
+                $violations | Should -Not -BeNullOrEmpty
+            }
+
+            # The real control-byte sweep intentionally has no extension filter.
+            $controlCandidates = @(Get-ChildItem -LiteralPath $tempRoot -File)
+            $controlCandidates.Name | Should -Contain 'opaque.bin'
+            @(Get-PulseControlByteViolations -Bytes ([IO.File]::ReadAllBytes($binaryPath)) -RelativePath 'patches/opaque.bin') | Should -Not -BeNullOrEmpty
+        } finally {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     # PLANTED-PII PROOF (Task 4.5 fix round, NEW-2): docs/gates/_qa-fixtures/ is excluded

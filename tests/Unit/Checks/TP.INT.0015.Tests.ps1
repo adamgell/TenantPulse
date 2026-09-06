@@ -295,6 +295,31 @@ Describe 'TP.INT.0015 - LAPS configuration policy meets minimum security bar' {
         }
     }
 
+    It 'rejects a <Shape> imported policyId in both Collected and qualifying Partial inputs' -ForEach @(
+        @{ Shape = 'one-element array'; Value = [object[]] @('p-array') }
+        @{ Shape = 'number'; Value = 16 }
+        @{ Shape = 'boolean'; Value = $true }
+    ) {
+        $row = New-PulseLapsPolicyFixture -PolicyId 'placeholder' -PolicyName 'Compliant but malformed'
+        $row.policyId = $Value
+
+        $collected = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($row) }
+        )
+        $collected.status | Should -Be 'Error'
+        $collected.reason | Should -Match 'policyId'
+
+        $partial = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{
+                Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Partial'; Data = @($row)
+                FailureClass = $null; ReasonCode = 'partial-provider'; Detail = $null; Provider = 'GraphKit'
+                Operations = @('ConfigurationPolicySettings.ListBeta'); Gaps = @((New-PulsePartialGapFixture))
+            }
+        )
+        $partial.status | Should -Be 'Error'
+        $partial.reason | Should -Match 'policyId'
+    }
+
     It 'Complete and non-decisive Partial reject a non-witness row without a usable policyId' {
         $row = [pscustomobject]@{
             policyName = 'Short'; backsUpToEntra = $true; hasSufficientComplexity = $true
@@ -457,6 +482,41 @@ Describe 'TP.INT.0015 - LAPS configuration policy meets minimum security bar' {
 
         $finding.status | Should -Be 'NotApplicable'
         $finding.status | Should -Not -Be 'Fail'
+        $finding.reason | Should -Match 'assignment'
+    }
+
+    It 'NotApplicable: non-string <Shape> imported assignment intent cannot prove a LAPS policy is assigned' -ForEach @(
+        @{ Shape = 'array'; Value = [object[]] @('Include') }
+        @{ Shape = 'numeric'; Value = 42 }
+        @{ Shape = 'boolean'; Value = $true }
+    ) {
+        $policy = New-PulseLapsPolicyFixture -PolicyId 'p-malformed' -PolicyName 'Compliant but malformed'
+        $policy.assignmentIntent = $Value
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        @($finding.evidence).Count | Should -Be 0
+        $finding.reason | Should -Match 'assignment'
+    }
+
+    It 'NotApplicable: a present <Shape> imported assignment intent cannot fall back to raw include evidence' -ForEach @(
+        @{ Shape = 'null'; Value = $null }
+        @{ Shape = 'empty string'; Value = '' }
+        @{ Shape = 'whitespace string'; Value = '   ' }
+    ) {
+        $policy = New-PulseLapsPolicyFixture -PolicyId 'p-malformed' -PolicyName 'Compliant but malformed'
+        $policy.assignmentIntent = $Value
+        $policy | Add-Member -NotePropertyName assignments -NotePropertyValue @(
+            @{ target = @{ '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget' } }
+        )
+        $finding = Invoke-PulseCheckFixture -CheckId 'TP.INT.0015' -Datasets @(
+            @{ Name = 'endpointSecurityLapsPolicies'; ApiVersion = 'beta'; Status = 'Collected'; Data = @($policy) }
+        )
+
+        $finding.status | Should -Be 'NotApplicable'
+        @($finding.evidence).Count | Should -Be 0
         $finding.reason | Should -Match 'assignment'
     }
 
