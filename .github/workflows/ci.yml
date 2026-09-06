@@ -98,6 +98,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
               throw 'GraphKit clone failed.'
           }
+          git -C $graphKitRoot config core.autocrlf false
+          if ($LASTEXITCODE -ne 0) {
+              throw 'GraphKit line-ending configuration failed.'
+          }
           git -C $graphKitRoot checkout --detach $env:GRAPHKIT_SHA
           if ($LASTEXITCODE -ne 0) {
               throw 'GraphKit checkout failed.'
