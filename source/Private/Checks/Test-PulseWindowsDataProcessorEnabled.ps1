@@ -2,8 +2,8 @@
     Private: TP.INT.0009 rule function - Windows diagnostic data processor configuration
     enabled (Task 3.2, Maester port MT.1099 - Test-MtWindowsDataProcessor, MIT).
 
-    PLATFORM-UNAVAILABLE DATASET (honest NA): released GraphKit 0.3.0 has no matching
-    descriptor. DatasetMap names the built-in provider plan directly; it returns
+    PLATFORM-UNAVAILABLE DATASET (honest NA): the exact required GraphKit 0.3.1
+    maintenance catalog has no matching descriptor. DatasetMap names the built-in provider plan directly; it returns
     PlatformUnavailable without resolving or sending a Graph operation. A controlled Ivy24
     read-only GET (beta,
     /deviceManagement/dataProcessorServiceForWindowsFeaturesOnboarding) did return the

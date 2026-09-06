@@ -130,8 +130,16 @@
     .PARAMETER ReportData
         Optional neutral report-data profiles collected independently of check selection.
         'Applications' writes versioned, hash-verified application-assignment and app-
-        install-error JSONL artifacts into the snapshot. It does not render DOCX/XLSX,
-        apply branding, or evaluate approval state.
+        install-error JSONL artifacts into the snapshot. 'Devices' guarantees collection
+        of managedDevices and writes a versioned, hash-verified managed-device-inventory
+        artifact that preserves every source column plus the stable fields needed by IHA's
+        six active device reports. 'Inventory' guarantees the neutral source datasets needed
+        by the IHA migration inventory, independently of check selection; it preserves raw
+        service fields and explicit collection certainty without creating presentation rows.
+        'Reports' requests five snapshot-only audit artifacts plus the Graph-backed Apple
+        enrollment-profile artifact, which reads once per stored DEP token. 'All' selects
+        Applications, Devices, Inventory, and Reports together. No profile renders
+        DOCX/XLSX, applies branding, or evaluates approval state.
 
     .PARAMETER ProviderPlanRegistry
         Optional dataset-name keyed overrides for TenantPulse-owned provider plans.
@@ -196,7 +204,7 @@ function Get-PulseTenantSnapshot {
         [switch] $ExpandSettings,
 
         [Parameter()]
-        [ValidateSet('Applications')]
+        [ValidateSet('Applications', 'Devices', 'Inventory', 'Reports', 'All')]
         [string[]] $ReportData,
 
         # Optional declared-operation overrides for TenantPulse-owned composite plans,
@@ -206,6 +214,12 @@ function Get-PulseTenantSnapshot {
         [hashtable] $ProviderPlanRegistry = @{}
 
     )
+
+    $effectiveReportData = @($ReportData)
+    if ($effectiveReportData -contains 'All') {
+        $effectiveReportData = @('Applications', 'Devices', 'Inventory', 'Reports')
+    }
+    $effectiveReportData = @($effectiveReportData | Select-Object -Unique)
 
     $moduleBase = if ($MyInvocation.MyCommand.Module) {
         $MyInvocation.MyCommand.Module.ModuleBase
@@ -228,7 +242,70 @@ function Get-PulseTenantSnapshot {
 
     $checks = @(Select-PulseCheck @selectParams)
 
-    $manifest = @(Get-PulseCollectionManifest -Checks $checks -DatasetMap $datasetMap)
+    # Report profiles are independent of check selection. A Devices request therefore
+    # contributes managedDevices to the same deduped collection manifest even when the
+    # selected checks need no device data. It is intentionally represented as a synthetic
+    # manifest-only consumer rather than a second direct Graph call: collection, preflight,
+    # auth-abort, partial-outcome, and integrity behavior remain owned by the ordinary
+    # dataset pipeline exactly once.
+    $reportChecks = @()
+    if ($effectiveReportData -contains 'Devices') {
+        $reportChecks += [pscustomobject]@{
+            Id   = 'ReportData.Devices'
+            Data = [pscustomobject]@{ Datasets = @('managedDevices'); Gates = @() }
+        }
+    }
+    if ($effectiveReportData -contains 'Inventory') {
+        $reportChecks += [pscustomobject]@{
+            Id   = 'ReportData.Inventory'
+            Data = [pscustomobject]@{
+                Datasets = @(
+                    'androidEnrollmentProfiles'
+                    'appProtectionPolicies'
+                    'authenticationMethodsPolicy'
+                    'conditionalAccessPolicies'
+                    'depOnboardingSettings'
+                    'deviceCategories'
+                    'deviceCompliancePolicies'
+                    'deviceConfigurations'
+                    'deviceEnrollmentConfigurations'
+                    'deviceManagementScripts'
+                    'deviceManagementSettings'
+                    'domainConnectors'
+                    'domains'
+                    'groups'
+                    'managedDeviceCleanupRules'
+                    'managedDevices'
+                    'mobileAppCategories'
+                    'mobileAppConfigurations'
+                    'ndesConnectors'
+                    'roleAssignmentScheduleInstances'
+                    'roleEligibilityScheduleInstances'
+                    'subscribedSkus'
+                    'vppTokens'
+                    'windowsAutopilotDeviceIdentities'
+                    'windowsUpdateCatalogItems'
+                )
+                Gates = @()
+            }
+        }
+    }
+    if ($effectiveReportData -contains 'Reports') {
+        $reportChecks += [pscustomobject]@{
+            Id   = 'ReportData.Reports'
+            Data = [pscustomobject]@{
+                Datasets = @(
+                    'conditionalAccessPolicies', 'depOnboardingSettings', 'deviceCompliancePolicies',
+                    'directoryRoleAssignments', 'directoryRoleDefinitions', 'domainConnectors', 'groups',
+                    'ndesConnectors', 'roleAssignmentScheduleInstances',
+                    'roleEligibilityScheduleInstances', 'vppTokens'
+                )
+                Gates = @()
+            }
+        }
+    }
+
+    $manifest = @(Get-PulseCollectionManifest -Checks @($checks + $reportChecks) -DatasetMap $datasetMap)
 
     $resolvedProviderPlanRegistry = Resolve-PulseProviderPlanRegistry -Overrides $ProviderPlanRegistry
 
@@ -274,8 +351,16 @@ function Get-PulseTenantSnapshot {
                 -Provider 'GraphKit' -Operations @($entry.Operation)
         }
 
-        if (@($ReportData) -contains 'Applications') {
+        if ($effectiveReportData -contains 'Applications') {
             foreach ($reportArtifact in @('application-assignments', 'app-install-errors')) {
+                Set-PulseExpansionEntry -Store $store -Name $reportArtifact -Status NotExpanded -Reason $failureReason
+            }
+        }
+        if ($effectiveReportData -contains 'Devices') {
+            Set-PulseExpansionEntry -Store $store -Name 'managed-device-inventory' -Status NotExpanded -Reason $failureReason
+        }
+        if ($effectiveReportData -contains 'Reports') {
+            foreach ($reportArtifact in @('apple-enrollment-profiles', 'compliance-policy-assignments', 'conditional-access-policies', 'connectors-and-tokens', 'directory-role-summary', 'groups-inventory')) {
                 Set-PulseExpansionEntry -Store $store -Name $reportArtifact -Status NotExpanded -Reason $failureReason
             }
         }
@@ -307,10 +392,15 @@ function Get-PulseTenantSnapshot {
         Reason                = $null
     }
 
-    $reportOperations = if (@($ReportData) -contains 'Applications') {
-        @(Get-PulseApplicationReportOperations)
-    } else {
-        @()
+    $reportOperations = @()
+    if ($effectiveReportData -contains 'Applications') {
+        $reportOperations += @(Get-PulseApplicationReportOperations)
+    }
+    if ($effectiveReportData -contains 'Devices') {
+        $reportOperations += @(Get-PulseManagedDeviceReportOperations)
+    }
+    if ($effectiveReportData -contains 'Reports') {
+        $reportOperations += @(Get-PulseAppleEnrollmentProfileReportOperations)
     }
     $preflightOperations = @(Get-PulsePermissionPreflightOperations -Manifest $manifest `
             -ExpandSettings:$ExpandSettings -AdditionalOperations $reportOperations `
@@ -321,10 +411,24 @@ function Get-PulseTenantSnapshot {
         -TenantPseudonym $tenantPseudonym -ProviderPlanRegistry $resolvedProviderPlanRegistry `
         -NetworkAbortState $networkAbortState -AuthorizationDecision $authorizationDecision
 
-    if (@($ReportData) -contains 'Applications') {
+    if ($effectiveReportData -contains 'Applications') {
         $null = Invoke-PulseApplicationReportCollection -Store $store -Context $context `
             -AuthorizationDecision $authorizationDecision -NetworkAbortState $networkAbortState `
             -ProfileId $ProfileId -Pseudonym $tenantPseudonym
+    }
+
+    if ($effectiveReportData -contains 'Devices') {
+        $null = Invoke-PulseDeviceReportCollection -Store $store -ProfileId $ProfileId `
+            -Pseudonym $tenantPseudonym -TenantId $contextTenantId -Context $context `
+            -AuthorizationDecision $authorizationDecision -NetworkAbortState $networkAbortState
+    }
+
+    if ($effectiveReportData -contains 'Reports') {
+        $null = Invoke-PulseAppleEnrollmentProfileReportCollection -Store $store -Context $context `
+            -AuthorizationDecision $authorizationDecision -NetworkAbortState $networkAbortState `
+            -ProfileId $ProfileId -Pseudonym $tenantPseudonym
+        $null = Invoke-PulseAuditReportCollection -Store $store -ProfileId $ProfileId `
+            -Pseudonym $tenantPseudonym -TenantId $contextTenantId
     }
 
     if ($ExpandSettings) {

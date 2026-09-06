@@ -171,7 +171,14 @@
     .PARAMETER ReportData
         Optional neutral report-data profiles passed through to Get-PulseTenantSnapshot.
         'Applications' captures application assignments and app-install errors as
-        versioned JSONL snapshot artifacts. Only accepted on the 'Collect' parameter set.
+        versioned JSONL snapshot artifacts. 'Devices' captures one normalized, versioned
+        managed-device inventory artifact that is sufficient for the external Office
+        layer to reproduce IHA's active device worksheets without placing Excel logic in
+        TenantPulse. 'Inventory' guarantees the neutral IHA-migration source datasets
+        independently of check selection. 'Reports' requests five snapshot-only audit
+        artifacts plus the Graph-backed Apple enrollment-profile artifact, which reads once
+        per stored DEP token. 'All' selects every report-data profile. Only accepted on the
+        'Collect' parameter set.
 #>
 function Invoke-PulseAssessment {
     [CmdletBinding(DefaultParameterSetName = 'Collect')]
@@ -221,7 +228,7 @@ function Invoke-PulseAssessment {
         [switch] $ExpandSettings,
 
         [Parameter(ParameterSetName = 'Collect')]
-        [ValidateSet('Applications')]
+        [ValidateSet('Applications', 'Devices', 'Inventory', 'Reports', 'All')]
         [string[]] $ReportData
     )
 

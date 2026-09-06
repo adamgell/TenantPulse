@@ -85,6 +85,14 @@
     deviceCompliancePolicies    = @{ Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'beta' }
     deviceConfigurations        = @{ Provider = 'TenantPulse'; Plan = 'Invoke-PulsePolicyAssignmentPlan'; ApiVersion = 'v1.0' }
     appProtectionPolicies       = @{ Type = 'AppProtectionPolicy'; Operation = 'List'; ApiVersion = 'beta' }
+    mobileAppConfigurations     = @{ Type = 'AppConfigurationPolicy'; Operation = 'List'; ApiVersion = 'beta' }
+    mobileAppCategories         = @{ Type = 'MobileAppCategory'; Operation = 'List'; ApiVersion = 'beta' }
+    deviceManagementScripts     = @{ Type = 'DeviceManagementScript'; Operation = 'List'; ApiVersion = 'beta' }
+    deviceCategories            = @{ Type = 'DeviceCategory'; Operation = 'ListBeta'; ApiVersion = 'beta' }
+    windowsUpdateCatalogItems   = @{ Type = 'WindowsUpdateCatalogItem'; Operation = 'List'; ApiVersion = 'beta' }
+    androidEnrollmentProfiles   = @{ Type = 'AndroidEnrollmentProfile'; Operation = 'List'; ApiVersion = 'beta' }
+    domainConnectors            = @{ Type = 'DomainConnector'; Operation = 'List'; ApiVersion = 'beta' }
+    groups                      = @{ Type = 'Group'; Operation = 'ListBeta'; ApiVersion = 'beta' }
     managedDevices               = @{ Type = 'ManagedDevice'; Operation = 'List'; ApiVersion = 'v1.0' }
     authenticationMethodsPolicy = @{ Type = 'AuthenticationMethodsPolicy'; Operation = 'Get'; ApiVersion = 'beta' }
     autopilotDevices             = @{ Type = 'AutopilotDevice'; Operation = 'List'; ApiVersion = 'beta' }

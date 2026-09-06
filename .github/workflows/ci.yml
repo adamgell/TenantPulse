@@ -87,6 +87,91 @@ jobs:
           }
           Write-Host "PowerShell version asserted: $actual"
 
+      - name: Stage exact GraphKit 0.3.1 dependency
+        shell: pwsh
+        env:
+          GRAPHKIT_SHA: 158c9a0152e25f30153e4d6a310dc5357ea6a80d
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $graphKitRoot = Join-Path $env:RUNNER_TEMP "GraphKit-$($env:GRAPHKIT_SHA)"
+          git clone --no-checkout https://github.com/adamgell/GraphKit.git $graphKitRoot
+          if ($LASTEXITCODE -ne 0) {
+              throw 'GraphKit clone failed.'
+          }
+          git -C $graphKitRoot config core.autocrlf false
+          if ($LASTEXITCODE -ne 0) {
+              throw 'GraphKit line-ending configuration failed.'
+          }
+          git -C $graphKitRoot checkout --detach $env:GRAPHKIT_SHA
+          if ($LASTEXITCODE -ne 0) {
+              throw 'GraphKit checkout failed.'
+          }
+          $actualGraphKitSha = (git -C $graphKitRoot rev-parse HEAD).Trim()
+          if (-not [string]::Equals($actualGraphKitSha, $env:GRAPHKIT_SHA, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "GraphKit checkout revision mismatch: expected $($env:GRAPHKIT_SHA), got $actualGraphKitSha."
+          }
+
+          Push-Location $graphKitRoot
+          try {
+              pwsh -NoProfile -File ./build.ps1 -ResolveDependency -Tasks noop
+              if ($LASTEXITCODE -ne 0) {
+                  throw 'GraphKit dependency restore failed.'
+              }
+              pwsh -NoProfile -File ./build.ps1 -Tasks pack
+              if ($LASTEXITCODE -ne 0) {
+                  throw 'GraphKit package build failed.'
+              }
+          }
+          finally {
+              Pop-Location
+          }
+
+          $graphKitSource = Join-Path $graphKitRoot 'output/module/GraphKit/0.3.1'
+          # Git and ModuleBuilder can emit text assets with the host OS newline
+          # convention. Canonicalize every text asset in the staged module so the
+          # dependency has one byte identity across all six CI matrix rows.
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          $textExtensions = @('.psm1', '.psd1', '.ps1xml', '.txt')
+          foreach ($textFile in Get-ChildItem -LiteralPath $graphKitSource -File -Recurse) {
+              if ($textFile.Extension -notin $textExtensions) {
+                  continue
+              }
+              $text = [System.IO.File]::ReadAllText($textFile.FullName)
+              $canonicalText = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+              if ($textFile.Name -eq 'GraphKit.psm1') {
+                  $lines = @($canonicalText.Split([char]10))
+                  for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
+                      if ($lines[$lineIndex].StartsWith("#Region '", [System.StringComparison]::Ordinal) -or
+                          $lines[$lineIndex].StartsWith("#EndRegion '", [System.StringComparison]::Ordinal)) {
+                          $lines[$lineIndex] = $lines[$lineIndex].Replace('\', '/')
+                      }
+                  }
+                  $canonicalText = $lines -join "`n"
+              }
+              [System.IO.File]::WriteAllText($textFile.FullName, $canonicalText, $utf8NoBom)
+          }
+
+          $graphKitTarget = Join-Path $PWD 'output/RequiredModules/GraphKit/0.3.1'
+          New-Item -ItemType Directory -Path $graphKitTarget -Force | Out-Null
+          Copy-Item -Path (Join-Path $graphKitSource '*') -Destination $graphKitTarget -Recurse -Force
+
+          . ./.build/RuntimeDependencyIntegrity.ps1
+          $expectedDigests = Import-PowerShellDataFile -LiteralPath ./.build/RuntimeDependencyDigests.psd1
+          $expectedDigest = [string] $expectedDigests['GraphKit|0.3.1']
+          $actualDigest = Get-PulseModuleTreeDigest -ModuleBase $graphKitTarget
+          if (-not $actualDigest.Equals($expectedDigest, [System.StringComparison]::OrdinalIgnoreCase)) {
+              Write-Host 'Staged GraphKit file hashes:'
+              Get-ChildItem -LiteralPath $graphKitTarget -File -Recurse |
+                  Sort-Object FullName |
+                  ForEach-Object {
+                      $relativePath = [System.IO.Path]::GetRelativePath($graphKitTarget, $_.FullName).Replace('\', '/')
+                      $fileHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                      Write-Host "$relativePath|$($_.Length)|$fileHash"
+                  }
+              throw "GraphKit 0.3.1 staged tree digest mismatch: expected $expectedDigest, got $actualDigest."
+          }
+          Write-Host "Staged exact GraphKit 0.3.1 from merged revision $actualGraphKitSha."
+
       - name: Resolve build dependencies
         shell: pwsh
         run: pwsh -File ./build.ps1 -ResolveDependency -Tasks noop
@@ -803,7 +888,13 @@ jobs:
           # 3575 -> 3577 preserves nullable normalized row-schema intent while rejecting
           # non-null intent that contradicts the normalized target type.
           # 3577 -> 3578 guards the 10000-character release-note limit under CRLF checkout.
+          # 3578 -> 3615 adds the IHA coverage register, managed-device report artifact,
+          # audit-inventory profile, descriptor bindings, and privacy/read-only gates.
+          # 3615 -> 3648 completes the IHA successor report surface, including audit,
+          # Apple enrollment-profile, managed-device detail, and migration gates.
+          # 3648 -> 3649 adds the real-catalog gate for both GraphKit 0.3.1 IHA bridge operations.
+          # 3649 -> 3650 proves the deterministic 1,000-device detail-expansion cap.
           # The four tests/Perf assertions are deliberately outside this QA+Unit release
-          # workflow and are not included in its measured 3578-test floor.
+          # workflow and are not included in its measured 3650-test floor.
           # NotRun remains forbidden.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3578 -AllowedSkips $allowedSkips -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3650 -AllowedSkips $allowedSkips -AllowNotRun 0
