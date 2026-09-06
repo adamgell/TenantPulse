@@ -68,27 +68,28 @@ review fix had focused deterministic proof only. The fresh package-first run tha
 the later source is recorded next.
 
 The current local package-first proof for exact commit
-`cd2daf6381766a255af654f83b6c62e26fbd2424` (tree
-`f634b0b7c3310d01db3242761a5bd098229272d4`) is run
-`1ebc4a52-1c3b-425c-b4b0-df7dbb5feaf4`: 3,328/3,328 deterministic tests passed with zero failures,
+`a1a2966cb20e30d69843e1c1e4f235f156d50ada` (tree
+`d4ef539208b0809d46658fd62c2f45a5e024a81c`) is run
+`ae9f4d6b-a5c1-4853-b5c5-f01c277185de`: 3,328/3,328 deterministic tests passed with zero failures,
 errors, skips, NotRun, or failed containers. It binds 62 shipped files and the 563,166-byte package
-SHA-256 `ebb235212654d213a94f03648fd3df10b3a543fed18a57b870ce683734e19216`, built-module SHA-256
+SHA-256 `762b47a6bf2a536d313ca4bae9135147fa8bf26434e80c2cb3989ad14dc1b0e2`, built-module SHA-256
 `0766c68f0740996e86c7656d30b4b70e9308252d5260480ad48cc981b9b933fe`, built-manifest SHA-256
 `b1e5e258080107c4ce2b093e3d9d80c55245019d9610964dfdc7cf5983a6166a`, NUnit-result SHA-256
-`28780d6d0d33b0dff5ec738a4405e5287a870e99aa6084e1682f737b4ce9ada3`, Pester-object SHA-256
-`8eb2717112765c7ea05c5c996cf88769244e9631f0f4741e8c1c8c1fd510ba9c`, and proof-file SHA-256
-`66bf06ad54fbba006171038bb05f3011df5d2e3cef76bf1a12ed53deec67cca7`. A verified
+`10406a4d8880e06d430fc9b97cde3feb9af0b74d6d2edd587e919012464537df`, Pester-object SHA-256
+`fd7d7e30490a3b5e3c5baa7479ce90a968f3f2d65c10549d6eb798d4917b8074`, and proof-file SHA-256
+`cba63dd08a573a91848db1154bcf5f9939b659a16faf7d371dd90f587d245154`. A verified
 no-key/no-`-Publish` publisher dry run rechecked the 3,328-test gate and all 62 module/package digests
 against that archive and reported `Nothing was published`. This remains local deterministic package
 evidence only; it does not claim remote CI, merge, live-tenant behavior, PSGallery publication, or
 customer acceptance.
 
-The integration head after that proof changes only this evidence record and the CI secret-scan
-gate (`.github/workflows/ci.yml` plus two exact synthetic-canary fingerprints in
-`.gitleaksignore`). It does not change module or package-producing source. The repaired gate scans
-the explicit pull-request or push commit range rather than relying on the prior action's 30-commit
-API window; a local Linux Gitleaks 8.24.3 reproduction found exactly the two deliberate canaries
-without those fingerprints and zero findings across the full pre-repair 50-commit range with them.
+Commit `a1a2966cb20e30d69843e1c1e4f235f156d50ada` adds only this evidence record and the CI
+secret-scan gate (`.github/workflows/ci.yml` plus two exact synthetic-canary fingerprints in
+`.gitleaksignore`) beyond runtime tree `cd2daf6381766a255af654f83b6c62e26fbd2424`; the built module
+and manifest hashes remain unchanged. The repaired gate scans the explicit pull-request or push
+commit range rather than relying on the prior action's 30-commit API window. A local Linux Gitleaks
+8.24.3 reproduction found exactly the two deliberate canaries without those fingerprints and zero
+findings across the full pre-repair 50-commit range with them.
 
 Historical proof run `9ef9712e-bddc-4dc9-82f0-f085ab874656` binds all 59 shipped files and the exact
 result pair for an earlier candidate. That 418,518-byte local candidate archive SHA-256 is
