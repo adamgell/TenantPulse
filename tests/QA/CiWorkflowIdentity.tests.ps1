@@ -35,6 +35,10 @@ Describe 'CI workflow revision identity' -Tag 'QA' {
         $graphKitBlock | Should -Match 'GRAPHKIT_SHA:\s+158c9a0152e25f30153e4d6a310dc5357ea6a80d'
         $graphKitBlock | Should -Match 'git clone --no-checkout https://github\.com/adamgell/GraphKit\.git'
         $graphKitBlock | Should -Match 'GraphKit checkout revision mismatch'
+        $graphKitBlock | Should -Match 'GraphKit\.psm1'
+        $graphKitBlock | Should -Match 'GraphKit\.psd1'
+        $graphKitBlock | Should -Match 'Replace\("`r`n", "`n"\)\.Replace\("`r", "`n"\)'
+        $graphKitBlock | Should -Match 'UTF8Encoding.*false'
         $graphKitBlock | Should -Match 'Get-PulseModuleTreeDigest'
         $graphKitBlock | Should -Match "GraphKit\|0\.3\.1"
     }
