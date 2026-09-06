@@ -117,11 +117,15 @@ PrivateData = @{
 
 ### Added
 
-- Neutral `-ReportData` profiles on both collection surfaces: `Applications` writes
-  hash-verified assignment and install-error artifacts; `Devices` writes the managed-device
-  worksheet source without inventing TPM state; and `Inventory` guarantees the 25-source IHA
-  migration inventory. Raw columns and explicit certainty are preserved, overlapping roots are
-  deduplicated, and Office rendering, branding, approvals, and derived severity stay outside.
+- Neutral `-ReportData` profiles on both collection surfaces: `Applications`, `Devices`, and
+  `Reports` publish nine hash-verified machine-data artifacts; `Inventory` guarantees the
+  25-source IHA migration set; and `All` selects every profile. Raw columns and explicit certainty
+  are preserved, overlapping roots are deduplicated, and Office rendering, branding, approvals,
+  current-clock status, and derived severity stay outside.
+- Complete the IHA machine-data successor with per-token Apple enrollment profiles, authoritative
+  per-Windows-device hardware/health detail, and a versioned recovery/import replacement contract.
+  Fuzzy group-name guesses, credential-like activation-lock bypass codes, opaque next-link replay,
+  and unverified legacy JSON imports are deliberately excluded.
 - Self-contained HTML findings reports through `Export-PulseReport -Format Html` and
   `Invoke-PulseAssessment -Format Html`. JSON remains canonical and is always written by the
   assessment path; HTML is a second findings-only renderer with inline CSS, no scripts, no

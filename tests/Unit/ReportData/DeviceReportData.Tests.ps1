@@ -22,10 +22,11 @@ BeforeAll {
         @{
             Type           = $Type
             Operation      = $Operation
-            ApiVersion     = 'v1.0'
-            PagingStrategy = 'NextLink'
+            ApiVersion     = $(if ($Operation -eq 'GetBeta') { 'beta' } else { 'v1.0' })
+            PagingStrategy = $(if ($Operation -eq 'GetBeta') { 'None' } else { 'NextLink' })
             ThrottleClass  = 'Read'
             ReplayPolicy   = 'Safe'
+            RequiredPermissions = @([pscustomobject]@{ Type = 'Application'; Value = 'DeviceManagementManagedDevices.Read.All' })
         }
     }
     Mock Test-GraphPermission -ModuleName TenantPulse { throw 'Test-GraphPermission must be mocked in this test.' }
@@ -70,6 +71,15 @@ Describe 'TenantPulse managed-device report-data contract' {
         }
     }
 
+    It 'declares the exact beta singleton used for authoritative Windows hardware detail' {
+        $operations = InModuleScope TenantPulse { @(Get-PulseManagedDeviceReportOperations) }
+        $operations.Count | Should -Be 1
+        $operations[0].Type | Should -Be 'ManagedDevice'
+        $operations[0].Operation | Should -Be 'GetBeta'
+        $operations[0].ApiVersion | Should -Be 'beta'
+        $operations[0].PagingStrategy | Should -Be 'None'
+    }
+
     It 'exposes Devices on both collection surfaces without adding it to FromSnapshot' {
         $snapshotParameter = (Get-Command Get-PulseTenantSnapshot).Parameters['ReportData']
         $assessmentParameter = (Get-Command Invoke-PulseAssessment).Parameters['ReportData']
@@ -97,9 +107,9 @@ Describe 'TenantPulse managed-device report-data contract' {
         Mock Get-PulseOperatorKey -ModuleName TenantPulse { [byte[]] (0..31) }
         Mock Get-GraphContext -ModuleName TenantPulse { $context }
         Mock Test-GraphPermission -ModuleName TenantPulse {
-            @($Baseline).Count | Should -Be 1
-            $Baseline[0].Type | Should -Be 'ManagedDevice'
-            $Baseline[0].Operation | Should -Be 'List'
+            @($Baseline).Count | Should -Be 2
+            @($Baseline | ForEach-Object { '{0}/{1}' -f $_.Type, $_.Operation }) |
+                Should -Be @('ManagedDevice/GetBeta', 'ManagedDevice/List')
             @(
                 [pscustomobject]@{ Finding = 'Configured'; Value = 'Unknown' }
                 [pscustomobject]@{ Finding = 'Granted'; Value = 'Yes' }
@@ -110,6 +120,16 @@ Describe 'TenantPulse managed-device report-data contract' {
         }
         Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ManagedDevice' -and $Operation -eq 'List' } {
             New-PulseTestGraphEnvelope -Data $devices
+        }
+        Mock Get-GraphObject -ModuleName TenantPulse -ParameterFilter { $Type -eq 'ManagedDevice' -and $Operation -eq 'GetBeta' } {
+            $base = @($devices | Where-Object id -EQ $Parameters.id)[0]
+            New-PulseTestGraphEnvelope -Data @([pscustomobject]@{
+                    id = $base.id
+                    hardwareInformation = [pscustomobject]@{ tpmVersion = '2.0'; totalStorageSpace = 1024 }
+                    deviceHealthAttestationState = [pscustomobject]@{ secureBoot = 'enabled'; tpmVersion = '2.0' }
+                    physicalMemoryInBytes = 8589934592
+                    processorArchitecture = 'x64'
+                })
         }
 
         $store = Get-PulseTenantSnapshot -ProfileId fixture -OutputPath $root -ReportData Devices
@@ -123,7 +143,15 @@ Describe 'TenantPulse managed-device report-data contract' {
             @(Get-PulseExpansionRows -Store $snapshotStore -Name 'managed-device-inventory')
         }
         @($rows.deviceId) | Should -Be @('device-a', 'device-b')
-        Should-Invoke Get-GraphObject -ModuleName TenantPulse -Times 1 -Exactly
+        @($rows.detailResolutionState) | Should -Be @('Resolved', 'Resolved')
+        @($rows.tpmVersion) | Should -Be @('2.0', '2.0')
+        @($rows.hardwareInformation.totalStorageSpace) | Should -Be @(1024, 1024)
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ManagedDevice' -and $Operation -eq 'List'
+        } -Times 1 -Exactly
+        Should-Invoke Get-GraphObject -ModuleName TenantPulse -ParameterFilter {
+            $Type -eq 'ManagedDevice' -and $Operation -eq 'GetBeta'
+        } -Times 2 -Exactly
         Should-Invoke Test-GraphPermission -ModuleName TenantPulse -Times 1 -Exactly
     }
 
@@ -158,6 +186,44 @@ Describe 'TenantPulse managed-device report-data contract' {
         $row.sourceColumns.futureGraphField | Should -Be 'preserved'
         @($row.PSObject.Properties.Name) | Should -Not -Contain 'tpmStatus'
         @($row.PSObject.Properties.Name) | Should -Not -Contain 'severity'
+    }
+
+    It 'keeps base rows partial and stops later detail reads after an authentication failure' {
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        $script:roots.Add($root)
+        $store = New-DeviceReportStore -Root $root -Rows @(
+            [pscustomobject]@{ id = 'device-a'; deviceName = 'Alpha'; operatingSystem = 'Windows' }
+            [pscustomobject]@{ id = 'device-b'; deviceName = 'Bravo'; operatingSystem = 'Windows' }
+        )
+        $context = [pscustomobject]@{ TenantId = '11111111-1111-1111-1111-111111111111' }
+        $authorization = [pscustomobject]@{
+            Decisions = [ordered]@{
+                'ManagedDevice/GetBeta' = [pscustomobject]@{ Decision = 'Granted'; ReasonCode = 'granted' }
+            }
+        }
+        $abort = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+        Mock Invoke-PulseReportGraphOperation -ModuleName TenantPulse {
+            [pscustomobject]@{
+                Status = 'Failed'; FailureClass = 'AuthenticationFailed'
+                ReasonCode = 'authentication-failed'; Rows = @()
+            }
+        }
+
+        $result = InModuleScope TenantPulse -ArgumentList $store, $context, $authorization, $abort {
+            param($snapshotStore, $ctx, $auth, $abortState)
+            Invoke-PulseDeviceReportCollection -Store $snapshotStore -Context $ctx `
+                -AuthorizationDecision $auth -NetworkAbortState $abortState `
+                -ProfileId fixture -Pseudonym tp-fixture
+        }
+        $result.Status | Should -Be 'Partial'
+        $result.RowCount | Should -Be 2
+        $abort.AuthenticationAborted | Should -BeTrue
+        $rows = InModuleScope TenantPulse -ArgumentList $store {
+            param($snapshotStore)
+            @(Get-PulseExpansionRows -Store $snapshotStore -Name 'managed-device-inventory')
+        }
+        @($rows.detailResolutionState) | Should -Be @('Failed', 'NotEvaluated')
+        Should-Invoke Invoke-PulseReportGraphOperation -ModuleName TenantPulse -Times 1 -Exactly
     }
 
     It 'is byte-deterministic across source order' {

@@ -7,7 +7,10 @@
     TPM property. TenantPulse does not duplicate those presentation filters or pretend
     that encryption/compliance fields prove TPM state. Instead, -ReportData Devices
     guarantees the ordinary managedDevices dataset is collected once and publishes one
-    neutral schema-v1 managed-device-inventory artifact from it.
+    neutral schema-v1 managed-device-inventory artifact from it. For Windows rows, the
+    public collection path also uses GraphKit's beta singleton read because Microsoft
+    documents that real hardwareInformation values require a device-id GET with that field
+    selected; collection-shaped defaults are not treated as authoritative hardware detail.
 
     The projection retains every source property in sourceColumns and promotes the stable
     fields required by the six IHA definitions. It makes no health/severity judgment. The
@@ -19,15 +22,64 @@
     NotExpanded/Failed; it is never laundered into an authoritative empty report.
 #>
 
+$script:PulseManagedDeviceReportOperations = @(
+    [pscustomobject]@{ Type = 'ManagedDevice'; Operation = 'GetBeta'; ApiVersion = 'beta'; PagingStrategy = 'None' }
+)
+
+function Get-PulseManagedDeviceReportOperations {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param()
+
+    return @($script:PulseManagedDeviceReportOperations | ForEach-Object {
+            [pscustomobject]@{
+                Type = $_.Type; Operation = $_.Operation; ApiVersion = $_.ApiVersion
+                PagingStrategy = $_.PagingStrategy
+            }
+        })
+}
+
+function Merge-PulseManagedDeviceReportSource {
+    param(
+        [Parameter(Mandatory)] $BaseDevice,
+        [AllowNull()] $DetailDevice
+    )
+
+    $merged = [ordered]@{}
+    foreach ($entry in @(
+            (ConvertTo-PulseReportSourceMap -InputObject $BaseDevice),
+            (ConvertTo-PulseReportSourceMap -InputObject $DetailDevice)
+        )) {
+        foreach ($key in @($entry.Keys)) { $merged[$key] = $entry[$key] }
+    }
+    return [pscustomobject] $merged
+}
+
 function New-PulseManagedDeviceReportRow {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)]
-        $Device
+        $Device,
+
+        [AllowNull()]
+        $BaseDevice,
+
+        [AllowNull()]
+        $DetailDevice,
+
+        [ValidateSet('Resolved', 'Partial', 'Failed', 'NotEvaluated', 'NotApplicable', 'NotRequested')]
+        [string] $DetailResolutionState = 'NotRequested'
     )
 
     $sourceColumns = ConvertTo-PulseReportSourceMap -InputObject $Device
+    $resolvedBaseDevice = if ($null -ne $BaseDevice) { $BaseDevice } else { $Device }
+    $hardwareInformation = Get-PulseReportValue -InputObject $Device -Name @('hardwareInformation')
+    $healthAttestation = Get-PulseReportValue -InputObject $Device -Name @('deviceHealthAttestationState')
+    $tpmVersion = Get-PulseReportValue -InputObject $hardwareInformation -Name @('tpmVersion')
+    if ([string]::IsNullOrWhiteSpace([string] $tpmVersion)) {
+        $tpmVersion = Get-PulseReportValue -InputObject $healthAttestation -Name @('tpmVersion')
+    }
 
     return [pscustomobject][ordered]@{
         schemaVersion             = '1'
@@ -49,6 +101,17 @@ function New-PulseManagedDeviceReportRow {
         managementAgent           = Get-PulseReportValue -InputObject $Device -Name @('managementAgent')
         managedDeviceOwnerType    = Get-PulseReportValue -InputObject $Device -Name @('managedDeviceOwnerType')
         deviceCategoryDisplayName = Get-PulseReportValue -InputObject $Device -Name @('deviceCategoryDisplayName')
+        processorArchitecture     = Get-PulseReportValue -InputObject $Device -Name @('processorArchitecture')
+        skuFamily                 = Get-PulseReportValue -InputObject $Device -Name @('skuFamily')
+        skuNumber                 = Get-PulseReportValue -InputObject $Device -Name @('skuNumber')
+        ethernetMacAddress        = Get-PulseReportValue -InputObject $Device -Name @('ethernetMacAddress')
+        bootstrapTokenEscrowed    = Get-PulseReportValue -InputObject $Device -Name @('bootstrapTokenEscrowed')
+        hardwareInformation      = if ($null -ne $hardwareInformation) { ConvertTo-PulseReportSourceMap -InputObject $hardwareInformation } else { $null }
+        deviceHealthAttestationState = if ($null -ne $healthAttestation) { ConvertTo-PulseReportSourceMap -InputObject $healthAttestation } else { $null }
+        tpmVersion                = $tpmVersion
+        detailResolutionState     = $DetailResolutionState
+        baseSourceColumns         = ConvertTo-PulseReportSourceMap -InputObject $resolvedBaseDevice
+        detailSourceColumns       = if ($null -ne $DetailDevice) { ConvertTo-PulseReportSourceMap -InputObject $DetailDevice } else { $null }
         sourceColumns             = $sourceColumns
     }
 }
@@ -60,7 +123,9 @@ function ConvertTo-PulseManagedDeviceReportRows {
         [Parameter(Mandatory)]
         [AllowNull()]
         [AllowEmptyCollection()]
-        [object[]] $Devices
+        [object[]] $Devices,
+
+        [hashtable] $DetailByDeviceId = @{}
     )
 
     $rows = [System.Collections.Generic.List[object]]::new()
@@ -77,7 +142,17 @@ function ConvertTo-PulseManagedDeviceReportRows {
             continue
         }
 
-        $row = New-PulseManagedDeviceReportRow -Device $device
+        $deviceId = [string] (Get-PulseReportValue -InputObject $device -Name @('id', 'managedDeviceId'))
+        $detailRecord = if (-not [string]::IsNullOrWhiteSpace($deviceId) -and $DetailByDeviceId.ContainsKey($deviceId)) {
+            $DetailByDeviceId[$deviceId]
+        } else { $null }
+        $detailDevice = if ($null -ne $detailRecord) { $detailRecord.Device } else { $null }
+        $detailState = if ($null -ne $detailRecord) { [string] $detailRecord.State } else { 'NotRequested' }
+        $mergedDevice = if ($null -ne $detailDevice) {
+            Merge-PulseManagedDeviceReportSource -BaseDevice $device -DetailDevice $detailDevice
+        } else { $device }
+        $row = New-PulseManagedDeviceReportRow -Device $mergedDevice -BaseDevice $device `
+            -DetailDevice $detailDevice -DetailResolutionState $detailState
         $hasStableId = -not [string]::IsNullOrWhiteSpace([string] $row.deviceId) -or
             -not [string]::IsNullOrWhiteSpace([string] $row.azureAdDeviceId)
         $hasName = -not [string]::IsNullOrWhiteSpace([string] $row.deviceName)
@@ -113,7 +188,19 @@ function Invoke-PulseDeviceReportCollection {
 
         [Parameter()]
         [AllowNull()]
-        [string] $TenantId
+        [string] $TenantId,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $Context,
+
+        [Parameter()]
+        [AllowNull()]
+        $AuthorizationDecision,
+
+        [Parameter()]
+        [AllowNull()]
+        [pscustomobject] $NetworkAbortState
     )
 
     $artifactName = 'managed-device-inventory'
@@ -143,8 +230,93 @@ function Invoke-PulseDeviceReportCollection {
         # dataset survives PowerShell enumeration. Assign directly; wrapping the call in
         # @() would turn that array into one nested pseudo-row.
         $devices = Read-PulseDataset -Store $Store -Name 'managedDevices' -ManifestSnapshot $manifest
-        $converted = ConvertTo-PulseManagedDeviceReportRows -Devices $devices
         $gaps = [System.Collections.Generic.List[object]]::new()
+        $detailByDeviceId = @{}
+
+        if ($null -ne $Context) {
+            $spec = @(Get-PulseManagedDeviceReportOperations)[0]
+            $detailBlockReason = $null
+            try {
+                $descriptor = Assert-PulseReadOnlyDescriptor -Type $spec.Type -Operation $spec.Operation `
+                    -ApiVersion $spec.ApiVersion -PassThru
+                if ($null -eq $descriptor -or [string] $descriptor.PagingStrategy -ne $spec.PagingStrategy) {
+                    $detailBlockReason = 'descriptor-paging-drift'
+                }
+            } catch {
+                $detailBlockReason = 'descriptor-unavailable'
+            }
+
+            if ($null -eq $detailBlockReason) {
+                $authorization = Get-PulseReportAuthorization -AuthorizationDecision $AuthorizationDecision -Operations @($spec)
+                if ($authorization.Decision -ne 'Granted') {
+                    $detailBlockReason = [string] $authorization.ReasonCode
+                }
+            }
+            if ($null -eq $NetworkAbortState) {
+                $NetworkAbortState = [pscustomobject]@{ AuthenticationAborted = $false; Reason = $null }
+            }
+            if ($NetworkAbortState.AuthenticationAborted) { $detailBlockReason = 'authentication-failed' }
+
+            $windowsDevices = @($devices | Where-Object {
+                    [string]::Equals([string] (Get-PulseReportValue -InputObject $_ -Name @('operatingSystem')), 'Windows', [System.StringComparison]::OrdinalIgnoreCase)
+                })
+            if ($null -ne $detailBlockReason -and $windowsDevices.Count -gt 0) {
+                $gaps.Add((New-PulseReportGap -Scope 'managed-device-detail' -ReasonCode $detailBlockReason -Operation 'ManagedDevice.GetBeta')) | Out-Null
+                foreach ($device in $windowsDevices) {
+                    $id = [string] (Get-PulseReportValue -InputObject $device -Name @('id', 'managedDeviceId'))
+                    if (-not [string]::IsNullOrWhiteSpace($id)) {
+                        $detailByDeviceId[$id] = [pscustomobject]@{ State = 'NotEvaluated'; Device = $null }
+                    }
+                }
+            } else {
+                foreach ($device in $windowsDevices) {
+                    $id = [string] (Get-PulseReportValue -InputObject $device -Name @('id', 'managedDeviceId'))
+                    if ([string]::IsNullOrWhiteSpace($id)) {
+                        $gaps.Add((New-PulseReportGap -Scope 'managed-device-detail-without-id' -ReasonCode 'invalid-provider-data' -Operation 'ManagedDevice.GetBeta')) | Out-Null
+                        continue
+                    }
+                    if ($NetworkAbortState.AuthenticationAborted) {
+                        $detailByDeviceId[$id] = [pscustomobject]@{ State = 'NotEvaluated'; Device = $null }
+                        $gaps.Add((New-PulseReportGap -Scope $id -ReasonCode 'authentication-failed' -Operation 'ManagedDevice.GetBeta')) | Out-Null
+                        continue
+                    }
+
+                    $outcome = Invoke-PulseReportGraphOperation -Context $Context -Spec $spec `
+                        -Dataset 'managed-device-inventory' -Parameters @{ id = $id }
+                    if ($outcome.FailureClass -eq 'AuthenticationFailed') {
+                        Set-PulseReportAuthenticationAbort -Store $Store -NetworkAbortState $NetworkAbortState `
+                            -ProfileId $ProfileId -Pseudonym $Pseudonym -TenantId $TenantId
+                    }
+                    $detailRows = @($outcome.Rows)
+                    $returnedId = if ($detailRows.Count -eq 1) {
+                        [string] (Get-PulseReportValue -InputObject $detailRows[0] -Name @('id', 'managedDeviceId'))
+                    } else { $null }
+                    if ($outcome.Status -in @('Collected', 'Partial') -and $detailRows.Count -eq 1 -and
+                        [string]::Equals($returnedId, $id, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $detailState = if ($outcome.Status -eq 'Partial') { 'Partial' } else { 'Resolved' }
+                        $detailByDeviceId[$id] = [pscustomobject]@{ State = $detailState; Device = $detailRows[0] }
+                        if ($outcome.Status -eq 'Partial') {
+                            $gaps.Add((New-PulseReportGap -Scope $id -ReasonCode $outcome.ReasonCode -Operation 'ManagedDevice.GetBeta')) | Out-Null
+                        }
+                    } else {
+                        $detailByDeviceId[$id] = [pscustomobject]@{ State = 'Failed'; Device = $null }
+                        $failureReason = if ($outcome.Status -eq 'Failed') { [string] $outcome.ReasonCode } else { 'invalid-provider-data' }
+                        $gaps.Add((New-PulseReportGap -Scope $id -ReasonCode $failureReason -Operation 'ManagedDevice.GetBeta')) | Out-Null
+                    }
+                }
+            }
+
+            foreach ($device in @($devices | Where-Object {
+                        -not [string]::Equals([string] (Get-PulseReportValue -InputObject $_ -Name @('operatingSystem')), 'Windows', [System.StringComparison]::OrdinalIgnoreCase)
+                    })) {
+                $id = [string] (Get-PulseReportValue -InputObject $device -Name @('id', 'managedDeviceId'))
+                if (-not [string]::IsNullOrWhiteSpace($id)) {
+                    $detailByDeviceId[$id] = [pscustomobject]@{ State = 'NotApplicable'; Device = $null }
+                }
+            }
+        }
+
+        $converted = ConvertTo-PulseManagedDeviceReportRows -Devices $devices -DetailByDeviceId $detailByDeviceId
         foreach ($gap in @($converted.Gaps)) { $gaps.Add($gap) | Out-Null }
 
         if ($sourceEntry.status -eq 'Partial') {

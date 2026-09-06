@@ -54,6 +54,41 @@ Describe 'IHA port coverage register' -Tag 'QA' {
         }
     }
 
+    It 'has replacement evidence for every active report with no unaccounted report gap' {
+        $incomplete = @($script:coverage.reports | Where-Object status -In @('Partial', 'Missing'))
+        $incomplete.Count | Should -Be 0
+        foreach ($entry in @($script:coverage.reports | Where-Object status -In @('Complete', 'Replaced'))) {
+            [string]::IsNullOrWhiteSpace([string] $entry.successor) | Should -BeFalse
+            @($entry.evidence).Count | Should -BeGreaterThan 0
+            foreach ($path in @($entry.evidence)) {
+                Test-Path -LiteralPath (Join-Path $script:repoRoot $path) -PathType Leaf | Should -BeTrue
+            }
+        }
+    }
+
+    It 'has no incomplete endpoint port and records evidence for every replacement' {
+        @($script:coverage.endpoints | Where-Object status -In @('Partial', 'Missing')).Count | Should -Be 0
+        foreach ($entry in @($script:coverage.endpoints | Where-Object status -EQ 'Replaced')) {
+            @($entry.evidence).Count | Should -BeGreaterThan 0
+            foreach ($path in @($entry.evidence)) {
+                Test-Path -LiteralPath (Join-Path $script:repoRoot $path) -PathType Leaf | Should -BeTrue
+            }
+        }
+    }
+
+    It 'closes every in-module cross-cutting gap and leaves only external Office rendering open' {
+        $incomplete = @($script:coverage.crossCutting | Where-Object status -In @('Partial', 'Missing'))
+        $incomplete.Count | Should -Be 1
+        $incomplete[0].capability | Should -Be 'Excel rendering'
+        foreach ($entry in @($script:coverage.crossCutting | Where-Object status -EQ 'Replaced')) {
+            if ($entry.PSObject.Properties.Name -contains 'evidence') {
+                foreach ($path in @($entry.evidence)) {
+                    Test-Path -LiteralPath (Join-Path $script:repoRoot $path) -PathType Leaf | Should -BeTrue
+                }
+            }
+        }
+    }
+
     It 'keeps Office rendering outside TenantPulse while tracking its completion gate' {
         $office = @($script:coverage.crossCutting | Where-Object capability -EQ 'Excel rendering')
         $office.Count | Should -Be 1

@@ -97,7 +97,7 @@ Register-GraphTenant -ProfileId 'contoso' -TenantId '<tenant-id>' -ClientId '<ap
 Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out'
 
 # Also capture neutral inputs for a future customer workbook/document pipeline
-Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out' -ReportData Inventory,Applications,Devices -ExpandSettings
+Invoke-PulseAssessment -ProfileId 'contoso' -OutputPath './out' -ReportData All -ExpandSettings
 ```
 
 This collects a snapshot, evaluates every check in the catalog, scores the result, and
@@ -110,9 +110,9 @@ self-contained `./out/tenantpulse-report.html` renderer.
 
 | Command | What it does |
 |---|---|
-| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. `-ReportData Inventory,Applications,Devices` guarantees the neutral audit source set plus versioned application and managed-device artifacts for downstream report builders. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
+| `Get-PulseTenantSnapshot` | Collects a read-only, sensitive snapshot through GraphKit and writes it to a snapshot store on disk. `-ReportData All` guarantees the neutral audit source set plus all versioned report-data artifacts for downstream builders. Manifest identity/reasons and selected known-sensitive values are protected, but the store is not de-identified. The only command that ever talks to Graph. |
 | `Get-PulseCheckCatalog` | Lists every check descriptor in the catalog (id, title, category, severity, authorities) as a lightweight, read-only view - useful for discovering what `-IncludeCategory`/`-IncludeCheck` values exist before running an assessment. |
-| `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render canonical JSON. `-ReportData Inventory,Applications,Devices` passes neutral report profiles to fresh collection; `-Format Html` also writes a self-contained HTML report; `-Redact` remains the local-only compatibility pseudonymization path. |
+| `Invoke-PulseAssessment` | The end-to-end entry point: collect (or reuse `-FromSnapshot`), evaluate every check, score, and render canonical JSON. `-ReportData All` passes every neutral report profile to fresh collection; `-Format Html` also writes a self-contained HTML report; `-Redact` remains the local-only compatibility pseudonymization path. |
 | `Invoke-PulseCheck` | Runs a scoped subset of checks (by id or category) against a fresh or existing snapshot - the same pipeline as `Invoke-PulseAssessment`, narrowed to exactly the checks you name. |
 | `Export-PulseReport` | Re-renders an already-scored findings JSON file as canonical JSON or self-contained HTML. Render-only - no Graph, snapshot read, re-evaluation, or re-scoring, and (deliberately) no `-Redact`: see its own help for why. |
 
@@ -459,13 +459,14 @@ workbook/document regions. The exact row and failure contract is documented in
 The stable TenantPulse `0.3.0` dependency remains immutable GraphKit `0.3.0`; it does not treat a
 locally staged GraphKit `0.4.0-r8` prerelease as a distributable customer dependency.
 
-`-ReportData Devices` similarly guarantees one ordinary `managedDevices` read and publishes one
-`managed-device-inventory` artifact. It carries normalized identity, user, hardware, OS,
-encryption, compliance, ownership, enrollment, and sync fields plus every original source column.
+`-ReportData Devices` guarantees one ordinary `managedDevices` read, performs the documented beta
+singleton detail read for each Windows device, and publishes one `managed-device-inventory`
+artifact. It carries normalized identity, user, hardware, health-attestation, TPM, OS, encryption,
+compliance, ownership, enrollment, and sync fields plus every original source column.
 This single artifact replaces the six active IHA device-report inputs; the Office layer owns their
 worksheet filters and records the stale-device UTC cutoff. TenantPulse does not claim TPM state
-because IHA's TPM-named definition never collected authoritative TPM evidence. The exact schema,
-certainty rules, and IHA mapping are documented in
+from encryption/compliance fields; `tpmVersion` is used only when the device detail actually returns
+it. The exact schema, certainty rules, and IHA mapping are documented in
 [`docs/contracts/device-report-data-v1.md`](docs/contracts/device-report-data-v1.md).
 
 `-ReportData Inventory` guarantees the 25 neutral source datasets required by the current IHA
@@ -474,6 +475,18 @@ snapshot collection path, so combining `Inventory`, `Applications`, and `Devices
 shared root twice. Add `-ExpandSettings` when the run also needs the successor conflict and setting
 artifacts. The exact dataset set, GraphKit bindings, and sensitivity boundary are documented in
 [`docs/contracts/audit-inventory-v1.md`](docs/contracts/audit-inventory-v1.md).
+
+`-ReportData Reports` publishes six additional schema-v1 artifacts for Apple enrollment profiles,
+compliance policy assignments, Conditional Access policy overview, connectors and tokens, directory
+roles, and groups. The Apple artifact uses one read-only GraphKit child collection per stored DEP
+token; the other five are snapshot-only projections. `-ReportData All` selects `Applications`,
+`Devices`, `Inventory`, and `Reports` while deduplicating shared datasets. These artifacts preserve
+structured ids, source columns, hashes,
+and explicit gaps; they do not compute approval, severity, expiration status, or Office display
+cells. The exact schemas and IHA replacement decisions are documented in
+[`docs/contracts/audit-report-data-v1.md`](docs/contracts/audit-report-data-v1.md).
+Storage/import/checkpoint replacements and the paired GraphKit release gate are documented in
+[`docs/contracts/iha-migration-and-recovery-v1.md`](docs/contracts/iha-migration-and-recovery-v1.md).
 
 ## Settings expansion (Phase 2)
 

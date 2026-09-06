@@ -11,7 +11,7 @@ definitions that all read `managedDevices`:
 | HardwareInventoryReport | Project manufacturer, model, serial, physical memory, encryption, OS, sync, and compliance fields. |
 | NonCompliantDevices | Select rows with an explicit, nonblank `complianceState` other than `compliant`; missing state remains unknown. |
 | StaleWindowsDevices | Select Windows rows whose valid `lastSyncDateTime` is older than the declared report run's UTC cutoff. The Office builder must record that cutoff; it must not silently use the viewer's current clock. |
-| TPMStatusReport | Do not label encryption/compliance fields as TPM evidence. The legacy definition collected no TPM property. Render it as Windows device/encryption inventory unless a future version adds an authoritative TPM source. |
+| TPMStatusReport | Use `tpmVersion` only when returned by the per-device hardware or attestation object. The legacy report definition itself collected no TPM property; encryption/compliance fields are never relabeled as TPM evidence. |
 
 ## Row schema
 
@@ -19,10 +19,15 @@ Every row carries `schemaVersion = "1"` and the normalized fields `deviceId`,
 `azureAdDeviceId`, `deviceName`, `userPrincipalName`, `userId`, `operatingSystem`, `osVersion`,
 `manufacturer`, `model`, `serialNumber`, `physicalMemoryInBytes`, `isEncrypted`,
 `complianceState`, `lastSyncDateTime`, `enrolledDateTime`, `managementAgent`,
-`managedDeviceOwnerType`, and `deviceCategoryDisplayName`.
+`managedDeviceOwnerType`, `deviceCategoryDisplayName`, `processorArchitecture`, `skuFamily`,
+`skuNumber`, `ethernetMacAddress`, `bootstrapTokenEscrowed`, `hardwareInformation`,
+`deviceHealthAttestationState`, `tpmVersion`, and `detailResolutionState`.
 
-`sourceColumns` preserves the complete source row so later versions can use Graph fields that were
-not promoted in schema v1. Tenant identifiers are recursively pseudonymized before publication.
+For Windows devices the public collection path requests `ManagedDevice.GetBeta`, whose fixed select
+includes hardware and health-attestation detail. `baseSourceColumns`, `detailSourceColumns`, and the
+merged `sourceColumns` preserve the exact inputs. Non-Windows detail is `NotApplicable`; a denied,
+failed, invalid, or authentication-suppressed detail read remains `Partial` with a gap rather than
+falling back to collection-shaped hardware defaults. Tenant identifiers are recursively pseudonymized before publication.
 The snapshot and expansion remain local-only evidence and may contain user/device identifiers.
 
 A usable row needs a Graph managed-device id, an Entra device id, or a device name. A null row or
