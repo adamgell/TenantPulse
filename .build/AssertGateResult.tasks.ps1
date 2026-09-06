@@ -593,10 +593,11 @@
 # provenance required before HTML warning suppression.
 # 3575 -> 3577 preserves nullable normalized row-schema intent while rejecting
 # non-null intent that contradicts the normalized target type.
+# 3577 -> 3578 guards the 10000-character release-note limit under CRLF checkout.
 # An earlier all-tests discovery reported 3324 because it also included the four dedicated
 # tests/Perf assertions. The release workflow deliberately and explicitly runs tests/QA
-# plus tests/Unit only; its measured package-first total is therefore 3577.
-$script:tenantPulseGateMinimumTests = 3577
+# plus tests/Unit only; its measured package-first total is therefore 3578.
+$script:tenantPulseGateMinimumTests = 3578
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

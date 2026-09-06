@@ -181,17 +181,11 @@ PrivateData = @{
 - Graph collection now fails closed unless `Get-GraphObject -PassThruResult` returns exactly one complete `GraphKit.OperationResult`; null, rows-only, multiple, type-spoofed, and malformed results can no longer be persisted as `Collected`, while bounded partial rows retain indeterminate, truncation, and page-cap detail.
 - Review finding 6 is implemented: Endpoint Security composite provenance now records the stable qualified primitive set `ConfigurationPolicy.ListBeta`, `ConfigurationPolicySetting.ListBeta`, and `ConfigurationPolicyAssignment.ListBeta`, independent of tenant policy count; setting and assignment gaps name their respective primitives explicitly.
 - Direct, composite, and expansion collection paths now use one canonical Graph failure mapper. A request-time `403` is recorded as `Failed` / `PermissionDenied`; only `AuthenticationFailed` aborts subsequent network collection, while deadline expiration, cancellation, indeterminate certainty, permission denial, and provider failure remain explicit and isolated.
-- Final review hardening now derives finding privacy from final classified evidence; rejects
-  malformed or duplicate group closure and case-variant, mixed-type, or split-evidence
-  duplicate update-ring identities; requires native nonblank update-ring ids and schema-valid
-  native-string assignment discriminators, intents, identities, filters, imported composite states,
-  and schema-native Endpoint Security policy, template, setting, and value fields;
-  deduplicates update-ring counts by identity, emits deterministic duplicate evidence, and
-  validates every scoped duplicate row before accepting a possible qualifying ring while
-  allowing two independent qualifying witnesses to prove Pass despite unrelated malformed candidates; rejects
-  contradictory BitLocker/LAPS values, malformed expansion rows, and non-canonical ARM paths;
-  and preserves exact gap attribution plus both errors when expansion and manifest persistence
-  fail together.
+- Final review hardening now derives privacy from classified evidence; validates native-string
+  assignment and Endpoint Security shapes; fails closed on malformed or contradictory
+  BitLocker/LAPS, expansion, ARM, group-closure, and update-ring evidence; deduplicates rings
+  by identity with deterministic evidence and exact gap attribution; and preserves both errors
+  when expansion and manifest persistence fail together.
 - Privacy completeness is now independent from the sharing boundary: ordinary evaluation
   documents remain `local-only`, only protected safe-share clones become `classified`, and HTML
   retains a prominent local-only warning unless the classification, native Boolean flags,

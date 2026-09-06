@@ -262,7 +262,7 @@ else {
         throw "The Pester object bound by the tested release proof changed after proof creation."
     }
 
-    # MinimumTests 3577 / -AllowNotRun 0 (see
+    # MinimumTests 3578 / -AllowNotRun 0 (see
     # .build/AssertGateResult.tasks.ps1's own $script:tenantPulseGateMinimumTests
     # accounting comment for the full per-commit history on both pre-merge lineages,
     # including the 1325 -> 1355 correction from an ad hoc test-run artifact; this
@@ -344,15 +344,16 @@ else {
     # secret scanning, and safe-share provenance warning coverage.
     # 3575 -> 3577 preserves nullable normalized row-schema intent while rejecting
     # non-null intent that contradicts the normalized target type.
+    # 3577 -> 3578 guards the 10000-character release-note limit under CRLF checkout.
     # The four tests/Perf assertions are deliberately outside the QA+Unit release
-    # workflow and are not included in its measured 3577-test floor.
+    # workflow and are not included in its measured 3578-test floor.
     # NotRun remains forbidden.
     $gate = Join-Path $repoRoot 'tests/QA/Assert-GateResult.ps1'
     $allowedSkips = if ($IsWindows) { 2 } else { 0 }
     & pwsh -NoProfile -File $gate `
         -ResultPath $boundNUnitPath `
         -PesterObjectPath $boundPesterObjectPath `
-        -MinimumTests 3577 `
+        -MinimumTests 3578 `
         -AllowedSkips $allowedSkips `
         -AllowNotRun 0 | Write-Verbose
     if ($LASTEXITCODE -ne 0) {
