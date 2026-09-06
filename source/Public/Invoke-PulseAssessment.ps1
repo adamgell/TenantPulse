@@ -174,7 +174,8 @@
         versioned JSONL snapshot artifacts. 'Devices' captures one normalized, versioned
         managed-device inventory artifact that is sufficient for the external Office
         layer to reproduce IHA's active device worksheets without placing Excel logic in
-        TenantPulse. Only accepted on the 'Collect' parameter set.
+        TenantPulse. 'Inventory' guarantees the neutral IHA-migration source datasets
+        independently of check selection. Only accepted on the 'Collect' parameter set.
 #>
 function Invoke-PulseAssessment {
     [CmdletBinding(DefaultParameterSetName = 'Collect')]
@@ -224,7 +225,7 @@ function Invoke-PulseAssessment {
         [switch] $ExpandSettings,
 
         [Parameter(ParameterSetName = 'Collect')]
-        [ValidateSet('Applications', 'Devices')]
+        [ValidateSet('Applications', 'Devices', 'Inventory')]
         [string[]] $ReportData
     )
 

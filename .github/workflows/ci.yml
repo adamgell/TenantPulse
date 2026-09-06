@@ -803,7 +803,9 @@ jobs:
           # 3575 -> 3577 preserves nullable normalized row-schema intent while rejecting
           # non-null intent that contradicts the normalized target type.
           # 3577 -> 3578 guards the 10000-character release-note limit under CRLF checkout.
+          # 3578 -> 3615 adds the IHA coverage register, managed-device report artifact,
+          # audit-inventory profile, descriptor bindings, and privacy/read-only gates.
           # The four tests/Perf assertions are deliberately outside this QA+Unit release
-          # workflow and are not included in its measured 3578-test floor.
+          # workflow and are not included in its measured 3615-test floor.
           # NotRun remains forbidden.
-          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3578 -AllowedSkips $allowedSkips -AllowNotRun 0
+          pwsh -File ./tests/QA/Assert-GateResult.ps1 -ResultPath $resultFiles[0].FullName -MinimumTests 3615 -AllowedSkips $allowedSkips -AllowNotRun 0

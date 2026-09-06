@@ -594,10 +594,12 @@
 # 3575 -> 3577 preserves nullable normalized row-schema intent while rejecting
 # non-null intent that contradicts the normalized target type.
 # 3577 -> 3578 guards the 10000-character release-note limit under CRLF checkout.
+# 3578 -> 3615 adds the IHA coverage register, managed-device report artifact, complete
+# audit-inventory profile, new descriptor bindings, and their privacy/read-only gates.
 # An earlier all-tests discovery reported 3324 because it also included the four dedicated
 # tests/Perf assertions. The release workflow deliberately and explicitly runs tests/QA
-# plus tests/Unit only; its measured package-first total is therefore 3578.
-$script:tenantPulseGateMinimumTests = 3578
+# plus tests/Unit only; its measured package-first total is therefore 3615.
+$script:tenantPulseGateMinimumTests = 3615
 
 function Get-TenantPulseCandidateProofState {
     param([Parameter(Mandatory)] [string] $Root)

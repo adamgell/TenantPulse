@@ -133,8 +133,10 @@
         install-error JSONL artifacts into the snapshot. 'Devices' guarantees collection
         of managedDevices and writes a versioned, hash-verified managed-device-inventory
         artifact that preserves every source column plus the stable fields needed by IHA's
-        six active device reports. Neither profile renders DOCX/XLSX, applies branding, or
-        evaluates approval state.
+        six active device reports. 'Inventory' guarantees the neutral source datasets needed
+        by the IHA migration inventory, independently of check selection; it preserves raw
+        service fields and explicit collection certainty without creating presentation rows.
+        No profile renders DOCX/XLSX, applies branding, or evaluates approval state.
 
     .PARAMETER ProviderPlanRegistry
         Optional dataset-name keyed overrides for TenantPulse-owned provider plans.
@@ -199,7 +201,7 @@ function Get-PulseTenantSnapshot {
         [switch] $ExpandSettings,
 
         [Parameter()]
-        [ValidateSet('Applications', 'Devices')]
+        [ValidateSet('Applications', 'Devices', 'Inventory')]
         [string[]] $ReportData,
 
         # Optional declared-operation overrides for TenantPulse-owned composite plans,
@@ -242,6 +244,41 @@ function Get-PulseTenantSnapshot {
         $reportChecks += [pscustomobject]@{
             Id   = 'ReportData.Devices'
             Data = [pscustomobject]@{ Datasets = @('managedDevices'); Gates = @() }
+        }
+    }
+    if (@($ReportData) -contains 'Inventory') {
+        $reportChecks += [pscustomobject]@{
+            Id   = 'ReportData.Inventory'
+            Data = [pscustomobject]@{
+                Datasets = @(
+                    'androidEnrollmentProfiles'
+                    'appProtectionPolicies'
+                    'authenticationMethodsPolicy'
+                    'conditionalAccessPolicies'
+                    'depOnboardingSettings'
+                    'deviceCategories'
+                    'deviceCompliancePolicies'
+                    'deviceConfigurations'
+                    'deviceEnrollmentConfigurations'
+                    'deviceManagementScripts'
+                    'deviceManagementSettings'
+                    'domainConnectors'
+                    'domains'
+                    'groups'
+                    'managedDeviceCleanupRules'
+                    'managedDevices'
+                    'mobileAppCategories'
+                    'mobileAppConfigurations'
+                    'ndesConnectors'
+                    'roleAssignmentScheduleInstances'
+                    'roleEligibilityScheduleInstances'
+                    'subscribedSkus'
+                    'vppTokens'
+                    'windowsAutopilotDeviceIdentities'
+                    'windowsUpdateCatalogItems'
+                )
+                Gates = @()
+            }
         }
     }
 
