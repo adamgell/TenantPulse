@@ -87,6 +87,55 @@ jobs:
           }
           Write-Host "PowerShell version asserted: $actual"
 
+      - name: Stage exact GraphKit 0.3.1 dependency
+        shell: pwsh
+        env:
+          GRAPHKIT_SHA: 158c9a0152e25f30153e4d6a310dc5357ea6a80d
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $graphKitRoot = Join-Path $env:RUNNER_TEMP "GraphKit-$($env:GRAPHKIT_SHA)"
+          git clone --no-checkout https://github.com/adamgell/GraphKit.git $graphKitRoot
+          if ($LASTEXITCODE -ne 0) {
+              throw 'GraphKit clone failed.'
+          }
+          git -C $graphKitRoot checkout --detach $env:GRAPHKIT_SHA
+          if ($LASTEXITCODE -ne 0) {
+              throw 'GraphKit checkout failed.'
+          }
+          $actualGraphKitSha = (git -C $graphKitRoot rev-parse HEAD).Trim()
+          if (-not [string]::Equals($actualGraphKitSha, $env:GRAPHKIT_SHA, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "GraphKit checkout revision mismatch: expected $($env:GRAPHKIT_SHA), got $actualGraphKitSha."
+          }
+
+          Push-Location $graphKitRoot
+          try {
+              pwsh -NoProfile -File ./build.ps1 -ResolveDependency -Tasks noop
+              if ($LASTEXITCODE -ne 0) {
+                  throw 'GraphKit dependency restore failed.'
+              }
+              pwsh -NoProfile -File ./build.ps1 -Tasks pack
+              if ($LASTEXITCODE -ne 0) {
+                  throw 'GraphKit package build failed.'
+              }
+          }
+          finally {
+              Pop-Location
+          }
+
+          $graphKitSource = Join-Path $graphKitRoot 'output/module/GraphKit/0.3.1'
+          $graphKitTarget = Join-Path $PWD 'output/RequiredModules/GraphKit/0.3.1'
+          New-Item -ItemType Directory -Path $graphKitTarget -Force | Out-Null
+          Copy-Item -Path (Join-Path $graphKitSource '*') -Destination $graphKitTarget -Recurse -Force
+
+          . ./.build/RuntimeDependencyIntegrity.ps1
+          $expectedDigests = Import-PowerShellDataFile -LiteralPath ./.build/RuntimeDependencyDigests.psd1
+          $expectedDigest = [string] $expectedDigests['GraphKit|0.3.1']
+          $actualDigest = Get-PulseModuleTreeDigest -ModuleBase $graphKitTarget
+          if (-not $actualDigest.Equals($expectedDigest, [System.StringComparison]::OrdinalIgnoreCase)) {
+              throw "GraphKit 0.3.1 staged tree digest mismatch: expected $expectedDigest, got $actualDigest."
+          }
+          Write-Host "Staged exact GraphKit 0.3.1 from merged revision $actualGraphKitSha."
+
       - name: Resolve build dependencies
         shell: pwsh
         run: pwsh -File ./build.ps1 -ResolveDependency -Tasks noop
