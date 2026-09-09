@@ -15,71 +15,13 @@ never uses the Microsoft Graph PowerShell SDK, and never constructs a Graph URI 
 
 ## Current release
 
-[GraphKit `0.3.0`](https://www.powershellgallery.com/packages/GraphKit/0.3.0) and
-[TenantPulse `0.2.0`](https://www.powershellgallery.com/packages/TenantPulse/0.2.0) are the
-current immutable PSGallery pair. TenantPulse `0.2.0` is the current immutable release on PSGallery.
+TenantPulse `0.2.0` is the current immutable release on PSGallery. It depends on the separately
+released [GraphKit `0.3.0`](https://www.powershellgallery.com/packages/GraphKit/0.3.0).
 Its 411284-byte archive was published at `2026-08-30T14:07:39.587Z` with SHA-256
 `a0d5ff793b92753ab3efb4db20cf5bcf8b953e3cf81bf1a776c96a3d992417bd`. The merged source is
 `b2eb7a882cc1fcb7994c39a606c7b9ac22f5a114`; exact-main CI run `33295648250` executed 2,277
 tests with zero failures, errors, skips, or NotRun results across all six OS/PowerShell jobs,
 with gitleaks green.
-
-Current source starts the unreleased TenantPulse `0.3.0` product-program line. It has a unique
-successor identity and is not the public TenantPulse `0.2.0` archive. On this line, Endpoint
-Security composite provenance uses the stable qualified primitives `ConfigurationPolicy.ListBeta`
-and `ConfigurationPolicySetting.ListBeta`, independent of tenant policy count. Legacy schema
-1.0.0/1.1.0 manifests remain fail-closed when they contain the later `Partial` state; reads reject
-that unsupported state without rewriting the manifest.
-
-The unreleased line also carries one canonical Graph failure mapping across direct, composite,
-and expansion collectors. A request-time `403` is `Failed` / `PermissionDenied`, and only
-`AuthenticationFailed` stops later network work; deadline expiration, cancellation, indeterminate
-certainty, permission denial, and provider failure remain explicit and isolated. Partial evaluation
-is an exact, reviewed opt-in for six checks. Assignment-scoped checks `TP.INT.0002` and
-`TP.INT.0004` use authoritative policy assignments and ignore only unrelated policy-scoped gaps;
-relevant assignment gaps, root-list uncertainty, and unclassified policy types remain
-`NotApplicable` only when they can affect the result. `TP.INT.0004` bounds possible witnesses
-against its two-ring threshold and rejects coercible non-numeric deadline shapes. Universal checks
-`TP.INT.0013` and `TP.INT.0029` may Fail on a known offender but cannot Pass with gaps, while existential checks `TP.INT.0014` and
-`TP.INT.0015` may Pass on a known native-Boolean witness but cannot Fail with gaps. The other 47
-checks remain `NotApplicable` on Partial. For the six opt-ins, zero usable Partial rows, malformed
-outcomes or gaps, and rule-invalid rows remain `Error`. Findings schema `1.0`, snapshot schema
-`2.0.0`, and scoring model `1.0` are unchanged. These are deterministic current-source and
-package-test claims only; they are not new live-service, merged-release, or publication claims.
-
-The current product-program boundary is narrower than a finished successor release:
-
-- **The implemented R1a foundation is locally package-first proven; R1a acceptance and remote
-  integration remain open.** Structured dataset outcomes are available to the evaluator but do not
-  yet migrate into a versioned findings/renderer contract as the governing R1a text requires. That
-  product contract still needs an explicit decision. No current verified evidence establishes a
-  remote refresh/push, exact remote-head review, merge, or merged-main CI for the runtime tree.
-  Nothing in this paragraph promotes it over the immutable public `0.2.0` package.
-- **R1b deterministic implementation is complete; protected-live proof remains separate.** Settings
-  Catalog assignments, typed include/exclude intent, Administrative Template expansion, and the
-  expansion-summary artifact are implemented. A shared authentication abort now blocks expansion
-  before descriptor resolution or Graph I/O, missing presentation-value ids produce deterministic
-  Partial gaps, and App Control decisions use the collected `assignedPolicyIds`. A protected live
-  shape/count proof with populated assignment targets remains an evidence gate, not missing code.
-- **R2 deterministic representation and certainty closeout is complete; protected-live proof remains
-  separate.** Composite datasets are declared as TenantPulse `Plan` entries, and preflight/read-only
-  gates validate their exact released GraphKit child operations. Endpoint Security surfaces absent
-  or unrecognized template metadata as explicit gaps, and current security-baseline collection is
-  independent of legacy-template failure. Protected-live proof of BitLocker raw-value mapping and
-  LAPS template identity remains required before making service-behavior claims.
-- **R3 deterministic representation is complete.** The Windows data-processor dataset names a
-  no-network TenantPulse plan, returns `PlatformUnavailable`, records null API version and an empty
-  operation set, and never claims a GraphKit `Get` operation that did not occur.
-- **R4 is partial.** The self-contained HTML findings renderer is implemented and deterministically
-  tested as the second supported renderer. Bounded relationship coverage, application-registration
-  credential coverage, complete Intune assignment awareness, exclusion-only assignment semantics,
-  and deterministic evidence caps remain to be completed. R5 privacy and R6 scale are tracked
-  separately in `docs/STATUS.md`.
-- **R9 has a split disposition.** Reusable GraphKit app-registration provisioning and actual-grant
-  verification remain applicable. The owner-confirmed absence of installed users, legacy consumers,
-  customer-tenant consumers, and repoint targets makes adopter migration, customer repointing,
-  rollback-window operation, legacy-runtime retirement, and destructive directory cleanup
-  `NotApplicable` rather than pending gates. They must not be performed to create completion evidence.
 
 ## Quick start
 
@@ -263,12 +205,8 @@ constitute a claim of CIS Benchmark compliance."*
 ## Operator prerequisites
 
 - PowerShell 7.4 or later
-- GraphKit exactly `0.3.1` for the unreleased TenantPulse `0.3.0` source line. It is declared with
-  `RequiredVersion`, so a different GraphKit version does not satisfy the runtime contract. The
-  tested `0.3.1` maintenance package must be staged from the verified GraphKit maintenance source
-  or an internal package channel until separately published. Published TenantPulse `0.2.0`
-  continues to resolve its immutable published [GraphKit `0.3.0`](https://www.powershellgallery.com/packages/GraphKit/0.3.0)
-  dependency.
+- [GraphKit `0.3.0`](https://www.powershellgallery.com/packages/GraphKit/0.3.0), installed
+  automatically as TenantPulse `0.2.0`'s required dependency
 - A GraphKit profile already registered for the tenant you want to assess (see GraphKit's
   own documentation - profile registration, credential setup, and Graph app-registration
   concerns are entirely GraphKit's responsibility, not TenantPulse's)
@@ -277,19 +215,17 @@ constitute a claim of CIS Benchmark compliance."*
   permissions** above) - most commonly `Policy.Read.All` for the Conditional-Access-backed
   checks (`TP.ENT.0003`-`0005`), plus whichever Intune/device permissions the datasets you
   collect require
-- PSGallery access for published dependencies, plus the verified local/internal GraphKit `0.3.1`
-  package while that maintenance version is not yet on PSGallery
+- PSGallery access for TenantPulse and its published dependencies
 
-GraphKit `0.3.0` and TenantPulse `0.2.0` are the immutable current PSGallery releases.
-The `0.2.0` release was greenfield, pre-adoption work: there was no installed TenantPulse user
+TenantPulse `0.2.0` is the immutable current PSGallery release and depends on the immutable
+GraphKit `0.3.0` release. The `0.2.0` release was greenfield, pre-adoption work: there was no installed TenantPulse user
 base, customer estate, prior runtime, or migration/cutover task. It added the cleanup-rule
 primitive, Settings Catalog assignments, expanded Intune
 RBAC primitives, and default TenantPulse provider plans for RBAC, BitLocker, LAPS, and current
 plus legacy security baselines. The Windows data-processor path is explicitly classified as
 platform-unavailable because Microsoft has not published the GET/application-permission
 contract needed for a releasable descriptor. See `docs/STATUS.md` for the exact local, live,
-package, CI, and publication evidence boundaries. Current source is the separate unreleased
-TenantPulse `0.3.0` product-program line.
+package, CI, and publication evidence boundaries.
 
 ## Catalog scope - what this is and isn't, honestly
 
@@ -315,7 +251,7 @@ verified-against-a-real-tenant catalog.
 
 "Live" below is historical evidence for the exact immutable TenantPulse `0.2.0` package only: its
 dataset and evaluation path completed against a live tenant. It is separate from exact-SHA CI and
-publication, and it does **not** prove current unreleased-source acceptance or closure of R1b-R6.
+publication.
 "Live (partial)" means the path completed but the service evidence contained explicit gaps, so
 evaluation failed closed.
 "Platform unavailable" means TenantPulse
@@ -400,7 +336,7 @@ What the current catalog does **not** cover, honestly:
   effective members. `TP.ENT.0022` must continue to count one permanent group assignment as one
   violation; future expansion is bounded blast-radius evidence, not multiplication of that finding.
 - **Application registrations.** `TP.ENT.0019` reads only `servicePrincipal` credentials because
-  GraphKit `0.3.1` and the current successor tree have no `Application.List` operation. Ordinary app
+  the released operation catalog has no `Application.List` operation. Ordinary app
   registration secrets/certificates are invisible. An all-unparseable credential population can
   also currently reach Pass; R4 must make that result `NotApplicable` unless a proven offender
   already establishes Fail.
@@ -458,24 +394,21 @@ does not carry CDW or customer branding, and does not interpret approval fields.
 harness-independent Office builder can consume the versioned rows and preserve customer-owned
 workbook/document regions. The exact row and failure contract is documented in
 [`docs/contracts/application-report-data-v1.md`](docs/contracts/application-report-data-v1.md).
-Published TenantPulse `0.2.0` retains immutable GraphKit `0.3.0`. The unreleased TenantPulse
-`0.3.0` successor tree requires the exact tested GraphKit `0.3.1` maintenance package; it does not
-treat a locally staged GraphKit `0.4.0-r8` prerelease as a distributable customer dependency.
 
 `-ReportData Devices` guarantees one ordinary `managedDevices` read, performs the documented beta
 singleton detail read for each Windows device, and publishes one `managed-device-inventory`
 artifact. It carries normalized identity, user, hardware, health-attestation, TPM, OS, encryption,
 compliance, ownership, enrollment, and sync fields plus every original source column.
-This single artifact replaces the six active IHA device-report inputs; the Office layer owns their
-worksheet filters and records the stale-device UTC cutoff. TenantPulse does not claim TPM state
+The artifact is intended for downstream reporting; presentation layers own worksheet filters and
+record the stale-device UTC cutoff. TenantPulse does not claim TPM state
 from encryption/compliance fields; `tpmVersion` is used only when the device detail actually returns
-it. The exact schema, certainty rules, and IHA mapping are documented in
+it. The exact schema and certainty rules are documented in
 [`docs/contracts/device-report-data-v1.md`](docs/contracts/device-report-data-v1.md).
 
-`-ReportData Inventory` guarantees the 25 neutral source datasets required by the current IHA
-migration inventory even when no selected check consumes them. It uses the ordinary deduplicated
+`-ReportData Inventory` guarantees the audit profile's 25 neutral source datasets even when no
+selected check consumes them. It uses the ordinary deduplicated
 snapshot collection path, so combining `Inventory`, `Applications`, and `Devices` does not fetch a
-shared root twice. Add `-ExpandSettings` when the run also needs the successor conflict and setting
+shared root twice. Add `-ExpandSettings` when the run also needs policy-conflict and setting
 artifacts. The exact dataset set, GraphKit bindings, and sensitivity boundary are documented in
 [`docs/contracts/audit-inventory-v1.md`](docs/contracts/audit-inventory-v1.md).
 
@@ -487,10 +420,8 @@ only successfully published artifacts carry a content hash. `-ReportData All` se
 `Devices`, `Inventory`, and `Reports` while deduplicating shared datasets. These artifacts preserve
 structured ids, source columns, hashes,
 and explicit gaps; they do not compute approval, severity, expiration status, or Office display
-cells. The exact schemas and IHA replacement decisions are documented in
+cells. The exact schemas and projection rules are documented in
 [`docs/contracts/audit-report-data-v1.md`](docs/contracts/audit-report-data-v1.md).
-Storage/import/checkpoint replacements and the paired GraphKit release gate are documented in
-[`docs/contracts/iha-migration-and-recovery-v1.md`](docs/contracts/iha-migration-and-recovery-v1.md).
 
 ## Settings expansion (Phase 2)
 
@@ -589,13 +520,6 @@ PSGallery - and only publishes for real when explicitly authorized with `-Publis
 a resolved API key (via `-NuGetApiKeySecure` or the `TENANTPULSE_NUGET_API_KEY`
 environment variable - there is no plain-string API key parameter), and confirmed through
 the normal `ShouldProcess` confirmation boundary.
-
-`source/TenantPulse.psd1` declares GraphKit `0.3.1` with `RequiredVersion`, the exact runtime
-contract. `RequiredModules.psd1` separately pins `GraphKit = '0.3.1'` for build-time staging.
-These two files intentionally use different schemas but must resolve the same version. For the
-unreleased TenantPulse `0.3.0` source line, validation stages the already-tested GraphKit `0.3.1`
-maintenance package locally; it must not silently fall back to any other GraphKit version. This
-source dependency is not a claim that GraphKit `0.3.1` has been published to PSGallery.
 
 Unit tests never import real GraphKit: every GraphKit command TenantPulse calls
 (`Get-GraphContext`, `Get-GraphObject`, `Invoke-GraphOperation`, `Get-GraphOperation`) is
